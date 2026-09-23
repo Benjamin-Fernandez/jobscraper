@@ -14,6 +14,8 @@
 
 ### 0.1 The resumption protocol
 
+0. Read **§0.5 (State of play)** first. It records live on-disk state and two
+   correctness landmines that the ledger does not surface.
 1. Read §10 (Build Ledger). Find the first task whose `STATUS` is not `DONE`.
 2. **Do not trust the flag. Verify it.** Every task carries a `Verify:` command.
    Run it. If it passes, the task is actually done — set the flag to `DONE` and
@@ -69,6 +71,75 @@ of them. Treat reviewer findings as advice, not orders — if a finding contradi
 this PRD, the PRD wins and you note the disagreement in the task's `Notes:`.
 Do not spawn subagents for work you can do inline; a task sized for one sitting
 rarely needs one.
+
+### 0.5 State of play — read before touching anything
+
+*Last session: 2026-09-24. Everything here is on-disk fact, verified at handoff.
+It is the state the Build Ledger does **not** capture.*
+
+**Where things stand:** M0 complete, M1 all but done. 8/40 tasks. 49/49 tests
+green. Branch **`v2-rebuild`**; `master` holds only the v1 restore point. Working
+tree clean at `6b36850`.
+
+#### Two landmines
+
+**1. `cli.py::_sync` is a bridge that reintroduces the exact bug §8.4 prevents.**
+M1-T4 removed the Excel workbook from the config, which broke `cfg.input_workbook`
+and with it `doctor`, `sync`, `resolve` and `run`. `_sync` was repointed at the
+watchlist to keep them alive — but it still routes through **v1's
+`sync_companies`, which keys rows on the display name**. So today, renaming a
+company in `watchlist.yaml` silently resets its scrape history and orphans its
+failure counters. The stable-`key` guarantee in §8.4 is written down but **not yet
+real**. **M3-T1b is what makes it real.** Do not treat §8.4 as implemented until
+that task is `DONE`.
+
+**2. `data/jobscraper.db` exists and is a v1-schema database.** Created by the
+bridge sync above; it has `tier`/`category` columns and **no `last_scraped_at`**.
+It is not the v2 database and holds nothing worth keeping — 224 company rows and
+no jobs. **M3-T1 should delete it and create the v2 schema fresh.** Do not migrate
+it. The real v1 data you may need lives at
+`archive/v1-2026-09-23/data/jobscraper.db` (inputs for M1-T2, already used, and
+M3-T3b, not yet).
+
+#### Blocked on the user, not on you
+
+- **M2-T0** — no `resume.pdf` in `data/`. All of M2 is blocked. **Do not invent a
+  sample resume**: a wrong profile mis-filters every posting downstream, silently.
+- **M1-T3** — pruning the 229 seeded companies. Non-blocking; the list works as
+  seeded. Fewer companies directly eases R-7's cadence problem.
+
+If both are still outstanding, the useful path is **M1-T5 → M3** (store,
+scheduler, scrape), which depends on neither, then back to M2.
+
+#### Environment facts that will cost you time otherwise
+
+- **A `GateGuard` hook intercepts every `Write`, `Edit` and first `Bash` call.**
+  It refuses the call and demands you first state importers/callers, affected API,
+  data schemas, and the user's verbatim instruction. Present those in the message
+  *before* retrying. This is normal here, not a malfunction. It also blocks
+  `git commit --amend` outright — write a follow-up commit instead.
+- **Windows / PowerShell.** Every `Verify:` in the ledger is a Python or `git`
+  one-liner for this reason. POSIX shell (`2>/dev/null`, `| wc -l`) does not run.
+  Beware `$?` after a pipe: it reports the *last* command's status, not Python's.
+- **`tests/run_tests.py -k <needle>` gates imports as well as tests.** A file that
+  will not import is skipped when the needle does not name it, and fails hard when
+  it does. This is deliberate — without it, `test_web.py` needing FastAPI would
+  fail M3's acceptance commands. Do not "simplify" it away.
+- The first commit's subject carries a stray `@` from a quoting slip. Cosmetic;
+  the body is intact; amend was refused. Leave it.
+
+#### Trust levels
+
+- **Verified by execution:** every `DONE` task's `Verify:` command, the 49-test
+  suite, the layering guard (proved non-vacuous by injecting a real violation),
+  `-k` exit codes, config env overrides, and `doctor` end to end.
+- **Written but never executed:** everything in M2–M10. The schema in §8.4, the
+  due query in §8.3[0] and the rules contract in §8.3[3] are *designs*, not
+  working code. Expect them to need adjustment on contact, and update §8 when
+  they do.
+- **Unmeasured assumptions:** the ≤800-char vital extract (Q5/R-1) and the share
+  of postings with vague locations (D-2). Both are quantified at M4-T4. Do not
+  tune the filter against a guess before then.
 
 ---
 
@@ -1175,6 +1246,9 @@ Legend: `STATUS` · `Completed` (date) · `Verify` (command that proves it) · `
 - **Completed:** —
 - **Do:** Rewrite `store.py` to §8.4. Keep the single-writer rule and the
   `known_job_ids` / `close_missing` semantics (a failed fetch must never close jobs).
+  **First delete the existing `data/jobscraper.db`** — it is a v1-schema file the
+  M1-T4 bridge created (224 company rows, no jobs, no `last_scraped_at`). It holds
+  nothing worth keeping and will not migrate. See §0.5.
 - **Verify:** `python tests/run_tests.py -k store` passes, including the carried-over
   `test_failed_fetch_must_not_close_jobs`.
 
@@ -1193,6 +1267,11 @@ Legend: `STATUS` · `Completed` (date) · `Verify` (command that proves it) · `
   restores it without resetting history.
 - **Notes:** **This task is why nothing else works without it.** The scheduler reads
   SQL; the watchlist is YAML; before this, nothing bridged them.
+  **There is a bridge in place right now and it is wrong** (§0.5): M1-T4 repointed
+  `cli.py::_sync` at the watchlist to keep four commands alive, but it still routes
+  through v1's `sync_companies`, which keys rows on the **display name**. Until this
+  task lands, renaming a company resets its scrape history — the precise failure
+  §8.4 exists to prevent. Delete `_sync` as part of this task; do not leave both.
 
 #### M3-T2 · Point discovery and adapters at the watchlist
 - **STATUS:** `NOT_STARTED`
