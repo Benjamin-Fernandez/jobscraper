@@ -1037,8 +1037,8 @@ Legend: `STATUS` · `Completed` (date) · `Verify` (command that proves it) · `
   fires first. Both paths are now covered separately.
 
 #### M1-T2 · Seed the watchlist with all 229 v1 companies
-- **STATUS:** `NOT_STARTED`
-- **Completed:** —
+- **STATUS:** `DONE`
+- **Completed:** 2026-09-24
 - **Do:** One-off script `scripts/seed_watchlist.py` reading `archive/v1-2026-09-23/data/jobscraper.db`
   and writing `config/watchlist.yaml` with all 229 companies — `name`, `careers_url`,
   and the cached `provider`/`slug`/`feed_url` where present (D-4). The 5 companies
@@ -1046,10 +1046,21 @@ Legend: `STATUS` · `Completed` (date) · `Verify` (command that proves it) · `
   Emit a schema comment header so the file teaches its own format. Sort
   alphabetically by name — the v1 ordinal no longer means anything.
 - **Verify:** `python -c "from jobscraper.watchlist import load; w=load(); print(len(w), sum(1 for c in w if c.enabled)); assert len(w)==229 and sum(1 for c in w if c.enabled)==224"`
-- **Notes:** Uses M1-T1's loader directly — `watchlist list` (M1-T4) and `doctor`
+- **Notes:** Uses M1-T1's loader directly — `watchlist list` (M1-T5) and `doctor`
   do not exist yet, and v1's `doctor` reads the Excel workbook M0-T2 archived.
   The script is one-off and lives in `scripts/`, not the package. Run it once,
   commit the YAML, then the YAML is the source of truth forever.
+  **Verified 2026-09-24:** 229 companies, 224 enabled, 229 with a resolved
+  provider, 133 with a cached feed URL — the full discovery asset preserved, as
+  D-4 intended. Keys are unique and the awkward real names slug cleanly
+  (`Google / DeepMind` → `google-deepmind`, `JD.com` → `jd-com`). The five v1
+  quarantines (DRW, Fionics, Google/DeepMind, Meta, Microsoft) arrive
+  `enabled: false` carrying the v1 error as a note. Result: 1,194 lines, 32 KB.
+  Two safeguards added beyond the task as written: the script **re-parses the
+  file it just wrote** before saving, so a broken watchlist can never be
+  committed and then fail at the next run far from its cause; and it refuses to
+  overwrite an existing `watchlist.yaml` without `--force`, because that file is
+  hand-edited and regenerating it would discard the user's pruning.
 
 #### M1-T3 · Prune the seeded watchlist
 - **STATUS:** `NOT_STARTED`
