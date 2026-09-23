@@ -1,0 +1,311 @@
+# The matching spec. This is the highest-leverage file in the project — tune it by hand.
+# Bump profile_version after any change, then run:  python -m jobscraper rescore
+
+profile_version: 1
+
+identity:
+  name: Benjamin Fernandez
+  graduation: 2026-08
+  degree: BEng Computer Engineering, Nanyang Technological University
+  summary: >-
+    Final-year Computer Engineering student at NTU Singapore, graduating August 2026.
+    Backend and infrastructure engineer. Internships at Tencent (cross-border payments
+    platform, Java/Spring Boot), Crypto.com (exchange operations platform, FastAPI/React,
+    Kubernetes/ArgoCD), and AMD (infrastructure automation, Ansible/Python).
+    Strengths: backend services, REST API design, distributed systems, payments and
+    exchange infrastructure, Kubernetes and CI/CD, PostgreSQL, Kafka, and LLM/RAG tooling.
+    Seeking new-graduate or graduate-programme software engineering roles in Singapore.
+
+locations:
+  # DECIDED: Singapore only.
+  allow: [singapore, sg]
+  # Rejected outright when no Singapore token is present. Matched on whole words
+  # only, so short tokens ("us", "ny") cannot fire inside "houston" or "company".
+  # A hint here beats "remote" in the same string: "US Remote" is not reachable
+  # on a Singapore work visa, so it is elsewhere, not a genuinely remote role.
+  deny_hints:
+    # Countries and regions a remote posting is commonly pinned to.
+    - us
+    - usa
+    - u.s.
+    - u.s.a.
+    - united states
+    - americas
+    - north america
+    - latam
+    - latin america
+    - canada
+    - uk
+    - united kingdom
+    - emea
+    - europe
+    - european
+    - ireland
+    - germany
+    - france
+    - netherlands
+    - switzerland
+    - poland
+    - spain
+    - portugal
+    - romania
+    - bulgaria
+    - japan
+    - korea
+    - taiwan
+    - china
+    - australia
+    - new zealand
+    - brazil
+    - mexico
+    - argentina
+    - israel
+    - uae
+    - saudi
+    - egypt
+    - nigeria
+    - south africa
+    - india
+    - bengaluru
+    - bangalore
+    - hyderabad
+    - pune
+    - chennai
+    - gurgaon
+    - mumbai
+    - manila
+    - philippines
+    - vietnam
+    - hanoi
+    - ho chi minh
+    - beijing
+    - shanghai
+    - shenzhen
+    - guangzhou
+    - hangzhou
+    - chengdu
+    - united states
+    - new york
+    - san francisco
+    - seattle
+    - austin
+    - chicago
+    - boston
+    - london
+    - dublin
+    - amsterdam
+    - paris
+    - berlin
+    - zurich
+    - frankfurt
+    - warsaw
+    - tokyo
+    - osaka
+    - seoul
+    - taipei
+    - hsinchu
+    - hong kong
+    - sydney
+    - melbourne
+    - kuala lumpur
+    - jakarta
+    - bangkok
+    - dubai
+    - toronto
+    - vancouver
+    - montreal
+    - atlanta
+    - denver
+    - miami
+    - dallas
+    - houston
+    - phoenix
+    - portland
+    - los angeles
+    - san diego
+    - san jose
+    - palo alto
+    - mountain view
+    - sunnyvale
+    - washington
+    - philadelphia
+    - detroit
+    - minneapolis
+    - nashville
+    - salt lake city
+    # Abbreviations that appear in multi-site remote postings.
+    - sf
+    - nyc
+    - ny
+    - la
+    - dc
+    - bay area
+  # Too vague to judge by rule; routed to the LLM instead of being rejected.
+  # Everything not matching `allow` and not listed here is treated as elsewhere,
+  # so this list is the ONLY escape hatch from the Singapore-only filter.
+  #
+  # These only earn a pass when NOTHING concrete is left beside them. "Remote"
+  # alone stays ambiguous; "Remote - Munich" does not, because "munich" survives
+  # the strip even though it is on no deny list. See matching.location_verdict.
+  ambiguous_hints:
+    - worldwide
+    - work from anywhere
+    - fully remote
+    - remote first
+    - remote-first
+    - all offices
+    - all locations
+    - any office
+    - multiple offices
+    - office of your choice
+    - asia
+    - anywhere
+    - apac
+    - asia pacific
+    - asia-pacific
+    - southeast asia
+    - south east asia
+    - multiple locations
+    - various
+    - remote
+    - hybrid
+    - flexible
+    - global
+    - worldwide
+    - emea
+    - international
+    - multiple
+    - tbd
+
+titles:
+  allow_patterns:
+    - '(?i)software\s+(engineer|developer|dev)\b'
+    - '(?i)\b(backend|back-end|back end|platform|infrastructure|systems|distributed)\b'
+    - '(?i)quant(itative)?\s+(developer|technologist|engineer|researcher)'
+    - '(?i)\b(graduate|associate)\s+(programme|program|analyst|engineer|developer)'
+    - '(?i)\b(new\s?grad|campus|university|early\s?career|fresh\s?grad)\b'
+    - '(?i)(site reliability|reliability|devops|cloud|data|security)\s+engineer'
+    - '(?i)\b(full[\s-]?stack|fullstack)\b'
+    - '(?i)\b(technology|technical)\s+(analyst|associate|graduate)'
+    - '(?i)\bengineer(ing)?\s+(analyst|associate|graduate|rotational)'
+    - '(?i)\b(20\s?26|20\s?27)\b'
+  deny_patterns:
+    - '(?i)\b(senior|sr\.?|staff|principal|lead|director|manager|head of|chief)\b'
+    - '(?i)\b(vp|vice president|executive director|managing director)\b'
+    - '(?i)\b(intern|internship|working student|apprentice|co-?op)\b'
+    - '(?i)\b(sales|marketing|recruit|talent acquisition|human resources)\b'
+    - '(?i)\b(legal|counsel|compliance officer|accountant|auditor)\b'
+    - '(?i)\b(relationship manager|wealth|private bank|teller|branch)\b'
+    - '(?i)\b(mechanical|civil|chemical|process|equipment|facilities)\s+engineer'
+    - '(?i)\b(technician|operator|assembler|machinist)\b'
+
+experience:
+  ceiling_years: 3
+  hard_floor_reject: 5
+
+skills:
+  core:
+    - python
+    - go
+    - golang
+    - java
+    - typescript
+    - javascript
+    - c++
+    - kubernetes
+    - k8s
+    - docker
+    - postgresql
+    - postgres
+    - kafka
+    - linux
+    - sql
+    - fastapi
+    - spring boot
+    - rest api
+    - api design
+    - microservices
+    - distributed systems
+    - backend
+    - ci/cd
+    - git
+  strong:
+    - react
+    - node.js
+    - nodejs
+    - express
+    - mongodb
+    - clickhouse
+    - redis
+    - mysql
+    - argocd
+    - github actions
+    - aws
+    - gcp
+    - azure
+    - terraform
+    - ansible
+    - prometheus
+    - grafana
+    - grpc
+    - oauth2
+    - sso
+    - okta
+    - networking
+    - observability
+    - pydantic
+  domain:
+    - payments
+    - cross-border
+    - settlement
+    - exchange
+    - trading
+    - market data
+    - fintech
+    - crypto
+    - blockchain
+    - digital assets
+    - low latency
+    - order execution
+    - llm
+    - rag
+    - machine learning
+    - anomaly detection
+    - backtesting
+  weak:
+    - verilog
+    - solidity
+    - next.js
+    - selenium
+    - react native
+    - ethereum
+    - web3
+
+weights:
+  bm25: 0.40
+  skill_overlap: 0.30
+  title_affinity: 0.20
+  tier_bonus: 0.05
+  category_prior: 0.05
+
+thresholds:
+  auto_reject_below: 25
+  llm_band: [25, 88]
+  auto_accept_above: 88
+
+# Extra query terms injected per workbook Category, used in local scoring.
+category_priors:
+  Quant: [low latency, c++, trading systems, market data, quantitative]
+  "Big Tech": [distributed systems, scale, platform, backend]
+  "AI Lab": [machine learning, llm, inference, research engineer]
+  "Chinese Tech": [backend, payments, platform, infrastructure]
+  "Regional Tech": [backend, platform, payments, microservices]
+  Fintech: [payments, api, settlement, ledger]
+  Crypto: [exchange, blockchain, digital assets, matching engine, custody]
+  Semiconductor: [firmware, embedded, verification, c++, drivers]
+  "Cloud / Infra": [observability, kubernetes, sre, devops, distributed]
+  "Intl Bank": [graduate programme, technology analyst, java, backend]
+  "SG Bank": [graduate programme, technology associate, java, backend]
+  "Gov / Public": [government technology, backend, cloud, singapore]
+  Cybersecurity: [security engineer, detection, appsec, cloud security]
+  "IT Services": [graduate, consultant, java, cloud, associate]

@@ -1,0 +1,63 @@
+# JobScraper runtime configuration. See docs/DESIGN.md.
+
+paths:
+  input_workbook: data/job_tracker_04_2026.xlsx
+  input_sheet: Job Tracker
+  db: data/jobscraper.db
+  output_dir: output
+
+run:
+  # Each invocation processes exactly this many companies, then stops.
+  batch_size: 30
+  # A full pass over all companies may not restart until this many days
+  # have elapsed since the cycle's first batch.
+  cycle_days: 14
+  max_workers: 6
+  per_company_timeout: 90
+  request_timeout: 25
+  # Seconds between requests to the same host.
+  rate_limit_delay: 0.7
+  max_retries: 3
+  # Consecutive failures before a company is quarantined.
+  quarantine_threshold: 3
+  # Quarantined companies get one retry every Nth run.
+  probation_every_n_runs: 4
+  # If more than this fraction of a batch fails, treat it as a local fault:
+  # quarantine nobody and roll back failure counters.
+  global_failure_abort_pct: 0.5
+  respect_robots: true
+  user_agent: "JobScraper/1.0 (personal job-search tool)"
+
+budget:
+  enable_llm: true
+  # How the judge reaches a model. See src/jobscraper/backends.py.
+  #   cli  - runs `claude -p`, the Claude Code CLI. Uses the subscription you
+  #          are already signed into; no API key, no per-token bill.
+  #   api  - the anthropic SDK. Needs ANTHROPIC_API_KEY.
+  #   off  - no model; matching falls back to local scoring alone.
+  # There is also `python -m jobscraper review`, which hands postings to Claude
+  # Code inside an interactive session instead of shelling out. See README.
+  backend: cli
+  # Leave empty to find `claude` on PATH.
+  cli_bin: ""
+  # Seconds to wait for one `claude -p` call. A judgement is normally 5-15s.
+  cli_timeout: 300
+  cli_extra_args: ["--restricted"]
+  # Consecutive transport failures before the judge gives up for this run and
+  # lets local scoring carry the batch.
+  max_consecutive_failures: 3
+  profile: thorough            # lean | standard | thorough | max
+  max_tokens_per_run: 2000000
+  model_high: claude-sonnet-5
+  model_low: claude-haiku-4-5-20251001
+  extraction_batch: 8
+  verdict_batch: 10
+  jd_chars_for_extraction: 2500
+  jd_chars_for_verdict: 3000
+  second_opinion_tiers: [T1, T2]
+
+output:
+  # Rows below this score never reach the tracker even with a positive verdict.
+  min_score_to_export: 25
+  # Verdicts that qualify for export.
+  export_verdicts: [strong, possible, contested]
