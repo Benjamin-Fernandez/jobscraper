@@ -922,23 +922,34 @@ Legend: `STATUS` · `Completed` (date) · `Verify` (command that proves it) · `
 - **Notes:** Do not move v1 files yet. M9 does that.
 
 #### M0-T2 · Archive v1 outputs and database
-- **STATUS:** `NOT_STARTED`
-- **Completed:** —
-- **Do:** Move `output/*.html`, `output/*.xlsx`, `data/jobscraper.db*` into
-  `archive/v1-2026-09-23/`. Leave the Excel workbook in place until M1-T2 is done.
-  The archived DB is the **input** for M1-T2 (watchlist seed) and M3-T3
-  (applications migration) — do not delete it after either.
+- **STATUS:** `DONE`
+- **Completed:** 2026-09-23
+- **Do:** Move **everything** under `output/`, plus `data/jobscraper.db*`, into
+  `archive/v1-2026-09-23/{output,data}/`. Leave the Excel workbook in place until
+  M1-T2 is done. The archived DB is the **input** for M1-T2 (watchlist seed) and
+  M3-T3b (applications migration) — do not delete it after either.
+  *(Refined during execution: the original wording named only `*.html` and
+  `*.xlsx`, which would have stranded `output/backups/`, `review_queue.json` and
+  `review_verdicts.json` — all v1 artefacts — in a directory the §5 metric
+  requires to be empty.)*
 - **Verify:** `python -c "import glob,sys; h=glob.glob('output/*.html'); a=glob.glob('archive/v1-2026-09-23/*'); print('html:',len(h),'archived:',len(a)); sys.exit(0 if not h and a else 1)"`
 - **Notes:** Archive, never delete (§0.3). Verify is a Python one-liner, not shell —
   this machine is Windows/PowerShell and `2>/dev/null | wc -l` does not run here.
+  Verified: 20 items archived, `output/` empty, and the archived DB still reads
+  229 companies / 5 applications. **Canonical archive paths for later tasks:**
+  `archive/v1-2026-09-23/data/jobscraper.db` (M1-T2, M3-T3b) and
+  `archive/v1-2026-09-23/output/` (reference only).
 
 #### M0-T3 · Split the test suite
-- **STATUS:** `NOT_STARTED`
-- **Completed:** —
-- **Do:** Split `tests/test_core.py` into `tests/test_scheduler.py`,
-  `tests/test_scrape.py`, `tests/test_filter.py`, `tests/test_decide.py`,
-  `tests/test_store.py`, `tests/test_web.py`, `tests/test_watchlist.py`,
-  `tests/test_profile.py`.
+- **STATUS:** `DONE`
+- **Completed:** 2026-09-24
+- **Do:** Split `tests/test_core.py` into `tests/test_filter.py`,
+  `tests/test_scrape.py`, `tests/test_store.py`, `tests/test_decide.py` and
+  `tests/test_legacy_v1.py`. *(The remaining files named in an earlier draft —
+  `test_scheduler.py`, `test_web.py`, `test_watchlist.py`, `test_profile.py` —
+  are created by the milestones that produce the code they test: M3-T3, M6-T1,
+  M1-T1, M2-T1. Creating them empty here would only add files that assert
+  nothing.)*
 
   **Disposition for all 29 existing tests — decide each explicitly, none may be
   dropped silently:**
@@ -946,11 +957,11 @@ Legend: `STATUS` · `Completed` (date) · `Verify` (command that proves it) · `
   |---|---|
   | 3 location tests (`test_location_is_default_deny`, `test_remote_pinned_*`, `test_stage_a_*`) | `test_filter.py` — carry over, then extend per M4-T1 |
   | `test_min_years_takes_the_lowest_stated` | `test_filter.py` — carries over unchanged (§8.3[3] adopts its semantics) |
-  | 4 cursor tests | **Hold in place** until M3-T3, then port to `test_scheduler.py` as staleness equivalents. Do not delete in M0. |
+  | **3** cursor tests *(the table first said 4; there are 3)* | `test_legacy_v1.py` until M3-T3 ports them to `test_scheduler.py` as staleness equivalents. Do not delete in M0. |
   | 4 discovery tests | `test_scrape.py` — carry over |
   | `test_failed_fetch_must_not_close_jobs` | `test_store.py` — carry over, it guards a real invariant |
   | 9 backend/review tests (added 2026-09-23) | `test_decide.py` — carry over; `backends.py` is REUSE |
-  | 6 `test_applied_*` + `sync_applied` | `test_web.py` — **rewrite** against the new API (M6-T2). The behaviours they assert (date set once, never walk back a status) are requirements; only the transport changes. |
+  | 6 `test_applied_*` + `sync_applied` | `test_legacy_v1.py` until M6-T2 **rewrites** them against the new API into `test_web.py`. The behaviours they assert (date set once, never walk back a status, leave the user's own columns alone) are v2 requirements; only the transport changes. |
   | 2 `test_html_view_*` / `test_cards_from_tracker_*` | **Delete.** They test `output.py`, which M9-T1 retires. Record the deletion in `Notes:`. |
 
   Add `tests/run_tests.py`: discovers `tests/test_*.py`, runs every `test_*`
@@ -960,7 +971,14 @@ Legend: `STATUS` · `Completed` (date) · `Verify` (command that proves it) · `
 - **Verify:** `python tests/run_tests.py` exits 0 and reports ≥ 27 tests;
   `python tests/run_tests.py -k filter` runs a strict subset and exits 0.
 - **Notes:** The old "≥20" bar let all 13 retired-module tests vanish while still
-  passing. The table above is the accounting; `-k` is the contract eight tasks depend on.
+  passing. The table above is the accounting; `-k` is the contract thirteen tasks
+  depend on.
+  **Verified 2026-09-24:** 27/27 pass. `-k filter` → 4/4, `-k location` → 1/1,
+  `-k legacy` → 9/9, all exit 0; `-k zzzznope` exits **1**, so a typo in a later
+  acceptance command cannot pass vacuously. Tests were moved by extracting exact
+  AST source ranges, so not one assertion was retyped or altered in transit.
+  The two `output.py` tests were deleted deliberately and are named in
+  `test_legacy_v1.py`'s docstring so the loss stays auditable.
 
 #### M0-T4 · Add the layering guard
 - **STATUS:** `NOT_STARTED`
@@ -989,8 +1007,8 @@ Legend: `STATUS` · `Completed` (date) · `Verify` (command that proves it) · `
 #### M1-T2 · Seed the watchlist with all 229 v1 companies
 - **STATUS:** `NOT_STARTED`
 - **Completed:** —
-- **Do:** One-off script `scripts/seed_watchlist.py` reading the archived v1 DB and
-  writing `config/watchlist.yaml` with all 229 companies — `name`, `careers_url`,
+- **Do:** One-off script `scripts/seed_watchlist.py` reading `archive/v1-2026-09-23/data/jobscraper.db`
+  and writing `config/watchlist.yaml` with all 229 companies — `name`, `careers_url`,
   and the cached `provider`/`slug`/`feed_url` where present (D-4). The 5 companies
   v1 quarantined get `enabled: false` plus a `notes:` line quoting the v1 error.
   Emit a schema comment header so the file teaches its own format. Sort
@@ -1139,7 +1157,8 @@ Legend: `STATUS` · `Completed` (date) · `Verify` (command that proves it) · `
 #### M3-T3b · Migrate v1 application history
 - **STATUS:** `NOT_STARTED`
 - **Completed:** —
-- **Do:** Port the `applications` rows from the archived v1 DB into the new
+- **Do:** Port the `applications` rows from `archive/v1-2026-09-23/data/jobscraper.db`
+  into the new
   `applications` + `app_events` tables (D-14), matching on **job URL** — v1 job ids
   are hashed with a company id that no longer means anything. Rows whose posting is
   never re-scraped are kept as orphans, retaining company, role, URL and applied
