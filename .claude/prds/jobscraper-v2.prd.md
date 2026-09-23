@@ -1017,13 +1017,24 @@ Legend: `STATUS` · `Completed` (date) · `Verify` (command that proves it) · `
 **Outcome:** companies live in a file the user can edit in seconds.
 
 #### M1-T1 · Watchlist schema + loader + validator
-- **STATUS:** `NOT_STARTED`
-- **Completed:** —
+- **STATUS:** `DONE`
+- **Completed:** 2026-09-24
 - **Do:** `watchlist.py` — load `config/watchlist.yaml` per §8.4, validate
   (name non-empty and unique, `careers_url` parses as http(s)), and raise a
   message naming the offending entry and line. Support the two-line minimal entry.
 - **Verify:** `python tests/run_tests.py -k watchlist` passes, including a case for
   a duplicate name and a malformed URL.
+- **Notes:** Verified 2026-09-24, 15/15 (49/49 overall). Line numbers come from a
+  `yaml.SafeLoader` subclass that records `node.start_mark`, so a duplicate cites
+  **both** offending lines rather than leaving you to find the first one.
+  Two additions beyond the task as written, both closing silent-failure holes:
+  **unknown fields are refused** — a misspelled `carers_url` would otherwise
+  scrape nothing and look like a 404 — and `render_entry()` emits one entry as
+  text rather than re-dumping the document, which is what lets M1-T5's `add`
+  append without destroying hand-written comments.
+  A test asserting a pure "duplicate name" error for two identical names was
+  **wrong and was corrected**: equal names slug to equal keys, so the key check
+  fires first. Both paths are now covered separately.
 
 #### M1-T2 · Seed the watchlist with all 229 v1 companies
 - **STATUS:** `NOT_STARTED`

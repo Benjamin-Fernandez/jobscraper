@@ -1,0 +1,1194 @@
+# The companies JobScraper watches.
+#
+# A minimal entry is two lines:
+#
+#   - name: Jane Street
+#     careers_url: https://www.janestreet.com/join-jane-street/open-roles/
+#
+# Optional fields:
+#   key         stable identity; defaults to a slug of the name. Set this by
+#               hand if you ever rename a company, so its scrape history and
+#               failure counts survive the rename.
+#   provider    ATS: greenhouse | lever | ashby | workday | smartrecruiters |
+#               workable | recruitee | generic_html. Discovered automatically
+#               if omitted.
+#   slug        the board identifier on that ATS.
+#   feed_url    the exact endpoint to fetch, when discovery cannot find it.
+#   enabled     false to keep the entry but skip it. Default true.
+#   notes       free text, ignored by the engine.
+#
+# Seeded from the v1 database: 229 companies, 229 with a resolved
+# provider, 133 with a cached feed URL. Prune freely - fewer companies means
+# the fortnightly sweep completes more comfortably.
+#
+# Edited by hand. Regenerating this file is not part of the normal workflow.
+version: 1
+companies:
+  - name: 1Password
+    careers_url: https://1password.com/jobs/
+    provider: ashby
+    slug: 1password
+
+  - name: Accenture
+    careers_url: https://www.accenture.com/sg-en/careers
+    provider: recruitee
+    slug: accenture
+
+  - name: Adyen
+    careers_url: https://www.adyen.com/careers
+    provider: greenhouse
+    slug: adyen
+
+  - name: Affirm
+    careers_url: https://www.affirm.com/careers
+    provider: greenhouse
+    slug: affirm
+
+  - name: Airbnb
+    careers_url: https://careers.airbnb.com/
+    provider: greenhouse
+    slug: airbnb
+
+  - name: Airwallex
+    careers_url: https://www.airwallex.com/careers
+    provider: ashby
+    slug: airwallex
+
+  - name: Akamai
+    careers_url: https://www.akamai.com/careers
+    provider: generic_html
+    feed_url: https://www.akamai.com/careers
+
+  - name: Akuna Capital
+    careers_url: https://akunacapital.com/careers
+    provider: greenhouse
+    slug: akunacapital
+
+  - name: Alchemy
+    careers_url: https://www.alchemy.com/careers
+    provider: ashby
+    slug: alchemy
+
+  - name: Alibaba / AliCloud
+    careers_url: https://job.alibaba.com/zhaopin/index.htm
+    provider: generic_html
+    feed_url: https://job.alibaba.com/zhaopin/index.htm
+
+  - name: Amazon / AWS
+    careers_url: https://www.amazon.jobs/
+    provider: generic_html
+    feed_url: https://www.amazon.jobs/
+
+  - name: Amber Group
+    careers_url: https://www.ambergroup.io/careers
+    provider: lever
+    slug: ambergroup
+
+  - name: AMD
+    careers_url: https://careers.amd.com/
+    provider: generic_html
+    feed_url: https://careers.amd.com/
+
+  - name: Ampere Computing
+    careers_url: https://amperecomputing.com/careers
+    provider: generic_html
+    feed_url: https://amperecomputing.com/careers
+
+  - name: Anchorage Digital
+    careers_url: https://www.anchorage.com/careers
+    provider: lever
+    slug: anchorage
+
+  - name: Animoca Brands
+    careers_url: https://www.animocabrands.com/careers
+    provider: lever
+    slug: animocabrands
+
+  - name: Ant Group
+    careers_url: https://talent.antgroup.com/
+    provider: generic_html
+    feed_url: https://talent.antgroup.com/
+
+  - name: Anthropic
+    careers_url: https://www.anthropic.com/careers
+    provider: greenhouse
+    slug: anthropic
+
+  - name: Apple
+    careers_url: https://jobs.apple.com/
+    provider: generic_html
+    feed_url: https://jobs.apple.com/
+
+  - name: Applied Materials
+    careers_url: https://careers.appliedmaterials.com/
+    provider: ashby
+    slug: applied
+
+  - name: Arm
+    careers_url: https://careers.arm.com/
+    provider: generic_html
+    feed_url: https://careers.arm.com/
+
+  - name: Aspire
+    careers_url: https://aspireapp.com/careers
+    provider: generic_html
+    feed_url: https://aspireapp.com/careers
+
+  - name: Atlassian
+    careers_url: https://www.atlassian.com/company/careers
+    provider: generic_html
+    feed_url: https://www.atlassian.com/company/careers
+
+  - name: Baidu
+    careers_url: https://talent.baidu.com/
+    provider: greenhouse
+    slug: baidu
+
+  - name: Bank of America
+    careers_url: https://careers.bankofamerica.com/
+    provider: workday
+    slug: ghr
+    feed_url: https://ghr.wd1.myworkdayjobs.com/lateral-us
+
+  - name: Barclays
+    careers_url: https://home.barclays/careers/
+    provider: generic_html
+    feed_url: https://home.barclays/careers/
+
+  - name: Belvedere Trading
+    careers_url: https://www.belvederetrading.com/careers/
+    provider: lever
+    slug: belvederetrading
+
+  - name: Binance
+    careers_url: https://www.binance.com/en/careers
+    provider: greenhouse
+    slug: binance
+
+  - name: BitMEX
+    careers_url: https://www.bitmex.com/careers
+    provider: generic_html
+    feed_url: https://www.bitmex.com/careers
+
+  - name: Block / Square
+    careers_url: https://careers.block.xyz/
+    provider: greenhouse
+    slug: block
+
+  - name: BNP Paribas
+    careers_url: https://group.bnpparibas/en/careers
+    provider: generic_html
+    feed_url: https://group.bnpparibas/en/careers
+
+  - name: BNY Mellon
+    careers_url: https://www.bnymellon.com/us/en/careers.html
+    provider: generic_html
+    feed_url: https://www.bnymellon.com/us/en/careers.html
+
+  - name: Booking.com
+    careers_url: https://careers.booking.com/
+    provider: generic_html
+    feed_url: https://careers.booking.com/
+
+  - name: Broadcom
+    careers_url: https://careers.broadcom.com/
+    provider: generic_html
+    feed_url: https://careers.broadcom.com/
+
+  - name: Bybit
+    careers_url: https://www.bybit.com/en/careers/
+    provider: greenhouse
+    slug: bybit
+
+  - name: Bytedance / TikTok
+    careers_url: https://jobs.bytedance.com/
+    provider: smartrecruiters
+    slug: bytedance
+
+  - name: Cadence
+    careers_url: https://cadence.wd1.myworkdayjobs.com/External_Careers
+    provider: workday
+    slug: cadence
+    feed_url: https://cadence.wd1.myworkdayjobs.com/External_Careers
+
+  - name: Canva
+    careers_url: https://www.canva.com/careers/
+    provider: smartrecruiters
+    slug: canva
+
+  - name: Capgemini
+    careers_url: https://www.capgemini.com/careers/
+    provider: generic_html
+    feed_url: https://www.capgemini.com/careers/
+
+  - name: Carousell
+    careers_url: https://careers.carousell.com/
+    provider: generic_html
+    feed_url: https://careers.carousell.com/
+
+  - name: Cerebras Systems
+    careers_url: https://www.cerebras.net/careers/
+    provider: ashby
+    slug: cerebras
+
+  - name: Chainalysis
+    careers_url: https://www.chainalysis.com/careers/
+    provider: generic_html
+    feed_url: https://www.chainalysis.com/careers/
+
+  - name: CIMB
+    careers_url: https://www.cimb.com/en/who-we-are/careers.html
+    provider: generic_html
+    feed_url: https://www.cimb.com/en/who-we-are/careers.html
+
+  - name: Circles.Life
+    careers_url: https://www.circles.life/sg/careers/
+    provider: workable
+    slug: circles
+
+  - name: Cisco
+    careers_url: https://jobs.cisco.com/
+    provider: generic_html
+    feed_url: https://jobs.cisco.com/
+
+  - name: Citadel
+    careers_url: https://www.citadel.com/careers/
+    provider: generic_html
+    feed_url: https://www.citadel.com/careers/
+
+  - name: Citadel Securities
+    careers_url: https://www.citadelsecurities.com/careers/
+    provider: generic_html
+    feed_url: https://www.citadelsecurities.com/careers/
+
+  - name: Citibank
+    careers_url: https://jobs.citi.com/
+    provider: workday
+    slug: citi
+    feed_url: https://citi.wd5.myworkdayjobs.com/2
+
+  - name: Cloudflare
+    careers_url: https://www.cloudflare.com/careers/
+    provider: greenhouse
+    slug: cloudflare
+
+  - name: Cognizant
+    careers_url: https://careers.cognizant.com/
+    provider: generic_html
+    feed_url: https://careers.cognizant.com/
+
+  - name: Cohere
+    careers_url: https://cohere.com/careers
+    provider: ashby
+    slug: cohere
+
+  - name: Coinbase
+    careers_url: https://www.coinbase.com/careers
+    provider: greenhouse
+    slug: coinbase
+
+  - name: Confluent
+    careers_url: https://www.confluent.io/careers/
+    provider: ashby
+    slug: confluent
+
+  - name: Credit Agricole CIB
+    careers_url: https://careers.ca-cib.com/
+    provider: generic_html
+    feed_url: https://careers.ca-cib.com/
+
+  - name: CrowdStrike
+    careers_url: https://www.crowdstrike.com/en-us/careers/
+    provider: workday
+    slug: crowdstrike
+    feed_url: https://crowdstrike.wd5.myworkdayjobs.com/crowdstrikecareers
+
+  - name: Crypto.com
+    careers_url: https://crypto.com/careers
+    provider: lever
+    slug: crypto
+
+  - name: Cumberland (DRW)
+    careers_url: https://cumberland.io/careers
+    provider: generic_html
+    feed_url: https://cumberland.io/careers
+
+  - name: Currencycloud
+    careers_url: https://www.currencycloud.com/company/careers/
+    provider: generic_html
+    feed_url: https://www.currencycloud.com/company/careers/
+
+  - name: D.E. Shaw
+    careers_url: https://www.deshaw.com/careers
+    provider: generic_html
+    feed_url: https://www.deshaw.com/careers
+
+  - name: Databricks
+    careers_url: https://www.databricks.com/company/careers
+    provider: greenhouse
+    slug: databricks
+
+  - name: Datadog
+    careers_url: https://www.datadoghq.com/careers/
+    provider: greenhouse
+    slug: datadog
+
+  - name: DBS Tech
+    careers_url: https://www.dbs.com/careers/
+    provider: workday
+    slug: dbs
+    feed_url: https://dbs.wd3.myworkdayjobs.com/DBS_Careers
+
+  - name: Dell Technologies
+    careers_url: https://jobs.dell.com/
+    provider: generic_html
+    feed_url: https://jobs.dell.com/
+
+  - name: Deribit
+    careers_url: https://www.deribit.com/careers
+    provider: generic_html
+    feed_url: https://www.deribit.com/careers
+
+  - name: Deutsche Bank
+    careers_url: https://www.db.com/careers/
+    provider: generic_html
+    feed_url: https://www.db.com/careers/
+
+  - name: Didi
+    careers_url: https://careers.didiglobal.com/
+    provider: greenhouse
+    slug: didi
+
+  - name: DRW
+    careers_url: https://drw.com/careers/
+    provider: generic_html
+    feed_url: https://drw.com/careers/
+    enabled: false
+    notes: "v1 could not scrape this: drw.com/work-at-drw renders postings via JavaScript; no ATS detected in the HTML"
+
+  - name: DSTA
+    careers_url: https://www.dsta.gov.sg/join-us/job-seeker
+    provider: generic_html
+    feed_url: https://www.dsta.gov.sg/join-us/job-seeker
+
+  - name: Dynatrace
+    careers_url: https://careers.dynatrace.com/
+    provider: generic_html
+    feed_url: https://careers.dynatrace.com/
+
+  - name: Elastic
+    careers_url: https://www.elastic.co/about/careers
+    provider: greenhouse
+    slug: elastic
+
+  - name: Expedia
+    careers_url: https://lifeatexpediagroup.com/jobs
+    provider: generic_html
+    feed_url: https://lifeatexpediagroup.com/jobs
+
+  - name: Fastly
+    careers_url: https://www.fastly.com/about/careers
+    provider: greenhouse
+    slug: fastly
+
+  - name: Figma
+    careers_url: https://www.figma.com/careers/
+    provider: greenhouse
+    slug: figma
+
+  - name: Finastra
+    careers_url: https://www.finastra.com/careers
+    provider: generic_html
+    feed_url: https://www.finastra.com/careers
+
+  - name: Fionics
+    careers_url: https://fionics.com/careers
+    provider: generic_html
+    feed_url: https://fionics.com/careers
+    enabled: false
+    notes: "v1 could not scrape this: fionics.com is a parked domain (redirects to /lander); company site appears defunct"
+
+  - name: Fireblocks
+    careers_url: https://www.fireblocks.com/careers/
+    provider: greenhouse
+    slug: fireblocks
+
+  - name: Flow Traders
+    careers_url: https://www.flowtraders.com/careers
+    provider: greenhouse
+    slug: flowtraders
+
+  - name: Foodpanda
+    careers_url: https://careers.foodpanda.com/
+    provider: generic_html
+    feed_url: https://careers.foodpanda.com/
+
+  - name: Fortinet
+    careers_url: https://www.fortinet.com/corporate/careers
+    provider: generic_html
+    feed_url: https://www.fortinet.com/corporate/careers
+
+  - name: Funding Societies
+    careers_url: https://fundingsocieties.com/about/careers
+    provider: workable
+    slug: fundingsocieties
+
+  - name: Galaxy Digital
+    careers_url: https://www.galaxy.com/careers/
+    provider: greenhouse
+    slug: galaxy
+
+  - name: Garena
+    careers_url: https://careers.sea.com/
+    provider: generic_html
+    feed_url: https://careers.sea.com/
+
+  - name: Gemini
+    careers_url: https://www.gemini.com/careers
+    provider: greenhouse
+    slug: gemini
+
+  - name: GlobalFoundries
+    careers_url: https://careers.globalfoundries.com/
+    provider: generic_html
+    feed_url: https://careers.globalfoundries.com/
+
+  - name: Gojek / GoTo
+    careers_url: https://www.gotogroup.com/careers
+    provider: generic_html
+    feed_url: https://www.gotogroup.com/careers
+
+  - name: Goldman Sachs
+    careers_url: https://www.goldmansachs.com/careers/
+    provider: generic_html
+    feed_url: https://www.goldmansachs.com/careers/
+
+  - name: Google / DeepMind
+    careers_url: https://careers.google.com/
+    provider: generic_html
+    feed_url: https://careers.google.com/
+    enabled: false
+    notes: "v1 could not scrape this: careers.google.com is a JavaScript app with no public job feed; paste a real feed URL"
+
+  - name: GovTech
+    careers_url: https://go.gov.sg/govtech-careers
+    provider: greenhouse
+    slug: govtech
+
+  - name: Grab
+    careers_url: https://grab.careers/
+    provider: smartrecruiters
+    slug: grab
+
+  - name: Grab Financial Group
+    careers_url: https://grab.careers/
+    provider: smartrecruiters
+    slug: grab
+
+  - name: Grafana Labs
+    careers_url: https://grafana.com/about/careers/
+    provider: greenhouse
+    slug: grafanalabs
+
+  - name: Graviton Research
+    careers_url: https://gravitonresearch.com/careers/
+    provider: smartrecruiters
+    slug: graviton
+
+  - name: Groq
+    careers_url: https://groq.com/careers/
+    provider: generic_html
+    feed_url: https://groq.com/careers/
+
+  - name: HashiCorp
+    careers_url: https://www.hashicorp.com/jobs
+    provider: generic_html
+    feed_url: https://www.hashicorp.com/jobs
+
+  - name: HashKey Group
+    careers_url: https://www.hashkey.com/en/careers
+    provider: generic_html
+    feed_url: https://www.hashkey.com/en/careers
+
+  - name: HCLTech
+    careers_url: https://www.hcltech.com/careers
+    provider: generic_html
+    feed_url: https://www.hcltech.com/careers
+
+  - name: HP Inc / HPE
+    careers_url: https://jobs.hp.com/
+    provider: generic_html
+    feed_url: https://jobs.hp.com/
+
+  - name: HRT
+    careers_url: https://www.hudsonrivertrading.com/careers/
+    provider: greenhouse
+    slug: hrttalentcommunity
+
+  - name: HSBC
+    careers_url: https://www.hsbc.com/careers
+    provider: generic_html
+    feed_url: https://www.hsbc.com/careers
+
+  - name: Huawei
+    careers_url: https://career.huawei.com/reccampportal/portal5/index.html
+    provider: generic_html
+    feed_url: https://career.huawei.com/reccampportal/portal5/index.html
+
+  - name: IBM
+    careers_url: https://www.ibm.com/careers/
+    provider: generic_html
+    feed_url: https://www.ibm.com/careers/
+
+  - name: iFAST
+    careers_url: https://www.ifastcorp.com/about/careers.html
+    provider: generic_html
+    feed_url: https://www.ifastcorp.com/about/careers.html
+
+  - name: IMC Trading
+    careers_url: https://www.imc.com/ap/careers/
+    provider: greenhouse
+    slug: imc
+
+  - name: IMDA
+    careers_url: https://www.imda.gov.sg/who-we-are/careers
+    provider: generic_html
+    feed_url: https://www.imda.gov.sg/who-we-are/careers
+
+  - name: Infosys
+    careers_url: https://www.infosys.com/careers/
+    provider: generic_html
+    feed_url: https://www.infosys.com/careers/
+
+  - name: Intel
+    careers_url: https://jobs.intel.com/
+    provider: workday
+    slug: intel
+    feed_url: https://intel.wd1.myworkdayjobs.com/External
+
+  - name: Jane Street
+    careers_url: https://www.janestreet.com/join-jane-street/open-roles/
+    provider: greenhouse
+    slug: janestreet
+
+  - name: JD.com
+    careers_url: https://job.jd.com/
+    provider: generic_html
+    feed_url: https://job.jd.com/
+
+  - name: JP Morgan
+    careers_url: https://careers.jpmorgan.com/
+    provider: generic_html
+    feed_url: https://careers.jpmorgan.com/
+
+  - name: Jump Trading
+    careers_url: https://www.jumptrading.com/careers/
+    provider: greenhouse
+    slug: jumptrading
+
+  - name: KLA Corporation
+    careers_url: https://careers.kla.com/
+    provider: generic_html
+    feed_url: https://careers.kla.com/
+
+  - name: Klarna
+    careers_url: https://jobs.lever.co/klarna
+    provider: lever
+    slug: klarna
+
+  - name: Kraken
+    careers_url: https://jobs.lever.co/kraken
+    provider: lever
+    slug: kraken
+
+  - name: Kredivo
+    careers_url: https://kredivo.com/careers
+    provider: generic_html
+    feed_url: https://kredivo.com/careers
+
+  - name: Kuaishou
+    careers_url: https://www.kuaishou.com/en/about/recruit
+    provider: generic_html
+    feed_url: https://www.kuaishou.com/en/about/recruit
+
+  - name: Lam Research
+    careers_url: https://careers.lamresearch.com/
+    provider: generic_html
+    feed_url: https://careers.lamresearch.com/
+
+  - name: Lazada
+    careers_url: https://www.lazada.com/en/careers/
+    provider: generic_html
+    feed_url: https://www.lazada.com/en/careers/
+
+  - name: LinkedIn
+    careers_url: https://careers.linkedin.com/
+    provider: lever
+    slug: linkedin
+
+  - name: Macquarie
+    careers_url: https://www.macquarie.com/au/en/careers.html
+    provider: generic_html
+    feed_url: https://www.macquarie.com/au/en/careers.html
+
+  - name: Marqeta
+    careers_url: https://www.marqeta.com/company/careers
+    provider: generic_html
+    feed_url: https://www.marqeta.com/company/careers
+
+  - name: Marvell Technology
+    careers_url: https://www.marvell.com/company/careers.html
+    provider: generic_html
+    feed_url: https://www.marvell.com/company/careers.html
+
+  - name: Mastercard
+    careers_url: https://careers.mastercard.com/
+    provider: workday
+    slug: mastercard
+    feed_url: https://mastercard.wd1.myworkdayjobs.com/CorporateCareers
+
+  - name: Mathrix
+    careers_url: https://www.linkedin.com/company/mathrix/jobs/
+    provider: recruitee
+    slug: mathrix
+
+  - name: Matrixport
+    careers_url: https://www.matrixport.com/careers
+    provider: generic_html
+    feed_url: https://www.matrixport.com/careers
+
+  - name: Maybank
+    careers_url: https://www.maybank.com/en/careers.page
+    provider: generic_html
+    feed_url: https://www.maybank.com/en/careers.page
+
+  - name: MediaTek
+    careers_url: https://www.mediatek.com/careers
+    provider: generic_html
+    feed_url: https://www.mediatek.com/careers
+
+  - name: Meituan
+    careers_url: https://careers.meituan.com/
+    provider: generic_html
+    feed_url: https://careers.meituan.com/
+
+  - name: Meta
+    careers_url: https://www.metacareers.com/
+    provider: generic_html
+    feed_url: https://www.metacareers.com/
+    enabled: false
+    notes: "v1 could not scrape this: metacareers.com is a JavaScript app with no public job feed; paste a real feed URL"
+
+  - name: Micron Technology
+    careers_url: https://careers.micron.com/
+    provider: generic_html
+    feed_url: https://careers.micron.com/
+
+  - name: Microsoft
+    careers_url: https://careers.microsoft.com/
+    provider: generic_html
+    feed_url: https://careers.microsoft.com/
+    enabled: false
+    notes: "v1 could not scrape this: careers.microsoft.com is a JS app; its gcsservices JSON API fails TLS verification from here"
+
+  - name: Mistral AI
+    careers_url: https://mistral.ai/careers/
+    provider: ashby
+    slug: mistral.ai
+
+  - name: Mizuho
+    careers_url: https://www.mizuhogroup.com/careers
+    provider: generic_html
+    feed_url: https://www.mizuhogroup.com/careers
+
+  - name: Mobileye
+    careers_url: https://www.mobileye.com/careers/
+    provider: generic_html
+    feed_url: https://www.mobileye.com/careers/
+
+  - name: MongoDB
+    careers_url: https://www.mongodb.com/careers
+    provider: greenhouse
+    slug: mongodb
+
+  - name: Monzo
+    careers_url: https://monzo.com/careers/
+    provider: greenhouse
+    slug: monzo
+
+  - name: Morgan Stanley
+    careers_url: https://www.morganstanley.com/people/students-graduates
+    provider: generic_html
+    feed_url: https://www.morganstanley.com/people/students-graduates
+
+  - name: MUFG
+    careers_url: https://www.mufg.jp/english/careers/
+    provider: workday
+    slug: mufgub
+    feed_url: https://mufgub.wd3.myworkdayjobs.com/MUFG-Careers
+
+  - name: NCS Group
+    careers_url: https://www.ncs.co/en-sg/careers/
+    provider: generic_html
+    feed_url: https://www.ncs.co/en-sg/careers/
+
+  - name: NetEase
+    careers_url: https://hr.163.com/
+    provider: generic_html
+    feed_url: https://hr.163.com/
+
+  - name: Netflix
+    careers_url: https://jobs.netflix.com/
+    provider: generic_html
+    feed_url: https://jobs.netflix.com/
+
+  - name: New Relic
+    careers_url: https://newrelic.com/about/careers
+    provider: greenhouse
+    slug: newrelic
+
+  - name: Ninja Van
+    careers_url: https://careers.ninjavan.co/
+    provider: lever
+    slug: ninjavan
+
+  - name: Nium
+    careers_url: https://www.nium.com/careers
+    provider: lever
+    slug: nium
+
+  - name: Nomura
+    careers_url: https://www.nomuraholdings.com/careers/
+    provider: generic_html
+    feed_url: https://www.nomuraholdings.com/careers/
+
+  - name: Notion
+    careers_url: https://www.notion.so/careers
+    provider: ashby
+    slug: notion
+
+  - name: NVIDIA
+    careers_url: https://nvidia.wd5.myworkdayjobs.com/NVIDIAExternalCareerSite
+    provider: workday
+    slug: nvidia
+    feed_url: https://nvidia.wd5.myworkdayjobs.com/NVIDIAExternalCareerSite
+
+  - name: NXP Semiconductors
+    careers_url: https://careers.nxp.com/
+    provider: generic_html
+    feed_url: https://careers.nxp.com/
+
+  - name: OCBC
+    careers_url: https://www.ocbc.com/group/careers.page
+    provider: generic_html
+    feed_url: https://www.ocbc.com/group/careers.page
+
+  - name: Okta
+    careers_url: https://www.okta.com/company/careers/
+    provider: greenhouse
+    slug: okta
+
+  - name: OKX
+    careers_url: https://www.okx.com/careers
+    provider: greenhouse
+    slug: okx
+
+  - name: OpenAI
+    careers_url: https://openai.com/careers
+    provider: ashby
+    slug: openai
+
+  - name: Optiver
+    careers_url: https://optiver.com/working-at-optiver/career-opportunities/
+    provider: generic_html
+    feed_url: https://optiver.com/working-at-optiver/career-opportunities/
+
+  - name: Oracle
+    careers_url: https://careers.oracle.com/
+    provider: generic_html
+    feed_url: https://careers.oracle.com/
+
+  - name: PagerDuty
+    careers_url: https://www.pagerduty.com/careers/
+    provider: greenhouse
+    slug: pagerduty
+
+  - name: Palantir
+    careers_url: https://www.palantir.com/careers/
+    provider: lever
+    slug: palantir
+
+  - name: Palo Alto Networks
+    careers_url: https://jobs.paloaltonetworks.com/en
+    provider: generic_html
+    feed_url: https://jobs.paloaltonetworks.com/en
+
+  - name: Paradigm (crypto MM)
+    careers_url: https://www.paradigm.co/careers
+    provider: greenhouse
+    slug: paradigm
+
+  - name: PayPal
+    careers_url: https://careers.pypl.com/
+    provider: generic_html
+    feed_url: https://careers.pypl.com/
+
+  - name: Paysign / Payoneer
+    careers_url: https://www.payoneer.com/about/careers/
+    provider: greenhouse
+    slug: payoneer
+
+  - name: Perplexity AI
+    careers_url: https://www.perplexity.ai/hub/careers
+    provider: ashby
+    slug: perplexity
+
+  - name: Plaid
+    careers_url: https://plaid.com/careers/
+    provider: ashby
+    slug: plaid
+
+  - name: Presto
+    careers_url: https://www.prestolabs.io/careers
+    provider: lever
+    slug: prestolabs
+
+  - name: PropertyGuru
+    careers_url: https://www.propertyguru.com.sg/careers
+    provider: generic_html
+    feed_url: https://www.propertyguru.com.sg/careers
+
+  - name: Qualcomm
+    careers_url: https://careers.qualcomm.com/
+    provider: generic_html
+    feed_url: https://careers.qualcomm.com/
+
+  - name: Rapyd
+    careers_url: https://www.rapyd.net/company/careers/
+    provider: generic_html
+    feed_url: https://www.rapyd.net/company/careers/
+
+  - name: Razer
+    careers_url: https://careers.razer.com/
+    provider: workday
+    slug: razer
+    feed_url: https://razer.wd3.myworkdayjobs.com/Careers
+
+  - name: Redis
+    careers_url: https://redis.com/company/careers/
+    provider: ashby
+    slug: redis
+
+  - name: Renesas
+    careers_url: https://www.renesas.com/en/about/careers
+    provider: smartrecruiters
+    slug: RenesasElectronics
+
+  - name: Revolut
+    careers_url: https://www.revolut.com/careers/
+    provider: generic_html
+    feed_url: https://www.revolut.com/careers/
+
+  - name: Robinhood
+    careers_url: https://careers.robinhood.com/
+    provider: greenhouse
+    slug: robinhood
+
+  - name: Rubrik
+    careers_url: https://www.rubrik.com/company/careers
+    provider: greenhouse
+    slug: rubrik
+
+  - name: Salesforce
+    careers_url: https://careers.salesforce.com/
+    provider: generic_html
+    feed_url: https://careers.salesforce.com/
+
+  - name: SambaNova Systems
+    careers_url: https://sambanova.ai/careers
+    provider: greenhouse
+    slug: sambanovasystems
+
+  - name: SAP
+    careers_url: https://jobs.sap.com/
+    provider: generic_html
+    feed_url: https://jobs.sap.com/
+
+  - name: Scale AI
+    careers_url: https://scale.com/careers
+    provider: greenhouse
+    slug: scaleai
+
+  - name: Sea Money / Monee
+    careers_url: https://careers.sea.com/
+    provider: generic_html
+    feed_url: https://careers.sea.com/
+
+  - name: Seagate
+    careers_url: https://www.seagate.com/em/en/jobs/
+    provider: generic_html
+    feed_url: https://www.seagate.com/em/en/jobs/
+
+  - name: SentinelOne
+    careers_url: https://www.sentinelone.com/jobs/
+    provider: generic_html
+    feed_url: https://www.sentinelone.com/jobs/
+
+  - name: ServiceNow
+    careers_url: https://careers.servicenow.com/
+    provider: smartrecruiters
+    slug: servicenow
+
+  - name: Shopee / Sea Group
+    careers_url: https://careers.sea.com/
+    provider: generic_html
+    feed_url: https://careers.sea.com/
+
+  - name: Shopify
+    careers_url: https://www.shopify.com/careers
+    provider: generic_html
+    feed_url: https://www.shopify.com/careers
+
+  - name: Silicon Laboratories
+    careers_url: https://jobs.silabs.com/
+    provider: workday
+    slug: silabs
+    feed_url: https://silabs.wd1.myworkdayjobs.com/SiliconlabsCareers
+
+  - name: Singtel / Innov8
+    careers_url: https://careers.singtel.com/
+    provider: smartrecruiters
+    slug: innov8
+
+  - name: Snap Inc
+    careers_url: https://careers.snap.com/
+    provider: generic_html
+    feed_url: https://careers.snap.com/
+
+  - name: Snowflake
+    careers_url: https://careers.snowflake.com/
+    provider: ashby
+    slug: snowflake
+
+  - name: Société Générale
+    careers_url: https://careers.societegenerale.com/
+    provider: generic_html
+    feed_url: https://careers.societegenerale.com/
+
+  - name: Splunk
+    careers_url: https://www.splunk.com/en_us/careers.html
+    provider: generic_html
+    feed_url: https://www.splunk.com/en_us/careers.html
+
+  - name: Spotify
+    careers_url: https://www.lifeatspotify.com/jobs
+    provider: lever
+    slug: spotify
+
+  - name: ST Engineering
+    careers_url: https://careers.stengg.com/
+    provider: generic_html
+    feed_url: https://careers.stengg.com/
+
+  - name: Standard Chartered
+    careers_url: https://www.sc.com/en/careers/
+    provider: recruitee
+    slug: standard
+
+  - name: StashAway
+    careers_url: https://www.stashaway.sg/careers
+    provider: generic_html
+    feed_url: https://www.stashaway.sg/careers
+
+  - name: State Street
+    careers_url: https://careers.statestreet.com/
+    provider: workday
+    slug: statestreet
+    feed_url: https://statestreet.wd1.myworkdayjobs.com/Global
+
+  - name: STMicroelectronics
+    careers_url: https://www.st.com/content/st_com/en/about/careers.html
+    provider: generic_html
+    feed_url: https://www.st.com/content/st_com/en/about/careers.html
+
+  - name: Stripe
+    careers_url: https://stripe.com/jobs
+    provider: greenhouse
+    slug: stripe
+
+  - name: Supabase
+    careers_url: https://supabase.com/careers
+    provider: ashby
+    slug: supabase
+
+  - name: Susquehanna (SIG)
+    careers_url: https://sig.com/careers/
+    provider: generic_html
+    feed_url: https://sig.com/careers/
+
+  - name: Syfe
+    careers_url: https://www.syfe.com/careers
+    provider: generic_html
+    feed_url: https://www.syfe.com/careers
+
+  - name: Synopsys
+    careers_url: https://careers.synopsys.com/
+    provider: generic_html
+    feed_url: https://careers.synopsys.com/
+
+  - name: TCS
+    careers_url: https://www.tcs.com/careers
+    provider: generic_html
+    feed_url: https://www.tcs.com/careers
+
+  - name: Temenos
+    careers_url: https://www.temenos.com/careers/
+    provider: workday
+    slug: temenos
+    feed_url: https://temenos.wd103.myworkdayjobs.com/Temenoscareers
+
+  - name: Temporal
+    careers_url: https://temporal.io/careers
+    provider: ashby
+    slug: temporal
+
+  - name: Tencent
+    careers_url: https://careers.tencent.com/
+    provider: generic_html
+    feed_url: https://careers.tencent.com/
+
+  - name: Tesla (AI / Dojo)
+    careers_url: https://www.tesla.com/careers
+    provider: greenhouse
+    slug: dojo
+
+  - name: Thought Machine
+    careers_url: https://thoughtmachine.net/careers
+    provider: ashby
+    slug: thought-machine
+
+  - name: Tibra Capital
+    careers_url: https://www.tibra.com/careers/
+    provider: generic_html
+    feed_url: https://www.tibra.com/careers/
+
+  - name: Tokopedia / GoTo
+    careers_url: https://www.gotogroup.com/careers
+    provider: generic_html
+    feed_url: https://www.gotogroup.com/careers
+
+  - name: Tower Research Capital
+    careers_url: https://www.tower-research.com/open-positions
+    provider: greenhouse
+    slug: towerresearchcapital
+
+  - name: Traveloka
+    careers_url: https://www.traveloka.com/en-sg/careers
+    provider: generic_html
+    feed_url: https://www.traveloka.com/en-sg/careers
+
+  - name: TSMC
+    careers_url: https://careers.tsmc.com/
+    provider: generic_html
+    feed_url: https://careers.tsmc.com/
+
+  - name: Twilio
+    careers_url: https://www.twilio.com/en-us/company/jobs
+    provider: greenhouse
+    slug: twilio
+
+  - name: Two Sigma
+    careers_url: https://careers.twosigma.com/
+    provider: generic_html
+    feed_url: https://careers.twosigma.com/
+
+  - name: Uber
+    careers_url: https://www.uber.com/us/en/careers/
+    provider: smartrecruiters
+    slug: uber
+
+  - name: UBS
+    careers_url: https://www.ubs.com/global/en/careers.html
+    provider: generic_html
+    feed_url: https://www.ubs.com/global/en/careers.html
+
+  - name: UOB
+    careers_url: https://www.uob.com.sg/personal/about-uob/career-opportunities.page
+    provider: generic_html
+    feed_url: https://www.uob.com.sg/personal/about-uob/career-opportunities.page
+
+  - name: Vercel
+    careers_url: https://vercel.com/careers
+    provider: greenhouse
+    slug: vercel
+
+  - name: Virtu Financial
+    careers_url: https://www.virtu.com/careers/
+    provider: greenhouse
+    slug: virtu
+
+  - name: Visa
+    careers_url: https://careers.visa.com/
+    provider: generic_html
+    feed_url: https://careers.visa.com/
+
+  - name: VMware / Broadcom
+    careers_url: https://careers.vmware.com/
+    provider: generic_html
+    feed_url: https://careers.vmware.com/
+
+  - name: Wells Fargo
+    careers_url: https://www.wellsfargojobs.com/
+    provider: generic_html
+    feed_url: https://www.wellsfargojobs.com/
+
+  - name: Western Digital
+    careers_url: https://jobs.westerndigital.com/
+    provider: smartrecruiters
+    slug: westerndigital
+
+  - name: Wipro
+    careers_url: https://careers.wipro.com/
+    provider: generic_html
+    feed_url: https://careers.wipro.com/
+
+  - name: Wise
+    careers_url: https://www.wise.jobs/
+    provider: greenhouse
+    slug: wise
+
+  - name: Workday
+    careers_url: https://www.workday.com/en-us/company/careers/
+    provider: generic_html
+    feed_url: https://www.workday.com/en-us/company/careers/
+
+  - name: WorldQuant
+    careers_url: https://www.worldquant.com/career-listing/
+    provider: greenhouse
+    slug: worldquant
+
+  - name: X / Twitter
+    careers_url: https://careers.x.com/
+    provider: smartrecruiters
+    slug: x
+
+  - name: xAI
+    careers_url: https://x.ai/careers
+    provider: smartrecruiters
+    slug: x
+
+  - name: Xiaomi
+    careers_url: https://careers.mi.com/
+    provider: smartrecruiters
+    slug: xiaomi
+
+  - name: Zendesk
+    careers_url: https://jobs.zendesk.com/
+    provider: workday
+    slug: zendesk
+    feed_url: https://zendesk.wd1.myworkdayjobs.com/zendesk
+
+  - name: Zscaler
+    careers_url: https://www.zscaler.com/careers
+    provider: greenhouse
+    slug: zscaler
