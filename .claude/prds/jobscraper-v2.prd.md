@@ -893,17 +893,23 @@ Legend: `STATUS` · `Completed` (date) · `Verify` (command that proves it) · `
 **Outcome:** the new skeleton exists and the old app still runs untouched.
 
 #### M0-T0 · Put the repo under version control
-- **STATUS:** `NOT_STARTED`
-- **Completed:** —
+- **STATUS:** `DONE`
+- **Completed:** 2026-09-23
 - **Do:** `git init`, a `.gitignore` covering `data/*.db*`, `archive/`,
   `node_modules/`, `web/dist/`, `__pycache__/`, `output/`, and one commit of the
   current v1 tree as the restore point (D-15).
 - **Verify:** `python -c "import subprocess;print(subprocess.run(['git','rev-parse','--is-inside-work-tree'],capture_output=True,text=True).stdout.strip())"` prints `true`, and `git log --oneline` shows ≥ 1 commit.
-- **Notes:** Everything after this assumes git. Do not skip it.
+- **Notes:** Verified — prints `true`, commit `9009eb3` holds 27 files / 411 KB.
+  The 92 MB of `.db` files are correctly excluded and remain on disk for M1-T2
+  and M3-T3b. `data/resume.*` is also ignored (personal, per M2-T0).
+  **Work happens on branch `v2-rebuild`; `master` holds only the v1 restore point.**
+  Cosmetic defect: the commit subject carries a stray `@` from a shell-quoting
+  slip; `git commit --amend` was refused by a local safety hook, so it stands.
+  Body is intact. Harmless — fix by hand if it bothers you.
 
 #### M0-T1 · Create the v2 package skeleton
-- **STATUS:** `NOT_STARTED`
-- **Completed:** —
+- **STATUS:** `DONE`
+- **Completed:** 2026-09-23
 - **Do:** Create `src/jobscraper/{scrape,profile,web}/__init__.py` and empty
   `filter.py`, `decide.py`, `shortlist.py`, `pipeline.py`, `watchlist.py`,
   `scheduler.py`, each with a module docstring stating its single responsibility
@@ -911,6 +917,8 @@ Legend: `STATUS` · `Completed` (date) · `Verify` (command that proves it) · `
 - **Verify:** `python -c "import importlib;mods=['filter','decide','shortlist','pipeline','watchlist','scheduler'];[print(m, len((importlib.import_module('jobscraper.'+m).__doc__ or '').strip()) ) for m in mods];assert all(len((importlib.import_module('jobscraper.'+m).__doc__ or '').strip())>40 for m in mods), 'every module needs a real docstring'"`
 - **Notes:** The assertion is on the docstring, not just the import — an empty file
   imports fine, which would let this task pass having done nothing.
+  Verified: docstrings 460–676 chars on the six modules, 264–301 on the three
+  subpackages. v1's 29 tests still pass, so the skeleton broke nothing.
 - **Notes:** Do not move v1 files yet. M9 does that.
 
 #### M0-T2 · Archive v1 outputs and database
