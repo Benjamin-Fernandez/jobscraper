@@ -324,6 +324,9 @@ Arrows are "depends on". Nothing below a layer may import from above it.
 - `store.py` must not import any stage module.
 - Stage modules (`scheduler`, `scrape/`, `filter`, `decide`, `profile/`) must not
   import each other; `pipeline.py` wires them.
+- `pipeline.py` is the **orchestrator**: the one module allowed to import every
+  stage, and one that nothing may import back. An import of it from below is a
+  cycle waiting to happen.
 - `shortlist.py` is a **publisher**, not a stage: it only turns stored decisions
   into a file, and is the one module both `pipeline.py` and `web/` may import.
 - `web/` may import `store.py`, `shortlist.py`, `config.py` and `models.py` —
@@ -965,9 +968,19 @@ Legend: `STATUS` · `Completed` (date) · `Verify` (command that proves it) · `
   | 2 `test_html_view_*` / `test_cards_from_tracker_*` | **Delete.** They test `output.py`, which M9-T1 retires. Record the deletion in `Notes:`. |
 
   Add `tests/run_tests.py`: discovers `tests/test_*.py`, runs every `test_*`
-  function, prints a per-file and total tally, exits non-zero on any failure.
+  function it *defines* (not ones it merely imports), prints a per-file and total
+  tally, exits non-zero on any failure **and** on a `-k` that matches nothing.
   **It must accept `-k <substring>`** filtering on function *and* file name —
-  eight later tasks verify with it.
+  thirteen later tasks verify with it.
+
+  **`-k` must also gate importing.** The ledger builds one milestone at a time,
+  so at any moment some test file imports something not yet installed —
+  `test_web.py` needs FastAPI long before M7 adds it. If a selective run imported
+  every file regardless, one not-yet-buildable module would fail an *earlier*
+  task's acceptance command for unrelated reasons. Rule: when `-k` is given and a
+  file's name does not match it, an import failure skips that file and is
+  reported as skipped; when the name does match, or no `-k` was given, an import
+  failure is a hard failure.
 - **Verify:** `python tests/run_tests.py` exits 0 and reports ≥ 27 tests;
   `python tests/run_tests.py -k filter` runs a strict subset and exits 0.
 - **Notes:** The old "≥20" bar let all 13 retired-module tests vanish while still
@@ -981,13 +994,21 @@ Legend: `STATUS` · `Completed` (date) · `Verify` (command that proves it) · `
   `test_legacy_v1.py`'s docstring so the loss stays auditable.
 
 #### M0-T4 · Add the layering guard
-- **STATUS:** `NOT_STARTED`
-- **Completed:** —
-- **Do:** A test that parses each module's imports (via `ast`) and asserts the
-  §8.2 boundary rules — `store.py` imports no stage module; stage modules do not
-  import each other; `web/` imports no stage module.
-- **Verify:** `python tests/run_tests.py` includes `test_module_layering` and it passes.
-- **Notes:** This is what keeps the design modular over a multi-day build.
+- **STATUS:** `DONE`
+- **Completed:** 2026-09-24
+- **Do:** `tests/test_layering.py` parses each module's imports via `ast` — no
+  importing, no executing — and asserts the §8.2 boundary rules. Six rules, one
+  test each, plus a seventh that fails when a new module belongs to no layer.
+- **Verify:** `python tests/run_tests.py -k layering` passes (7/7), and the full
+  suite passes.
+- **Notes:** Verified 2026-09-24, 34/34 overall. **Proved non-vacuous:** injecting
+  `from . import decide` into `filter.py` makes the guard exit 1 with
+  "stages must be composed by pipeline.py"; the file was then restored and
+  confirmed unchanged. Two rules were added beyond the original three because the
+  guard exposed the gaps: only `store.py` may contain SQL (§8.4's Postgres path
+  depends on it), only `backends.py` may reach a model, and nothing may import
+  `pipeline.py`. The classification test immediately caught `pipeline` having no
+  assigned layer — hence the new `ORCHESTRATOR` set, now also named in §8.2.
 
 ---
 
