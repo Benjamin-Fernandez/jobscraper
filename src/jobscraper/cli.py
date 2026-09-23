@@ -1,9 +1,9 @@
 """Command-line surface.
 
-    python -m jobscraper doctor     check config, workbook, deps, API key
-    python -m jobscraper sync       load the workbook into the database
+    python -m jobscraper doctor     check config, watchlist, deps, judge
+    python -m jobscraper sync       load the watchlist into the database
     python -m jobscraper status     where the cursor is, what is quarantined
-    python -m jobscraper run        process the next 30 companies
+    python -m jobscraper run        process the next batch of companies
     python -m jobscraper resolve    resolve ATS providers without fetching jobs
     python -m jobscraper export     rewrite the trackers from the database
     python -m jobscraper review     judge postings inside a Claude Code session
@@ -21,7 +21,7 @@ from . import backends
 from . import cursor as cursor_mod
 from . import review as review_mod
 from .config import load_config, load_profile
-from .ingest import read_companies
+from . import watchlist
 from .net import HttpClient
 from .output import (cards_from_tracker, write_html_view,
                      write_needs_review, write_run_tracker)
@@ -41,7 +41,25 @@ def _boot(args):
 
 
 def _sync(cfg, store):
-    rows = read_companies(cfg.input_workbook, cfg.input_sheet)
+    """Load the watchlist into the companies table.
+
+    A bridge, not the final design. It feeds watchlist entries through v1's
+    `sync_companies`, which still keys rows on the display name and carries
+    tier/category columns v2 has dropped. M3-T1b replaces it with
+    `store.sync_watchlist`, which keys on the stable `key` so that renaming a
+    company cannot reset its scrape history (PRD 8.4).
+
+    It exists now because M1-T4 removed the Excel workbook from the config, and
+    leaving every command raising AttributeError until M3 is not an option.
+    """
+    entries = watchlist.load(cfg.watchlist_path)
+    rows = [{"ordinal": i,
+             "name": e.name,
+             "tier": "",
+             "category": "",
+             "careers_url": e.careers_url,
+             "role_type_hint": ""}
+            for i, e in enumerate(watchlist.enabled_only(entries), start=1)]
     added, updated = store.sync_companies(rows)
     return len(rows), added, updated
 
@@ -52,14 +70,16 @@ def cmd_doctor(args) -> int:
     print("JobScraper doctor")
     print(BAR)
 
-    wb = cfg.input_workbook
-    print(f"workbook       {wb}")
-    if not wb.exists():
-        print("               MISSING - copy your tracker there first")
+    wl = cfg.watchlist_path
+    print(f"watchlist      {wl}")
+    try:
+        total, added, updated = _sync(cfg, store)
+    except watchlist.WatchlistError as exc:
+        print(f"               INVALID - {exc}")
         store.close()
         return 1
-    total, added, updated = _sync(cfg, store)
-    print(f"               OK - {total} companies ({added} new, {updated} updated)")
+    print(f"               OK - {total} enabled companies "
+          f"({added} new, {updated} updated)")
 
     print(f"profile        v{profile.version}, {len(profile.all_skills())} skills, "
           f"locations={','.join(profile.loc_allow)}")
@@ -82,7 +102,7 @@ def cmd_doctor(args) -> int:
         print("               or judge in-session: "
               "`python -m jobscraper review --export`")
 
-    print(f"budget         profile={cfg.budget.get('profile')}, "
+    print(f"budget         model={cfg.budget.get('model', '(unset)')}, "
           f"llm={'on' if cfg.budget.get('enable_llm') else 'off'}, "
           f"ceiling={int(cfg.budget.get('max_tokens_per_run', 0)):,} tokens/run")
     print(f"batch          {cfg.run['batch_size']} companies per run, "
@@ -364,7 +384,7 @@ def build_parser() -> argparse.ArgumentParser:
     sub = p.add_subparsers(dest="cmd", required=True)
 
     sub.add_parser("doctor", help="check setup").set_defaults(fn=cmd_doctor)
-    sub.add_parser("sync", help="load workbook into db").set_defaults(fn=cmd_sync)
+    sub.add_parser("sync", help="load the watchlist into the db").set_defaults(fn=cmd_sync)
     sub.add_parser("status", help="cursor and health").set_defaults(fn=cmd_status)
     sub.add_parser("export", help="rewrite trackers").set_defaults(fn=cmd_export)
 

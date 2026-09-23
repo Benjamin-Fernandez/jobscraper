@@ -1074,8 +1074,8 @@ Legend: `STATUS` · `Completed` (date) · `Verify` (command that proves it) · `
   cadence in R-7 easier to meet.
 
 #### M1-T4 · v2 configuration file
-- **STATUS:** `NOT_STARTED`
-- **Completed:** —
+- **STATUS:** `DONE`
+- **Completed:** 2026-09-24
 - **Do:** Rewrite `config/config.yaml` for v2 and adapt `config.py` per §9. Add
   `paths.watchlist`, `paths.rules`, `paths.shortlist`; `run.batch_size: 10` (D-13),
   `run.cycle_days: 14`; `budget.model` (single, cheapest — D-6); `web.host:
@@ -1085,6 +1085,27 @@ Legend: `STATUS` · `Completed` (date) · `Verify` (command that proves it) · `
 - **Verify:** `python -c "from jobscraper.config import load_config; c=load_config(); assert c.run['batch_size']==10 and c.run['cycle_days']==14 and c.budget.get('model'); assert 'model_high' not in c.budget and 'input_workbook' not in c.raw['paths']; print('config v2 ok')"`
 - **Notes:** M3, M4 and M10 all read keys defined here. Without this task they each
   invent their own.
+  **Verified 2026-09-24**, 49/49 suite green. Env overrides confirmed working:
+  `JOBSCRAPER_DB`, `JOBSCRAPER_HOST`, `JOBSCRAPER_PORT`, `JOBSCRAPER_CONFIG`.
+  Also added `budget.decide_batch: 20` and `budget.vital_chars: 800` — M4 needs
+  both and neither had a home — plus `applications.statuses` for M8-T2.
+
+  **Two deviations, deliberate:**
+
+  1. **`Profile` and `load_profile` are kept**, not dropped as this task first
+     said. Five live modules and two test files import them
+     (`matching.py`, `llm.py`, `review.py`, `runner.py`, `cli.py`,
+     `test_filter.py`, `test_decide.py`). They die with those modules at M9-T1;
+     removing them now would break 13 passing tests for no gain.
+  2. **`cli.py::_sync` was repointed at the watchlist.** Removing
+     `paths.input_workbook` broke `cfg.input_workbook`, which `doctor`, `sync`,
+     `resolve` and `run` all call — four commands raising `AttributeError` until
+     M3. `_sync` now feeds watchlist entries through v1's `sync_companies`. It is
+     a **bridge**: that function still keys on the display name and wants
+     tier/category. **M3-T1b must replace it with `store.sync_watchlist`**, which
+     keys on the stable `key`. Until then, renaming a company in the watchlist
+     still resets its history — the exact bug §8.4 exists to prevent.
+     `doctor` now reports the watchlist and the single `budget.model`.
 
 #### M1-T5 · `watchlist` CLI verbs
 - **STATUS:** `NOT_STARTED`

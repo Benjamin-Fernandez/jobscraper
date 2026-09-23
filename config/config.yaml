@@ -1,16 +1,32 @@
-# JobScraper runtime configuration. See docs/DESIGN.md.
+# JobScraper v2 runtime configuration. See .claude/prds/jobscraper-v2.prd.md.
+#
+# Paths are relative to the project root unless absolute.
+#
+# Every deployment-shaped value can be overridden by an environment variable,
+# which is what lets the same code run from a checkout and, one day, from a
+# container without editing this file (PRD section 8.6):
+#
+#   JOBSCRAPER_CONFIG   path to this file
+#   JOBSCRAPER_DB       path to the database
+#   JOBSCRAPER_HOST     web bind address
+#   JOBSCRAPER_PORT     web port
 
 paths:
-  input_workbook: data/job_tracker_04_2026.xlsx
-  input_sheet: Job Tracker
+  watchlist: config/watchlist.yaml            # companies to watch - hand-edited
+  rules: config/rules.yaml                    # the prefilter - hand-edited
+  profile: data/profile.derived.yaml          # generated from your resume
+  profile_overrides: config/profile.overrides.yaml   # your corrections; never regenerated
+  resume_dir: data                            # where resume.pdf / resume.docx lives
   db: data/jobscraper.db
-  output_dir: output
+  shortlist: data/shortlist.json              # the accepted queue the web app reads
+  output_dir: output                          # legacy, for review.py; retired in M9-T1
 
 run:
-  # Each invocation processes exactly this many companies, then stops.
-  batch_size: 30
-  # A full pass over all companies may not restart until this many days
-  # have elapsed since the cycle's first batch.
+  # Companies per run. PRD R-7: at 229 companies this needs ~1.6 runs/day to
+  # finish a 14-day sweep. Raise it if you run less often than that.
+  batch_size: 10
+  # A company becomes due again this many days after it was last scraped.
+  # This is the whole two-week cycle: there is no separate cursor (D-9).
   cycle_days: 14
   max_workers: 6
   per_company_timeout: 90
@@ -26,7 +42,7 @@ run:
   # quarantine nobody and roll back failure counters.
   global_failure_abort_pct: 0.5
   respect_robots: true
-  user_agent: "JobScraper/1.0 (personal job-search tool)"
+  user_agent: "JobScraper/2.0 (personal job-search tool)"
 
 budget:
   enable_llm: true
@@ -34,30 +50,29 @@ budget:
   #   cli  - runs `claude -p`, the Claude Code CLI. Uses the subscription you
   #          are already signed into; no API key, no per-token bill.
   #   api  - the anthropic SDK. Needs ANTHROPIC_API_KEY.
-  #   off  - no model; matching falls back to local scoring alone.
-  # There is also `python -m jobscraper review`, which hands postings to Claude
-  # Code inside an interactive session instead of shelling out. See README.
+  #   off  - no model; the prefilter alone decides.
   backend: cli
-  # Leave empty to find `claude` on PATH.
-  cli_bin: ""
-  # Seconds to wait for one `claude -p` call. A judgement is normally 5-15s.
+  cli_bin: ""                                 # empty = find `claude` on PATH
   cli_timeout: 300
   cli_extra_args: ["--restricted"]
-  # Consecutive transport failures before the judge gives up for this run and
-  # lets local scoring carry the batch.
+  # Consecutive transport failures before the judge stands down for this run.
   max_consecutive_failures: 3
-  profile: thorough            # lean | standard | thorough | max
+  # One model, the cheapest (D-6). Tier routing went with the tiering.
+  model: claude-haiku-4-5-20251001
   max_tokens_per_run: 2000000
-  model_high: claude-sonnet-5
-  model_low: claude-haiku-4-5-20251001
-  extraction_batch: 8
-  verdict_batch: 10
-  jd_chars_for_extraction: 2500
-  jd_chars_for_verdict: 3000
-  second_opinion_tiers: [T1, T2]
+  # Postings per decide call. Per-call overhead dominates the cost, so larger is
+  # cheaper - until a call starts hitting cli_timeout.
+  decide_batch: 20
+  # Hard ceiling on the vital extract sent per posting (PRD section 8.3[4]).
+  # This is the single number that decides what a run costs.
+  vital_chars: 800
 
-output:
-  # Rows below this score never reach the tracker even with a positive verdict.
-  min_score_to_export: 25
-  # Verdicts that qualify for export.
-  export_verdicts: [strong, possible, contested]
+web:
+  # 127.0.0.1, never 0.0.0.0. There is no authentication (PRD R-9), so binding
+  # wide on a personal machine would be a security regression.
+  host: 127.0.0.1
+  port: 8765
+
+applications:
+  # Ordered. Adding a status is a config change, not a migration (M8-T2).
+  statuses: [to_apply, applied, interviewing, offer, rejected, withdrawn]
