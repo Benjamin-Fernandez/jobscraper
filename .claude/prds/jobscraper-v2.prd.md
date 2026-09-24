@@ -1667,8 +1667,20 @@ Legend: `STATUS` · `Completed` (date) · `Verify` (command that proves it) · `
   `title` is accepted per contract 4 but not echoed — the decide prompt carries it.
 
 #### M4-T3 · Decision call + accept guard
-- **STATUS:** `NOT_STARTED`
-- **Completed:** —
+- **STATUS:** `DONE`
+- **Completed:** 2026-09-24 — `-k decide` 24/24 (11 new), full suite 183/183.
+  All three mandatory stub cases store `reject`: `is_singapore: null`,
+  `is_singapore: false`, and `yoe_min: 4`. Also covered: a merely truthy
+  `"yes"` is not Singapore; the cache means a posting is never paid for twice; a
+  changed extract is re-decided; batches split by `decide_batch`; malformed
+  output and dead transports store nothing (retried next run); fenced JSON parses.
+  **Shape:** `decide.decide(postings, summary, backend, model, lookup, save, …)`
+  — the store is injected as two callables, so `decide` stays a stage that knows
+  no SQL and the pipeline owns persistence. `guard()` is the §8.3[5]
+  post-condition, applied before anything is stored. Prompt carries only the
+  derived summary + extracts (no company prestige, no tier), wraps each posting
+  in `<posting>` tags and tells the model that text is data, not instructions.
+  Wiring into `pipeline.run` lands with M5-T1.
 - **Do:** Batched cheap-model call via `backends.py`, cached by
   `hash(job_id + vital_text + profile_version)`. Implement **both** §8.3[5]
   post-conditions (location and the 3-year cap).
