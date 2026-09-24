@@ -247,7 +247,8 @@ def render(result: FilterResult) -> str:
         mark = "  <- deciding rule" if (not result.passed
                                          and t.rule_id == result.reject_rule) else ""
         detail = f"  {t.detail}" if t.detail else ""
-        lines.append(f"  {t.rule_id:<{width}}  {t.verdict.upper():<8}{detail}{mark}")
+        lines.append(f"  {t.rule_id:<{width}}  {t.verdict.upper():<8}{detail}{mark}"
+                     .rstrip())
     return "\n".join(lines)
 
 

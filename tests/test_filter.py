@@ -330,3 +330,35 @@ def test_filter_accepts_objects_as_well_as_dicts():
     raw = RawJob("1", "Backend Engineer", "https://x", "Singapore",
                  description=GOOD_DESC)
     assert F.evaluate(raw, _rules(), PROFILE, stub_scorer).passed
+
+
+# --------------------------------------------------------------------------
+# M4-T1b - `filter test`: a dry run with no scrape and no database
+# --------------------------------------------------------------------------
+
+def _cli(*argv):
+    import contextlib
+    import io
+
+    from jobscraper import cli
+
+    out, err = io.StringIO(), io.StringIO()
+    with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+        code = cli.main(list(argv))
+    return code, out.getvalue(), err.getvalue()
+
+
+def test_filter_cli_test_names_the_deciding_rule_and_token():
+    code, out, _err = _cli("filter", "test", "--title", "Senior Backend Engineer",
+                           "--location", "Singapore")
+    assert code == 0, out
+    assert "REJECT by title_deny: senior" in out, out
+    assert "deciding rule" in out, out
+
+
+def test_filter_cli_test_runs_against_a_draft_rules_file():
+    rules = _rules(lambda d: _rule(d, "title_deny").update(enabled=False))
+    code, out, _err = _cli("filter", "test", "--title", "Senior Backend Engineer",
+                           "--location", "Remote, Global",
+                           "--rules", str(rules.path))
+    assert code == 0 and "REJECT by location_explicit: remote" in out, out

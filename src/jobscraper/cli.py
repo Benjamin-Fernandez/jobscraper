@@ -376,6 +376,86 @@ def cmd_review(args) -> int:
     return 0
 
 
+def cmd_filter(args) -> int:
+    """Tune the prefilter (PRD 8.3[3], M4-T1b): dry-run the rules on one posting.
+
+    `filter test` touches no database and scrapes nothing. The profile is the
+    derived one (data/profile.derived.yaml) when it exists. Without it there are
+    no target titles or skills to match, so every rule that reads the profile is
+    disabled for the run - and the output says so - rather than silently
+    skipping or rejecting everything. `filter explain` reads the `prefilter`
+    table and waits on the v2 store (M3-T1).
+
+    Self-contained on purpose (PRD 0.6: a lane adds one verb, touches nothing
+    else here), hence the local imports.
+    """
+    import dataclasses
+
+    import yaml
+
+    from . import filter as filter_mod
+
+    if args.filter_cmd == "explain":
+        print(f"filter explain {args.job_id}: not available yet - it reads the "
+              "v2 `prefilter` table, which arrives with M3-T1. Use `filter test`.",
+              file=sys.stderr)
+        return 2
+
+    try:
+        sys.stdout.reconfigure(errors="replace")      # JD text is not cp1252
+    except (AttributeError, ValueError):
+        pass
+    cfg = load_config(args.config)
+    rules_path = Path(args.rules) if args.rules else cfg.rules_path
+    try:
+        ruleset = filter_mod.load_rules(rules_path)
+    except (OSError, ValueError) as exc:
+        print(f"cannot load rules: {exc}", file=sys.stderr)
+        return 2
+
+    profile: dict = {}
+    profile_note = f"{cfg.profile_path}"
+    if cfg.profile_path.exists():
+        try:
+            from .profile.resume_ingest import load_derived_profile
+            profile = dict(load_derived_profile(cfg))
+            profile_note += " (+ overrides)"
+        except ImportError:                   # Lane D's loader not merged yet
+            profile = yaml.safe_load(cfg.profile_path.read_text(encoding="utf-8")) or {}
+            profile_note += " (overrides not applied: profile loader not built yet)"
+    else:
+        uses_profile = [r.id for r in ruleset.rules if r.enabled and any(
+            str(v).startswith("profile.") for k, v in r.spec.items()
+            if k in ("source", "aliases"))]
+        ruleset = dataclasses.replace(ruleset, rules=tuple(
+            dataclasses.replace(r, enabled=False) if r.id in uses_profile else r
+            for r in ruleset.rules))
+        profile_note = "none - fallback"
+        print(f"WARNING: no derived profile at {cfg.profile_path}; rules that read "
+              f"it are DISABLED for this run: {', '.join(uses_profile) or '-'}.\n"
+              "         Build it with the resume ingest (M2) for a faithful result.",
+              file=sys.stderr)
+
+    try:
+        from .profile.keywords import overlap as scorer
+    except ImportError:                       # Lane D's matcher not merged yet
+        scorer = None
+
+    posting = {"title": args.title, "location": args.location,
+               "description": args.desc}
+    result = filter_mod.evaluate(posting, ruleset, profile, scorer)
+    print(f"title     {args.title}")
+    print(f"location  {args.location or '(blank)'}")
+    print(f"desc      {len(args.desc)} chars")
+    print(f"rules     {rules_path}  (hash {ruleset.hash[:12]})")
+    print(f"profile   {profile_note}")
+    if scorer is None and profile:
+        print("scorer    none (profile/keywords.py not built yet) - overlap rules skip")
+    print(BAR)
+    print(filter_mod.render(result))
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="jobscraper",
                                 description="Fortnightly careers-site monitor")
@@ -440,6 +520,19 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--dry-run", action="store_true",
                      help="do everything except write the output files")
     run.set_defaults(fn=cmd_run)
+
+    flt = sub.add_parser("filter", help="tune the prefilter rules (dry run)")
+    flt_sub = flt.add_subparsers(dest="filter_cmd", required=True)
+    ft = flt_sub.add_parser("test", help="run the rules on one made-up posting; "
+                                         "no scrape, no database")
+    ft.add_argument("--title", required=True)
+    ft.add_argument("--location", default="")
+    ft.add_argument("--desc", default="", help="description text")
+    ft.add_argument("--rules", help="rules file to test (default: config's)")
+    fe = flt_sub.add_parser("explain", help="every rule's verdict for a stored "
+                                            "posting (needs M3-T1)")
+    fe.add_argument("job_id")
+    flt.set_defaults(fn=cmd_filter)
     return p
 
 
