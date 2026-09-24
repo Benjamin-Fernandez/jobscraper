@@ -260,3 +260,18 @@ def test_pipeline_without_a_model_leaves_survivors_waiting():
     later = _run(cfg, st, fetcher=mixed_fetcher, backend=_AcceptSingapore(),
                  now=shift(T0, days=15))
     assert later.stats["judged"] == 1                   # picked up next run
+
+
+def test_pipeline_nothing_due_still_finishes_pending_work():
+    """With no company due, `run` scrapes nothing but still works the funnel,
+    so a rules edit or a waiting survivor is handled now, not at the next due
+    date - and it writes no run row and stamps nothing."""
+    cfg, st = _world(1)
+    _run(cfg, st, fetcher=mixed_fetcher)                # model off: 1 waiting
+    rep = _run(cfg, st, fetcher=mixed_fetcher, backend=_AcceptSingapore(),
+               now=shift(T0, days=1))                   # nothing due
+    assert rep.status == "nothing_due" and rep.run_no == 0
+    assert rep.stats["judged"] == 1 and rep.stats["shortlisted"] == 1
+    assert _count(st, "runs") == 1
+    dry = _run(cfg, st, fetcher=mixed_fetcher, dry_run=True, now=shift(T0, days=1))
+    assert dry.status == "nothing_due" and "judged" not in dry.stats

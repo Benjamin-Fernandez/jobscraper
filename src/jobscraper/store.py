@@ -614,12 +614,24 @@ class Store:
              yoe_min, reason, model, utcnow()))
         self.conn.commit()
 
-    def accepted_jobs(self, profile_version: int) -> list[dict[str, Any]]:
+    def accepted_jobs(self, profile_version: int,
+                      rules_hash: Optional[str] = None) -> list[dict[str, Any]]:
         """Every accepted posting for this profile, with the run that found it.
 
         The shortlist's raw material (M5-T1). Where a posting was decided more
-        than once (its description changed) the newest decision wins.
+        than once (its description changed) the newest decision wins. With
+        `rules_hash`, a posting must also pass the CURRENT prefilter: a rules
+        edit that would now reject a role withdraws it from the shortlist rather
+        than leaving it standing on a decision made under the old rules.
         """
+        current = ""
+        params: tuple = (profile_version,)
+        if rules_hash is not None:
+            current = """
+                  AND EXISTS (SELECT 1 FROM prefilter p
+                               WHERE p.job_id = j.job_id AND p.passed = 1
+                                 AND p.profile_version = ? AND p.rules_hash = ?)"""
+            params = (profile_version, profile_version, rules_hash)
         return [dict(r) for r in self.conn.execute(
             """SELECT j.job_id, j.first_seen_run AS run_no, co.name AS company,
                       j.title, j.url, j.location, j.posted_at, j.closed_at,
@@ -634,8 +646,8 @@ class Store:
                                   WHERE d2.job_id = d.job_id
                                     AND d2.profile_version = d.profile_version
                                   ORDER BY d2.decided_at DESC, d2.rowid DESC
-                                  LIMIT 1)
-                ORDER BY j.job_id""", (profile_version,))]
+                                  LIMIT 1)""" + current + """
+                ORDER BY j.job_id""", params)]
 
     # ---------------- applications ----------------
 

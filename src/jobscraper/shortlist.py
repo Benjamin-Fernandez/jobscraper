@@ -22,15 +22,16 @@ from .store import Store, utcnow
 VERSION = 1
 
 
-def build(store: Store, profile_version: int,
-          now: Optional[str] = None) -> dict[str, Any]:
+def build(store: Store, profile_version: int, now: Optional[str] = None,
+          rules_hash: Optional[str] = None) -> dict[str, Any]:
     """The shortlist document, in a deterministic order (M5-T1).
 
     jobs: (run_no DESC, company ASC, id ASC); runs: run_no DESC. A job whose
     posting has since closed stays, flagged `closed: true`, so a role you were
-    about to apply to does not vanish without explanation (Q4).
+    about to apply to does not vanish without explanation (Q4). With
+    `rules_hash`, only roles that still pass the current rules are listed.
     """
-    rows = store.accepted_jobs(profile_version)
+    rows = store.accepted_jobs(profile_version, rules_hash=rules_hash)
     jobs = []
     for r in rows:
         job = {"id": r["job_id"], "run_no": r["run_no"], "company": r["company"],
@@ -53,9 +54,10 @@ def build(store: Store, profile_version: int,
 
 
 def write(store: Store, path: Path, profile_version: int,
-          now: Optional[str] = None) -> dict[str, Any]:
+          now: Optional[str] = None,
+          rules_hash: Optional[str] = None) -> dict[str, Any]:
     """Regenerate the file atomically: the web app never reads half a shortlist."""
-    doc = build(store, profile_version, now=now)
+    doc = build(store, profile_version, now=now, rules_hash=rules_hash)
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(path.suffix + ".tmp")
     tmp.write_text(json.dumps(doc, indent=2, ensure_ascii=False) + "\n",

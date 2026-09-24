@@ -114,6 +114,6 @@ def apply_verdicts(cfg: Config, store: Store, profile: dict[str, Any],
         stats["applied"] += 1
         stats["accepted"] += int(final == "accept")
         stats["rejected_by_postcondition"] += int(downgraded)
-    doc = shortlist.write(store, cfg.shortlist_path, pv)
+    doc = shortlist.write(store, cfg.shortlist_path, pv, rules_hash=ruleset.hash)
     stats["shortlisted"] = len(doc["jobs"])
     return stats

@@ -130,6 +130,18 @@ def run(cfg: Config, store: Store, *, dry_run: bool = False,
         rep.message = ("nothing is due" + (f"; next company due {plan.next_due_at} UTC"
                                            if plan.next_due_at else ""))
         say(rep.message)
+        # Nothing to scrape, but the funnel works on what is *missing*, so a
+        # rules or profile edit still reaches the stored postings now rather
+        # than at the next due date. No run row, no stamps; a dry run writes
+        # nothing at all.
+        if not dry_run:
+            own = client is None
+            c = client or make_client(cfg)
+            try:
+                _funnel(cfg, store, rep, c, backend, profile, say)
+            finally:
+                if own:
+                    c.close()
         return rep
 
     say(f"\nRun plan: {len(plan.due)} due" +
@@ -389,7 +401,7 @@ def _funnel(cfg: Config, store: Store, rep: RunReport, client: HttpClient,
             say(f"  !! model: {err}")
 
     # ---- [6] shortlist ----
-    doc = shortlist.write(store, cfg.shortlist_path, pv)
+    doc = shortlist.write(store, cfg.shortlist_path, pv, rules_hash=ruleset.hash)
     rep.stats["shortlisted"] = len(doc["jobs"])
     say(f"  shortlist: {len(doc['jobs'])} roles -> {cfg.shortlist_path}")
 

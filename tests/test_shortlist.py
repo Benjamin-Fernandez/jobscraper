@@ -81,6 +81,22 @@ def test_shortlist_keeps_closed_roles_flagged():
     assert not any(j.get("closed") for j in doc["jobs"] if j["company"] != "Grab")
 
 
+def test_shortlist_withdraws_a_role_the_current_rules_reject():
+    """Found in the M4-T4 audit: "Sr. SRE" was accepted before `sr` joined
+    title_deny. A rules edit must take it off the Inbox, not leave it standing
+    on a decision made under the old rules."""
+    _, st, ids = _world()
+    okx1 = ids[("okx", 1)]
+    for jid in ids.values():
+        st.save_prefilter(jid, 1, "rulesA", True)
+        st.save_prefilter(jid, 1, "rulesB", jid != okx1)
+    assert len(shortlist.build(st, 1, rules_hash="rulesA")["jobs"]) == 6
+    kept = [j["id"] for j in shortlist.build(st, 1, rules_hash="rulesB")["jobs"]]
+    assert len(kept) == 5 and okx1 not in kept
+    # No rules_hash: every accepted role, as before.
+    assert len(shortlist.build(st, 1)["jobs"]) == 6
+
+
 def test_shortlist_has_the_documented_shape():
     _, st, _ = _world()
     doc = shortlist.build(st, 1)

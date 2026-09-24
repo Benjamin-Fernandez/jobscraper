@@ -27,7 +27,9 @@ rules:
     field: title
     enabled: true
     patterns:
-      - '\b(senior|staff|principal|lead|head|director|manager|vp)\b'
+      # sr / snr: "Sr. Software Engineer" slipped through as "senior" only
+      # (found in the M4-T4 audit, run #12). \bsr\b does not match "SRE".
+      - '\b(senior|sr|snr|staff|principal|lead|head|director|manager|vp)\b'
       - '\b(intern|internship|apprentice|working student)\b'
       - '\b(sales|marketing|recruit|legal|finance|hr)\b'
     extra: []               # <- yours; merged with the above, never overwritten
