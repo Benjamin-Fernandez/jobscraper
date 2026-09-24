@@ -597,20 +597,23 @@ class Store:
                                company: Optional[str] = None,
                                role: Optional[str] = None,
                                url: Optional[str] = None,
-                               at: Optional[str] = None) -> bool:
+                               at: Optional[str] = None,
+                               applied_at: Optional[str] = None) -> bool:
         """Upsert an application; append to `app_events` only on a real change.
 
         Returns whether an event was appended - re-posting the same status is a
         no-op for the history (M6-T2), though `notes` still updates. `applied_at`
         is stamped the first time the status leaves NOT_YET_APPLIED and is never
-        re-stamped afterwards.
+        re-stamped afterwards. `applied_at` overrides that stamp's date - only
+        for importing a record whose real date is known (M3-T3b).
         """
         now = at or utcnow()
         prev = self.application(job_id)
         prev_status = prev["status"] if prev else None
+        stamp = applied_at
         applied_at = prev["applied_at"] if prev else None
         if applied_at is None and status not in NOT_YET_APPLIED:
-            applied_at = now[:10]
+            applied_at = stamp or now[:10]
 
         if prev is None:
             self.conn.execute(
@@ -632,6 +635,33 @@ class Store:
                    VALUES (?,?,?,?)""", (job_id, prev_status, status, now))
         self.conn.commit()
         return changed
+
+    def relink_orphan_applications(self) -> int:
+        """Point applications at their posting once it has been scraped.
+
+        A migrated v1 application (D-14) carries a v1 job id that no v2 job has,
+        because v1 hashed ids with a company id that no longer means anything.
+        Its URL is the durable link: when a scraped job has the same URL, the
+        application and its history move onto that job id. Safe to run every
+        run; returns how many moved.
+        """
+        orphans = self.conn.execute(
+            """SELECT a.job_id, a.url FROM applications a
+               WHERE a.url IS NOT NULL
+                 AND NOT EXISTS (SELECT 1 FROM jobs j WHERE j.job_id = a.job_id)"""
+        ).fetchall()
+        moved = 0
+        for o in orphans:
+            job = self.find_job_by_url(o["url"])
+            if not job or self.application(job["job_id"]):
+                continue
+            self.conn.execute("UPDATE applications SET job_id = ? WHERE job_id = ?",
+                              (job["job_id"], o["job_id"]))
+            self.conn.execute("UPDATE app_events SET job_id = ? WHERE job_id = ?",
+                              (job["job_id"], o["job_id"]))
+            moved += 1
+        self.conn.commit()
+        return moved
 
     def applications(self) -> list[dict[str, Any]]:
         """Everything with a status, newest change first.

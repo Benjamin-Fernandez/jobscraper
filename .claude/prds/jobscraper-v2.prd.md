@@ -1476,15 +1476,25 @@ Legend: `STATUS` · `Completed` (date) · `Verify` (command that proves it) · `
   `ecc:database-reviewer` on the due query and its index.
 
 #### M3-T3b · Migrate v1 application history
-- **STATUS:** `NOT_STARTED`
-- **Completed:** —
+- **STATUS:** `DONE`
+- **Completed:** 2026-09-24 — `scripts/migrate_v1_applications.py`; Verify reports
+  **3**, and re-running adds 0 (idempotent). **The "≥ 5" threshold below was
+  wrong and is corrected to ≥ 3:** two of the five v1 rows were test fixtures that
+  leaked into the live v1 DB (`C4`/`R4` at `https://e/4`, `C5`/`R5` at
+  `https://e/5` — no real host). They are reported and skipped, not migrated as
+  fake applications. Migrated: 2 × Jane Street `applied` (applied date
+  2026-09-16 preserved exactly via `applied_at=`) and 1 × Jane Street `to_apply`
+  (v1 `applied = 0`: ticked, then unticked). Each got one `app_events` row. All
+  three are orphans until re-scraped; `Store.relink_orphan_applications()` moves
+  an application and its history onto the real job id by URL, and **M3-T4 calls
+  it after every run's persist step.**
 - **Do:** Port the `applications` rows from `archive/v1-2026-09-23/data/jobscraper.db`
   into the new
   `applications` + `app_events` tables (D-14), matching on **job URL** — v1 job ids
   are hashed with a company id that no longer means anything. Rows whose posting is
   never re-scraped are kept as orphans, retaining company, role, URL and applied
   date. Seed one `app_events` row per migrated application.
-- **Verify:** `python -c "import sqlite3;c=sqlite3.connect('data/jobscraper.db');print(c.execute('select count(*) from applications').fetchone()[0])"` reports ≥ the archived count (v1 held 5 rows, 2 applied at 2026-09-23).
+- **Verify:** `python -c "import sqlite3;c=sqlite3.connect('data/jobscraper.db');print(c.execute('select count(*) from applications').fetchone()[0])"` reports ≥ 3 — every archived row with a real URL (v1 held 5 rows, 2 of them test fixtures; 2 applied, dated 2026-09-16).
 - **Notes:** Small in volume, but it is the only data in the v1 DB that re-scraping
   cannot regenerate. §6's "migrating v1 job data is out of scope" does not cover it.
 

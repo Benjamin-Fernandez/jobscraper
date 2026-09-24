@@ -290,3 +290,25 @@ def test_sync_the_real_watchlist_loads_all_229():
     st = _synced(*load())
     assert len(st.companies()) == 229
     assert len(st.companies(enabled_only=True)) == 224
+
+
+# ---------------- M3-T3b: migrated v1 applications ----------------
+
+def test_store_applied_at_override_keeps_the_real_date():
+    st = _store(0)
+    st.set_application_status("v1id", "applied", at="2026-09-24T10:00:00",
+                              applied_at="2026-09-16")
+    assert st.application("v1id")["applied_at"] == "2026-09-16"
+
+
+def test_store_orphan_application_relinks_when_its_posting_is_scraped():
+    st = _store(1)
+    st.set_application_status("v1id", "applied", company="C1",
+                              role="Software Engineer", url="https://x/7")
+    assert st.relink_orphan_applications() == 0          # posting not seen yet
+    jid = _job(st, st.companies()[0].id, ext="7")
+    assert st.relink_orphan_applications() == 1
+    assert st.application("v1id") is None
+    assert st.application(jid)["status"] == "applied"
+    assert len(st.application_events(jid)) == 1
+    assert st.relink_orphan_applications() == 0          # idempotent
