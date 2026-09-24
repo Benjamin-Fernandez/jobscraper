@@ -14,7 +14,7 @@ from urllib.parse import urlparse
 
 import httpx
 
-from .models import BLOCKED, GONE, RETRYABLE, SCHEMA, TRANSIENT, UNKNOWN
+from ..models import BLOCKED, GONE, RETRYABLE, SCHEMA, TRANSIENT, UNKNOWN
 
 
 # Public ATS JSON APIs. robots.txt on these hosts targets crawlers walking the

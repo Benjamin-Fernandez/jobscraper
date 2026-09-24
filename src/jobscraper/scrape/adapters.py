@@ -12,7 +12,7 @@ from html.parser import HTMLParser
 from typing import Any, Optional
 from urllib.parse import urljoin, urlparse
 
-from .models import SCHEMA, Company, RawJob
+from ..models import SCHEMA, RawJob, WatchedCompany
 from .net import FetchError, HttpClient
 
 MAX_JOBS = 600
@@ -70,10 +70,10 @@ def _s(v: Any) -> str:
 class Adapter:
     provider = "base"
 
-    def fetch(self, client: HttpClient, company: Company) -> list[RawJob]:
+    def fetch(self, client: HttpClient, company: WatchedCompany) -> list[RawJob]:
         raise NotImplementedError
 
-    def hydrate(self, client: HttpClient, company: Company, job: RawJob) -> None:
+    def hydrate(self, client: HttpClient, company: WatchedCompany, job: RawJob) -> None:
         """Fill job.description in place. Default: nothing more to fetch."""
         return None
 

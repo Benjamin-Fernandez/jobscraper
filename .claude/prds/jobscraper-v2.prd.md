@@ -1436,8 +1436,15 @@ Legend: `STATUS` · `Completed` (date) · `Verify` (command that proves it) · `
   §8.4 exists to prevent. Delete `_sync` as part of this task; do not leave both.
 
 #### M3-T2 · Point discovery and adapters at the watchlist
-- **STATUS:** `NOT_STARTED`
-- **Completed:** —
+- **STATUS:** `DONE`
+- **Completed:** 2026-09-24 — `-k scrape` 7/7 (all four discovery corroboration
+  tests), full suite 83/83, layering guard green with the three files now checked
+  as the `scrape` stage. `git mv` into `scrape/` (history preserved); the only
+  edits are import paths and the input annotation `Company` → `WatchedCompany`
+  (the fields they read — name, careers_url, provider, slug, feed_url — are
+  identical). No logic changed. Importers repointed: `cli.py`, legacy `runner.py`,
+  `tests/test_scrape.py`. `net` is still listed in the guard's FOUNDATION set;
+  harmless (no top-level `net` remains) and tidied in M9.
 - **Do:** Move `adapters.py`, `discovery.py`, `net.py` under `scrape/`. Change only
   their *input type* (watchlist entry instead of Excel-derived `Company`). No logic changes.
 - **Verify:** `python tests/run_tests.py -k scrape` passes, including the four

@@ -23,10 +23,10 @@ from . import review as review_mod
 from . import scheduler
 from .config import load_config, load_profile
 from . import watchlist
-from .net import HttpClient
+from .scrape.net import HttpClient
 from .output import (cards_from_tracker, write_html_view,
                      write_needs_review, write_run_tracker)
-from . import discovery
+from .scrape import discovery
 from .runner import ensure_resolved, run_batch
 from .serve import serve_view
 from .store import Store as StoreV2

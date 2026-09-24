@@ -10,7 +10,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from jobscraper import discovery as D
+from jobscraper.scrape import discovery as D
 
 def test_aggregator_urls_never_yield_a_slug():
     """Mathrix once became LinkedIn because its careers URL was a LinkedIn page."""
