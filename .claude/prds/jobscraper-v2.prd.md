@@ -2146,11 +2146,14 @@ Legend: `STATUS` · `Completed` (date) · `Verify` (command that proves it) · `
   ~1.6 runs/day**. How will runs actually be triggered — by hand, Task Scheduler,
   or a container loop? If the real rate is lower, either the batch rises above 10 or
   the watchlist shrinks (M1-T3). *Decide after M3-T3 measures a real run's duration.*
-- [ ] **Q2 — Dismiss semantics.** Does `Dismiss` in the Inbox hide the role forever,
-  or only for that run? *Decide at M7-T3.*
-- [ ] **Q3 — Re-decide on profile change.** Bumping `profile_version` invalidates every
-  cached decision, which re-runs the model over the whole corpus. Acceptable, or should
-  re-decision be opt-in per run? *Decide at M2-T2.*
+- [x] **Q2 — Dismiss semantics. RESOLVED 2026-09-24 (user): leave as is** —
+  Dismiss hides a role for the current browser session only and writes nothing to
+  the server (`web/src/dismissed.js`).
+- [x] **Q3 — Re-decide on profile change. RESOLVED 2026-09-24 (user): acceptable.**
+  Bumping `profile_version` re-decides the corpus. With the judge at ~300 tokens per
+  posting (§5) and ~0.5% of postings reaching it, that cost is small.
+- [x] **Title rules. RESOLVED 2026-09-24 (user):** "trade support engineer" added to
+  `title_allow.extra`; `avp` is deliberately **not** added to `title_deny`.
 - [x] **Q4 — Closed postings. RESOLVED 2026-09-23.** Keep them in the shortlist with
   a `"closed": true` flag; the UI marks them stale rather than hiding them.
   Specified in M5-T1.

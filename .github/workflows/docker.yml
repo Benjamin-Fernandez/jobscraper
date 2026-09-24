@@ -10,9 +10,9 @@ name: docker
 
 on:
   pull_request:
-    branches: [v2-rebuild]
+    branches: [master, v2-rebuild]
   push:
-    branches: [v2-rebuild]
+    branches: [master, v2-rebuild]
 
 permissions:
   contents: read

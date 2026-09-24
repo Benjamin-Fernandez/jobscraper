@@ -16,11 +16,10 @@ build ledger: [`.claude/prds/jobscraper-v2.prd.md`](.claude/prds/jobscraper-v2.p
 ## Quick start (Windows, no Docker)
 
 Needs Python 3.12 and, for the model step, [Claude Code](https://claude.com/claude-code)
-signed in on this machine. No API key. (v2 lives on the `v2-rebuild` branch;
-`master` still holds the v1 restore point.)
+signed in on this machine. No API key. (v1 is kept at the `v1-final` tag.)
 
 ```powershell
-git clone -b v2-rebuild https://github.com/Benjamin-Fernandez/jobscraper.git
+git clone https://github.com/Benjamin-Fernandez/jobscraper.git
 cd jobscraper
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
