@@ -57,7 +57,12 @@ budget:
   backend: cli
   cli_bin: ""                                 # empty = find `claude` on PATH
   cli_timeout: 300
-  cli_extra_args: ["--restricted"]
+  # Measured 2026-09-24: with only --restricted, every call carried ~21,000
+  # tokens of Claude Code's own tool definitions; with no tools, 536. The
+  # judge only reads text and answers JSON, so it gets no tools, no MCP
+  # servers and no skills.
+  cli_extra_args: ["--restricted", "--strict-mcp-config", "--disable-slash-commands",
+                   "--tools", ""]
   # Consecutive transport failures before the judge stands down for this run.
   max_consecutive_failures: 3
   # One model, the cheapest (D-6). Tier routing went with the tiering.
