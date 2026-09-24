@@ -1,6 +1,6 @@
 # JobScraper v2 — Product Requirements & Build Specification
 
-**Status:** ACTIVE — in implementation, parallel lanes (§0.6)
+**Status:** ACTIVE — Phase 1 (M0–M10) delivered; Phase 2 planned (§8.7, M11–M15)
 **Created:** 2026-09-23
 **Supersedes:** the v1 pipeline described in `docs/DESIGN.md`
 **Owner:** Benjamin (single user, personal job search)
@@ -110,6 +110,14 @@ paste - see the latest ledger note or the handoff message for its location.
 to `title_deny`, whether to add "trade support engineer" to `title_allow`,
 Docker model transport (image has no `claude`; `review --export/--apply` is the
 in-container path), and merging `v2-rebuild` into `master`.
+
+**Next: Phase 2 — decision modes (planned 2026-09-24).** The user wants the app
+usable two ways: *traditional* (today's rules → extract → model → guard) and
+*model-led*, where a local Qwen model reads each posting against a hand-written
+**profile document** and decides — with the stated future goal that Qwen fully
+decides what goes through. Design: §8.7. Decisions: D-16–D-22. Build: M11–M15.
+**Phase 2 changes no Phase 1 behaviour until M15 graduates it**: `rules` stays
+the default mode, and every Phase 1 test must keep passing throughout.
 
 #### Two landmines
 
@@ -428,6 +436,23 @@ The vertical slice that tests the hypothesis end to end:
 9. One web page: Inbox tab (scroll, open, apply) + Applications tab (mark status).
 10. `docker compose up` spin-up, with the no-Docker path preserved.
 
+### Phase 2 — decision modes (planned 2026-09-24)
+
+Because a local model costs no tokens (D-17), the expensive-step discipline that
+shaped Phase 1 no longer binds; GPU time and *trust* do. Phase 2 adds a second
+decision mode beside the first, with a measured path for the model to take over:
+
+1. A **decision policy** abstraction: `rules` (Phase 1, unchanged) or `model`.
+2. A hand-written **profile document** (`config/profile.md`) — the roles wanted,
+   experience, location, must-haves, dealbreakers — the sole criteria in model mode.
+3. A **model-led funnel**: model triage on title/location, then a full read of
+   survivors against the profile document (D-19).
+4. **Configurable guards**: the Singapore / 3-year post-conditions stay on in
+   model mode until the model earns their removal (D-20).
+5. **Evaluation**: a labelled golden set and a shadow mode that runs a policy over
+   the stored corpus without publishing, so switching is decided by numbers (D-22).
+6. Surfacing: fit score, reasons and "why" in the Inbox; `assess explain`.
+
 ### Out of scope
 
 | Item | Why deferred |
@@ -456,7 +481,7 @@ Decisions that shape the build. An agent must not silently reverse these.
 | **D-5** | `shortlist.json` is **engine-owned and disposable**; application status lives **only in SQLite** | Avoids two writers on one file. The engine regenerates the shortlist freely; user state is never in a regenerated file. | Web app joins the two at read time. |
 | **D-6** | **One** model tier (cheapest), reached via the existing Claude Code CLI backend | No API key exists. Tier routing was tied to the tiering being deleted. | `backends.py` carries over unchanged. `model_high`/`model_low` collapse to `model`. |
 | **D-7** | Singapore means **explicitly Singapore**. Remote — including "Remote (APAC)" and "Remote, Global" — is rejected. | User: "singapore only, not even remote". | A location allow-list of exactly `singapore`/`sg`. The v1 `ambiguous_hints` escape hatch is deleted. |
-| **D-8** | Prefilter is **hard and free**; the model is the last step, never the first | Cost control. A posting the rules can reject must never reach the model. | Order in §8.3 is normative, not advisory. |
+| **D-8** | Prefilter is **hard and free**; the model is the last step, never the first | Cost control. A posting the rules can reject must never reach the model. | Order in §8.3 is normative, not advisory. **Applies to `rules` mode; in `model` mode D-19 supersedes it (Phase 2).** |
 | **D-9** | Scheduling is **per-company staleness**, not a global cursor. A company is due when `last_scraped_at` is null or older than `cycle_days`. | User: decide whether to loop back to company 1 "based on whether it has been scraped within the past 2 weeks". A cursor cannot express that; a timestamp can. | `cursor.py` retires. Self-healing: failures, additions and removals all resolve naturally. See §8.3[0]. |
 | **D-10** | The resume parser emits **`target_titles`**, used as a positive title filter alongside the deny-list. | User request. A generated allow-list catches "Site Reliability Engineer" without hand-maintaining every variant. | New `title_allow` prefilter rule. Generated list is merged with a user `extra:` list that is never overwritten (§8.4). |
 | **D-11** | **Docker packages the app**; the model transport is the one thing Docker cannot carry. | User wants easy spin-up and eventual cloud. But `claude -p` authenticates against the host's Claude Code login, which does not exist inside a container. | Local: mount `~/.claude` read-only. Cloud (later): needs an API key or a hosted transport. **Called out as Risk R-8 — do not discover this at deploy time.** |
@@ -464,6 +489,13 @@ Decisions that shape the build. An agent must not silently reverse these.
 | **D-13** | Batch size **10 companies per run** to start. | User instruction. v1 used 30. | See R-7: at 229 companies this needs ~1.6 runs/day to complete a 14-day cycle, where 30 needed ~0.5. The staleness queue degrades gracefully if that is not met, and the value is one config line. |
 | **D-14** | **Migrate v1 `applications` history.** Jobs and decisions still start clean. | The user's own application record is the one thing in the v1 DB that cannot be regenerated by re-scraping. "Migrating v1 job data is out of scope" (§6) was never meant to cover it. | M3-T3 ports the `applications` rows, matching on job URL. Rows whose job is not re-scraped are kept as orphans with their URL, so nothing the user recorded is lost. |
 | **D-15** | **`git init` the repo before M0.** | There is no `.git` here (verified 2026-09-23). §0.3's "archive, never delete" and M7-T4's "the diff touches exactly 3 files" both assume version control. | M0-T0. Without it, a multi-day agent-driven rebuild has no undo. |
+| **D-16** | **Two decision modes behind one policy abstraction:** `rules` (Phase 1, the default) and `model` (Phase 2). | User, 2026-09-24: "use it traditionally, or leave it totally up to qwen". One pipeline, two ways to reach an accept/reject, chosen per run. | `pipeline._funnel` splits into a rules funnel (unchanged) and a model funnel; decisions are keyed by policy (D-21). `rules` stays default until M15. |
+| **D-17** | **The model-led transport is a local open model — Qwen3 via Ollama** (`qwen3:14b`, fits the 16 GB RTX 5080). Mode and backend are orthogonal. | A local model has no per-token cost and needs no key or login, in or out of Docker. | Model mode *can* run on `claude -p`, but `doctor` warns: it reads whole descriptions, which is exactly what Phase 1 avoided paying for. |
+| **D-18** | **In model mode the profile document is the only criteria.** `config/profile.md` is user-owned prose, never regenerated; `rules.yaml` and the resume-derived profile are not consulted. | "Comparing the JD against a profile document that describes the roles I am looking for, YOE, etc." A document says what rules cannot (preferences, trade-offs, context). | Editing it changes the policy id, so everything is re-assessed (Q3: accepted). The derived profile may seed a *draft* (`profile doc --draft`) that never overwrites it. |
+| **D-19** | **Model-led is two-tier: model triage, then a full read.** No hand rules in model mode. | Measured 2026-09-24: ~27.7k postings per cycle, 55% arrive without a description, median description 5,970 chars. Reading everything in full is ~half a day of GPU per cycle plus ~15k page fetches; one-line triage first makes it minutes. | Triage sees `title \| location \| company` only; survivors are hydrated and read up to `judge_chars`. Both tiers are the model's decisions, so "Qwen decides" holds. |
+| **D-20** | **Code guards are configurable per mode**, and **on by default in model mode until M15**. | Location precision is the one metric that must be 100% (§5); a local model reading untrusted page text is the likeliest way to miss it (R-17). | `model_mode.guards: [singapore, max_yoe]`; `[]` means the model fully decides — the stated end state, reached only through the M15 gates. |
+| **D-21** | **Decisions are keyed by a policy id** = hash(mode, criteria hash, model id + digest, prompt version). Modes never overwrite or reuse each other's answers. | Switching between traditional and model-led must be instant and reversible, and a Qwen answer must never masquerade as a Haiku one. | Schema v3 (M11-T2). The shortlist is "accepted decisions of the active policy". Existing decisions migrate to their `rules` policy id; applications are untouched (D-5). |
+| **D-22** | **Graduation is measured, not declared.** Model mode becomes the default, and later drops its guards, only when it matches or beats `rules` on a user-labelled golden set with 100% location precision, and a shadow cycle agrees. | The user's goal is that Qwen *fully* decides; the safe way there is evidence. | M13 builds the instruments (golden set, `eval`, `shadow`); M15 holds the two switches, each a user decision. |
 
 ---
 
@@ -1118,6 +1150,141 @@ of scope here rather than half-built.
 - **No auth exists.** Acceptable on `127.0.0.1`. Any cloud exposure requires auth
   first — recorded as R-9.
 
+### 8.7 Decision modes — traditional and model-led (Phase 2)
+
+*Planned 2026-09-24 via `/ecc:plan`. Nothing here is built yet; M11–M15 build it.*
+
+**Why the design changes.** Phase 1 was shaped by per-token cost: free rules
+first, an 800-character extract, the model last (D-8). A local model (D-17) costs
+nothing per token, so the binding constraints become **GPU time** and **trust** —
+and the user wants a path where the model, not hand rules, decides.
+
+#### Two modes, one pipeline
+
+```
+                          ┌── mode: rules  (Phase 1, default) ───────────────────────────┐
+ sync → schedule → scrape │  prefilter(rules.yaml) → vital extract(800) → decide → guard │
+        → persist ───────►│                                                              ├─► decisions ─► shortlist
+                          │  triage(model: title|location vs profile.md) → hydrate       │   (by policy)
+                          │  → assess(model: JD ≤ judge_chars vs profile.md) → guards?   │
+                          └── mode: model  (Phase 2) ────────────────────────────────────┘
+```
+
+Scrape, persist, scheduling, crash recovery, the web app and applications are
+shared and unchanged. Only the decision half has two implementations.
+
+#### The policy (D-21)
+
+A **policy** is everything that determines an answer: `mode`, the criteria hash
+(rules mode: `rules_hash` + derived `profile_version`; model mode: sha256 of the
+normalised profile document), the model id **and its digest** (Ollama reports it;
+a re-pulled model is a new policy), and a `prompt_version` constant. `policy_id`
+is a short hash of those. Every decision, triage verdict and shortlist is scoped
+to one policy, so switching modes flips which set of answers is live — nothing is
+overwritten, and switching back is instant.
+
+#### Module changes (layering, §8.2)
+
+| Module | Layer | Change |
+|---|---|---|
+| `llmjson.py` | NEW foundation | The model-answer parsing now duplicated in `decide.py` and `profile/resume_ingest.py` (`_loads`, `_tri`, `_int`, fence stripping) moves here, shared by both and by `assess.py`. No model calls, no SQL. |
+| `guards.py` | NEW foundation | `guard()` moves here from `decide.py` (re-exported there) and becomes a configurable list: `singapore`, `max_yoe`. Both modes apply it. |
+| `policy.py` | NEW foundation | `Policy` dataclass + `policy_id()`; pure hashing of inputs it is given (it imports no stage). |
+| `assess.py` | NEW stage | Model-led: loads the profile document, builds the **triage** and **judge** prompts, prepares JD text (`judge_chars`), parses answers via `llmjson`. Sibling of `filter`/`decide`; imports no stage. |
+| `decide.py` | stage | Unchanged behaviour; imports `guard` from `guards.py`. |
+| `pipeline.py` | orchestrator | `_funnel` → `_funnel_rules` (today's code, unchanged) + `_funnel_model`; `run(mode=...)`; stats gain `mode`, `policy_id`, `triaged`, `triage_kept`, `assessed`, `gpu_seconds`. |
+| `review.py` | orchestrator | Policy-aware: `review --export/--apply` works for either mode. |
+| `store.py` | foundation | Schema v3 (below); all queries take `policy_id`. |
+| `shortlist.py` | publisher | Built from the active policy; adds `score`, `mode`, `matched`, `concerns`. |
+| `web/` | web | Score, mode badge and "why" on Inbox cards; optional sort by score; `/api/meta` reports the active mode and policy. |
+| `cli.py` | entry | `run --mode rules\|model`; `assess explain <job>`; `eval`; `shadow`; `profile doc --draft`; `doctor` shows mode, policy id, profile-document status, backend. |
+
+#### The profile document (D-18)
+
+`config/profile.md` — user-owned Markdown, never regenerated. A template ships
+with headings the prompt relies on: *Roles I want*, *Roles I do not want*,
+*Experience* (e.g. "0–3 years; new-grad and junior titles welcome"), *Location*
+("Singapore only; remote is out"), *Must-haves*, *Nice-to-haves*, *Dealbreakers*,
+*Anything else*. `python -m jobscraper profile doc --draft` writes
+`config/profile.draft.md` from the resume-derived profile and the current rules
+(one model call) for the user to edit and rename; it refuses to overwrite
+`profile.md`.
+
+#### The model-led funnel (D-19)
+
+1. **Triage (model, cheap).** Open postings with no triage verdict for the policy,
+   batched ~50 per call as one line each — `id | title | location | company` —
+   against the profile document → `{id, keep, reason ≤8 words}`. ≈40 tokens a
+   posting: the full ~27.7k-posting corpus is ~1.1M prompt tokens.
+2. **Hydrate** survivors that arrived without a description (existing `_hydrate`).
+3. **Assess (model, full read).** Survivors without a decision for the policy:
+   cleaned JD trimmed to `judge_chars` (default 6,000 ≈ the measured median),
+   `judge_batch` ~4 per call, `num_ctx` sized to fit → `{id, decision, score
+   0–100, is_singapore, yoe_min, matched[], concerns[], reason}`.
+4. **Guards (D-20)** — configured list; default `[singapore, max_yoe]`.
+5. **Publish** — shortlist of the active policy, ranked by run, then score.
+
+Per-run cap `max_assessed_per_run` bounds a run's GPU time; the backlog carries
+over by the existing "select by what is missing" rule, as Phase 1 already does.
+
+#### Throughput budget (to be measured at M12-T5)
+
+Measured corpus (2026-09-24): ~27.7k open postings per cycle, 45% with a
+description at listing time, description p50 5,970 / p90 8,715 chars; new
+postings per run 1.4k–6k. **Assumption, unmeasured:** Qwen3-14B on the RTX 5080
+at ~2.5k prompt tok/s and ~60 output tok/s. On that assumption a full read of
+everything is ~13 h per cycle; triage is minutes and the full read of survivors
+scales with the triage keep-rate. M12-T5 replaces the assumption with numbers.
+
+#### Data contracts — schema v3
+
+- `policies(policy_id PK, mode, criteria_hash, model, model_digest,
+  prompt_version, created_at)` — names every policy the web app can show.
+- `decisions` gains `policy_id`, `score`, `details_json` (matched / concerns);
+  key becomes `(job_id, policy_id, input_hash)` — `input_hash` is the hash of the
+  text the model saw (today's `vital_hash`). SQLite needs a table rebuild.
+- `triage(job_id, policy_id, keep, reason, model, triaged_at)`,
+  PK `(job_id, policy_id)`.
+- `prefilter` is unchanged (rules mode only).
+- **Migration** (`meta.schema_version` 2 → 3) runs once on open, after copying
+  the database to `data/jobscraper.db.bak-v2` (already git-ignored). Existing
+  decisions get their rules-mode policy id; the shortlist must be byte-identical
+  before and after (M11-T2 Verify). `applications` and `app_events` are not
+  touched.
+
+#### Configuration
+
+```yaml
+decide:
+  mode: rules                    # rules | model   (run --mode overrides)
+model_mode:
+  profile_doc: config/profile.md
+  triage: true
+  triage_batch: 50
+  judge_chars: 6000
+  judge_batch: 4
+  max_assessed_per_run: 400
+  guards: [singapore, max_yoe]   # [] = the model fully decides (only after M15)
+  min_score: 0                   # accept threshold on top of the model's decision
+```
+
+The backend stays `budget.backend` (D-17: orthogonal); Docker already selects
+Ollama by environment.
+
+#### The trust ladder — how Qwen comes to decide alone (D-22)
+
+1. **Shadow** — `shadow --mode model` runs the model policy over the stored
+   corpus without publishing and reports agreement with the live policy:
+   accepted by both / only rules / only model, with reasons.
+2. **Golden set** — the user labels ~60 postings (the audited accepts, sampled
+   rejects, near misses) in `data/golden.jsonl` (personal, git-ignored); `eval`
+   reports each policy's precision, recall and location precision.
+3. **Default to model** (M15-T1) when model-with-guards ≥ rules on golden recall,
+   with 100% location precision, and a shadow cycle shows no location miss.
+4. **Guards off** (M15-T2) when model-without-guards keeps 100% location precision
+   on the golden set and one full cycle's hand audit. Only then does Qwen fully
+   decide. Rules mode remains available as a fallback.
+
 ## 9. What already exists — reuse, do not rewrite
 
 Audited against the working tree on 2026-09-23.
@@ -1148,7 +1315,7 @@ Audited against the working tree on 2026-09-23.
 
 ## 10. Build Ledger
 
-> Eleven milestones, M0–M10. Each task is one sitting. **The `Verify:` command is
+> Eleven milestones, M0–M10 (Phase 1), plus M11–M15 (Phase 2, §8.7). Each task is one sitting. **The `Verify:` command is
 > the truth, not the flag.** See §0.1. Tasks within a milestone run in listed order;
 > milestones run in numeric order. Every `Verify:` here is a Python or `git`
 > one-liner, never POSIX shell — this machine is Windows/PowerShell.
@@ -2138,6 +2305,177 @@ Legend: `STATUS` · `Completed` (date) · `Verify` (command that proves it) · `
 
 ---
 
+---
+
+## Phase 2 — Decision modes (M11–M15)
+
+> Design: §8.7. Decisions: D-16–D-22. **Invariant for every Phase 2 task: `rules`
+> mode's behaviour and the Phase 1 suite do not change** until M15 says so.
+> Suggested lanes (§0.6): M11 is serial (Lead). After M11, M12-T1 (profile
+> document) and M12-T2/T3 (`assess.py`) run as two lanes; M14-T1 (web) joins once
+> M12-T3 fixes the output contract; M13 follows M12.
+
+### M11 — Policy foundation (no behaviour change)
+
+#### M11-T1 · Shared model-answer parsing (`llmjson.py`) and guards (`guards.py`)
+- **STATUS:** `NOT_STARTED`
+- **Completed:** —
+- **Do:** Move the JSON-answer helpers out of `decide.py` and
+  `profile/resume_ingest.py` into foundation `llmjson.py`; move `guard()` into
+  foundation `guards.py` as a configurable list (`singapore`, `max_yoe`),
+  re-exported from `decide.py`. Classify both in `tests/test_layering.py`.
+- **Verify:** `python tests/run_tests.py` passes unchanged in count and result;
+  `-k layering` green; `grep -n "def _loads" src/jobscraper -r` finds one definition.
+
+#### M11-T2 · Schema v3 and migration
+- **STATUS:** `NOT_STARTED`
+- **Completed:** —
+- **Do:** Per §8.7 *Data contracts*: `policies`, `triage`, `decisions` rebuilt with
+  `policy_id`/`score`/`details_json` and key `(job_id, policy_id, input_hash)`.
+  Migration v2 → v3 on open, after backing up to `data/jobscraper.db.bak-v2`;
+  existing decisions get their rules-mode policy id.
+- **Verify:** a test migrates a v2 fixture DB and asserts row counts and
+  `applications`/`app_events` untouched; on a **copy** of the real
+  `data/jobscraper.db`, `shortlist.build` is identical (modulo `generated_at`)
+  before and after migration. Use `ecc:database-reviewer` on the migration.
+
+#### M11-T3 · Policy identity; rules mode keyed by policy
+- **STATUS:** `NOT_STARTED`
+- **Completed:** —
+- **Do:** `policy.py` (`Policy`, `policy_id()`); rules funnel, `review`, shortlist
+  and web read and write by policy id; the Ollama backend reports its model digest.
+- **Verify:** full suite green; a live `run` with nothing due leaves
+  `data/shortlist.json` identical apart from `generated_at`.
+
+#### M11-T4 · `decide.mode` config and `run --mode`
+- **STATUS:** `NOT_STARTED`
+- **Completed:** —
+- **Do:** Config block per §8.7; `run --mode` override; `doctor` prints mode,
+  policy id, profile-document status and backend (warning if `model` mode runs on
+  a paid backend).
+- **Verify:** `python -m jobscraper doctor` prints `mode: rules` and a policy id;
+  `run --mode model` with no profile document exits non-zero naming the missing file.
+
+### M12 — Model-led mode
+
+#### M12-T1 · Profile document
+- **STATUS:** `NOT_STARTED`
+- **Completed:** —
+- **Do:** Template `config/profile.md` with the §8.7 headings; loader + criteria
+  hash (whitespace-normalised); `profile doc --draft` → `config/profile.draft.md`,
+  refusing to overwrite `profile.md`.
+- **Verify:** tests: an edit changes the hash, whitespace does not; `--draft` never
+  touches an existing `profile.md` (stub backend).
+
+#### M12-T2 · Triage stage (`assess.triage`)
+- **STATUS:** `NOT_STARTED`
+- **Completed:** —
+- **Do:** Batch prompt (`id | title | location | company`) against the profile
+  document → `{id, keep, reason}`; malformed or missing ids stay untriaged
+  (retried), never guessed.
+- **Verify:** stub-backend tests for batching, parsing, missing ids, and that the
+  prompt carries the profile document and no rules.
+
+#### M12-T3 · Assess stage (`assess.judge`) and configurable guards
+- **STATUS:** `NOT_STARTED`
+- **Completed:** —
+- **Do:** JD preparation to `judge_chars`; output contract `{id, decision, score,
+  is_singapore, yoe_min, matched[], concerns[], reason}`; guards from config.
+- **Verify:** stub-backend tests: with guards on, an accept with
+  `is_singapore: null` is stored as reject; with `guards: []` it is stored as
+  accept; scores and details round-trip into `decisions`.
+
+#### M12-T4 · Model funnel wiring
+- **STATUS:** `NOT_STARTED`
+- **Completed:** —
+- **Do:** `_funnel_model`: triage → hydrate → assess → guards → shortlist, with
+  `max_assessed_per_run` and the §8.7 stats keys; hermetic pipeline tests.
+- **Verify:** `-k pipeline` green including a model-mode run with a stub backend
+  whose shortlist differs from the rules-mode shortlist on the same corpus, and a
+  switch back to `rules` restoring the rules shortlist exactly.
+
+#### M12-T5 · Live measurement on Qwen3-14B (needs Ollama + model; user approval)
+- **STATUS:** `NOT_STARTED`
+- **Completed:** —
+- **Do:** Install Ollama, `ollama pull qwen3:14b`, run model mode on one batch and
+  on the 29 shortlisted roles; record prompt tok/s, output tok/s, seconds per
+  triaged and per assessed posting, peak VRAM, and run duration in §5.
+- **Verify:** the §8.7 throughput assumption is replaced by measured numbers.
+
+### M13 — Evaluation
+
+#### M13-T0 · Label a golden set
+- **STATUS:** `NOT_STARTED`
+- **Completed:** —
+- **Do:** **User task.** Label ~60 postings in `data/golden.jsonl`
+  (`{job_id, want: true|false, singapore: true|false, note}`) — the audited accepts,
+  sampled rejects and near misses. A helper may pre-fill candidates; the user decides.
+- **Verify:** `eval` loads it and reports the label count.
+
+#### M13-T1 · `eval`
+- **STATUS:** `NOT_STARTED`
+- **Completed:** —
+- **Do:** `python -m jobscraper eval [--mode ...]` → precision, recall, location
+  precision and disagreements for a policy against the golden set, without
+  publishing anything.
+- **Verify:** tests with a synthetic golden set and stub policies give known numbers.
+
+#### M13-T2 · `shadow`
+- **STATUS:** `NOT_STARTED`
+- **Completed:** —
+- **Do:** Run a non-active policy over the stored corpus (respecting the per-run
+  cap) and report agreement with the live policy; never writes the shortlist.
+- **Verify:** test: `data/shortlist.json` byte-identical before and after a shadow run.
+
+#### M13-T3 · Policy-aware review transport
+- **STATUS:** `NOT_STARTED`
+- **Completed:** —
+- **Do:** `review --export/--apply` for model mode (profile-document prompt), same
+  guards and cache as the automatic path.
+- **Verify:** the M9-T1 review tests, parametrised over both modes.
+
+### M14 — Surfacing
+
+#### M14-T1 · Web: score, mode, why
+- **STATUS:** `NOT_STARTED`
+- **Completed:** —
+- **Do:** Inbox cards show score, mode badge and expandable matched/concerns;
+  optional sort by score; `/api/meta` reports mode and policy. Rebuild the bundle.
+- **Verify:** Vitest component tests; `-k web` for the API fields; built assets committed.
+
+#### M14-T2 · `assess explain <job>`
+- **STATUS:** `NOT_STARTED`
+- **Completed:** —
+- **Do:** Like `filter explain`: the triage verdict, the text the model saw, its
+  answer, and what the guards did — for the active or a named policy.
+- **Verify:** CLI test through `cli.main` (as `tests/test_cli.py`).
+
+#### M14-T3 · Docs
+- **STATUS:** `NOT_STARTED`
+- **Completed:** —
+- **Do:** README (modes, profile document, Ollama, eval/shadow), regenerate
+  `docs/DESIGN.md` (it is generated from §7/§8.1/§8.2 — add §8.7).
+- **Verify:** the M9-T2 clean-clone walk-through still reaches a working page.
+
+### M15 — Graduation (each switch is a user decision, gated by numbers)
+
+#### M15-T1 · Model mode as the default
+- **STATUS:** `NOT_STARTED`
+- **Completed:** —
+- **Do:** Set `decide.mode: model` — only when `eval` shows model-with-guards ≥
+  rules on golden recall with 100% location precision, and one shadow cycle had
+  no location miss. The user approves the switch.
+- **Verify:** the `eval` and `shadow` reports that met the gate, recorded here.
+
+#### M15-T2 · The model fully decides (guards off)
+- **STATUS:** `NOT_STARTED`
+- **Completed:** —
+- **Do:** Set `model_mode.guards: []` — only when model-without-guards keeps 100%
+  location precision on the golden set and on one full cycle's hand audit. The
+  user approves.
+- **Verify:** the reports that met the gate, recorded here. Rules mode stays
+  available as a fallback (`run --mode rules`).
+
 ## 11. Open Questions
 
 - [x] **Q1 — Scheduling. RESOLVED 2026-09-23 (D-9).** Per-company staleness
@@ -2160,6 +2498,17 @@ Legend: `STATUS` · `Completed` (date) · `Verify` (command that proves it) · `
 - [ ] **Q5 — Is 800 characters enough?** The vital-extract budget is an estimate.
   *Validated or falsified at M4-T4.*
 
+- [ ] **Q7 — Score or binary?** Model mode returns both. Is acceptance the model's
+  accept alone, or accept *and* `score ≥ min_score`? *Proposed: accept alone
+  (min_score 0); the score ranks the Inbox. Decide at M12-T3.*
+- [ ] **Q8 — Company name in the prompt?** Phase 1 excluded prestige signals. Model
+  mode needs the company name for context ("fintech", "bank"). *Proposed: include
+  the name, instruct the model not to weigh prestige. Decide at M12-T2.*
+- [ ] **Q9 — Golden set size and sampling.** ~60 labels proposed; enough to catch a
+  location miss, not to rank models finely. *Decide at M13-T0.*
+- [ ] **Q10 — After graduation, does rules mode stay?** *Proposed: yes, as the
+  fallback when the GPU or Ollama is unavailable. Decide at M15.*
+
 ## 12. Risks
 
 | # | Risk | Likelihood | Impact | Mitigation |
@@ -2178,6 +2527,12 @@ Legend: `STATUS` · `Completed` (date) · `Verify` (command that proves it) · `
 | R-12 | Run crashes mid-flight, leaving `runs.status='running'` and partial state | Medium | Low | Ordering in §8.3[0] makes a crash a no-op: the stamp happens last, content-hashed caches resume safely, and the next run reaps stale `running` rows |
 | R-13 | Tripled scrape frequency (D-13: 10/run instead of 30) breaches a site's rate limit or robots policy | Low | Medium | `net.py` carries over unchanged with per-host delay and robots support; frequency rises but per-host concurrency does not, since a batch of 10 spans 10 different hosts |
 | R-14 | Renaming a company in the YAML silently resets its history | **Was High** | High | Eliminated by design: §8.4 keys rows on `key`, not `name`, and M3-T1b tests the rename case explicitly |
+| R-15 | Qwen3-14B is weaker than Haiku on borderline calls | Medium | Medium | Guards stay on (D-20); shadow and golden-set gates before any default switch (D-22); rules mode remains the fallback |
+| R-16 | Model-led throughput: a full read of every posting is ~half a day of GPU per cycle | High | Medium | Two-tier triage (D-19); `max_assessed_per_run`; measured at M12-T5 before anything depends on it |
+| R-17 | Prompt injection: posting text steering a model that fully decides | Medium | High | Page text stays inside data tags and is declared data; guards on until graduation; every decision stores the text the model saw and its reason; shadow monitoring |
+| R-18 | A vague profile document produces vague decisions | Medium | Medium | Template headings; `profile doc --draft`; `assess explain`; `eval` makes vagueness visible as disagreement |
+| R-19 | The schema v3 migration damages application history | Low | High | Migration touches `decisions` and new tables only; automatic backup to `data/jobscraper.db.bak-v2`; the v2-fixture test and the real-copy shortlist identity check (M11-T2) |
+| R-20 | The same policy answers differently after Ollama or the model is updated | Medium | Low | The model digest is part of the policy id (D-21): a re-pulled model is a new policy, re-assessed rather than silently mixed |
 
 ## 13. Glossary
 
@@ -2194,7 +2549,16 @@ Legend: `STATUS` · `Completed` (date) · `Verify` (command that proves it) · `
 | **Staleness queue** | The ordering that replaces v1's cursor: never-scraped first, then longest-neglected. |
 | **target_titles** | Role names generated from the resume that the scraper looks out for; drives the `title_allow` rule (D-10). |
 | **Rule kind** | One of `regex_deny`, `any_match`, `max_number`, `overlap_floor`. Adding a kind is a registry entry, not a rewrite. |
+| **Decision mode** | `rules` (Phase 1: prefilter → extract → decide → guard) or `model` (Phase 2: triage → assess → guards). D-16. |
+| **Policy / policy id** | Everything that determines an answer — mode, criteria hash, model + digest, prompt version — hashed to an id that keys decisions and shortlists. D-21. |
+| **Profile document** | `config/profile.md`: the user's prose description of the roles they want; the sole criteria in model mode. D-18. |
+| **Triage** | Model mode's first tier: keep/drop from title, location and company alone. |
+| **Assess** | Model mode's second tier: the full read of a posting against the profile document. |
+| **Guards** | Code post-conditions (Singapore, max years) applied after any model; configurable per mode. D-20. |
+| **Shadow** | Running a non-active policy over the stored corpus without publishing, to measure agreement. |
+| **Golden set** | User-labelled postings (`data/golden.jsonl`) against which `eval` scores a policy. |
+| **Graduation** | The two gated switches of M15: model mode as default, then guards off. D-22. |
 
 ---
 
-*Status: in implementation. Next actions: see §0.5 and each lane in §0.6.*
+*Status: Phase 1 (M0–M10) delivered. Phase 2 planned — §8.7, M11–M15. Next action: M11-T1.*
