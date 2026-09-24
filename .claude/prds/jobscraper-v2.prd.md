@@ -81,7 +81,9 @@ under its 4-agent cap — not inside a task.
 
 **Where things stand:** 38/40 tasks `DONE`. Open: **M4-T4** (needs 7 more
 accepted roles for the user's 30-role hand audit - the next cycle opens
-2026-10-08) and **M1-T3** (the user's prune). **204/204 Python, 27/27 Vitest**,
+2026-10-08) and **M1-T3** (the user's prune). **229/229 Python, 27/27 Vitest** (post-M9 hardening added direct
+tests for all 8 ATS adapters and HTTP failure classification, every CLI verb end
+to end, and the judge's no-tools flag),
 CI green (tests + Docker) on `v2-rebuild`, pushed to
 https://github.com/Benjamin-Fernandez/jobscraper. v1 is retired to
 `archive/v1-src/`; `master` still holds the v1 restore point - merging
