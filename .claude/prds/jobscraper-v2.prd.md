@@ -1706,8 +1706,8 @@ Legend: `STATUS` · `Completed` (date) · `Verify` (command that proves it) · `
 ### M6 — Web API
 
 #### M6-T1 · FastAPI app + read endpoints
-- **STATUS:** `NOT_STARTED`
-- **Completed:** —
+- **STATUS:** `DONE`
+- **Completed:** 2026-09-24
 - **Do:** `web/api.py` with `/api/runs`, `/api/shortlist`, `/api/applications`,
   `/api/stats`. One router file per domain (§8.5).
 - **Verify:** `python tests/run_tests.py -k web` passes with `TestClient` and
@@ -1715,21 +1715,38 @@ Legend: `STATUS` · `Completed` (date) · `Verify` (command that proves it) · `
   and `?run=<n>` return different sets; `?run=99999` returns an empty list, not a
   500; a shortlisted job with no application row still appears, with a null status
   (the join must not drop it).
+- **Notes:** Verified 2026-09-24 (Lane C): `-k web` 20/20, against the real M3-T1
+  store in a temp dir and `tests/fixtures/shortlist.json`. Routers live in
+  `web/routers/{runs,shortlist,applications,stats}.py` and are auto-discovered;
+  the D-5 join is in `web/data.py`. `/api/shortlist` returns a bare list;
+  `?run=` other than `latest|all|<n>` is a 422. `/api/applications` inlines each
+  row's `events` (oldest first) for M8-T1. `/api/stats` also serves the ordered
+  `statuses` vocabulary from config, for M8-T1's dropdown.
+  Web modules import `jobscraper.*` absolutely: the layering guard reads the first
+  segment of a relative import (`from .deps`) as a top-level module and would
+  flag it.
 
 #### M6-T2 · Write endpoint + event history
-- **STATUS:** `NOT_STARTED`
-- **Completed:** —
+- **STATUS:** `DONE`
+- **Completed:** 2026-09-24
 - **Do:** `POST /api/applications/{job_id}` upserts `applications` and appends to
   `app_events`. Idempotent; re-posting the same status must not duplicate an event.
 - **Verify:** Test posts `applied` twice and asserts exactly one `app_events` row.
+- **Notes:** Verified 2026-09-24 (Lane C):
+  `test_web_posting_applied_twice_appends_exactly_one_event` passes (the second
+  POST returns `event_appended: false`). Body is `{status, notes}` plus optional
+  `company`/`role`/`url`, passed to `set_application_status` so the row still
+  describes the job after the posting leaves the shortlist. A status outside
+  `applications.statuses` is a 422 with no write. A non-JSON body is a 422, so a
+  cross-site HTML form cannot write.
 
 ---
 
 ### M7 — Web UI
 
 #### M7-T1 · Vite + Vue scaffold, builds into the package
-- **STATUS:** `NOT_STARTED`
-- **Completed:** —
+- **STATUS:** `DONE`
+- **Completed:** 2026-09-24
 - **Do:** `web/` project, output to `src/jobscraper/web/static/`. Document the build
   in README. FastAPI serves the built assets at `/`. Add **Vitest** + Vue Test Utils
   so M7-T3 and M8-T1 have something falsifiable to assert; wire `npm test`.
@@ -1738,42 +1755,82 @@ Legend: `STATUS` · `Completed` (date) · `Verify` (command that proves it) · `
   serves the page at `http://127.0.0.1:8765`.
 - **Notes:** Without a frontend test runner, every UI task below is manual-only and
   nothing guards against regression on day 4.
+  Verified 2026-09-24 (Lane C): `npm run build` writes `static/index.html` + hashed
+  assets; `npm test` 1/1 (Vitest 5, jsdom); `python -m jobscraper web` served the
+  mounted Vue page at `http://127.0.0.1:8765`, no console errors. Build docs are in
+  `web/README.md` (README is the Lead's; link it from there). Routers in
+  `web/routers/` are auto-discovered so M7-T4 stays a 3-file change. Vitest pinned
+  to 5.x: 3.x carries advisory GHSA-82fw-gwwq-j7x9.
 
 #### M7-T2 · Tab shell + run selector
-- **STATUS:** `NOT_STARTED`
-- **Completed:** —
+- **STATUS:** `DONE`
+- **Completed:** 2026-09-24
 - **Do:** The `TABS` registry (§8.5), plus the run selector that swaps the dataset
   in place. **One page for all runs** — this is the core of requirement (2).
 - **Verify:** Changing the run selector issues one `GET /api/shortlist?run=<n>` and
   navigates nowhere; no new HTML file is produced anywhere.
+- **Notes:** Verified 2026-09-24 (Lane C) in the browser against
+  `tests/fixtures/shortlist.json` and a scratch v2 store: selecting run 11 made
+  exactly one request (`/api/shortlist?run=11`), with the same document (a
+  `window` marker survived) and the same URL; `git status` showed no HTML beyond the
+  rebuilt `static/index.html`. Also asserted in Vitest (`web/tests/App.test.js`).
+  `/api/runs` and `/api/shortlist` landed here because the selector needs them;
+  they already run on the real M3-T1 store. Runs come from `Store.list_runs()`,
+  with per-run `accepted` taken from the shortlist, so a run that accepted nothing
+  still appears in the selector.
 
 #### M7-T3 · Inbox tab
-- **STATUS:** `NOT_STARTED`
-- **Completed:** —
+- **STATUS:** `DONE`
+- **Completed:** 2026-09-24
 - **Do:** Scrollable list: company, title, location, yoe, reason, matched skills,
   `Open ↗`, `Mark applied`, `Dismiss`.
 - **Verify:** Manual — open the page, mark one applied, reload, status persisted.
+- **Notes:** Verified 2026-09-24 (Lane C) in the browser, on the fixture shortlist
+  and a scratch v2 store: marked OKX applied, reloaded, and OKX showed `applied`
+  with its button disabled. The DB held one `applications` row and one `app_events`
+  row (`None -> applied`). Covered by 11 Vitest tests (`web/tests/Inbox.test.js`).
+  Dismiss is **session-local** (sessionStorage, no server write) pending Q2.
+  Only `http(s)` URLs become links, since posting URLs are third-party data.
+  §8.3[6] has no matched-skills field, so the card shows `matched_skills` only
+  when a job carries it.
 
 #### M7-T4 · Prove extensibility with a throwaway tab
-- **STATUS:** `NOT_STARTED`
-- **Completed:** —
+- **STATUS:** `DONE`
+- **Completed:** 2026-09-24
 - **Do:** Add a trivial "Stats" tab by touching **only** `tabs.js`, one `.vue`
   file, and one router. Record in `Notes:` every file changed. Then revert it.
 - **Verify:** `git status --porcelain` lists exactly 3 changed/added files (requires
   M0-T0). If it lists more, the tab architecture has failed its requirement — fix
   the architecture, not the diff. Then `git checkout -- .` to revert the probe.
+- **Notes:** Verified 2026-09-24 (Lane C). `git status --porcelain` listed exactly
+  3 files: ` M web/src/tabs.js`, `?? web/src/tabs/Stats.vue`,
+  `?? src/jobscraper/web/routers/stats_probe.py`. The probe router answered
+  `/api/stats-probe` with no other edit (discovery works), `npm test` passed with the
+  tab bar rendering both tabs, a scratch-dir `vite build` emitted a `Stats` chunk,
+  and the layering guard stayed green. Reverted with `git checkout -- .` plus
+  deleting the two untracked files, which `checkout` leaves behind. The router is
+  named `stats_probe` because `/api/stats` already exists (M6-T1). The committed
+  `static/` bundle was not rebuilt, so shipping a real tab also means committing a
+  rebuilt bundle (see `web/README.md`).
 
 ---
 
 ### M8 — Application tracking
 
 #### M8-T1 · Applications tab
-- **STATUS:** `NOT_STARTED`
-- **Completed:** —
+- **STATUS:** `DONE`
+- **Completed:** 2026-09-24
 - **Do:** Table of everything with a status, grouped by status, with the
   `app_events` timeline per row and inline status change.
 - **Verify:** Manual — advance a role through `applied → interviewing`, confirm
   both events appear in order.
+- **Notes:** Verified 2026-09-24 (Lane C) in the browser on a scratch v2 store: OKX
+  (applied in M7-T3) moved to `interviewing` with the inline dropdown. After a
+  reload it sat in the `interviewing` group with timeline `applied 00:53 UTC` →
+  `interviewing 00:57 UTC`, no console errors. 6 Vitest tests in
+  `web/tests/Applications.test.js`. The tab ignores the run selector, since an
+  application outlives its run. The dropdown's options come from `/api/stats`
+  `statuses` (config `applications.statuses`), so M8-T2 should need no UI change.
 
 #### M8-T2 · Status vocabulary in config
 - **STATUS:** `NOT_STARTED`

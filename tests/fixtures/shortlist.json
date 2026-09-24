@@ -1,0 +1,41 @@
+{
+  "version": 1,
+  "generated_at": "2026-09-23T14:30:00",
+  "profile_version": 1,
+  "runs": [
+    { "run_no": 12, "finished_at": "2026-09-23T14:30:00", "accepted": 3 },
+    { "run_no": 11, "finished_at": "2026-09-21T09:12:00", "accepted": 2 }
+  ],
+  "jobs": [
+    { "id": "a1b2c3", "run_no": 12, "company": "OKX",
+      "title": "DevOps / Site Reliability Engineer",
+      "url": "https://job-boards.greenhouse.io/okx/jobs/7767872003",
+      "location": "Singapore", "posted_at": "2026-09-18",
+      "yoe_min": 0, "reason": "Singapore-based; K8s and CI/CD match",
+      "decided_at": "2026-09-23T14:29:41" },
+    { "id": "d4e5f6", "run_no": 12, "company": "GovTech",
+      "title": "Platform Infrastructure Engineer, AISO",
+      "url": "https://example.org/govtech/jobs/1001",
+      "location": "Singapore", "posted_at": "2026-09-20",
+      "yoe_min": 1, "reason": "Singapore public sector; Terraform and AWS",
+      "decided_at": "2026-09-23T14:29:50" },
+    { "id": "g7h8i9", "run_no": 12, "company": "Shopee",
+      "title": "Software Engineer, Backend (New Grad)",
+      "url": "https://example.org/shopee/jobs/2002",
+      "location": "Singapore", "posted_at": "2026-09-21",
+      "yoe_min": 0, "reason": "New-grad role in Singapore; Go and Kafka",
+      "decided_at": "2026-09-23T14:29:58" },
+    { "id": "j1k2l3", "run_no": 11, "company": "Grab",
+      "title": "Software Engineer I",
+      "url": "https://example.org/grab/jobs/3003",
+      "location": "Singapore", "posted_at": "2026-09-15",
+      "yoe_min": 0, "reason": "Entry level; Singapore HQ",
+      "decided_at": "2026-09-21T09:11:02" },
+    { "id": "m4n5o6", "run_no": 11, "company": "Stripe",
+      "title": "Backend Engineer, Payments",
+      "url": "https://example.org/stripe/jobs/4004",
+      "location": "Singapore", "posted_at": "2026-09-14",
+      "yoe_min": 2, "reason": "Singapore office; 2 years is under the cap",
+      "decided_at": "2026-09-21T09:11:40" }
+  ]
+}

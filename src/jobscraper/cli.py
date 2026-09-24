@@ -349,6 +349,28 @@ def cmd_review(args) -> int:
     return 0
 
 
+def cmd_web(args) -> int:
+    """Serve the one-page web app (PRD 8.5) on `web.host`:`web.port`.
+
+    FastAPI and uvicorn are imported here, not at the top of the module, so
+    every other verb keeps working on a machine without the web dependencies.
+    The bind address comes from config (env-overridable) and defaults to
+    127.0.0.1: there is no authentication (PRD R-9).
+    """
+    import uvicorn
+
+    from .web.api import create_app
+
+    cfg = load_config(getattr(args, "config", None))
+    host, port = cfg.web["host"], int(cfg.web["port"])
+    if host not in ("127.0.0.1", "localhost", "::1"):
+        print(f"warning: binding {host} - this app has no authentication",
+              file=sys.stderr)
+    print(f"JobScraper web: http://{host}:{port}  (Ctrl+C to stop)")
+    uvicorn.run(create_app(cfg), host=host, port=port, log_level="warning")
+    return 0
+
+
 def cmd_filter(args) -> int:
     """Tune the prefilter (PRD 8.3[3], M4-T1b). Both subcommands are read-only.
 
@@ -571,6 +593,9 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--dry-run", action="store_true",
                      help="fetch and report, write nothing, consume no queue")
     run.set_defaults(fn=cmd_run)
+
+    sub.add_parser("web", help="serve the web app (inbox, applications)"
+                   ).set_defaults(fn=cmd_web)
 
     flt = sub.add_parser("filter", help="tune the prefilter rules (dry run)")
     flt_sub = flt.add_subparsers(dest="filter_cmd", required=True)
