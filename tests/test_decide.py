@@ -392,3 +392,15 @@ def test_cli_system_prompt_goes_by_file_not_argv():
         B.subprocess.run = real
     assert seen["text"] == "line one\nline two"
     assert not Path(seen["path"]).exists()          # the temp file is cleaned up
+
+
+def test_judge_runs_with_no_tools_from_the_real_config():
+    """`--tools ""` is what took per-call overhead from ~21k tokens to ~0.5k
+    (measured 2026-09-24). Pin that the shipped config still passes it, as two
+    argv elements with the empty string intact."""
+    budget = dict(load_config().budget, backend="cli", cli_bin="claude-fake")
+    b = B.build(budget)
+    argv = b._argv("claude-haiku-4-5")
+    i = argv.index("--tools")
+    assert argv[i + 1] == "", argv
+    assert "--restricted" in argv and "--strict-mcp-config" in argv
