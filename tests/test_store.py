@@ -196,3 +196,97 @@ def test_store_prefilter_verdict_is_scoped_to_its_rules():
     assert st.get_prefilter(jid, 1, "rulesA")["reject_rule"] == "title_deny"
     assert st.get_prefilter(jid, 1, "rulesB") is None
     assert st.prefilter_rejections_by_rule(1, "rulesA") == {"title_deny": 1}
+
+
+# ---------------- M3-T1b: watchlist -> companies sync ----------------
+
+from jobscraper.watchlist import WatchlistEntry
+
+
+def _entry(key="shopee", name="Shopee", url="https://careers.shopee.sg", **kw):
+    return WatchlistEntry(key=key, name=name, careers_url=url, **kw)
+
+
+def _synced(*entries):
+    st = Store(_db())
+    st.sync_watchlist(list(entries))
+    return st
+
+
+def test_sync_new_key_is_inserted_and_due():
+    st = _synced(_entry())
+    c = st.company_by_key("shopee")
+    assert c.name == "Shopee" and c.enabled == 1 and c.last_scraped_at is None
+
+
+def test_sync_rename_keeps_history():
+    """The R-14 bug: renaming must not reset staleness or failure counters."""
+    st = _synced(_entry())
+    cid = st.company_by_key("shopee").id
+    st.stamp_scraped([cid], at="2026-09-20T00:00:00")
+    st.record_failure(cid, "transient", "timeout")
+    st.sync_watchlist([_entry(name="Shopee / Sea Group")])
+    c = st.company_by_key("shopee")
+    assert c.id == cid and c.name == "Shopee / Sea Group"
+    assert c.last_scraped_at == "2026-09-20T00:00:00"
+    assert c.consecutive_failures == 1
+    assert len(st.companies()) == 1
+
+
+def test_sync_careers_url_change_clears_resolution():
+    st = _synced(_entry(provider="greenhouse", slug="shopee",
+                        feed_url="https://boards.greenhouse.io/shopee"))
+    cid = st.company_by_key("shopee").id
+    st.record_failure(cid, "gone", "404")
+    st.stamp_scraped([cid], at="2026-09-20T00:00:00")
+    st.sync_watchlist([_entry(url="https://jobs.shopee.com")])
+    c = st.company_by_key("shopee")
+    assert (c.provider, c.slug, c.feed_url) == (None, None, None)
+    assert c.consecutive_failures == 0
+    # Staleness is history, not resolution: it survives the move.
+    assert c.last_scraped_at == "2026-09-20T00:00:00"
+
+
+def test_sync_keeps_a_resolution_discovery_learned():
+    st = _synced(_entry())
+    cid = st.company_by_key("shopee").id
+    st.set_resolution(cid, "lever", "shopee", None, "probe")
+    st.sync_watchlist([_entry()])
+    assert st.company_by_key("shopee").provider == "lever"
+
+
+def test_sync_removed_entry_is_disabled_with_jobs_and_applications_intact():
+    st = _synced(_entry(), _entry(key="okx", name="OKX", url="https://okx.com/careers"))
+    cid = st.company_by_key("shopee").id
+    jid = _job(st, cid)
+    st.set_application_status(jid, "applied")
+    counts = st.sync_watchlist([_entry(key="okx", name="OKX",
+                                       url="https://okx.com/careers")])
+    assert counts["disabled"] == 1
+    c = st.company_by_key("shopee")
+    assert c is not None and c.enabled == 0
+    assert st.get_job(jid) is not None
+    assert st.application(jid)["status"] == "applied"
+
+
+def test_sync_readding_restores_without_resetting_history():
+    st = _synced(_entry())
+    cid = st.company_by_key("shopee").id
+    st.stamp_scraped([cid], at="2026-09-20T00:00:00")
+    st.sync_watchlist([])
+    st.sync_watchlist([_entry()])
+    c = st.company_by_key("shopee")
+    assert c.id == cid and c.enabled == 1
+    assert c.last_scraped_at == "2026-09-20T00:00:00"
+
+
+def test_sync_enabled_false_in_yaml_is_respected():
+    st = _synced(_entry(enabled=False, notes="v1 quarantined"))
+    assert st.company_by_key("shopee").enabled == 0
+
+
+def test_sync_the_real_watchlist_loads_all_229():
+    from jobscraper.watchlist import load
+    st = _synced(*load())
+    assert len(st.companies()) == 229
+    assert len(st.companies(enabled_only=True)) == 224

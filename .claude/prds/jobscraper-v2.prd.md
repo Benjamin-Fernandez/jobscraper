@@ -86,7 +86,8 @@ tree clean at `6b36850`.
 
 #### Two landmines
 
-**1. `cli.py::_sync` is a bridge that reintroduces the exact bug §8.4 prevents.**
+**1. ~~`cli.py::_sync` is a bridge that reintroduces the exact bug §8.4 prevents.~~
+RESOLVED 2026-09-24 by M3-T1b** — `_sync` is gone; sync keys on `key`. Kept below for history.
 M1-T4 removed the Excel workbook from the config, which broke `cfg.input_workbook`
 and with it `doctor`, `sync`, `resolve` and `run`. `_sync` was repointed at the
 watchlist to keep them alive — but it still routes through **v1's
@@ -96,7 +97,9 @@ failure counters. The stable-`key` guarantee in §8.4 is written down but **not 
 real**. **M3-T1b is what makes it real.** Do not treat §8.4 as implemented until
 that task is `DONE`.
 
-**2. `data/jobscraper.db` exists and is a v1-schema database.** Created by the
+**2. ~~`data/jobscraper.db` exists and is a v1-schema database.~~ RESOLVED
+2026-09-24 by M3-T1** — archived to `archive/v2-bridge-db-2026-09-24/`; the file
+at `data/jobscraper.db` is now v2. Kept below for history. Created by the
 bridge sync above; it has `tier`/`category` columns and **no `last_scraped_at`**.
 It is not the v2 database and holds nothing worth keeping — 224 company rows and
 no jobs. **M3-T1 should delete it and create the v2 schema fresh.** Do not migrate
@@ -1405,8 +1408,15 @@ Legend: `STATUS` · `Completed` (date) · `Verify` (command that proves it) · `
   `test_failed_fetch_must_not_close_jobs`.
 
 #### M3-T1b · Watchlist → `companies` sync
-- **STATUS:** `NOT_STARTED`
-- **Completed:** —
+- **STATUS:** `DONE`
+- **Completed:** 2026-09-24 — `-k sync` 9/9 (8 new + v1's `sync_applied`),
+  full suite 71/71. `_sync` deleted; `doctor` and `sync` run on the v2 store
+  (live: first sync 229 added / 224 enabled, second sync 0 added — idempotent).
+  Beyond the Verify list: a resolution discovery *learned* survives a sync whose
+  YAML omits it (`COALESCE`), while a `careers_url` change keeps only what the
+  YAML states; `last_scraped_at` survives a URL move (staleness is history, not
+  resolution); `enabled: false` in the YAML is honoured. Legacy `run`/`resolve`/
+  `status` now stop with a clear "v2 database" error until M3-T3/M3-T4 replace them.
 - **Do:** `store.sync_watchlist(entries)` implementing the identity and sync
   semantics in §8.4 exactly: match on `key`, insert new as due, update descriptive
   fields only, clear resolution when `careers_url` changes, disable (never delete)

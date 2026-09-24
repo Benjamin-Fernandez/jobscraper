@@ -187,6 +187,65 @@ class Store:
         self.conn.commit()
         return int(cur.lastrowid)
 
+    def sync_watchlist(self, entries: Iterable[Any]) -> dict[str, int]:
+        """Reconcile the watchlist YAML into `companies` (PRD 8.4, normative).
+
+        `entries` are watchlist entries (anything with key, name, careers_url,
+        provider, slug, feed_url, enabled). Identity is `key`, never `name`:
+        matching on the display name is exactly the bug this replaces - renaming
+        "Shopee" silently made a new row, reset its staleness and orphaned its
+        failure counters.
+
+        - new key          -> insert; `last_scraped_at` NULL, so due next run
+        - known key        -> update descriptive fields only; history untouched
+        - careers_url moved -> clear the cached resolution and the failure count:
+                             a new URL is a new board
+        - key gone from YAML -> enabled = 0, never deleted: jobs, decisions and
+                             applications still point at the row
+        """
+        existing = {c.key: c for c in self.companies()}
+        seen: set[str] = set()
+        counts = {"added": 0, "updated": 0, "disabled": 0, "url_changed": 0}
+        for e in entries:
+            seen.add(e.key)
+            row = existing.get(e.key)
+            if row is None:
+                self.conn.execute(
+                    """INSERT INTO companies (key, name, careers_url, provider, slug,
+                       feed_url, enabled) VALUES (?,?,?,?,?,?,?)""",
+                    (e.key, e.name, e.careers_url, e.provider, e.slug, e.feed_url,
+                     int(bool(e.enabled))))
+                counts["added"] += 1
+                continue
+            if e.careers_url != row.careers_url:
+                # Only what the YAML itself states survives a URL change;
+                # anything discovery learned about the old board is void.
+                self.conn.execute(
+                    """UPDATE companies SET name = ?, careers_url = ?, enabled = ?,
+                       provider = ?, slug = ?, feed_url = ?, resolve_method = NULL,
+                       resolved_at = NULL, consecutive_failures = 0
+                       WHERE id = ?""",
+                    (e.name, e.careers_url, int(bool(e.enabled)), e.provider,
+                     e.slug, e.feed_url, row.id))
+                counts["url_changed"] += 1
+            else:
+                # A resolution the YAML does not state is one discovery learned;
+                # keep it rather than making the next run rediscover it.
+                self.conn.execute(
+                    """UPDATE companies SET name = ?, enabled = ?,
+                       provider = COALESCE(?, provider), slug = COALESCE(?, slug),
+                       feed_url = COALESCE(?, feed_url) WHERE id = ?""",
+                    (e.name, int(bool(e.enabled)), e.provider, e.slug, e.feed_url,
+                     row.id))
+            counts["updated"] += 1
+        for key, row in existing.items():
+            if key not in seen and row.enabled:
+                self.conn.execute(
+                    "UPDATE companies SET enabled = 0 WHERE id = ?", (row.id,))
+                counts["disabled"] += 1
+        self.conn.commit()
+        return counts
+
     def companies(self, enabled_only: bool = False) -> list[WatchedCompany]:
         sql = "SELECT * FROM companies"
         if enabled_only:
