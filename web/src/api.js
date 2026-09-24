@@ -21,3 +21,13 @@ export function getRuns() {
 export function getShortlist(run) {
   return request(`shortlist?run=${encodeURIComponent(run)}`)
 }
+
+// Record an application status. `details` (company, role, url) is kept on the
+// application row so the record survives the posting leaving the shortlist.
+export function setApplicationStatus(jobId, status, { notes, ...details } = {}) {
+  return request(`applications/${encodeURIComponent(jobId)}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ status, notes: notes ?? null, ...details }),
+  })
+}

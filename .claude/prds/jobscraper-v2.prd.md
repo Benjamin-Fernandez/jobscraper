@@ -1616,11 +1616,16 @@ Legend: `STATUS` · `Completed` (date) · `Verify` (command that proves it) · `
   still appears in the selector.
 
 #### M7-T3 · Inbox tab
-- **STATUS:** `NOT_STARTED`
+- **STATUS:** `IN_PROGRESS`
 - **Completed:** —
 - **Do:** Scrollable list: company, title, location, yoe, reason, matched skills,
   `Open ↗`, `Mark applied`, `Dismiss`.
 - **Verify:** Manual — open the page, mark one applied, reload, status persisted.
+- **Notes:** UI built and covered by 11 Vitest tests (`web/tests/Inbox.test.js`).
+  Stopped at the manual Verify, which needs `POST /api/applications/{id}` (M6-T2).
+  Dismiss is **session-local** (sessionStorage, no server write) pending Q2.
+  §8.3[6] has no matched-skills field, so the card shows `matched_skills` only
+  when a job carries it.
 
 #### M7-T4 · Prove extensibility with a throwaway tab
 - **STATUS:** `NOT_STARTED`
