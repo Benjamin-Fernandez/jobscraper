@@ -77,39 +77,37 @@ under its 4-agent cap — not inside a task.
 
 ### 0.5 State of play — read before touching anything
 
-*Last updated: 2026-09-24, after the first parallel-lane wave (§0.6). On-disk
-fact, verified at handoff.*
+*Last updated: 2026-09-24, after M9. On-disk fact, verified at handoff.*
 
-**Where things stand:** 31/40 tasks `DONE`; **191/191 Python tests, 26/26
-Vitest** green on `v2-rebuild`. Lanes B (filter), C (web) and D (profile) are
-merged and their worktrees removed; only the main checkout remains. The
-pipeline is end to end: `python -m jobscraper run` syncs the watchlist,
-schedules, scrapes, prefilters, hydrates survivors, extracts, decides via
-`claude -p` and writes `data/shortlist.json`; `python -m jobscraper web` serves
-Inbox + Applications on 127.0.0.1:8765. `data/jobscraper.db` is the v2 schema
-holding 229 companies, **no scraped jobs yet**, and the 3 migrated v1
-applications. `data/profile.derived.yaml` was generated from the real resume.
+**Where things stand:** 38/40 tasks `DONE`. Open: **M4-T4** (needs 7 more
+accepted roles for the user's 30-role hand audit - the next cycle opens
+2026-10-08) and **M1-T3** (the user's prune). **204/204 Python, 27/27 Vitest**,
+CI green (tests + Docker) on `v2-rebuild`, pushed to
+https://github.com/Benjamin-Fernandez/jobscraper. v1 is retired to
+`archive/v1-src/`; `master` still holds the v1 restore point - merging
+`v2-rebuild` into `master` is the user's call.
 
-**Not yet on GitHub.** `gh` is installed (`C:\Program Files\GitHub CLI`) but
-the user has not run `gh auth login`, so there is no `origin`. Everything is
-committed locally. Once authenticated:
-`gh repo create jobscraper --public --source . --remote origin` then
-`git push -u origin master v2-rebuild` (the user chose **public**; `data/`,
-`archive/` and resumes are git-ignored).
+**Live data:** one full cycle done - 224 companies, 21,600 postings, 23 roles
+on the shortlist, 3 migrated v1 applications. Profile v2 (re-derived after the
+system-prompt fix).
 
-**Remaining, in order:** M1-T5 (watchlist verbs) and M8-T2 (status vocabulary)
-are small and independent — a good pair for two lanes. **M4-T4 is the first real
-run**: it spends model quota and needs the user's hand audit of 30 accepted
-roles, so do it with the user present. Then M9 (retire v1, README, acceptance)
-and M10 (Docker), serial. M1-T3 (prune) is the user's.
+**Measured and fixed along the way** (details in §5 and the ledger):
+`claude.CMD` truncated multi-line system prompts (now sent by file); the judge
+carried ~21k tokens of Claude Code tool definitions per call (now none); the
+web app now answers only loopback Host headers (DNS rebinding, R-9).
 
-**Reviews done at the merge gate:** `ecc:python-reviewer` (no critical findings;
-three fixed, one declined — `job_id` includes the provider, but an ATS
-migration brings new external ids anyway, so closing the old board's postings
-is correct and applications re-link by URL) and `ecc:database-reviewer` (four
-fixed; foreign keys deferred — orphaned applications are allowed by design,
-SQLite cannot add constraints to existing tables, and they belong with the
-Postgres port).
+**For the user - watchlist coverage (R-11):** 59 of 224 companies failed the
+cycle, including Shopee / Sea Money / Garena (`careers.sea.com` no longer
+exists; now `career.sea.com`), OCBC, UOB, CIMB, Maybank, Visa, Goldman Sachs,
+Morgan Stanley, PayPal, NCS. Agents may not edit the watchlist (M1-T3), so
+verified replacement entries are being prepared as a proposal for the user to
+paste - see the latest ledger note or the handoff message for its location.
+
+**Decisions waiting on the user:** Q2 (Dismiss: session-only today), Q3
+(profile change re-decides everything - accepted cost?), whether to add `avp`
+to `title_deny`, whether to add "trade support engineer" to `title_allow`,
+Docker model transport (image has no `claude`; `review --export/--apply` is the
+in-container path), and merging `v2-rebuild` into `master`.
 
 #### Two landmines
 
@@ -1774,8 +1772,13 @@ Legend: `STATUS` · `Completed` (date) · `Verify` (command that proves it) · `
   postings reached the model, which read the body, found London / Austin /
   Lisbon and rejected them (`is_singapore: false`), or rejected them as
   unconfirmed. Model decisions: 4 accept, 28 reject, 0 accepted outside Singapore.
-  **Remaining:** keep running batches until ≥ 30 roles are accepted, then the user
-  hand-audits them for the location metric (§5) and this task closes.
+  **Full cycle (runs #1–#12):** 21,600 postings, 72 judged, **23 accepted, all
+  Singapore** (GovTech ×7, Airwallex ×4, DBS ×2, Stripe ×2 incl. New Grad,
+  Palantir New Grad, Tower Research ×2, OKX, Mastercard, Cohere, Jump Trading,
+  Thought Machine). One to eyeball: "AVP, Full Stack Engineer" (DBS) - AVP is
+  a mid-level bank grade and `title_deny` catches `vp`, not `avp`.
+  **Remaining:** 23 accepted so far; the 30-role hand audit needs 7 more
+  accepts (next cycle opens 2026-10-08), then the user audits and this closes.
 - **Do:** Run one real batch. Record in this file: tokens/posting, survivor rate,
   and a hand-audit of 30 accepted roles for the location metric (§5).
 - **Verify:** Numbers written into §5's table and into `runs.stats_json`.
@@ -2035,8 +2038,34 @@ Legend: `STATUS` · `Completed` (date) · `Verify` (command that proves it) · `
   something the README did not say; each one is a defect to fix before `DONE`.
 
 #### M9-T3 · End-to-end acceptance
-- **STATUS:** `NOT_STARTED`
-- **Completed:** —
+- **STATUS:** `DONE`
+- **Completed:** 2026-09-24 — one full cycle, runs #1–#12: every one of the 224
+  enabled companies scheduled, scraped and stamped; run #12 found nothing due
+  and exited 0 reporting the next due date (2026-10-08). sync → schedule →
+  scrape → filter → decide → shortlist → apply → persist, each observed live.
+  **Every §5 metric except spin-up, measured:**
+
+  | Metric | Target | Measured over the cycle |
+  |---|---|---|
+  | Tokens per posting reaching the model | ≤ 2,000 | **334** (runs #3–#12: 22,358 in / 67 judged) |
+  | Postings reaching the model | ≤ 10% | **0.33%** (72 of 21,600) |
+  | Location precision | 100% of accepted | **23 / 23** Singapore (checked against the location field; the user's hand audit of 30 is M4-T4) |
+  | Adding a company | ≤ 2 lines, no code | **2 lines** via `watchlist add` (temp copy) |
+  | HTML artifacts in `output/` | 0 | **0** (`output/` is empty) |
+  | Time to triage | single page | one page; the run selector swaps the dataset in place (M7-T2) |
+  | Staleness of the oldest company | ≤ 14 days, surfaced | 0 due, next due 2026-10-08; `status` reports run rate 11/day vs 1.6/day needed |
+  | Adding a filter rule | config only | `title_allow.extra: ["trade support engineer"]` flipped `filter test` REJECT → PASS, no code |
+  | Spin-up from clone | 1 command | M10-T2, verified in CI |
+
+  **Apply → persists:** on a *copy* of the live DB (the user's application
+  record untouched), `POST /api/applications/{id}` `applied`, web server
+  restarted, `GET /api/applications` still `applied` with its one
+  `None → applied` event. `/ecc:code-review`-equivalent review of the M9 diff run
+  before closing (one MEDIUM: watchlist names containing ` #` - fixed, tested).
+  **Coverage finding:** 59 of 224 companies failed this cycle (24 blocked 403,
+  17 transient - 8 of them hostnames that no longer exist, including
+  `careers.sea.com` for Shopee / Sea Money / Garena - 10 "no job links",
+  8 gone 404). That is R-11 materialised; see §0.5 for the proposed fixes.
 - **Do:** One full cycle on the curated watchlist: sync → schedule → scrape →
   filter → decide → shortlist → apply in the web app → status persists.
 - **Verify:** Every §5 metric **except** "spin-up from clone" measured and recorded
