@@ -32,6 +32,12 @@ services:
       # reach the server. The HOST side is pinned to loopback below.
       JOBSCRAPER_HOST: "0.0.0.0"
       JOBSCRAPER_PORT: "8765"
+      # The judge in Docker is a local Qwen model served by the `ollama`
+      # service below - no API key, no Claude login in the container. Start it
+      # with `--profile llm`. Without it, runs still scrape and filter, and
+      # survivors wait (as "awaiting model") until a model is reachable.
+      JOBSCRAPER_BACKEND: "ollama"
+      JOBSCRAPER_OLLAMA_URL: "http://ollama:11434"
     ports:
       - "127.0.0.1:8765:8765"
     volumes:
@@ -62,5 +68,25 @@ services:
     init: true
     restart: unless-stopped
 
+  # Local LLM (opt-in: `docker compose --profile llm up -d`). Runs Qwen3 on the
+  # host's NVIDIA GPU (Docker Desktop + WSL2 on Windows; the NVIDIA Container
+  # Toolkit on Linux). Not published on the host: only `app` reaches it, over
+  # the compose network. Pull the model once into the `models` volume:
+  #   docker compose exec ollama ollama pull qwen3:14b
+  ollama:
+    image: ollama/ollama
+    profiles: ["llm"]
+    volumes:
+      - models:/root/.ollama
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    restart: unless-stopped
+
 volumes:
   data:
+  models:

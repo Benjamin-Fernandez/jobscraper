@@ -59,9 +59,21 @@ docker compose run --rm app run       # one batch; any command works: doctor, st
 docker compose down                   # stop; the jobscraper_data volume keeps the database
 ```
 
-The image has no `claude` program, so inside Docker the model step is skipped
-and survivors wait. Judge them with the in-session review below, or run batches
-from the host. Details and the security notes are in `docker-compose.yml`.
+In Docker the judge is a **local Qwen3 model served by Ollama** on your NVIDIA
+GPU — no API key and no Claude login inside the container:
+
+```bash
+docker compose --profile llm up -d --build            # app + the ollama service
+docker compose exec ollama ollama pull qwen3:14b      # once: 9.3 GB into a volume
+docker compose run --rm app doctor                    # judge: ollama (qwen3:14b ...) OK
+```
+
+Without `--profile llm` the app still runs; the model step is skipped and
+survivors wait until a model is reachable (or judge them with the in-session
+review below). Details and the security notes are in `docker-compose.yml`.
+
+The same local model works outside Docker: install [Ollama](https://ollama.com),
+`ollama pull qwen3:14b`, and set `budget.backend: ollama` in `config/config.yaml`.
 
 ---
 

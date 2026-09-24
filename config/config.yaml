@@ -53,8 +53,19 @@ budget:
   #   cli  - runs `claude -p`, the Claude Code CLI. Uses the subscription you
   #          are already signed into; no API key, no per-token bill.
   #   api  - the anthropic SDK. Needs ANTHROPIC_API_KEY.
+  #   ollama - a local open model (Qwen3) served by Ollama on this machine's
+  #          GPU. No key, no login. `ollama pull qwen3:14b` first. The Docker
+  #          setup uses this (env JOBSCRAPER_BACKEND / JOBSCRAPER_OLLAMA_URL).
   #   off  - no model; the prefilter alone decides.
   backend: cli
+  ollama_url: http://127.0.0.1:11434
+  # 9.3 GB; fits a 16 GB GPU with room for the context below. qwen3:8b (5.2 GB)
+  # is the step down if memory is tight.
+  ollama_model: qwen3:14b
+  # Tokens of context per call. A 20-posting decide batch is ~6-7k tokens;
+  # Ollama's own default is far smaller and would silently truncate the prompt.
+  ollama_num_ctx: 16384
+  ollama_timeout: 600
   cli_bin: ""                                 # empty = find `claude` on PATH
   cli_timeout: 300
   # Measured 2026-09-24: with only --restricted, every call carried ~21,000

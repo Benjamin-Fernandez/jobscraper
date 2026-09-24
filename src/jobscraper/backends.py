@@ -5,12 +5,14 @@ user prompt, hand back text. Prompt assembly, batching, caching and parsing are
 transport-agnostic and stay in llm.py, so swapping transports changes nothing
 about how a posting is judged.
 
-Three transports:
+Four transports:
 
   cli   Runs `claude -p` as a subprocess. Authenticates through the Claude Code
         subscription already signed in on this machine - no ANTHROPIC_API_KEY,
         no per-token billing. This is the default.
   api   The anthropic SDK. Needs ANTHROPIC_API_KEY. Kept for whoever has one.
+  ollama A local open model (Qwen3) served by Ollama on this machine's GPU.
+        No key, no login - the transport the Docker setup uses.
   off   No model at all. The funnel falls back to local scoring alone.
 
 There is a fourth path that is deliberately NOT a backend: the handoff review in
@@ -229,23 +231,126 @@ class ApiBackend(Backend):
             output_tokens=_i(getattr(usage, "output_tokens", 0)) if usage else 0)
 
 
+class OllamaBackend(Backend):
+    """A local open model (e.g. Qwen3) served by Ollama: no API key, no login.
+
+    Ollama runs the model on this machine's GPU and serves it over HTTP
+    (default http://127.0.0.1:11434). That is what lets the app run in Docker
+    with no Claude credentials in the container: the container talks to an
+    Ollama service instead (D-11, R-8).
+
+    Every call asks for no "thinking" (Qwen3 reasons at length by default - slow,
+    and pointless for a yes/no screen) and for JSON output, which Ollama enforces
+    while the model generates, so a malformed answer is unlikely rather than
+    merely discouraged. Temperature 0: the same posting gets the same answer.
+
+    The model is `budget.ollama_model`, not `budget.model`: the latter names a
+    Claude model for the other transports.
+    """
+
+    name = "ollama"
+
+    def __init__(self, url: str = "http://127.0.0.1:11434", model: str = "qwen3:14b",
+                 timeout: float = 600.0, num_ctx: int = 16384,
+                 client: Any = None):
+        import httpx
+        self.url = url.rstrip("/")
+        self.model = model
+        self.num_ctx = int(num_ctx)
+        self._http = client or httpx.Client(timeout=timeout)
+        self._probed: Optional[bool] = None
+
+    def _probe(self) -> bool:
+        """Is Ollama up, and is the model pulled? Asked once, then remembered."""
+        if self._probed is None:
+            try:
+                resp = self._http.get(f"{self.url}/api/tags", timeout=5.0)
+                resp.raise_for_status()
+                names = {m.get("name", "") for m in resp.json().get("models", [])}
+            except Exception as exc:
+                self.unavailable_reason = (
+                    f"Ollama is not reachable at {self.url} ({type(exc).__name__}) - "
+                    "install it from https://ollama.com and start it")
+                self._probed = False
+                return False
+            wanted = self.model if ":" in self.model else f"{self.model}:latest"
+            if wanted not in names:
+                self.unavailable_reason = (
+                    f"model {self.model!r} is not pulled into Ollama - run "
+                    f"`ollama pull {self.model}`")
+                self._probed = False
+            else:
+                self._probed = True
+        return self._probed
+
+    @property
+    def available(self) -> bool:
+        return self._probe()
+
+    def describe(self) -> str:
+        return f"ollama ({self.model} at {self.url})"
+
+    def complete(self, model: str, system: str, user: str,
+                 max_tokens: int = 4096) -> Completion:
+        if not self.available:
+            raise BackendError(self.unavailable_reason)
+        body = {
+            "model": self.model,
+            "messages": [{"role": "system", "content": system},
+                         {"role": "user", "content": user}],
+            "stream": False,
+            "think": False,
+            "format": "json",
+            "options": {"temperature": 0, "num_ctx": self.num_ctx,
+                        "num_predict": max_tokens},
+        }
+        try:
+            resp = self._http.post(f"{self.url}/api/chat", json=body)
+        except Exception as exc:
+            raise BackendError(f"Ollama request failed: {type(exc).__name__}: {exc}")
+        if resp.status_code != 200:
+            raise BackendError(
+                f"Ollama returned HTTP {resp.status_code}: {resp.text[:200]}")
+        try:
+            data = resp.json()
+        except ValueError:
+            raise BackendError(f"Ollama sent non-JSON: {resp.text[:200]}")
+        if data.get("error"):
+            raise BackendError(f"Ollama error: {str(data['error'])[:200]}")
+        return Completion(text=str((data.get("message") or {}).get("content") or ""),
+                          input_tokens=_i(data.get("prompt_eval_count")),
+                          output_tokens=_i(data.get("eval_count")))
+
+
 def build(budget: dict[str, Any]) -> Backend:
-    """Pick a transport from the `budget` block of config.yaml."""
+    """Pick a transport from the `budget` block of config.yaml.
+
+    `JOBSCRAPER_BACKEND` and `JOBSCRAPER_OLLAMA_URL` override the file, which is
+    how the Docker setup switches to its Ollama service without editing config.
+    """
     if not budget.get("enable_llm", True):
         return OffBackend("disabled in config (budget.enable_llm: false)")
 
-    kind = str(budget.get("backend", "cli")).strip().lower()
+    kind = str(os.environ.get("JOBSCRAPER_BACKEND")
+               or budget.get("backend", "cli")).strip().lower()
     if kind in ("off", "none", ""):
         return OffBackend("budget.backend is `off`")
     if kind == "api":
         return ApiBackend()
+    if kind == "ollama":
+        return OllamaBackend(
+            url=str(os.environ.get("JOBSCRAPER_OLLAMA_URL")
+                    or budget.get("ollama_url") or "http://127.0.0.1:11434"),
+            model=str(budget.get("ollama_model") or "qwen3:14b"),
+            timeout=float(budget.get("ollama_timeout", 600)),
+            num_ctx=int(budget.get("ollama_num_ctx", 16384)))
     if kind == "cli":
         return ClaudeCliBackend(
             binary=str(budget.get("cli_bin", "") or ""),
             timeout=float(budget.get("cli_timeout", 300)),
             extra_args=budget.get("cli_extra_args"))
     return OffBackend(f"unknown budget.backend {kind!r} "
-                      "(expected cli, api or off)")
+                      "(expected cli, api, ollama or off)")
 
 
 def _envelope(stdout: str) -> dict[str, Any]:
