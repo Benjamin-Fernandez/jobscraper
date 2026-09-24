@@ -362,3 +362,51 @@ def test_filter_cli_test_runs_against_a_draft_rules_file():
                            "--location", "Remote, Global",
                            "--rules", str(rules.path))
     assert code == 0 and "REJECT by location_explicit: remote" in out, out
+
+
+def _explain_env():
+    """A throwaway v2 database, derived profile and config, wired together."""
+    from jobscraper.store import Store as StoreV2
+
+    tmp = Path(tempfile.mkdtemp())
+    (tmp / "profile.derived.yaml").write_text(
+        yaml.safe_dump(PROFILE), encoding="utf-8")
+    cfg = tmp / "config.yaml"
+    cfg.write_text(yaml.safe_dump({"paths": {
+        "db": str(tmp / "v2.db"), "rules": str(RULES_PATH),
+        "profile": str(tmp / "profile.derived.yaml")}}), encoding="utf-8")
+
+    st = StoreV2(tmp / "v2.db")
+    cid = st.insert_company("acme", "Acme", "https://acme/careers")
+    raw = RawJob("7", "Senior Site Reliability Engineer", "https://acme/jobs/7",
+                 "Remote (APAC)", description="Needs 5+ years with Kubernetes.")
+    st.upsert_job("job7", cid, raw, 1, True)
+    st.commit()
+    rules = _rules()
+    st.save_prefilter("job7", 1, rules.hash, False, "title_deny", "senior")
+    st.close()
+    return cfg
+
+
+def test_filter_cli_explain_shows_every_rule_for_a_stored_posting():
+    cfg = _explain_env()
+    code, out, _err = _cli("--config", str(cfg), "filter", "explain", "job7")
+    assert code == 0, out
+    assert "Senior Site Reliability Engineer" in out and "Acme" in out, out
+    assert "stored    REJECT by title_deny: senior" in out, out
+    # The live trace names every rule, not just the one that decided.
+    for rule_id, token in (("title_deny", "senior"),
+                           ("location_explicit", "remote"),
+                           ("experience_ceiling", "5+ years")):
+        line = next(ln for ln in out.splitlines() if ln.strip().startswith(rule_id))
+        assert "REJECT" in line and token in line, line
+    # A posting URL works as well as its id.
+    code, out, _err = _cli("--config", str(cfg), "filter", "explain",
+                           "https://acme/jobs/7")
+    assert code == 0 and "job7  Acme" in out, out
+
+
+def test_filter_cli_explain_unknown_job_is_a_clear_error():
+    cfg = _explain_env()
+    code, _out, err = _cli("--config", str(cfg), "filter", "explain", "nope")
+    assert code == 1 and "no posting" in err, err

@@ -362,14 +362,17 @@ def cmd_review(args) -> int:
 
 
 def cmd_filter(args) -> int:
-    """Tune the prefilter (PRD 8.3[3], M4-T1b): dry-run the rules on one posting.
+    """Tune the prefilter (PRD 8.3[3], M4-T1b). Both subcommands are read-only.
 
-    `filter test` touches no database and scrapes nothing. The profile is the
-    derived one (data/profile.derived.yaml) when it exists. Without it there are
-    no target titles or skills to match, so every rule that reads the profile is
-    disabled for the run - and the output says so - rather than silently
-    skipping or rejecting everything. `filter explain` reads the `prefilter`
-    table and waits on the v2 store (M3-T1).
+    `filter test` dry-runs the rules on a posting you type in: no scrape, no
+    database. `filter explain <job_id>` re-runs them on a stored posting for the
+    full per-rule trace, and shows the verdict stored in `prefilter` for the
+    current rules and profile beside it.
+
+    The profile is the derived one (data/profile.derived.yaml) when it exists.
+    Without it there are no target titles or skills to match, so every rule that
+    reads the profile is disabled for the run - and the output says so - rather
+    than silently skipping or rejecting everything.
 
     Self-contained on purpose (PRD 0.6: a lane adds one verb, touches nothing
     else here), hence the local imports.
@@ -379,24 +382,21 @@ def cmd_filter(args) -> int:
     import yaml
 
     from . import filter as filter_mod
-
-    if args.filter_cmd == "explain":
-        print(f"filter explain {args.job_id}: not available yet - it reads the "
-              "v2 `prefilter` table, which arrives with M3-T1. Use `filter test`.",
-              file=sys.stderr)
-        return 2
+    from .store import SchemaMismatch
+    from .store import Store as V2Store
 
     try:
         sys.stdout.reconfigure(errors="replace")      # JD text is not cp1252
     except (AttributeError, ValueError):
         pass
     cfg = load_config(args.config)
-    rules_path = Path(args.rules) if args.rules else cfg.rules_path
+    rules_path = Path(getattr(args, "rules", None) or cfg.rules_path)
     try:
         ruleset = filter_mod.load_rules(rules_path)
     except (OSError, ValueError) as exc:
         print(f"cannot load rules: {exc}", file=sys.stderr)
         return 2
+    rules_hash = ruleset.hash      # before any fallback disabling: the stored key
 
     profile: dict = {}
     profile_note = f"{cfg.profile_path}"
@@ -426,16 +426,57 @@ def cmd_filter(args) -> int:
     except ImportError:                       # Lane D's matcher not merged yet
         scorer = None
 
-    posting = {"title": args.title, "location": args.location,
-               "description": args.desc}
+    stored_line = None
+    if args.filter_cmd == "explain":
+        if not cfg.db_path.exists():
+            print(f"no database at {cfg.db_path} - nothing has been scraped yet",
+                  file=sys.stderr)
+            return 1
+        try:
+            store = V2Store(cfg.db_path)
+        except SchemaMismatch as exc:
+            print(str(exc), file=sys.stderr)
+            return 1
+        try:
+            job = store.get_job(args.job_id)
+            if job is None:                   # a URL: re-read for the company name
+                by_url = store.find_job_by_url(args.job_id)
+                job = store.get_job(by_url["job_id"]) if by_url else None
+            if job is None:
+                print(f"no posting with id or url {args.job_id!r}", file=sys.stderr)
+                return 1
+            version = profile.get("profile_version")
+            row = (store.get_prefilter(job["job_id"], int(version), rules_hash)
+                   if version is not None else None)
+        finally:
+            store.close()
+        if row:
+            verdict = ("PASS" if row["passed"] else
+                       f"REJECT by {row['reject_rule']}: {row['reject_detail']}")
+            stored_line = f"{verdict}  (at {row['evaluated_at']})"
+        elif version is None:
+            stored_line = "unknown - no profile_version without a derived profile"
+        else:
+            stored_line = ("none for these rules + profile v"
+                           f"{version} (never prefiltered, or the rules changed since)")
+        posting = {"title": job.get("title"), "location": job.get("location"),
+                   "description": job.get("jd_text")}
+        print(f"job       {job['job_id']}  {job.get('company') or ''}  "
+              f"{job.get('url') or ''}".rstrip())
+    else:
+        posting = {"title": args.title, "location": args.location,
+                   "description": args.desc}
+
     result = filter_mod.evaluate(posting, ruleset, profile, scorer)
-    print(f"title     {args.title}")
-    print(f"location  {args.location or '(blank)'}")
-    print(f"desc      {len(args.desc)} chars")
-    print(f"rules     {rules_path}  (hash {ruleset.hash[:12]})")
+    print(f"title     {posting['title'] or ''}")
+    print(f"location  {posting['location'] or '(blank)'}")
+    print(f"desc      {len(posting['description'] or '')} chars")
+    print(f"rules     {rules_path}  (hash {rules_hash[:12]})")
     print(f"profile   {profile_note}")
     if scorer is None and profile:
         print("scorer    none (profile/keywords.py not built yet) - overlap rules skip")
+    if stored_line is not None:
+        print(f"stored    {stored_line}")
     print(BAR)
     print(filter_mod.render(result))
     return 0
@@ -515,8 +556,8 @@ def build_parser() -> argparse.ArgumentParser:
     ft.add_argument("--desc", default="", help="description text")
     ft.add_argument("--rules", help="rules file to test (default: config's)")
     fe = flt_sub.add_parser("explain", help="every rule's verdict for a stored "
-                                            "posting (needs M3-T1)")
-    fe.add_argument("job_id")
+                                            "posting, beside the stored verdict")
+    fe.add_argument("job_id", help="job id, or the posting's URL")
     flt.set_defaults(fn=cmd_filter)
     return p
 
