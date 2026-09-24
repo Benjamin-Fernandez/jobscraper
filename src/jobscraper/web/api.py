@@ -32,13 +32,14 @@ UNBUILT_HINT = ("The web UI has not been built.\n"
 def _default_store_factory(cfg: Config) -> Callable[[], Any]:
     """Open the real store on demand - one connection per request.
 
-    Opened inside the request's worker thread rather than shared, because a
-    SQLite connection may not cross threads and FastAPI runs sync endpoints on
-    a thread pool.
+    Nothing is opened at startup, so `/` serves even when the database is
+    missing or unreadable. `check_same_thread=False` because FastAPI may create
+    the connection on one pool thread and close it on another; each request
+    still gets its own connection, so none is ever shared concurrently.
     """
     def factory() -> Any:
         from jobscraper.store import Store
-        return Store(cfg.db_path)
+        return Store(cfg.db_path, check_same_thread=False)
     return factory
 
 
