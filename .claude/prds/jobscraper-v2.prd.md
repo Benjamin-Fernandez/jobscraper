@@ -1648,13 +1648,23 @@ Legend: `STATUS` · `Completed` (date) · `Verify` (command that proves it) · `
   when a job carries it.
 
 #### M7-T4 · Prove extensibility with a throwaway tab
-- **STATUS:** `NOT_STARTED`
-- **Completed:** —
+- **STATUS:** `DONE`
+- **Completed:** 2026-09-24
 - **Do:** Add a trivial "Stats" tab by touching **only** `tabs.js`, one `.vue`
   file, and one router. Record in `Notes:` every file changed. Then revert it.
 - **Verify:** `git status --porcelain` lists exactly 3 changed/added files (requires
   M0-T0). If it lists more, the tab architecture has failed its requirement — fix
   the architecture, not the diff. Then `git checkout -- .` to revert the probe.
+- **Notes:** Verified 2026-09-24 (Lane C). `git status --porcelain` listed exactly
+  3 files: ` M web/src/tabs.js`, `?? web/src/tabs/Stats.vue`,
+  `?? src/jobscraper/web/routers/stats_probe.py`. The probe router answered
+  `/api/stats-probe` with no other edit (discovery works), `npm test` passed with the
+  tab bar rendering both tabs, a scratch-dir `vite build` emitted a `Stats` chunk,
+  and the layering guard stayed green. Reverted with `git checkout -- .` plus
+  deleting the two untracked files, which `checkout` leaves behind. The router is
+  named `stats_probe` because `/api/stats` already exists (M6-T1). The committed
+  `static/` bundle was not rebuilt, so shipping a real tab also means committing a
+  rebuilt bundle (see `web/README.md`).
 
 ---
 
