@@ -1357,14 +1357,27 @@ Legend: `STATUS` · `Completed` (date) · `Verify` (command that proves it) · `
      `doctor` now reports the watchlist and the single `budget.model`.
 
 #### M1-T5 · `watchlist` CLI verbs
-- **STATUS:** `NOT_STARTED`
-- **Completed:** —
+- **STATUS:** `DONE`
+- **Completed:** 2026-09-24
 - **Do:** `python -m jobscraper watchlist list|add|disable` — `add` appends a
   minimal entry preserving comments and key order. **`add` does not run discovery**
   (that lives in `scrape/` and is not relocated until M3-T2); resolution happens on
   the next run like any other new company.
 - **Verify:** A test adds a company to a temp file, reloads it, and asserts the new
   entry validates and pre-existing comments survive; `python -m jobscraper watchlist list` prints 229.
+- **Notes:** Verified 2026-09-24 (Lane E): `test_add_appends_a_minimal_entry_and_every_comment_survives`
+  passes (31/31 watchlist, 207/207 overall); `watchlist list` ends
+  `229 companies, 224 enabled`. `watchlist.add_entry` / `disable_entry` are text
+  edits that re-parse the result and check that **exactly** the intended change
+  happened before an atomic write; anything else is refused, file untouched.
+  `add` refuses duplicates with the loader's error (both lines cited), matches
+  the file's list indent, and refuses if `companies:` is not the last block
+  (append would land elsewhere). `disable` flips an existing `enabled:` line in
+  place (its comment kept) or inserts one after the entry's last field; a
+  flow-style entry is refused. Both keep the file's own line endings byte for
+  byte on any OS (the Windows checkout is CRLF). Additions beyond
+  the task: `--file` (tests and scratch copies), `add --key`, and `disable`
+  accepts an exact name as well as a key. No DB write: the next `run` syncs.
 
 ---
 

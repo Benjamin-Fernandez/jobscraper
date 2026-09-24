@@ -25,8 +25,10 @@ See PRD section 8.4.
 """
 from __future__ import annotations
 
+import os
 import re
-from dataclasses import dataclass
+import tempfile
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Iterable, Optional
 from urllib.parse import urlparse
@@ -245,6 +247,183 @@ def render_entry(entry: WatchlistEntry) -> str:
         if k in data:
             lines.append(f"    {k}: {_scalar(data[k])}")
     return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# Editing the file in place (M1-T5)
+#
+# The file is hand-written, so `add` and `disable` never re-serialise it: that
+# would drop every comment and blank line the user wrote. Each is a targeted
+# text edit, and each re-parses the result and checks that exactly the intended
+# change happened before anything is written. A file whose shape the edit does
+# not understand is refused, never guessed at.
+# ---------------------------------------------------------------------------
+
+# The line breaks PyYAML counts, so our line numbers agree with `entry.line`.
+_LINE = re.compile(r"[^\r\n\x85  ]*(?:\r\n|[\r\n\x85  ]|$)")
+_ITEM = re.compile(r"^(\s*)-(\s+)")
+_ENABLED = re.compile(
+    r"^(?P<pre>enabled:)(?P<sp>[ \t]*)(?P<val>[^#\r\n]*?)(?P<post>[ \t]*(?:#.*)?)$")
+
+
+def _read_raw(p: Path) -> tuple[str, str]:
+    """The file's exact text and its line-ending style (CRLF on a Windows checkout)."""
+    if not p.exists():
+        load(p)                                   # raises the helpful "not found"
+    text = p.read_bytes().decode("utf-8")
+    return text, ("\r\n" if "\r\n" in text else "\n")
+
+
+def _lines(text: str) -> list[str]:
+    """Split keeping line endings; ''.join() of the result is the input."""
+    return [m.group(0) for m in _LINE.finditer(text) if m.group(0)]
+
+
+def _write_atomic(p: Path, text: str) -> None:
+    """Replace the file in one step, so a crash never leaves half a watchlist."""
+    fd, tmp = tempfile.mkstemp(dir=p.parent, prefix=f".{p.name}.", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "wb") as fh:
+            fh.write(text.encode("utf-8"))
+        os.replace(tmp, p)
+    except BaseException:
+        Path(tmp).unlink(missing_ok=True)
+        raise
+
+
+def _find(entries: list[WatchlistEntry], key_or_name: str) -> Optional[WatchlistEntry]:
+    needle = (key_or_name or "").strip()
+    for e in entries:
+        if e.key == needle:
+            return e
+    for e in entries:
+        if e.name.casefold() == needle.casefold():
+            return e
+    return None
+
+
+def _same(a: WatchlistEntry, b: WatchlistEntry) -> bool:
+    """Equal in every field that the file says, ignoring where it sits."""
+    return a.as_dict() == b.as_dict() and a.key == b.key
+
+
+def add_entry(path: Optional[Path], name: str, careers_url: str,
+              key: Optional[str] = None) -> WatchlistEntry:
+    """Append a minimal entry to the end of `companies:` and return it.
+
+    Appends text rather than rewriting the file, so comments, blank lines, key
+    order and line endings all survive. The whole file is then re-validated: a
+    duplicate is refused with the loader's own error, naming both lines, and
+    nothing is written. Discovery is not run - the next `run` resolves the
+    provider like any other new company.
+    """
+    p = Path(path) if path else DEFAULT_PATH
+    text, nl = _read_raw(p)
+    before = parse(text, source=p.name)           # never append to a broken file
+
+    entry = WatchlistEntry(key=(key or "").strip() or slugify(name),
+                           name=(name or "").strip(),
+                           careers_url=(careers_url or "").strip())
+    lines = _lines(text)
+    last = lines[before[-1].line - 1] if 0 < before[-1].line <= len(lines) else ""
+    m = _ITEM.match(last)
+    indent = m.group(1) if m else "  "
+    # render_entry writes "  - name: ..." / "    field: ..."; re-base it on the
+    # file's own list indent so a file written with "- name:" stays consistent.
+    block = nl.join(indent + ln[2:] for ln in render_entry(entry).split("\n"))
+
+    body = text if (not text or text.endswith(("\n", "\r"))) else text + nl
+    sep = "" if (not body or body.endswith(nl + nl)) else nl
+    new_text = body + sep + block + nl
+
+    after = parse(new_text, source=p.name)        # duplicates and bad URLs raise here
+    added = after[-1] if after else None
+    if (len(after) != len(before) + 1 or added is None
+            or not all(_same(a, b) for a, b in zip(before, after))
+            or (added.key, added.name, added.careers_url)
+            != (entry.key, entry.name, entry.careers_url)):
+        raise WatchlistError(
+            f"{p.name}: cannot append safely - `watchlist add` needs `companies:` "
+            "to be the last block in the file, written as a `- name: ...` list, "
+            "and a name without line breaks. Add this entry by hand instead.")
+    _write_atomic(p, new_text)
+    return added
+
+
+def disable_entry(path: Optional[Path],
+                  key_or_name: str) -> tuple[WatchlistEntry, bool]:
+    """Set `enabled: false` on one entry, touching no other line of the file.
+
+    Matches the entry's `key`, or failing that its exact name (any case).
+    Returns the entry and whether the file changed - disabling a disabled entry
+    is a no-op. An existing `enabled:` line is flipped in place, keeping its
+    comment; otherwise one line is inserted after the entry's last field.
+    """
+    p = Path(path) if path else DEFAULT_PATH
+    text, nl = _read_raw(p)
+    before = parse(text, source=p.name)
+    target = _find(before, key_or_name)
+    if target is None:
+        raise WatchlistError(
+            f"{p.name}: no entry with key or name {key_or_name!r}. "
+            "`watchlist list` shows every key.")
+    if not target.enabled:
+        return target, False
+
+    lines = _lines(text)
+    first = target.line - 1
+    if not 0 <= first < len(lines):
+        raise WatchlistError(f"{p.name}: cannot locate {target.name!r} in the file")
+    head = lines[first]
+    m = _ITEM.match(head)
+    col = len(m.group(0)) if m else len(head) - len(head.lstrip(" \t"))
+
+    # The entry runs until the next non-comment line indented less than its keys.
+    end = first + 1
+    while end < len(lines):
+        s = lines[end].rstrip("\r\n")
+        stripped = s.strip()
+        if stripped and not stripped.startswith("#") and len(s) - len(s.lstrip(" \t")) < col:
+            break
+        end += 1
+
+    new_lines = list(lines)
+    for i in range(first, end):
+        raw = lines[i]
+        eol = raw[len(raw.rstrip("\r\n")):]
+        content = raw[:len(raw) - len(eol)]
+        lead = content[:col]
+        if i != first and lead.strip():
+            continue
+        hit = _ENABLED.match(content[col:])
+        if hit:
+            new_lines[i] = (lead + hit["pre"] + (hit["sp"] or " ") + "false"
+                            + hit["post"] + eol)
+            break
+    else:
+        # No `enabled:` line: insert one after the entry's last field, which also
+        # closes any block scalar (`notes: |`) that field may have opened.
+        last = max(i for i in range(first, end)
+                   if lines[i].strip() and not lines[i].strip().startswith("#"))
+        if not new_lines[last].endswith(("\n", "\r")):
+            new_lines[last] += nl
+        new_lines.insert(last + 1, " " * col + "enabled: false" + nl)
+
+    new_text = "".join(new_lines)
+    refusal = (f"{p.name}: cannot disable {target.name!r} safely - its entry is "
+               "not written as a plain `- name: ...` block. Add `enabled: false` "
+               "by hand.")
+    try:
+        after = parse(new_text, source=p.name)
+    except WatchlistError as exc:
+        raise WatchlistError(refusal) from exc
+    expected = [replace(e, enabled=False) if e.key == target.key else e
+                for e in before]
+    if len(after) != len(expected) or not all(
+            _same(a, b) for a, b in zip(expected, after)):
+        raise WatchlistError(refusal)
+    _write_atomic(p, new_text)
+    return next(e for e in after if e.key == target.key), True
 
 
 def _scalar(v: Any) -> str:
