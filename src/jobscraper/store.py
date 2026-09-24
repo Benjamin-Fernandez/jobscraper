@@ -204,8 +204,9 @@ class Store:
 
         - new key          -> insert; `last_scraped_at` NULL, so due next run
         - known key        -> update descriptive fields only; history untouched
-        - careers_url moved -> clear the cached resolution, failure count and
-                             quarantine: a new URL is a new board
+        - careers_url moved -> clear the cached resolution, failure count,
+                             quarantine and last_scraped_at: a new URL is a new
+                             board, never checked, so it is due next run (D-9)
         - key gone from YAML -> enabled = 0, never deleted: jobs, decisions and
                              applications still point at the row
         """
@@ -231,7 +232,8 @@ class Store:
                        provider = ?, slug = ?, feed_url = ?, resolve_method = NULL,
                        resolved_at = NULL, consecutive_failures = 0,
                        last_error_class = NULL, last_error = NULL,
-                       quarantined_at = NULL, probation_due_run = NULL
+                       quarantined_at = NULL, probation_due_run = NULL,
+                       last_scraped_at = NULL
                        WHERE id = ?""",
                     (e.name, e.careers_url, int(bool(e.enabled)), e.provider,
                      e.slug, e.feed_url, row.id))
@@ -374,6 +376,18 @@ class Store:
             """SELECT COUNT(*), MIN(started_at) FROM runs
                WHERE status = 'ok' AND started_at >= ?""", (since,)).fetchone()
         return int(r[0]), r[1]
+
+    def mark_due(self, cids: Iterable[int]) -> None:
+        """Forget when these companies were last scraped: due on the next run.
+
+        For a board that has changed under a company (a fixed careers URL, a
+        re-resolved ATS): the old stamp describes an attempt on a board that no
+        longer applies. Failure counts and quarantine are not touched here.
+        """
+        for cid in cids:
+            self.conn.execute(
+                "UPDATE companies SET last_scraped_at = NULL WHERE id = ?", (cid,))
+        self.conn.commit()
 
     def stamp_scraped(self, cids: Iterable[int], at: Optional[str] = None) -> None:
         """Record an ATTEMPT (D-9). Called last in a run, so a crash stamps nothing."""

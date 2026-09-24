@@ -231,8 +231,19 @@ def test_sync_careers_url_change_clears_resolution():
     c = st.company_by_key("shopee")
     assert (c.provider, c.slug, c.feed_url) == (None, None, None)
     assert c.consecutive_failures == 0
-    # Staleness is history, not resolution: it survives the move.
-    assert c.last_scraped_at == "2026-09-20T00:00:00"
+    # The old stamp was an attempt on the old board; the new board has never
+    # been checked, so it is due next run - like a newly added company (D-9).
+    assert c.last_scraped_at is None
+
+
+def test_store_mark_due_clears_only_the_stamp():
+    st = _synced(_entry())
+    cid = st.company_by_key("shopee").id
+    st.stamp_scraped([cid], at="2026-09-20T00:00:00")
+    st.record_failure(cid, "gone", "404")
+    st.mark_due([cid])
+    c = st.company_by_key("shopee")
+    assert c.last_scraped_at is None and c.consecutive_failures == 1
 
 
 def test_sync_keeps_a_resolution_discovery_learned():

@@ -41,7 +41,7 @@ rules:
     enabled: true
     source: profile.target_titles   # generated (D-10)
     aliases: profile.title_aliases
-    extra: []                       # <- yours; e.g. "solutions engineer"
+    extra: ["trade support engineer"]   # <- yours; user decision 2026-09-24 (M4-T4 audit)
     match: token_subset             # all words of a target title present, any order
 
   # 3. Location, default-deny (D-7). First match wins:
@@ -54,7 +54,11 @@ rules:
     field: location
     enabled: true
     allow_tokens: [singapore, sg]
-    vague_tokens: [apac, global, multiple, various, all offices, worldwide]
+    # "central region" / "city area": UOB's Workday labels its Singapore roles
+    # "Central Region (City Area)". Vague, not allowed: the model reads the
+    # description and code still requires Singapore confirmed (D-2, D-7).
+    vague_tokens: [apac, global, multiple, various, all offices, worldwide,
+                   central region, city area]
     reject_remote: true             # D-7
     remote_tokens: [remote, anywhere, distributed]
     patterns: []

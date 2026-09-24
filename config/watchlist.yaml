@@ -191,9 +191,12 @@ companies:
     feed_url: https://careers.booking.com/
 
   - name: Broadcom
-    careers_url: https://careers.broadcom.com/
-    provider: generic_html
-    feed_url: https://careers.broadcom.com/
+    key: broadcom
+    careers_url: https://broadcom.wd1.myworkdayjobs.com/External_Career
+    provider: workday
+    slug: broadcom
+    feed_url: https://broadcom.wd1.myworkdayjobs.com/External_Career
+    notes: "careers.broadcom.com is dead; Workday tenant (also carries ex-VMware roles). verified 2026-09-24: 371 postings, 31 in Singapore"
 
   - name: Bybit
     careers_url: https://www.bybit.com/en/careers/
@@ -293,9 +296,11 @@ companies:
     slug: confluent
 
   - name: Credit Agricole CIB
-    careers_url: https://careers.ca-cib.com/
+    key: credit-agricole-cib
+    careers_url: "https://jobs.ca-cib.com/Pages/Offre/ListeOffre.aspx?mode=list&lcid=2057&facet_Country=169&showSearchUrl=1"
     provider: generic_html
-    feed_url: https://careers.ca-cib.com/
+    feed_url: "https://jobs.ca-cib.com/Pages/Offre/ListeOffre.aspx?mode=list&lcid=2057&facet_Country=169&showSearchUrl=1"
+    notes: "careers.ca-cib.com is dead; jobs.ca-cib.com (Talentsoft) list filtered to Singapore. verified 2026-09-24: 15 links = 7 Singapore vacancies + 8 nav links"
 
   - name: CrowdStrike
     careers_url: https://www.crowdstrike.com/en-us/careers/
@@ -397,9 +402,12 @@ companies:
     slug: figma
 
   - name: Finastra
-    careers_url: https://www.finastra.com/careers
-    provider: generic_html
-    feed_url: https://www.finastra.com/careers
+    key: finastra
+    careers_url: https://finastra.wd3.myworkdayjobs.com/FINC
+    provider: workday
+    slug: finastra
+    feed_url: https://finastra.wd3.myworkdayjobs.com/FINC
+    notes: "Workday tenant. verified 2026-09-24: 150 postings, 4 in Singapore"
 
   - name: Fionics
     careers_url: https://fionics.com/careers
@@ -449,14 +457,19 @@ companies:
     slug: gemini
 
   - name: GlobalFoundries
-    careers_url: https://careers.globalfoundries.com/
-    provider: generic_html
-    feed_url: https://careers.globalfoundries.com/
+    key: globalfoundries
+    careers_url: https://globalfoundries.wd1.myworkdayjobs.com/External
+    provider: workday
+    slug: globalfoundries
+    feed_url: https://globalfoundries.wd1.myworkdayjobs.com/External
+    notes: "careers.globalfoundries.com is dead; Workday tenant. verified 2026-09-24: 600 postings (capped), 117 in Singapore"
 
   - name: Gojek / GoTo
-    careers_url: https://www.gotogroup.com/careers
-    provider: generic_html
-    feed_url: https://www.gotogroup.com/careers
+    key: gojek-goto
+    careers_url: https://jobs.lever.co/GoToGroup
+    provider: lever
+    slug: GoToGroup
+    notes: "gotogroup.com is dead; GoTo Group Lever board. verified 2026-09-24: 35 postings, 12 in Singapore"
 
   - name: Goldman Sachs
     careers_url: https://www.goldmansachs.com/careers/
@@ -556,9 +569,11 @@ companies:
     feed_url: https://www.imda.gov.sg/who-we-are/careers
 
   - name: Infosys
-    careers_url: https://www.infosys.com/careers/
-    provider: generic_html
-    feed_url: https://www.infosys.com/careers/
+    key: infosys
+    careers_url: https://apply.workable.com/infosys-singaporeand-australia/
+    provider: workable
+    slug: infosys-singaporeand-australia
+    notes: "Infosys Singapore & Australia Workable board (infosys.com returns 403). verified 2026-09-24: 200 postings, 116 in Singapore"
 
   - name: Intel
     careers_url: https://jobs.intel.com/
@@ -607,14 +622,19 @@ companies:
     feed_url: https://kredivo.com/careers
 
   - name: Kuaishou
-    careers_url: https://www.kuaishou.com/en/about/recruit
-    provider: generic_html
-    feed_url: https://www.kuaishou.com/en/about/recruit
+    key: kuaishou
+    careers_url: https://kwai.wd3.myworkdayjobs.com/Kuaishou_External
+    provider: workday
+    slug: kwai
+    feed_url: https://kwai.wd3.myworkdayjobs.com/Kuaishou_External
+    notes: "Kwai international Workday tenant. verified 2026-09-24: 45 postings, 4 in Singapore (some titles are in Chinese)"
 
   - name: Lam Research
-    careers_url: https://careers.lamresearch.com/
+    key: lam-research
+    careers_url: "https://opportunities.lamresearch.com/search/?q=&locationsearch=Singapore"
     provider: generic_html
-    feed_url: https://careers.lamresearch.com/
+    feed_url: "https://opportunities.lamresearch.com/search/?q=&locationsearch=Singapore"
+    notes: "SuccessFactors career site, Singapore-filtered search page (first page only). verified 2026-09-24: 26 links = 25 Singapore postings + 1 nav link"
 
   - name: Lazada
     careers_url: https://www.lazada.com/en/careers/
@@ -637,9 +657,12 @@ companies:
     feed_url: https://www.marqeta.com/company/careers
 
   - name: Marvell Technology
-    careers_url: https://www.marvell.com/company/careers.html
-    provider: generic_html
-    feed_url: https://www.marvell.com/company/careers.html
+    key: marvell-technology
+    careers_url: https://marvell.wd1.myworkdayjobs.com/MarvellCareers
+    provider: workday
+    slug: marvell
+    feed_url: https://marvell.wd1.myworkdayjobs.com/MarvellCareers
+    notes: "Workday tenant. verified 2026-09-24: 238 postings, 21 in Singapore"
 
   - name: Mastercard
     careers_url: https://careers.mastercard.com/
@@ -680,9 +703,12 @@ companies:
     notes: "v1 could not scrape this: metacareers.com is a JavaScript app with no public job feed; paste a real feed URL"
 
   - name: Micron Technology
-    careers_url: https://careers.micron.com/
-    provider: generic_html
-    feed_url: https://careers.micron.com/
+    key: micron-technology
+    careers_url: https://micron.wd1.myworkdayjobs.com/External
+    provider: workday
+    slug: micron
+    feed_url: https://micron.wd1.myworkdayjobs.com/External
+    notes: "Workday tenant behind careers.micron.com. verified 2026-09-24: 600 postings (capped), 142 in Singapore"
 
   - name: Microsoft
     careers_url: https://careers.microsoft.com/
@@ -717,9 +743,12 @@ companies:
     slug: monzo
 
   - name: Morgan Stanley
-    careers_url: https://www.morganstanley.com/people/students-graduates
-    provider: generic_html
-    feed_url: https://www.morganstanley.com/people/students-graduates
+    key: morgan-stanley
+    careers_url: https://ms.wd5.myworkdayjobs.com/External
+    provider: workday
+    slug: ms
+    feed_url: https://ms.wd5.myworkdayjobs.com/External
+    notes: "Workday tenant. verified 2026-09-24: 600 postings (capped), 7 in Singapore"
 
   - name: MUFG
     careers_url: https://www.mufg.jp/english/careers/
@@ -728,14 +757,18 @@ companies:
     feed_url: https://mufgub.wd3.myworkdayjobs.com/MUFG-Careers
 
   - name: NCS Group
-    careers_url: https://www.ncs.co/en-sg/careers/
+    key: ncs-group
+    careers_url: "https://groupcareers.singtel.com/search/?q=NCS&sortColumn=referencedate&sortDirection=desc"
     provider: generic_html
-    feed_url: https://www.ncs.co/en-sg/careers/
+    feed_url: "https://groupcareers.singtel.com/search/?q=NCS&sortColumn=referencedate&sortDirection=desc"
+    notes: "NCS hires through Singtel's SuccessFactors site (ncs.co returns 403). verified 2026-09-24: 33 links = 25 NCS postings (all Singapore, newest first) + 8 nav/sister-company links"
 
   - name: NetEase
-    careers_url: https://hr.163.com/
-    provider: generic_html
-    feed_url: https://hr.163.com/
+    key: netease
+    careers_url: https://job-boards.greenhouse.io/neteasegames
+    provider: greenhouse
+    slug: neteasegames
+    notes: "NetEase Games international Greenhouse board (hr.163.com is China-only). verified 2026-09-24: 30 postings, 23 in Singapore"
 
   - name: Netflix
     careers_url: https://jobs.netflix.com/
@@ -758,9 +791,11 @@ companies:
     slug: nium
 
   - name: Nomura
-    careers_url: https://www.nomuraholdings.com/careers/
+    key: nomura
+    careers_url: "https://careers.nomura.com/Nomura/search/?q=&locationsearch=Singapore"
     provider: generic_html
-    feed_url: https://www.nomuraholdings.com/careers/
+    feed_url: "https://careers.nomura.com/Nomura/search/?q=&locationsearch=Singapore"
+    notes: "SuccessFactors career site, Singapore-filtered search page (first page only). verified 2026-09-24: 34 links = 30 Singapore postings + 4 region nav links"
 
   - name: Notion
     careers_url: https://www.notion.so/careers
@@ -774,14 +809,20 @@ companies:
     feed_url: https://nvidia.wd5.myworkdayjobs.com/NVIDIAExternalCareerSite
 
   - name: NXP Semiconductors
-    careers_url: https://careers.nxp.com/
-    provider: generic_html
-    feed_url: https://careers.nxp.com/
+    key: nxp-semiconductors
+    careers_url: https://nxp.wd3.myworkdayjobs.com/careers
+    provider: workday
+    slug: nxp
+    feed_url: https://nxp.wd3.myworkdayjobs.com/careers
+    notes: "careers.nxp.com is dead; Workday tenant. verified 2026-09-24: 600 postings (capped), 8 in Singapore"
 
   - name: OCBC
-    careers_url: https://www.ocbc.com/group/careers.page
-    provider: generic_html
-    feed_url: https://www.ocbc.com/group/careers.page
+    key: ocbc
+    careers_url: https://ocbc.wd102.myworkdayjobs.com/External
+    provider: workday
+    slug: ocbc
+    feed_url: https://ocbc.wd102.myworkdayjobs.com/External
+    notes: "Workday tenant (found via web search). verified 2026-09-24: 600 postings (capped), 363 in Singapore"
 
   - name: Okta
     careers_url: https://www.okta.com/company/careers/
@@ -829,9 +870,12 @@ companies:
     slug: paradigm
 
   - name: PayPal
-    careers_url: https://careers.pypl.com/
-    provider: generic_html
-    feed_url: https://careers.pypl.com/
+    key: paypal
+    careers_url: https://paypal.wd1.myworkdayjobs.com/jobs
+    provider: workday
+    slug: paypal
+    feed_url: https://paypal.wd1.myworkdayjobs.com/jobs
+    notes: "Workday tenant behind careers.pypl.com. verified 2026-09-24: 278 postings, 17 in Singapore"
 
   - name: Paysign / Payoneer
     careers_url: https://www.payoneer.com/about/careers/
@@ -854,9 +898,12 @@ companies:
     slug: prestolabs
 
   - name: PropertyGuru
-    careers_url: https://www.propertyguru.com.sg/careers
-    provider: generic_html
-    feed_url: https://www.propertyguru.com.sg/careers
+    key: propertyguru
+    careers_url: https://propertyguru.wd105.myworkdayjobs.com/PropertyGuru
+    provider: workday
+    slug: propertyguru
+    feed_url: https://propertyguru.wd105.myworkdayjobs.com/PropertyGuru
+    notes: "Workday tenant. verified 2026-09-24: 26 postings, 2 in Singapore"
 
   - name: Qualcomm
     careers_url: https://careers.qualcomm.com/
@@ -1113,9 +1160,12 @@ companies:
     feed_url: https://www.ubs.com/global/en/careers.html
 
   - name: UOB
-    careers_url: https://www.uob.com.sg/personal/about-uob/career-opportunities.page
-    provider: generic_html
-    feed_url: https://www.uob.com.sg/personal/about-uob/career-opportunities.page
+    key: uob
+    careers_url: https://uobgroup.wd3.myworkdayjobs.com/UOBExternal
+    provider: workday
+    slug: uobgroup
+    feed_url: https://uobgroup.wd3.myworkdayjobs.com/UOBExternal
+    notes: "Workday tenant linked from careers.uobgroup.com. verified 2026-09-24: 600 postings (capped); SG roles are labelled 'Central Region (City Area)' (310 of 600) - needs a location allow token"
 
   - name: Vercel
     careers_url: https://vercel.com/careers
@@ -1128,9 +1178,12 @@ companies:
     slug: virtu
 
   - name: Visa
-    careers_url: https://careers.visa.com/
-    provider: generic_html
-    feed_url: https://careers.visa.com/
+    key: visa
+    careers_url: https://visa.wd5.myworkdayjobs.com/Visa
+    provider: workday
+    slug: visa
+    feed_url: https://visa.wd5.myworkdayjobs.com/Visa
+    notes: "Workday tenant (SmartRecruiters 'Visa' board is empty). verified 2026-09-24: 600 postings (capped), 51 in Singapore"
 
   - name: VMware / Broadcom
     careers_url: https://careers.vmware.com/
@@ -1138,9 +1191,12 @@ companies:
     feed_url: https://careers.vmware.com/
 
   - name: Wells Fargo
-    careers_url: https://www.wellsfargojobs.com/
-    provider: generic_html
-    feed_url: https://www.wellsfargojobs.com/
+    key: wells-fargo
+    careers_url: https://wf.wd1.myworkdayjobs.com/WellsFargoJobs
+    provider: workday
+    slug: wf
+    feed_url: https://wf.wd1.myworkdayjobs.com/WellsFargoJobs
+    notes: "Workday tenant behind wellsfargojobs.com. verified 2026-09-24: 600 postings (capped), 1 in Singapore"
 
   - name: Western Digital
     careers_url: https://jobs.westerndigital.com/
@@ -1158,9 +1214,12 @@ companies:
     slug: wise
 
   - name: Workday
-    careers_url: https://www.workday.com/en-us/company/careers/
-    provider: generic_html
-    feed_url: https://www.workday.com/en-us/company/careers/
+    key: workday
+    careers_url: https://workday.wd5.myworkdayjobs.com/Workday
+    provider: workday
+    slug: workday
+    feed_url: https://workday.wd5.myworkdayjobs.com/Workday
+    notes: "Workday's own tenant. verified 2026-09-24: 370 postings, 4 in Singapore"
 
   - name: WorldQuant
     careers_url: https://www.worldquant.com/career-listing/
