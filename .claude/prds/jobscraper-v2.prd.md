@@ -1498,11 +1498,21 @@ Legend: `STATUS` · `Completed` (date) · `Verify` (command that proves it) · `
   an explain command is guesswork.
 
 #### M4-T2 · Vital extract
-- **STATUS:** `NOT_STARTED`
-- **Completed:** —
+- **STATUS:** `DONE`
+- **Completed:** 2026-09-24
 - **Do:** `decide.py::vital_extract()` per §8.3[4], ≤800 chars, `UNSTATED` markers.
 - **Verify:** Test asserts output ≤800 chars on a real 12k-char JD fixture **and**
   that the location and years-of-experience strings survive the reduction.
+- **Notes:** Verify = `python tests/run_tests.py -k vital` (4/4). Two *real* JDs,
+  copied verbatim from the v1 archive's `jobs` table, no composition needed:
+  `tests/fixtures/jd_edge_infrastructure_warsaw.json` (12,004 chars → 606) and
+  `jd_account_executive_singapore.json` (12,076 → 792). Budget is spent in
+  post-condition order (LOCATION, EXPERIENCE, REQUIREMENTS, ROLE) so location and
+  years are never the part that gets cut; numbered-years sentences outrank other
+  experience sentences. REQUIREMENTS drops sentences EXPERIENCE already carries.
+  v1's `REQ_HEADINGS` was **ported** into decide.py and extended (`what we require`,
+  role headings, stop-headings) rather than imported: matching.py is LEGACY (M9).
+  `title` is accepted per contract 4 but not echoed — the decide prompt carries it.
 
 #### M4-T3 · Decision call + accept guard
 - **STATUS:** `NOT_STARTED`

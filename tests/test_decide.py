@@ -176,3 +176,81 @@ def test_missing_verdicts_file_is_a_clear_error():
         raise AssertionError("a missing verdicts file must not pass silently")
     except SystemExit as exc:
         assert "review --export" in str(exc)
+
+
+# --------------------------------------------------------------------------
+# M4-T2 - vital extract (PRD section 8.3[4])
+#
+# The decide step pays per character, so the extract has a hard budget. What
+# must never be lost in the squeeze are the two facts the post-conditions guard:
+# where the job is, and how many years it asks for.
+# --------------------------------------------------------------------------
+
+from jobscraper.decide import vital_extract
+
+FIXTURES = Path(__file__).resolve().parent / "fixtures"
+VITAL_LABELS = ("LOCATION: ", "EXPERIENCE: ", "REQUIREMENTS: ", "ROLE: ")
+
+
+def _jd(name):
+    return json.loads((FIXTURES / name).read_text(encoding="utf-8"))
+
+
+def _lines(extract):
+    lines = extract.split("\n")
+    assert len(lines) == 4, extract
+    for line, label in zip(lines, VITAL_LABELS):
+        assert line.startswith(label), (label, line)
+    return lines
+
+
+def test_vital_extract_squeezes_a_real_12k_jd_and_keeps_location_and_years():
+    jd = _jd("jd_edge_infrastructure_warsaw.json")
+    assert len(jd["jd_text"]) >= 12000, "the fixture must be a real ~12k JD"
+
+    out = vital_extract(jd["title"], jd["location"], jd["jd_text"])
+
+    assert len(out) <= 800, len(out)
+    loc, exp, req, role = _lines(out)
+    assert "Warsaw, Poland" in loc, loc               # the field, verbatim
+    assert "Warsaw location" in loc, loc              # and the body's place line
+    assert "5+ years experience" in exp, exp          # the deciding number survives
+    assert "UNSTATED" not in req and "UNSTATED" not in role, out
+    # Headings are found by meaning, not position: Palantir says "What We Require".
+    assert "Active clearance" in out, out
+
+
+def test_vital_extract_on_a_singapore_jd_with_shouted_headings():
+    jd = _jd("jd_account_executive_singapore.json")
+    assert len(jd["jd_text"]) >= 12000
+
+    out = vital_extract(jd["title"], jd["location"], jd["jd_text"])
+
+    assert len(out) <= 800, len(out)
+    loc, exp, req, _role = _lines(out)
+    assert "SG - Singapore" in loc and "Singapore" in loc.split("|", 1)[1], loc
+    assert "5 years of sales experience" in exp, exp
+    assert "UNSTATED" not in req, req
+
+
+def test_vital_extract_marks_missing_sections_unstated():
+    out = vital_extract("Backend Engineer", "", "We build payment rails. Join us.")
+    loc, exp, req, role = _lines(out)
+    assert loc == "LOCATION: UNSTATED | UNSTATED", loc
+    assert exp == "EXPERIENCE: UNSTATED", exp
+    assert req == "REQUIREMENTS: UNSTATED", req
+    assert role == "ROLE: UNSTATED", role
+
+
+def test_vital_extract_honours_the_limit_on_flattened_text():
+    # Some adapters hand back one enormous line with no headings on their own
+    # lines. The budget must still hold, and the years must still be found.
+    body = ("Great culture and snacks. " * 300
+            + "Requirements: 2-5 years of experience with Python and Kubernetes. "
+            + "Degree in computer science. " + "Benefits galore. " * 300)
+    for limit in (800, 300):
+        out = vital_extract("Platform Engineer", "Singapore", body, limit=limit)
+        assert len(out) <= limit, (limit, len(out))
+    out = vital_extract("Platform Engineer", "Singapore", body)
+    assert "2-5 years of experience" in out, out
+    assert "REQUIREMENTS: UNSTATED" not in out, out
