@@ -18,6 +18,7 @@ from typing import Any, Callable, Optional
 from fastapi import FastAPI
 from fastapi.responses import PlainTextResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from jobscraper.config import Config, load_config
 from jobscraper.web import routers
@@ -53,12 +54,26 @@ def _include_routers(app: FastAPI) -> None:
             app.include_router(router, prefix="/api")
 
 
+# The only Host headers the app answers. There is no login (PRD R-9), so a page
+# on another site that rebinds its own domain name to 127.0.0.1 could otherwise
+# read and change the application record from the user's browser (DNS
+# rebinding). Such a request carries the attacker's hostname, not one of these.
+DEFAULT_ALLOWED_HOSTS = ["127.0.0.1", "localhost", "::1"]
+
+
 def create_app(cfg: Optional[Config] = None,
                store_factory: Optional[Callable[[], Any]] = None,
-               static_dir: Path = STATIC_DIR) -> FastAPI:
-    """Build the app. Every argument has a production default."""
+               static_dir: Path = STATIC_DIR,
+               allowed_hosts: Optional[list[str]] = None) -> FastAPI:
+    """Build the app. Every argument has a production default.
+
+    `allowed_hosts` defaults to `web.allowed_hosts` in config.yaml, else the
+    loopback names - extend it only if you deliberately serve under another name.
+    """
     cfg = cfg or load_config()
     app = FastAPI(title="JobScraper", version="2")
+    hosts = allowed_hosts or list(cfg.web.get("allowed_hosts") or DEFAULT_ALLOWED_HOSTS)
+    app.add_middleware(TrustedHostMiddleware, allowed_hosts=hosts)
     app.state.cfg = cfg
     app.state.store_factory = store_factory or _default_store_factory(cfg)
 

@@ -32,7 +32,7 @@ def _cfg(**paths: str) -> Config:
 def _client(cfg: Config | None = None, store=None, **kw) -> TestClient:
     return TestClient(create_app(cfg or _cfg(),
                                  store_factory=(lambda: store) if store else None,
-                                 **kw))
+                                 **kw), base_url="http://localhost")
 
 
 # ---------------------------------------------------------------- M7-T1
@@ -131,7 +131,8 @@ def _world(shortlist: Path = FIXTURE, runs: int = 12,
             cfg = _cfg(shortlist=str(shortlist), db=str(db))
         else:
             cfg = _config_file(Path(tmp), statuses, shortlist=str(shortlist), db=str(db))
-        yield TestClient(create_app(cfg, store_factory=open_store)), open_store
+        yield (TestClient(create_app(cfg, store_factory=open_store),
+                          base_url="http://localhost"), open_store)
 
 
 def _ids(jobs: list[dict]) -> set[str]:
@@ -380,3 +381,22 @@ def test_web_shipped_vocabulary_keeps_the_two_statuses_the_inbox_names():
     statuses = raw["applications"]["statuses"]
     assert {"to_apply", "applied"} <= set(statuses), statuses
     assert len(statuses) == len(set(statuses)), "duplicate status in config"
+
+
+
+def test_web_refuses_a_foreign_host_header():
+    """DNS rebinding (R-9): a page that points its own domain at 127.0.0.1 sends
+    that domain as the Host header. The app must not answer it."""
+    c = _client()
+    assert c.get("/api/runs").status_code == 200
+    evil = c.get("/api/runs", headers={"host": "attacker.example"})
+    assert evil.status_code == 400
+    assert c.get("/api/runs", headers={"host": "127.0.0.1:8765"}).status_code == 200
+
+
+def test_web_allowed_hosts_can_be_extended_in_config():
+    cfg = _cfg()
+    cfg.raw["web"]["allowed_hosts"] = ["jobs.home.lan"]
+    c = TestClient(create_app(cfg), base_url="http://jobs.home.lan")
+    assert c.get("/api/runs").status_code == 200
+    assert c.get("/api/runs", headers={"host": "localhost"}).status_code == 400
