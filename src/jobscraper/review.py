@@ -25,7 +25,7 @@ from .llm import _key, _parse_json
 from .matching import extract_requirements
 from .models import Candidate, RawJob, ScoreBreakdown, Verdict
 from .output import write_application_tracker, write_html_view
-from .store import Store
+from .store_v1 import Store
 
 QUEUE_NAME = "review_queue.json"
 VERDICTS_NAME = "review_verdicts.json"

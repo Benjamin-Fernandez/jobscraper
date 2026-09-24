@@ -23,7 +23,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from .models import Company, CycleState
-from .store import Store
+from .store_v1 import Store
 
 
 @dataclass

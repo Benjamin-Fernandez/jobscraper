@@ -19,7 +19,7 @@ from openpyxl.utils import get_column_letter
 from openpyxl.worksheet.datavalidation import DataValidation
 
 from .models import Candidate
-from .store import Store
+from .store_v1 import Store
 
 PROGRAM_COLS = [
     ("job_id", 12), ("Found", 11), ("Run", 6), ("Company", 22), ("Tier", 6),

@@ -1379,8 +1379,23 @@ Legend: `STATUS` · `Completed` (date) · `Verify` (command that proves it) · `
 **Outcome:** postings flow from the watchlist into the new store.
 
 #### M3-T1 · Port the store to the new schema
-- **STATUS:** `NOT_STARTED`
-- **Completed:** —
+- **STATUS:** `DONE`
+- **Completed:** 2026-09-24 — `-k store` 17/17, full suite 63/63.
+  **How v1 keeps running:** v1's store was `git mv`'d to `store_v1.py` unchanged
+  (LEGACY, retired in M9-T1) and its seven importers repointed, rather than
+  rewriting `store.py` in place and breaking them all. Each store refuses the
+  other's database (`SchemaMismatch` / `RuntimeError`) because both default to
+  `data/jobscraper.db`. The bridge DB was **archived, not deleted**, to
+  `archive/v2-bridge-db-2026-09-24/`.
+  **Schema additions beyond §8.4, deliberate:** `companies.key` (the §8.4 sync
+  semantics need it and the table list omitted it), `resolve_method`/`resolved_at`
+  (discovery writes them), `applications.company/role/url` (an orphaned
+  application must stay legible, D-14), `coverage.http_status`, a `meta` table
+  holding `schema_version`. `models.WatchedCompany` is the v2 row type; v1
+  `Company` stays for legacy modules. Timestamps are UTC `YYYY-MM-DDTHH:MM:SS`
+  text; cut-offs are computed in Python (`store.shift`) so the SQL stays plain.
+  §0.6 contract 5 is implemented and tested. Until M3-T1b lands, the v1 commands
+  (`doctor`, `run`, …) fail cleanly against the v2 DB instead of corrupting it.
 - **Do:** Rewrite `store.py` to §8.4. Keep the single-writer rule and the
   `known_job_ids` / `close_missing` semantics (a failed fetch must never close jobs).
   **First delete the existing `data/jobscraper.db`** — it is a v1-schema file the

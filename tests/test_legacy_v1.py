@@ -34,7 +34,7 @@ from openpyxl import Workbook, load_workbook
 from jobscraper import cursor as C
 from jobscraper.models import RawJob
 from jobscraper.output import sync_applied
-from jobscraper.store import Store
+from jobscraper.store_v1 import Store
 
 T0 = datetime(2026, 9, 14, 9, 0, tzinfo=timezone.utc)
 PROG = 14          # program columns; Status is 15 (O), Date Applied is 16 (P)
