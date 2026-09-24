@@ -298,6 +298,15 @@ def test_add_keeps_crlf_line_endings():
     assert [e.name for e in load(p)][-1] == "Gamma"
 
 
+def test_add_quotes_a_name_containing_a_hash():
+    """' #' starts a YAML comment: unquoted, "Acme #1 Corp" would reload as "Acme"
+    (found by the M9 code review)."""
+    from jobscraper.watchlist import add_entry
+    p = _tmp_watchlist()
+    add_entry(p, "Acme #1 Corp", "https://acme.example/careers")
+    assert [e.name for e in load(p)][-1] == "Acme #1 Corp"
+
+
 def test_add_takes_an_explicit_key():
     from jobscraper.watchlist import add_entry
     p = _tmp_watchlist()
