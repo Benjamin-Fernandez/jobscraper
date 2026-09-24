@@ -262,6 +262,26 @@ def test_pipeline_without_a_model_leaves_survivors_waiting():
     assert later.stats["judged"] == 1                   # picked up next run
 
 
+def test_pipeline_switching_models_rejudges_once_then_caches():
+    """Qwen replacing Haiku: a decision made by another model is not reused -
+    it is re-judged and replaced - and the new model's answer is then cached,
+    recorded under the model that actually answered."""
+    class _Qwen(_AcceptSingapore):
+        def model_name(self, requested):
+            return "qwen3:14b"
+
+    cfg, st = _world(1)
+    haiku = _AcceptSingapore()
+    _run(cfg, st, fetcher=mixed_fetcher, backend=haiku)
+    assert haiku.calls == 1
+    qwen = _Qwen()
+    rep = _run(cfg, st, fetcher=mixed_fetcher, backend=qwen, now=shift(T0, days=1))
+    assert qwen.calls == 1 and rep.stats["judged"] == 1     # re-judged, not reused
+    assert {r[0] for r in st.conn.execute("SELECT model FROM decisions")} == {"qwen3:14b"}
+    _run(cfg, st, fetcher=mixed_fetcher, backend=qwen, now=shift(T0, days=2))
+    assert qwen.calls == 1                                  # now cached
+
+
 def test_pipeline_nothing_due_still_finishes_pending_work():
     """With no company due, `run` scrapes nothing but still works the funnel,
     so a rules edit or a waiting survivor is handled now, not at the next due

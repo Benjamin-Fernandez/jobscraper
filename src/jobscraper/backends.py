@@ -68,6 +68,12 @@ class Backend:
     def describe(self) -> str:
         return self.name
 
+    def model_name(self, requested: str) -> str:
+        """The model that will actually answer. Recorded on every decision, and
+        part of what makes a cached decision reusable: an answer from another
+        model is not this model's answer."""
+        return requested
+
     def complete(self, model: str, system: str, user: str,
                  max_tokens: int = 4096) -> Completion:
         raise BackendError("no transport configured")
@@ -289,6 +295,9 @@ class OllamaBackend(Backend):
 
     def describe(self) -> str:
         return f"ollama ({self.model} at {self.url})"
+
+    def model_name(self, requested: str) -> str:
+        return self.model                   # the Qwen tag, not budget.model
 
     def complete(self, model: str, system: str, user: str,
                  max_tokens: int = 4096) -> Completion:

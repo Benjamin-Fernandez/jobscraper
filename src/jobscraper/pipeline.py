@@ -382,10 +382,17 @@ def _funnel(cfg: Config, store: Store, rep: RunReport, client: HttpClient,
         def save(d: decide.Decision) -> None:
             store.save_decision(d.job_id, pv, d.vital_hash, d.decision,
                                 d.is_singapore, d.yoe_min, d.reason, d.model)
+        # The model that actually answers (Qwen under Ollama, not budget.model).
+        # A cached decision is reused only if that same model made it, so
+        # switching models - Haiku to Qwen - re-judges and replaces old answers.
+        model = backend.model_name(str(budget.get("model", "")))
+
+        def lookup(job_id: str, h: str):
+            row = store.get_decision(job_id, pv, h)
+            return row if row and row["model"] == model else None
         _, ds = decide.decide(
             postings, summary=str(profile.get("summary") or ""), backend=backend,
-            model=str(budget.get("model", "")),
-            lookup=lambda job_id, h: store.get_decision(job_id, pv, h), save=save,
+            model=model, lookup=lookup, save=save,
             batch_size=int(budget.get("decide_batch", 20)),
             ceiling_years=int(ruleset.ceiling_years or 3),
             max_consecutive_failures=int(budget.get("max_consecutive_failures", 3)))
