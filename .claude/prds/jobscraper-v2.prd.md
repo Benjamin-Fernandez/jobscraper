@@ -1543,8 +1543,8 @@ Legend: `STATUS` · `Completed` (date) · `Verify` (command that proves it) · `
 **Outcome:** the expensive step is small, cheap and correct.
 
 #### M4-T1 · Prefilter rules + the rules.yaml contract
-- **STATUS:** `NOT_STARTED`
-- **Completed:** —
+- **STATUS:** `DONE`
+- **Completed:** 2026-09-24
 - **Do:** `filter.py` per §8.3[3]. Implement the four rule *kinds* (`regex_deny`,
   `any_match`, `max_number`, `overlap_floor`) behind a registry so a fifth kind is a
   new function, not a rewrite. Honour declaration order, `enabled:`, and the
@@ -1561,10 +1561,33 @@ Legend: `STATUS` · `Completed` (date) · `Verify` (command that proves it) · `
     already asserts, so the carried-over test and this one must agree).
   - Extensibility — setting `enabled: false` disables a rule, and an `extra:` entry
     takes effect without editing code.
+- **Notes:** Verify = `-k filter` 19/19 (14 new + the 4 carried-over v1 tests,
+  `test_min_years_takes_the_lowest_stated` included, + 1 watchlist match). Contract
+  3 as written: `load_rules(path)` (path optional, defaults to `config/rules.yaml`)
+  → `RuleSet(.hash = sha256 of the canonical-JSON of the parsed YAML, 64 hex, so
+  comments/spacing don't change it)`; `evaluate(posting, ruleset, profile, scorer)`
+  → `FilterResult(passed, reject_rule, reject_detail, overlap_score, trace)`;
+  posting may be a dict or an object. `filter.render(result)` formats it for the
+  CLI. Registry: `@filter.rule_kind(name, prepare=)`, proven by a test that adds a
+  fifth kind. No `profile/` or `matching.py` import — location/years logic ported.
+  **Deviations from the §8.3[3] YAML, all deliberate:** (1) the `experience_ceiling`
+  pattern is range-aware (`(?<!\d)(\d{1,2})…(?:-|–|to)…years?|yrs?`) — the PRD's
+  `(\d+)\s*\+?\s*(?:years|yrs)` reads "2-5 years" as **5** and would reject it,
+  contradicting D-12's lowest-wins; `filter.min_years_required` is held equal to
+  v1's by a test. (2) `keyword_floor` has `skip_when_empty: description` — a
+  posting with no JD text is passed to the model rather than rejected for 0
+  overlap (listing-only adapters would otherwise lose everything). (3)
+  `location_explicit` is `regex_deny` in default-deny mode (`allow_tokens` set);
+  a location that is only filler (`Hybrid`, `On-site`) passes as vague. (4) Every
+  rule is evaluated for the trace; the first reject still decides. Per the §8.3[3]
+  table, `Singapore-based role, US only` **passes** (allow token wins) — the
+  prose claim that v1's residue logic rejects it is not what v1 did either.
+  Persisting the result into the `prefilter` table is the store's/pipeline's job
+  (M3-T1/M3-T4): `FilterResult` carries every column it needs.
 
 #### M4-T1b · Filter tuning tools
-- **STATUS:** `NOT_STARTED`
-- **Completed:** —
+- **STATUS:** `DONE`
+- **Completed:** 2026-09-24
 - **Do:** `filter explain <job_id>` and `filter test --title/--location/--desc`
   per §8.3[3]. Both read-only; `test` touches no database.
 - **Verify:** `python -m jobscraper filter test --title "Senior Backend Engineer"
@@ -1572,13 +1595,37 @@ Legend: `STATUS` · `Completed` (date) · `Verify` (command that proves it) · `
   token (`senior`).
 - **Notes:** Do not defer this. Tuning five rules against 20,000 postings without
   an explain command is guesswork.
+  *2026-09-24 (Lane B):* **`filter test` done** — the Verify command prints
+  `REJECT by title_deny: senior` and marks the deciding rule; tests
+  `test_filter_cli_*`. Extra flag `--rules <file>` dry-runs a draft rules file.
+  Profile source: `data/profile.derived.yaml` when present (via Lane D's
+  `load_derived_profile(cfg)` once merged; raw YAML, overrides unapplied, until
+  then). When absent, every rule whose `source`/`aliases` reads `profile.*`
+  (today `title_allow`, `keyword_floor`) is shown `DISABLED` and a WARNING goes
+  to stderr — not silently skipped. Scorer: `profile.keywords.overlap` once
+  merged, else none (overlap rules show `SKIP`). **`filter explain <job_id|url>`
+  done after merging `v2-rebuild` (M3-T1 landed):** reads the job via the v2
+  `Store.get_job`/`find_job_by_url`, shows the stored `prefilter` row for
+  (profile_version, current rules hash) — or says why there is none — beside a
+  live re-evaluation giving every rule's verdict and matched text. Read-only; it
+  refuses to create a missing DB. Tests `test_filter_cli_explain_*`.
 
 #### M4-T2 · Vital extract
-- **STATUS:** `NOT_STARTED`
-- **Completed:** —
+- **STATUS:** `DONE`
+- **Completed:** 2026-09-24
 - **Do:** `decide.py::vital_extract()` per §8.3[4], ≤800 chars, `UNSTATED` markers.
 - **Verify:** Test asserts output ≤800 chars on a real 12k-char JD fixture **and**
   that the location and years-of-experience strings survive the reduction.
+- **Notes:** Verify = `python tests/run_tests.py -k vital` (4/4). Two *real* JDs,
+  copied verbatim from the v1 archive's `jobs` table, no composition needed:
+  `tests/fixtures/jd_edge_infrastructure_warsaw.json` (12,004 chars → 606) and
+  `jd_account_executive_singapore.json` (12,076 → 792). Budget is spent in
+  post-condition order (LOCATION, EXPERIENCE, REQUIREMENTS, ROLE) so location and
+  years are never the part that gets cut; numbered-years sentences outrank other
+  experience sentences. REQUIREMENTS drops sentences EXPERIENCE already carries.
+  v1's `REQ_HEADINGS` was **ported** into decide.py and extended (`what we require`,
+  role headings, stop-headings) rather than imported: matching.py is LEGACY (M9).
+  `title` is accepted per contract 4 but not echoed — the decide prompt carries it.
 
 #### M4-T3 · Decision call + accept guard
 - **STATUS:** `NOT_STARTED`

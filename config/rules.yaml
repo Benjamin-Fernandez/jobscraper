@@ -1,0 +1,85 @@
+# The free prefilter (PRD section 8.3[3]). Hand-edited; read by filter.py.
+#
+# Rules run top to bottom and the FIRST rejection wins. Every rule is still
+# evaluated so `filter explain` / `filter test` can show the whole picture, but
+# only the first reject decides - and it is recorded with the matched text.
+#
+#   Disable a rule   -> enabled: false            (reversible; nothing deleted)
+#   Tune a rule      -> add to its `extra:` list  (merged, never overwritten)
+#   Reorder          -> move the block            (order here IS evaluation order)
+#   New rule kind    -> one function in filter.py's registry
+#
+# Kinds: regex_deny | any_match | max_number | overlap_floor
+#
+# Editing anything that changes meaning changes the rules hash, which makes every
+# cached prefilter verdict stale (PRD 8.4). Comments and spacing do not.
+#
+#   python -m jobscraper filter test --title "..." --location "..." [--desc "..."]
+
+version: 1
+ceiling_years: 3            # D-12; the default `max` for max_number rules
+
+rules:
+  # 1. Seniority and non-engineering titles. Runs BEFORE title_allow, so
+  #    "Senior Software Engineer" is rejected even though it names a target.
+  - id: title_deny
+    kind: regex_deny
+    field: title
+    enabled: true
+    patterns:
+      - '\b(senior|staff|principal|lead|head|director|manager|vp)\b'
+      - '\b(intern|internship|apprentice|working student)\b'
+      - '\b(sales|marketing|recruit|legal|finance|hr)\b'
+    extra: []               # <- yours; merged with the above, never overwritten
+
+  # 2. Positive title filter (D-10): the title must contain every word of at
+  #    least one target title, in any order, after aliases (sre, swe, ...) are
+  #    folded. Targets come from the resume-derived profile.
+  - id: title_allow
+    kind: any_match
+    field: title
+    enabled: true
+    source: profile.target_titles   # generated (D-10)
+    aliases: profile.title_aliases
+    extra: []                       # <- yours; e.g. "solutions engineer"
+    match: token_subset             # all words of a target title present, any order
+
+  # 3. Location, default-deny (D-7). First match wins:
+  #      1. an allow token anywhere            -> pass  ("Remote - Singapore" too)
+  #      2. remote / anywhere / distributed    -> reject
+  #      3. blank, or only vague tokens        -> pass, for the model to read (D-2)
+  #      4. names any other place              -> reject
+  - id: location_explicit
+    kind: regex_deny
+    field: location
+    enabled: true
+    allow_tokens: [singapore, sg]
+    vague_tokens: [apac, global, multiple, various, all offices, worldwide]
+    reject_remote: true             # D-7
+    remote_tokens: [remote, anywhere, distributed]
+    patterns: []
+    extra: []                       # <- yours; extra deny regexes, checked after remote
+
+  # 4. Experience ceiling (D-12). The LOWEST number stated anywhere in the title
+  #    or description is the bar: "2-5 years" -> 2 -> passes; "4+ years" -> 4 ->
+  #    rejects. The pattern captures a range's floor, which is why it is wider
+  #    than a bare "N years".
+  - id: experience_ceiling
+    kind: max_number
+    fields: [title, description]
+    enabled: true
+    pattern: '(?<!\d)(\d{1,2})\s*\+?\s*(?:(?:-|–|to)\s*\d{1,2}\s*)?\+?\s*(?:years?|yrs?)\b'
+    max: 3                          # D-12
+    ignore_above: 30                # "founded 150 years ago" is not a requirement
+
+  # 5. Skill overlap with the derived profile, scored by the injected keyword
+  #    matcher. A posting with no description is passed through, not rejected:
+  #    an empty JD is missing evidence, not evidence of a mismatch.
+  - id: keyword_floor
+    kind: overlap_floor
+    fields: [title, description]
+    enabled: true
+    source: profile.skills
+    extra: []                       # <- yours; skills the resume undersells
+    min_overlap: 2
+    skip_when_empty: description
