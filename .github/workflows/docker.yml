@@ -1,0 +1,172 @@
+# The Verify harness for M10 (PRD section 8.6). The dev machine has no Docker,
+# so this is where the image, the compose file and the no-node path are proven.
+#
+#   image    - M10-T1: multi-stage build, doctor runs, node absent, non-root
+#   compose  - M10-T2: `up` serves the app on 127.0.0.1 only, and an
+#              application status survives `down` + `up` (the named volume)
+#   no-node  - M10-T3: a clean Python environment with no node serves the
+#              committed UI and the API
+name: docker
+
+on:
+  pull_request:
+    branches: [v2-rebuild]
+  push:
+    branches: [v2-rebuild]
+
+permissions:
+  contents: read
+
+jobs:
+  image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build
+        run: docker build -t jobscraper .
+
+      - name: doctor runs in the container
+        run: docker run --rm jobscraper python -m jobscraper doctor
+
+      - name: node and npm are absent from the final image
+        run: docker run --rm jobscraper sh -c '! command -v node && ! command -v npm'
+
+      - name: runs as a non-root user
+        run: |
+          uid="$(docker run --rm jobscraper id -u)"
+          echo "uid=$uid"
+          test "$uid" != "0"
+
+      - name: the image serves the bundle the node stage built
+        run: docker run --rm jobscraper sh -c 'test -f src/jobscraper/web/static/index.html && ls src/jobscraper/web/static/assets'
+
+  compose:
+    runs-on: ubuntu-latest
+    env:
+      BASE: http://127.0.0.1:8765
+      JOB_ID: ci-docker-volume-check
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: compose file is valid
+        run: docker compose config --quiet
+
+      - name: up
+        run: docker compose up -d --build --wait --wait-timeout 180
+
+      - name: serves the UI and the API
+        run: |
+          for i in $(seq 1 60); do
+            curl -fsS "$BASE/api/runs" && break
+            sleep 2
+          done
+          curl -fsS "$BASE/api/runs"
+          echo
+          curl -fsS "$BASE/" | grep -q '<div id="app">'
+
+      - name: published on the host loopback only, never 0.0.0.0
+        run: |
+          docker compose port app 8765
+          test "$(docker compose port app 8765)" = "127.0.0.1:8765"
+          ss -ltn | grep ':8765 '
+          ! ss -ltn | grep -E '(0\.0\.0\.0|\*|\[::\]):8765 '
+
+      - name: record an application status
+        run: |
+          curl -fsS -X POST "$BASE/api/applications/$JOB_ID" \
+            -H 'Content-Type: application/json' \
+            -d '{"status": "applied", "company": "CI", "role": "Volume check"}'
+          echo
+
+      - name: down (keeping the volume) and up again
+        run: |
+          docker compose down
+          docker volume ls
+          docker compose up -d --wait --wait-timeout 180
+
+      - name: the status survived the restart
+        run: |
+          for i in $(seq 1 60); do
+            curl -fsS "$BASE/api/runs" >/dev/null && break
+            sleep 2
+          done
+          curl -fsS "$BASE/api/applications" | tee /tmp/apps.json
+          echo
+          jq -e --arg id "$JOB_ID" \
+            'map(select(.job_id == $id and .status == "applied")) | length == 1' \
+            /tmp/apps.json
+
+      - name: a batch verb runs through `compose run`
+        run: docker compose run --rm app doctor
+
+      - name: seeding the volume leaves files the app can write
+        run: |
+          mkdir -p data
+          echo seeded > data/ci-seed.txt
+          docker compose run --rm -v "$(pwd)/data:/seed:ro" --entrypoint cp app /seed/ci-seed.txt /app/data/
+          docker compose run --rm --entrypoint sh app -c 'cat /app/data/ci-seed.txt && test -w /app/data/ci-seed.txt'
+
+      - name: logs
+        if: always()
+        run: docker compose logs --no-color
+
+      - name: clean up
+        if: always()
+        run: docker compose down -v
+
+  no-node:
+    # A bare Python image: no node, no npm, no curl. This is the environment
+    # M10-T3 promises works from the committed bundle alone (PRD R-3).
+    runs-on: ubuntu-latest
+    container: python:3.12-slim
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: node is absent
+        run: sh -c '! command -v node && ! command -v npm'
+
+      - name: install into a clean venv
+        run: |
+          python -m venv /tmp/venv
+          /tmp/venv/bin/pip install --disable-pip-version-check -r requirements.txt
+
+      - name: web serves the committed UI and the API
+        env:
+          PYTHONPATH: src
+          JOBSCRAPER_DB: /tmp/no-node.db
+        run: |
+          /tmp/venv/bin/python -m jobscraper web > /tmp/web.log 2>&1 &
+          pid=$!
+          # Keep going on a failed probe so the server log is always printed.
+          set +e
+          /tmp/venv/bin/python - <<'PY'
+          import json, re, time, urllib.request
+
+          base = "http://127.0.0.1:8765"
+          for _ in range(60):
+              try:
+                  urllib.request.urlopen(base + "/api/runs", timeout=2)
+                  break
+              except OSError:
+                  time.sleep(1)
+          else:
+              raise SystemExit("server never answered /api/runs")
+
+          runs = json.load(urllib.request.urlopen(base + "/api/runs"))
+          print("/api/runs ->", runs)
+          assert isinstance(runs, list), runs
+
+          html = urllib.request.urlopen(base + "/").read().decode()
+          assert '<div id="app">' in html, html[:400]
+          assets = re.findall(r'(?:src|href)="\./(assets/[^"]+)"', html)
+          assert assets, "index.html references no bundled assets"
+          for path in assets:
+              with urllib.request.urlopen(f"{base}/{path}") as resp:
+                  assert resp.status == 200 and resp.read(), path
+              print("served", path)
+          PY
+          status=$?
+          kill "$pid"
+          cat /tmp/web.log
+          exit $status
