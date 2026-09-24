@@ -206,6 +206,18 @@ all four slots are busy, review waits; it does not squeeze in a fifth.
 When Lane D finishes, its slot is free: the Lead may hand it M5-T1 or M4-T4, or
 leave it empty. Re-cutting lanes is a Lead decision recorded here.
 
+#### Wave 2 (re-cut 2026-09-24, after B, C and D merged)
+
+| Lane | Role | Tasks | Owns (may edit) | Branch / worktree |
+|---|---|---|---|---|
+| **A** | Lead | M4-T4 (first real run, measured) → M9-T1 → M9-T2 → M9-T3, after E merges | as wave 1, plus `README.md`, `docs/` | main checkout |
+| **E** | Small tasks | M1-T5 → M8-T2 | `watchlist.py`, `tests/test_watchlist.py`, `src/jobscraper/web/`, `web/`, `tests/test_web.py`, `config/config.yaml` (`applications:` block only), plus one `watchlist` verb in `cli.py` | `../JobScraper-lane-e`, `lane/e-small` |
+| **F** | Docker | M10-T1 → M10-T2 → M10-T3, verified in GitHub Actions (no Docker on the dev machine) | `Dockerfile`, `docker-compose.yml`, `.dockerignore`, `.github/workflows/docker.yml` | `../JobScraper-lane-f`, `lane/f-docker` |
+
+M9-T1 (retire v1, which rewrites `cli.py`) waits for Lane E's merge so the two
+do not collide in `cli.py`. Lane F is independent of M9: it builds from
+`requirements.txt` and `src/`.
+
 #### Shared files — the only exceptions to ownership
 
 - **`cli.py`** is the Lead's. Lanes B, C and D may each add **one** verb
