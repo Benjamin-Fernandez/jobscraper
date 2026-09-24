@@ -1,0 +1,62 @@
+# Build context for the Dockerfile (PRD M10-T1). Keep it to what the image
+# needs: requirements.txt, src/, config/ and the web/ sources. Everything else is
+# either personal (data/, archive/ - the repo is public, the image may be too),
+# host-built (node_modules), or noise.
+
+# --- personal / state: never baked into an image ---------------------------
+data/
+archive/
+output/
+*.db
+*.db-wal
+*.db-shm
+.env
+.env.*
+
+# --- the SPA is rebuilt inside the image by the node stage -----------------
+# Excluding the committed bundle proves the image serves what the node stage
+# built, not a possibly stale copy from the checkout.
+src/jobscraper/web/static/
+web/node_modules/
+web/dist/
+web/.vite/
+node_modules/
+npm-debug.log*
+
+# --- repo / tooling --------------------------------------------------------
+.git/
+.gitignore
+.github/
+.claude/
+.vscode/
+.idea/
+docs/
+tests/
+scripts/
+README.md
+run.ps1
+Dockerfile
+docker-compose.yml
+.dockerignore
+
+# --- caches ----------------------------------------------------------------
+**/__pycache__/
+**/*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+build/
+dist/
+
+# --- os / editor / worktree junk -------------------------------------------
+**/.DS_Store
+**/Thumbs.db
+*.swp
+*.orig
+*.rej

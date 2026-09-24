@@ -1,0 +1,66 @@
+# JobScraper v2 - one command from clone to running app (PRD section 8.6, M10-T2).
+#
+#   docker compose up -d --build          # web app -> http://127.0.0.1:8765
+#   docker compose run --rm app run       # process one batch (no in-container cron)
+#   docker compose run --rm app doctor    # check setup
+#   docker compose run --rm app status    # any other verb works the same way
+#   docker compose down                   # stop; the database survives
+#   docker compose down -v                # stop AND DELETE the database volume
+#
+# State lives in the named volume `data` (shown by Docker as `jobscraper_data`):
+# the SQLite database, shortlist.json and the derived profile. To seed it from a
+# checkout's data/ (copies run as the container user, so the files stay
+# writable by the app - `docker compose cp` would leave them owned by root):
+#   bash / zsh:  docker compose run --rm -v "$(pwd)/data:/seed:ro" --entrypoint cp app /seed/resume.pdf /seed/jobscraper.db /app/data/
+#   PowerShell:  docker compose run --rm -v "${PWD}/data:/seed:ro" --entrypoint cp app /seed/resume.pdf /seed/jobscraper.db /app/data/
+# Stop the web app first (`docker compose stop`) when replacing the database.
+#
+# Security (PRD R-9): the app has NO authentication. It is published on the
+# host's loopback only - never change the host side of `ports` to 0.0.0.0.
+
+name: jobscraper
+
+services:
+  app:
+    build: .
+    image: jobscraper:local
+    # The verb is the command, so `docker compose run --rm app <verb>` works.
+    entrypoint: ["python", "-m", "jobscraper"]
+    command: ["web"]
+    environment:
+      # Inside the container: listen on all interfaces so the port mapping can
+      # reach the server. The HOST side is pinned to loopback below.
+      JOBSCRAPER_HOST: "0.0.0.0"
+      JOBSCRAPER_PORT: "8765"
+    ports:
+      - "127.0.0.1:8765:8765"
+    volumes:
+      - data:/app/data
+      # Hand-edited inputs (watchlist, rules, overrides). Read-only: nothing the
+      # pipeline or the web app does should write here.
+      - ./config:/app/config:ro
+      # --- Model transport (D-11, R-8) - OFF by default --------------------
+      # `claude -p` authenticates with the host's Claude Code login. The plan
+      # is to mount ~/.claude read-only. It is commented out because the image
+      # does not contain the `claude` binary yet, so the mount would put your
+      # credentials inside the container for no benefit. Without it, `doctor`
+      # reports the judge as UNAVAILABLE and runs fall back to rules only.
+      # When the image gains the CLI, uncomment ONE of:
+      #   Linux / macOS / Git Bash:
+      # - ${HOME}/.claude:/home/app/.claude:ro
+      #   Windows PowerShell (Docker Desktop):
+      # - ${USERPROFILE}/.claude:/home/app/.claude:ro
+    # Hardening: nothing is writable except the data volume and /tmp (which the
+    # `claude -p` backend uses as its working directory).
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop: [ALL]
+    security_opt:
+      - "no-new-privileges:true"
+    # Reaps `claude -p` child processes; PID 1 would otherwise be Python.
+    init: true
+    restart: unless-stopped
+
+volumes:
+  data:
