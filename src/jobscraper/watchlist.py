@@ -437,6 +437,7 @@ def _scalar(v: Any) -> str:
         s[0] in "&*?|-<>=!%@`{[\"'#"
         or s.strip() != s
         or ": " in s
+        or " #" in s or "\t#" in s          # YAML would start a comment there
         or s.endswith(":")
         or s.lower() in ("true", "false", "null", "yes", "no", "on", "off", "~")
     )
