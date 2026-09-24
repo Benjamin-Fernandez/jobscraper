@@ -452,3 +452,85 @@ def test_profile_cli_show_prints_the_profile():
     assert rc == 0, text
     assert "profile_version: 1" in text
     assert "spring boot" in text and "site reliability engineer" in text
+
+
+# ------------------------------------------------------ M2-T3: keyword overlap
+
+from jobscraper.profile.keywords import overlap  # noqa: E402
+
+# PRD 8.3[3]: `min_overlap: 2` in config/rules.yaml (Lane B's file). Restated
+# here so this test pins the scorer against the floor the filter will use.
+FLOOR = 2
+
+SKILLS = ["python", "java", "spring boot", "fastapi", "kubernetes", "postgresql",
+          "kafka", "docker", "go", "rest api", "ci/cd", "microservices", "aws"]
+
+BACKEND_JD = """
+Backend Engineer, Payments. You will build microservices in Java and Spring
+Boot, design REST APIs, and run them on Kubernetes (k8s) with Docker. Our data
+lives in Postgres and Kafka. Experience with Go or Python is a plus; we ship
+through CI/CD on AWS.
+"""
+
+MARKETING_JD = """
+Growth Marketing Manager. Own our go-to-market strategy and go above and beyond
+for every launch. Run campaigns across paid social and email, report funnel
+metrics in Excel and Google Analytics, and manage the content calendar in
+HubSpot. Strong communication and storytelling skills; SEO experience a plus.
+"""
+
+
+def test_keywords_backend_jd_clears_the_floor():
+    score, matched = overlap(BACKEND_JD, SKILLS)
+    assert score >= FLOOR * 3, (score, matched)
+    for s in ("java", "spring boot", "kubernetes", "postgresql", "kafka", "go",
+              "python", "rest api", "ci/cd", "microservices", "aws", "docker"):
+        assert s in matched, f"{s} should match: {matched}"
+    assert "fastapi" not in matched
+
+
+def test_keywords_marketing_jd_is_below_the_floor():
+    score, matched = overlap(MARKETING_JD, SKILLS)
+    assert score < FLOOR, (score, matched)
+    assert "go" not in matched, "'go-to-market' is not the Go language"
+
+
+def test_keywords_multiword_skill_weighs_double():
+    assert overlap("We use Spring Boot.", ["spring boot"]) == (2, ["spring boot"])
+    assert overlap("We use Python.", ["python"]) == (1, ["python"])
+
+
+def test_keywords_match_whole_tokens_only():
+    assert overlap("JavaScript and MySQL", ["java", "sql"]) == (0, [])
+    assert overlap("Spring is here; boot camp", ["spring boot"]) == (0, [])
+
+
+def test_keywords_symbol_skills():
+    score, matched = overlap("Modern C++ and C# services", ["c++", "c#", "c"])
+    assert matched == ["c++", "c#"], "the C in C++ is not the C language"
+    assert overlap("Node.js or NodeJS", ["node.js"]) == (1, ["node.js"])
+    assert overlap("ASP.NET on .NET 8", [".net"])[1] == [".net"]
+
+
+def test_keywords_common_variants_fold():
+    assert overlap("k8s", ["kubernetes"])[1] == ["kubernetes"]
+    assert overlap("Postgres 16", ["postgresql"])[1] == ["postgresql"]
+    assert overlap("Golang services", ["go"])[1] == ["go"]
+    assert overlap("REST APIs", ["rest api"])[1] == ["rest api"]
+    assert overlap("a microservice", ["microservices"])[1] == ["microservices"]
+
+
+def test_keywords_each_skill_counts_once():
+    assert overlap("python python PYTHON", ["python"]) == (1, ["python"])
+    assert overlap("python", ["Python", "python "]) == (1, ["Python"])
+
+
+def test_keywords_report_matches_in_skill_order():
+    score, matched = overlap("kafka then java", ["java", "kafka", "rust"])
+    assert (score, matched) == (2, ["java", "kafka"])
+
+
+def test_keywords_empty_inputs():
+    assert overlap("", SKILLS) == (0, [])
+    assert overlap(BACKEND_JD, []) == (0, [])
+    assert overlap(BACKEND_JD, ["", "   "]) == (0, [])

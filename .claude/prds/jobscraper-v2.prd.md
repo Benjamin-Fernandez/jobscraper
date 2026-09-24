@@ -1395,12 +1395,21 @@ Legend: `STATUS` · `Completed` (date) · `Verify` (command that proves it) · `
   `config/profile.overrides.yaml` if wrong.
 
 #### M2-T3 · Keyword/skill matcher
-- **STATUS:** `NOT_STARTED`
-- **Completed:** —
+- **STATUS:** `DONE`
+- **Completed:** 2026-09-24
 - **Do:** `profile/keywords.py` — overlap score between a posting and the derived
   skills. Simple, explainable, no BM25: normalised token overlap with weights for
   multi-word skills. Must report *which* skills matched, for the UI.
 - **Verify:** Test asserts a backend JD scores above the floor and a marketing JD below it.
+- **Notes:** Verified 9/9 (`-k keywords`), full suite 86/86. Contract 2 exactly:
+  `profile.keywords.overlap(text, skills) -> (score, matched)`, matched in skill
+  order, as given. Whole-token consecutive match after light folding (plural
+  `s`, `.js`, k8s/postgres/golang aliases); each skill counts once; multi-word
+  skills weigh 2, single 1. `go`/`c`/`r` match only capitalised or spelled out,
+  so "go-to-market" is not Go. Against the **real** derived skills: synthetic
+  backend JD 12, marketing JD 0 (floor 2). Known limit: a skill the model
+  wrote with a filler word (`ci/cd pipelines`) will not match plain "CI/CD" -
+  fix such entries with `skills_remove`/`skills` in the overrides.
 
 ---
 
