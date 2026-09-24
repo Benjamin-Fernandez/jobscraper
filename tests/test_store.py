@@ -312,3 +312,39 @@ def test_store_orphan_application_relinks_when_its_posting_is_scraped():
     assert st.application(jid)["status"] == "applied"
     assert len(st.application_events(jid)) == 1
     assert st.relink_orphan_applications() == 0          # idempotent
+
+
+# ---------------- database review follow-ups ----------------
+
+def test_sync_careers_url_change_lifts_quarantine():
+    """A new URL is a new board: the old board's quarantine does not carry over."""
+    st = _synced(_entry())
+    cid = st.company_by_key("shopee").id
+    st.record_failure(cid, "gone", "404")
+    st.quarantine(cid, probation_due_run=9)
+    st.sync_watchlist([_entry(url="https://jobs.shopee.com")])
+    c = st.company_by_key("shopee")
+    assert c.quarantined_at is None and c.probation_due_run is None
+    assert c.last_error is None
+
+
+def test_store_stale_is_new_does_not_reset_first_seen():
+    st = _store(1)
+    cid = st.companies()[0].id
+    jid = _job(st, cid, run=1)
+    raw = RawJob(external_id="1", title="Software Engineer", url="https://x/1",
+                 location="Singapore")
+    st.upsert_job(jid, cid, raw, 5, True)          # caller wrongly says "new"
+    st.commit()
+    row = st.get_job(jid)
+    assert row["first_seen_run"] == 1 and row["last_seen_run"] == 5
+
+
+def test_store_same_second_redecision_yields_one_shortlist_row():
+    st = _store(1)
+    jid = _job(st, st.companies()[0].id)
+    st.save_decision(jid, 1, "h1", "reject", True, 0, "a", "m")
+    st.save_decision(jid, 1, "h2", "accept", True, 0, "b", "m")
+    st.conn.execute("UPDATE decisions SET decided_at = '2026-09-24T09:00:00'")
+    rows = st.accepted_jobs(1)
+    assert len(rows) == 1 and rows[0]["reason"] == "b"

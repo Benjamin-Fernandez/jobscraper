@@ -56,6 +56,8 @@ CREATE TABLE IF NOT EXISTS jobs (
 );
 CREATE INDEX IF NOT EXISTS idx_jobs_company ON jobs(company_id);
 CREATE INDEX IF NOT EXISTS idx_jobs_url ON jobs(url);
+CREATE INDEX IF NOT EXISTS idx_jobs_first_seen ON jobs(first_seen_run);
+CREATE INDEX IF NOT EXISTS idx_jobs_last_seen ON jobs(last_seen_run);
 
 CREATE TABLE IF NOT EXISTS prefilter (
     job_id TEXT NOT NULL,
@@ -66,6 +68,8 @@ CREATE TABLE IF NOT EXISTS prefilter (
     evaluated_at TEXT NOT NULL,
     PRIMARY KEY (job_id, profile_version, rules_hash)
 );
+CREATE INDEX IF NOT EXISTS idx_prefilter_rules
+    ON prefilter(profile_version, rules_hash, passed);
 
 CREATE TABLE IF NOT EXISTS decisions (
     job_id TEXT NOT NULL,
@@ -76,6 +80,8 @@ CREATE TABLE IF NOT EXISTS decisions (
     decided_at TEXT NOT NULL,
     PRIMARY KEY (job_id, profile_version, vital_hash)
 );
+CREATE INDEX IF NOT EXISTS idx_decisions_profile
+    ON decisions(profile_version, decision, decided_at);
 
 CREATE TABLE IF NOT EXISTS applications (
     job_id TEXT PRIMARY KEY,
@@ -198,8 +204,8 @@ class Store:
 
         - new key          -> insert; `last_scraped_at` NULL, so due next run
         - known key        -> update descriptive fields only; history untouched
-        - careers_url moved -> clear the cached resolution and the failure count:
-                             a new URL is a new board
+        - careers_url moved -> clear the cached resolution, failure count and
+                             quarantine: a new URL is a new board
         - key gone from YAML -> enabled = 0, never deleted: jobs, decisions and
                              applications still point at the row
         """
@@ -223,7 +229,9 @@ class Store:
                 self.conn.execute(
                     """UPDATE companies SET name = ?, careers_url = ?, enabled = ?,
                        provider = ?, slug = ?, feed_url = ?, resolve_method = NULL,
-                       resolved_at = NULL, consecutive_failures = 0
+                       resolved_at = NULL, consecutive_failures = 0,
+                       last_error_class = NULL, last_error = NULL,
+                       quarantined_at = NULL, probation_due_run = NULL
                        WHERE id = ?""",
                     (e.name, e.careers_url, int(bool(e.enabled)), e.provider,
                      e.slug, e.feed_url, row.id))
@@ -465,11 +473,16 @@ class Store:
         Does not commit: a run persists a company's jobs as one batch.
         """
         if is_new:
+            # ON CONFLICT rather than INSERT OR REPLACE: should the caller's
+            # "is new" ever be stale, a replace would silently reset
+            # first_seen_run; this degrades to "seen again" instead.
             self.conn.execute(
-                """INSERT OR REPLACE INTO jobs (job_id, company_id, external_id,
+                """INSERT INTO jobs (job_id, company_id, external_id,
                    title, location, url, posted_at, jd_hash, jd_text, vital_text,
                    first_seen_run, last_seen_run, closed_at)
-                   VALUES (?,?,?,?,?,?,?,?,?,NULL,?,?,NULL)""",
+                   VALUES (?,?,?,?,?,?,?,?,?,NULL,?,?,NULL)
+                   ON CONFLICT (job_id) DO UPDATE SET
+                       last_seen_run = excluded.last_seen_run, closed_at = NULL""",
                 (job_id, company_id, raw.external_id, raw.title, raw.location,
                  raw.url, raw.posted_at, raw.jd_hash(), raw.description,
                  run_no, run_no))
@@ -580,9 +593,13 @@ class Store:
                  JOIN jobs j       ON j.job_id = d.job_id
                  JOIN companies co ON co.id = j.company_id
                 WHERE d.profile_version = ? AND d.decision = 'accept'
-                  AND d.decided_at = (SELECT MAX(d2.decided_at) FROM decisions d2
-                                       WHERE d2.job_id = d.job_id
-                                         AND d2.profile_version = d.profile_version)
+                  -- Newest wins; rowid breaks a same-second tie (SQLite's
+                  -- implicit row id - a Postgres port would use a serial).
+                  AND d.rowid = (SELECT d2.rowid FROM decisions d2
+                                  WHERE d2.job_id = d.job_id
+                                    AND d2.profile_version = d.profile_version
+                                  ORDER BY d2.decided_at DESC, d2.rowid DESC
+                                  LIMIT 1)
                 ORDER BY j.job_id""", (profile_version,))]
 
     # ---------------- applications ----------------
