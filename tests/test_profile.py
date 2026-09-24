@@ -137,3 +137,318 @@ def test_resume_force_extracts_even_when_unchanged():
     with _Counter() as counter:
         again = ri.load_resume(d, previous_hash=first.source_hash, force=True)
     assert counter.calls == 1 and again.changed and again.text
+
+
+# ----------------------------------------------------- M2-T2: derived profile
+
+import contextlib  # noqa: E402
+import io  # noqa: E402
+import json  # noqa: E402
+
+import yaml  # noqa: E402
+
+from jobscraper.backends import Completion, OffBackend  # noqa: E402
+from jobscraper.config import ROOT, Config  # noqa: E402
+
+MODEL_ANSWER = {
+    "summary": "New graduate   backend engineer with Python and Java.",
+    "skills": ["Python", "Java", "Spring Boot", "kubernetes", "python", " PostgreSQL "],
+    "years_experience": 0,
+    "graduation": "2026-08",
+    "target_titles": ["Software Engineers", "Backend Engineer",
+                      "site reliability engineer", "DevOps Engineer"],
+    "title_aliases": {"SRE": "site reliability engineer",
+                      "swe": "software engineer",
+                      "pm": "product manager"},
+}
+
+
+class StubBackend:
+    """Stands in for `claude -p`. Records every call; answers like a model would,
+    fenced JSON included, so the parser is exercised too."""
+
+    name = "stub"
+    available = True
+    unavailable_reason = ""
+
+    def __init__(self, answer=None, raw: str | None = None):
+        self.answer = MODEL_ANSWER if answer is None else answer
+        self.raw = raw
+        self.calls: list[tuple[str, str, str]] = []
+
+    def complete(self, model, system, user, max_tokens=4096):
+        self.calls.append((model, system, user))
+        text = self.raw if self.raw is not None else (
+            "```json\n" + json.dumps(self.answer) + "\n```")
+        return Completion(text=text, input_tokens=10, output_tokens=10)
+
+
+def _quiet(*_a, **_k):
+    pass
+
+
+def _profile_dir() -> tuple[Path, Config]:
+    d = _tmp()
+    fixture.make_pdf(d / "resume.pdf")
+    cfg = Config({"paths": {"profile": str(d / "profile.derived.yaml"),
+                            "profile_overrides": str(d / "overrides.yaml"),
+                            "resume_dir": str(d)},
+                  "budget": {"model": "stub-model"}})
+    return d, cfg
+
+
+def _derived(cfg: Config) -> dict:
+    return yaml.safe_load(cfg.profile_path.read_text(encoding="utf-8"))
+
+
+def test_profile_derive_writes_the_spec_yaml():
+    d, cfg = _profile_dir()
+    stub = StubBackend()
+    res = ri.ingest(cfg, backend=stub, log=_quiet)
+    assert res.status == "derived"
+    assert len(stub.calls) == 1, "exactly one model call"
+    model, system, user = stub.calls[0]
+    assert model == "stub-model"
+    assert "Alex Tan" in user, "the resume text is what the model reads"
+    # Sent bare, haiku wrote a Markdown write-up of the resume instead of JSON.
+    assert "<resume>" in user and "JSON" in user.split("</resume>")[-1], \
+        "the output contract must be restated after the resume"
+    assert "plausibly" in system and "lowercase" in system and "singular" in system
+
+    y = _derived(cfg)
+    assert y["source_file"] == "resume.pdf"
+    assert y["source_hash"] == ri.file_hash(d / "resume.pdf")
+    assert y["profile_version"] == 1
+    assert y["summary"] == "New graduate backend engineer with Python and Java."
+    assert y["skills"] == ["python", "java", "spring boot", "kubernetes", "postgresql"]
+    assert y["target_titles"] == ["software engineer", "backend engineer",
+                                  "site reliability engineer", "devops engineer"]
+    assert y["title_aliases"] == {"sre": "site reliability engineer",
+                                  "swe": "software engineer"}, \
+        "an alias pointing at a title we do not target is dropped"
+    assert y["years_experience"] == 0 and str(y["graduation"]) == "2026-08"
+    assert y["parsed_at"]
+
+
+def test_profile_model_quirks_are_normalised():
+    """Seen live from haiku: graduation as an object, and skills bundled as
+    'a/b' or 'x (y, z)' - forms a keyword matcher can never hit."""
+    _d, cfg = _profile_dir()
+    answer = dict(MODEL_ANSWER,
+                  graduation={"degree": "BEng", "expected_date": "August 2026"},
+                  skills=["TypeScript/JavaScript", "CI/CD", "TCP/IP networking",
+                          "authentication (OAuth2, Okta SSO)", "python"])
+    ri.ingest(cfg, backend=StubBackend(answer), log=_quiet)
+    y = _derived(cfg)
+    assert str(y["graduation"]) == "2026-08"
+    assert y["skills"] == ["typescript", "javascript", "ci/cd", "tcp/ip networking",
+                           "authentication", "oauth2", "okta sso", "python"]
+
+
+def test_profile_model_alias_shapes_are_tolerated():
+    """Aliases are secondary. A model answering them as a list must not sink the
+    whole profile; the hand-edited overrides file stays strict."""
+    for shape in ([{"alias": "SRE", "title": "site reliability engineer"}],
+                  [["sre", "site reliability engineer"]],
+                  "sre means site reliability engineer"):
+        _d, cfg = _profile_dir()
+        ri.ingest(cfg, backend=StubBackend(dict(MODEL_ANSWER, title_aliases=shape)),
+                  log=_quiet)
+        got = _derived(cfg)["title_aliases"]
+        assert got in ({"sre": "site reliability engineer"}, {}), (shape, got)
+
+
+def test_profile_graduation_forms():
+    for raw, want in (("2026-08", "2026-08"), ("Aug 2026", "2026-08"),
+                      ("August 2026", "2026-08"), ("2026", "2026"),
+                      ("sometime", None), (None, None)):
+        assert ri._graduation(raw) == want, (raw, ri._graduation(raw))
+
+
+def test_profile_unchanged_resume_makes_no_model_call():
+    _d, cfg = _profile_dir()
+    stub = StubBackend()
+    ri.ingest(cfg, backend=stub, log=_quiet)
+    with _Counter() as counter:
+        res = ri.ingest(cfg, backend=stub, log=_quiet)
+    assert res.status == "unchanged"
+    assert len(stub.calls) == 1 and counter.calls == 0
+    assert _derived(cfg)["profile_version"] == 1
+
+
+def test_profile_unchanged_resume_says_so():
+    _d, cfg = _profile_dir()
+    ri.ingest(cfg, backend=StubBackend(), log=_quiet)
+    said: list[str] = []
+    ri.ingest(cfg, backend=StubBackend(), log=said.append)
+    assert any("resume unchanged" in s for s in said), said
+
+
+def test_profile_version_bumps_when_the_resume_changes_the_profile():
+    d, cfg = _profile_dir()
+    ri.ingest(cfg, backend=StubBackend(), log=_quiet)
+    fixture.make_pdf(d / "resume.pdf", lines=["Alex Tan", "Now knows Rust"])
+    answer = dict(MODEL_ANSWER, skills=["python", "rust"])
+    res = ri.ingest(cfg, backend=StubBackend(answer), log=_quiet)
+    assert res.status == "derived" and res.profile_version == 2
+    assert _derived(cfg)["profile_version"] == 2
+
+
+def test_profile_refresh_with_identical_result_keeps_the_version():
+    """A version bump re-decides the whole corpus (Q3). Re-deriving the same
+    profile must not pay that cost for nothing."""
+    _d, cfg = _profile_dir()
+    ri.ingest(cfg, backend=StubBackend(), log=_quiet)
+    stub = StubBackend()
+    res = ri.ingest(cfg, backend=stub, force=True, log=_quiet)
+    assert len(stub.calls) == 1, "force re-derives"
+    assert res.profile_version == 1
+
+
+def test_profile_bad_model_output_writes_nothing():
+    _d, cfg = _profile_dir()
+    for raw in ("Sorry, I cannot help with that.",
+                json.dumps({"summary": "x", "skills": []}),
+                json.dumps(dict(MODEL_ANSWER, target_titles="engineer"))):
+        try:
+            ri.ingest(cfg, backend=StubBackend(raw=raw), log=_quiet)
+        except ri.ProfileError:
+            assert not cfg.profile_path.exists()
+            continue
+        raise AssertionError(f"should refuse model output: {raw!r}")
+
+
+def test_profile_unavailable_backend_is_a_clear_error():
+    _d, cfg = _profile_dir()
+    try:
+        ri.ingest(cfg, backend=OffBackend("budget.backend is `off`"), log=_quiet)
+    except ri.ProfileError as exc:
+        assert "off" in str(exc)
+        return
+    raise AssertionError("an unavailable backend must raise ProfileError")
+
+
+def _write_overrides(cfg: Config, text: str) -> None:
+    cfg.profile_overrides_path.write_text(text, encoding="utf-8")
+
+
+def test_profile_overrides_merge_additively():
+    _d, cfg = _profile_dir()
+    ri.ingest(cfg, backend=StubBackend(), log=_quiet)
+    _write_overrides(cfg, """
+skills: [Rust, python]
+skills_remove: [java]
+target_titles: [Backend Developers]
+target_titles_remove: [devops engineer]
+title_aliases: {be: backend engineer}
+summary: "My own words."
+years_experience: 1
+""")
+    p = ri.load_derived_profile(cfg)
+    assert p["skills"] == ["python", "spring boot", "kubernetes", "postgresql", "rust"]
+    assert p["target_titles"] == ["software engineer", "backend engineer",
+                                  "site reliability engineer", "backend developer"]
+    assert "devops engineer" not in p["target_titles"], "target_titles_remove drops it"
+    assert p["title_aliases"]["be"] == "backend engineer"
+    assert p["title_aliases"]["sre"] == "site reliability engineer"
+    assert p["summary"] == "My own words." and p["years_experience"] == 1
+    # the generated file itself is untouched by the merge
+    assert "devops engineer" in _derived(cfg)["target_titles"]
+
+
+def test_profile_contract_shape():
+    """Contract 1 (PRD 0.6): what Lanes A and B build against."""
+    _d, cfg = _profile_dir()
+    ri.ingest(cfg, backend=StubBackend(), log=_quiet)
+    p = ri.load_derived_profile(cfg)
+    assert isinstance(p["profile_version"], int)
+    assert isinstance(p["summary"], str) and p["summary"]
+    assert isinstance(p["years_experience"], int)
+    for key in ("skills", "target_titles"):
+        assert p[key] and all(isinstance(s, str) for s in p[key])
+    assert all(isinstance(k, str) and isinstance(v, str)
+               for k, v in p["title_aliases"].items())
+
+
+def test_profile_overrides_unknown_key_is_refused():
+    """A typo in a hand-edited file must not be shrugged off."""
+    _d, cfg = _profile_dir()
+    ri.ingest(cfg, backend=StubBackend(), log=_quiet)
+    _write_overrides(cfg, "skils: [rust]\n")
+    try:
+        ri.load_derived_profile(cfg)
+    except ri.ProfileError as exc:
+        assert "skils" in str(exc)
+        return
+    raise AssertionError("unknown override key must raise")
+
+
+def test_profile_overrides_cannot_set_the_version():
+    _d, cfg = _profile_dir()
+    ri.ingest(cfg, backend=StubBackend(), log=_quiet)
+    _write_overrides(cfg, "profile_version: 99\n")
+    try:
+        ri.load_derived_profile(cfg)
+    except ri.ProfileError as exc:
+        assert "profile_version" in str(exc)
+        return
+    raise AssertionError("profile_version is engine-owned")
+
+
+def test_profile_overrides_edit_bumps_version_without_a_model_call():
+    _d, cfg = _profile_dir()
+    stub = StubBackend()
+    ri.ingest(cfg, backend=stub, log=_quiet)
+    _write_overrides(cfg, "skills: [rust]\n")
+    res = ri.ingest(cfg, backend=stub, log=_quiet)
+    assert len(stub.calls) == 1, "an overrides edit needs no model"
+    assert res.profile_version == 2
+    assert ri.load_derived_profile(cfg)["profile_version"] == 2
+    # a comment-only edit changes nothing that matters
+    _write_overrides(cfg, "# just a note\nskills: [rust]\n")
+    assert ri.ingest(cfg, backend=stub, log=_quiet).profile_version == 2
+
+
+def test_profile_bump_by_hand():
+    _d, cfg = _profile_dir()
+    ri.ingest(cfg, backend=StubBackend(), log=_quiet)
+    assert ri.bump_profile_version(cfg) == 2
+    assert ri.load_derived_profile(cfg)["profile_version"] == 2
+
+
+def test_profile_missing_derived_file_is_a_clear_error():
+    _d, cfg = _profile_dir()
+    try:
+        ri.load_derived_profile(cfg)
+    except ri.ProfileError as exc:
+        assert "profile --refresh" in str(exc)
+        return
+    raise AssertionError("no derived profile must raise ProfileError")
+
+
+def test_profile_committed_overrides_template_is_a_no_op():
+    """The template shipped in config/ must load, and change nothing."""
+    tmpl = ROOT / "config" / "profile.overrides.yaml"
+    assert tmpl.is_file()
+    _d, cfg = _profile_dir()
+    ri.ingest(cfg, backend=StubBackend(), log=_quiet)
+    before = ri.load_derived_profile(cfg)
+    _write_overrides(cfg, tmpl.read_text(encoding="utf-8"))
+    after = ri.load_derived_profile(cfg)
+    assert before == after
+
+
+def test_profile_cli_show_prints_the_profile():
+    from jobscraper import cli
+
+    d, cfg = _profile_dir()
+    ri.ingest(cfg, backend=StubBackend(), log=_quiet)
+    cfg_file = d / "config.yaml"
+    cfg_file.write_text(yaml.safe_dump(cfg.raw), encoding="utf-8")
+    out = io.StringIO()
+    with contextlib.redirect_stdout(out):
+        rc = cli.main(["--config", str(cfg_file), "profile", "--show"])
+    text = out.getvalue()
+    assert rc == 0, text
+    assert "profile_version: 1" in text
+    assert "spring boot" in text and "site reliability engineer" in text
