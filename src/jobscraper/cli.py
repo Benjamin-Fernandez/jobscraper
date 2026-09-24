@@ -470,6 +470,44 @@ def cmd_filter(args) -> int:
     return 0
 
 
+def cmd_profile(args) -> int:
+    """Lane D's verb (PRD 0.6): build, show or bump the resume-derived profile.
+
+    Bare `profile` re-derives only if the resume or overrides changed, then
+    shows. `--show` only reads; `--refresh` forces the model call; `--bump`
+    invalidates every cached decision without re-deriving.
+    """
+    from .profile import resume_ingest as ri
+
+    cfg = load_config(getattr(args, "config", None))
+    try:
+        if args.bump:
+            print(f"profile_version bumped to {ri.bump_profile_version(cfg)}")
+        elif args.refresh or not args.show:
+            ri.ingest(cfg, force=args.refresh)
+        p = ri.load_derived_profile(cfg)
+    except (ri.ProfileError, ri.ResumeError) as exc:
+        print(f"profile: {exc}", file=sys.stderr)
+        return 1
+
+    print(BAR)
+    print(f"profile          {cfg.profile_path}")
+    print(f"overrides        {cfg.profile_overrides_path}")
+    print(f"profile_version: {p['profile_version']}")
+    print(f"years_experience: {p['years_experience']}   "
+          f"graduation: {p.get('graduation') or '-'}")
+    print(f"summary: {p['summary']}")
+    print(f"skills ({len(p['skills'])}): {', '.join(p['skills'])}")
+    print(f"target_titles ({len(p['target_titles'])}):")
+    for t in p["target_titles"]:
+        print(f"  - {t}")
+    if p["title_aliases"]:
+        print("title_aliases: " + ", ".join(
+            f"{k} -> {v}" for k, v in sorted(p["title_aliases"].items())))
+    print(BAR)
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="jobscraper",
                                 description="Fortnightly careers-site monitor")
@@ -546,6 +584,16 @@ def build_parser() -> argparse.ArgumentParser:
                                             "posting, beside the stored verdict")
     fe.add_argument("job_id", help="job id, or the posting's URL")
     flt.set_defaults(fn=cmd_filter)
+
+    prof = sub.add_parser("profile",
+                          help="build or show the profile derived from your resume")
+    prof.add_argument("--show", action="store_true",
+                      help="print the merged profile; never calls the model")
+    prof.add_argument("--refresh", action="store_true",
+                      help="re-derive from the resume even if it is unchanged")
+    prof.add_argument("--bump", action="store_true",
+                      help="bump profile_version: every cached decision goes stale")
+    prof.set_defaults(fn=cmd_profile)
     return p
 
 

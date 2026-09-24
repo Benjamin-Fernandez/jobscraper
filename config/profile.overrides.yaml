@@ -1,0 +1,32 @@
+# Your corrections to the profile derived from your resume (PRD section 8.3[1]).
+#
+# data/profile.derived.yaml is GENERATED: it is rewritten whenever the resume
+# changes, so do not edit it. This file is never written by code - edit freely.
+# See what the merge produces with:   python -m jobscraper profile --show
+#
+# How each key merges with the generated profile:
+#   skills, target_titles     ADDITIVE - extend the generated lists.
+#   skills_remove,            drop generated (or added) entries you disagree
+#   target_titles_remove      with. Match the lowercase form --show prints.
+#   title_aliases             merged; an entry here wins over a generated one.
+#   summary, years_experience,
+#   graduation                REPLACE the generated value when set.
+#
+# Titles are lowercase singular ("backend engineer"), like the generated ones.
+# An unknown key is an error, not a silent no-op - a typo will not be ignored.
+#
+# Changing what this file says (comments do not count) bumps profile_version on
+# the next run, which makes every cached decision stale so postings are
+# re-judged against the corrected profile.
+
+skills: []
+skills_remove: []
+
+target_titles: []
+target_titles_remove: []
+
+title_aliases: {}
+
+# summary: "One paragraph, <=80 words, used verbatim in the decide prompt."
+# years_experience: 0
+# graduation: 2026-08

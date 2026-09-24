@@ -1345,18 +1345,27 @@ Legend: `STATUS` · `Completed` (date) · `Verify` (command that proves it) · `
   mis-filters every posting downstream. `.gitignore` should exclude `data/resume.*`.
 
 #### M2-T1 · Resume text extraction
-- **STATUS:** `NOT_STARTED`
-- **Completed:** —
+- **STATUS:** `DONE`
+- **Completed:** 2026-09-24
 - **Do:** `profile/resume_ingest.py` — find `data/resume.pdf|docx`, extract text
   (`pypdf`, `python-docx`), compute SHA-256, short-circuit when unchanged.
   Generate the test fixture by writing a 1-page PDF with `pypdf`/`reportlab` in
   `tests/fixtures/make_resume_fixture.py` — do **not** commit the real resume.
 - **Verify:** `python tests/run_tests.py -k resume` passes against the generated
   fixture; running ingest twice performs extraction once (assert via a call counter).
+- **Notes:** Verified 9/9 (`-k resume`), full suite 58/58. API:
+  `find_resume`, `file_hash` (`"sha256:<hex>"`), `extract_text`,
+  `load_resume(dir, previous_hash, force) -> ResumeText`; unchanged hash returns
+  `changed=False` with no extraction (`test_resume_unchanged_is_extracted_once`).
+  DOCX extraction includes table cells; an empty text layer (scanned PDF) raises
+  `ResumeError` rather than deriving a profile from nothing. The fixture PDF is
+  hand-written PDF syntax, read back by pypdf - **no reportlab dependency** - and
+  both fixtures are generated into a temp dir at test time; nothing binary is
+  committed. Real `data/resume.pdf` extracts (5.6k chars).
 
 #### M2-T2 · Derived profile via one cheap model call
-- **STATUS:** `NOT_STARTED`
-- **Completed:** —
+- **STATUS:** `DONE`
+- **Completed:** 2026-09-24
 - **Do:** Resume text → `data/profile.derived.yaml` per §8.3[1]. Merge
   `config/profile.overrides.yaml` on top. Bumping `profile_version` must invalidate
   cached decisions.
@@ -1366,14 +1375,44 @@ Legend: `STATUS` · `Completed` (date) · `Verify` (command that proves it) · `
   additively, and that `target_titles_remove` drops a generated entry.
 - **Notes:** The cache-key assertion belongs to M4-T3, which is where the decision
   cache is built — do not try to verify it here.
+  **Verified 2026-09-24:** 19 stub-backend tests in `tests/test_profile.py`
+  (full suite 77/77), and a live run against the real resume via `claude -p`
+  (haiku): `profile --show` prints 51 skills, 9 target titles, `profile_version: 1`.
+  Contract 1 = `profile.resume_ingest.load_derived_profile(cfg)`; read-only, never
+  calls the model — the pipeline calls `ingest(cfg)` first (a no-op unless
+  something changed). CLI: `profile` (ingest if changed, then show), `--show`
+  (read only), `--refresh` (force the model call), `--bump`.
+  **`profile_version`** is engine-owned and only rises: on a re-derive whose
+  content differs, on an overrides *content* change (no model call; comments do
+  not count), or by `profile --bump`. An identical re-derive keeps the version.
+  M4-T3 just keys on the merged profile's `profile_version`.
+  **Extensions beyond 8.3[1]:** `skills_remove` (mirror of `target_titles_remove`);
+  unknown override keys and `profile_version` in overrides are errors.
+  **Live-model findings, now handled:** sent bare, haiku wrote Markdown instead
+  of JSON (resume is now fenced, contract restated after it); `graduation` came
+  back as an object and `title_aliases` as a list (both coerced); bundled skills
+  like `typescript/javascript` are split; invented titles (`backend software
+  engineer`) are prevented by anchoring the prompt to common posting titles.
+  **Open:** Q3 (re-decide on bump) left as specced. The model still reports
+  `years_experience: 1` for an all-internship resume — correct it in
+  `config/profile.overrides.yaml` if wrong.
 
 #### M2-T3 · Keyword/skill matcher
-- **STATUS:** `NOT_STARTED`
-- **Completed:** —
+- **STATUS:** `DONE`
+- **Completed:** 2026-09-24
 - **Do:** `profile/keywords.py` — overlap score between a posting and the derived
   skills. Simple, explainable, no BM25: normalised token overlap with weights for
   multi-word skills. Must report *which* skills matched, for the UI.
 - **Verify:** Test asserts a backend JD scores above the floor and a marketing JD below it.
+- **Notes:** Verified 9/9 (`-k keywords`), full suite 86/86. Contract 2 exactly:
+  `profile.keywords.overlap(text, skills) -> (score, matched)`, matched in skill
+  order, as given. Whole-token consecutive match after light folding (plural
+  `s`, `.js`, k8s/postgres/golang aliases); each skill counts once; multi-word
+  skills weigh 2, single 1. `go`/`c`/`r` match only capitalised or spelled out,
+  so "go-to-market" is not Go. Against the **real** derived skills: synthetic
+  backend JD 12, marketing JD 0 (floor 2). Known limit: a skill the model
+  wrote with a filler word (`ci/cd pipelines`) will not match plain "CI/CD" -
+  fix such entries with `skills_remove`/`skills` in the overrides.
 
 ---
 
