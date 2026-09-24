@@ -302,20 +302,6 @@ class Store:
             "SELECT consecutive_failures FROM companies WHERE id = ?", (cid,)).fetchone()
         return int(r[0])
 
-    def rollback_failures(self, cids: Iterable[int]) -> None:
-        """Global circuit breaker: undo this run's failure increments.
-
-        When most of a batch fails at once the fault is local (network down),
-        not the companies', so nobody should creep towards quarantine for it.
-        """
-        for cid in cids:
-            self.conn.execute(
-                """UPDATE companies SET consecutive_failures =
-                   CASE WHEN consecutive_failures > 0
-                        THEN consecutive_failures - 1 ELSE 0 END
-                   WHERE id = ?""", (cid,))
-        self.conn.commit()
-
     def quarantine(self, cid: int, probation_due_run: int) -> None:
         self.conn.execute(
             """UPDATE companies SET quarantined_at = ?, probation_due_run = ?
@@ -519,6 +505,41 @@ class Store:
             f"""SELECT j.*, co.name AS company FROM jobs j
                 JOIN companies co ON co.id = j.company_id
                 WHERE j.{col} = ? ORDER BY j.job_id""", (run_no,))]
+
+    _JOB_WITH_COMPANY = """SELECT j.*, co.name AS company, co.key AS company_key,
+                                  co.provider, co.slug, co.feed_url, co.careers_url
+                             FROM jobs j JOIN companies co ON co.id = j.company_id"""
+
+    def jobs_pending_prefilter(self, profile_version: int,
+                               rules_hash: str) -> list[dict[str, Any]]:
+        """Open postings with no verdict for these rules and this profile.
+
+        Not "this run's new postings": anything unevaluated qualifies, so a
+        rules edit (new rules_hash) re-checks the whole open corpus for free,
+        and a run that died before its prefilter is caught up by the next.
+        """
+        return [dict(r) for r in self.conn.execute(
+            self._JOB_WITH_COMPANY + """
+             WHERE j.closed_at IS NULL
+               AND NOT EXISTS (SELECT 1 FROM prefilter p
+                                WHERE p.job_id = j.job_id AND p.profile_version = ?
+                                  AND p.rules_hash = ?)
+             ORDER BY j.job_id""", (profile_version, rules_hash))]
+
+    def jobs_passed_prefilter(self, profile_version: int,
+                              rules_hash: str) -> list[dict[str, Any]]:
+        """Open postings the current rules let through: the decide stage's input."""
+        return [dict(r) for r in self.conn.execute(
+            self._JOB_WITH_COMPANY + """
+              JOIN prefilter p ON p.job_id = j.job_id
+             WHERE j.closed_at IS NULL AND p.passed = 1
+               AND p.profile_version = ? AND p.rules_hash = ?
+             ORDER BY j.job_id""", (profile_version, rules_hash))]
+
+    def set_description(self, job_id: str, text: str) -> None:
+        """Store a description fetched after the listing (hydration)."""
+        self.conn.execute("UPDATE jobs SET jd_text = ? WHERE job_id = ?", (text, job_id))
+        self.conn.commit()
 
     def set_vital(self, job_id: str, vital_text: str) -> None:
         self.conn.execute(

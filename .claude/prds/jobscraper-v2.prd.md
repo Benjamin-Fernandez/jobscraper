@@ -1701,8 +1701,30 @@ Legend: `STATUS` · `Completed` (date) · `Verify` (command that proves it) · `
 ### M5 — Shortlist
 
 #### M5-T1 · Shortlist writer
-- **STATUS:** `NOT_STARTED`
-- **Completed:** —
+- **STATUS:** `DONE`
+- **Completed:** 2026-09-24 — `tests/test_shortlist.py` 5/5: delete + regenerate
+  is byte-identical modulo `generated_at`; no `status`/`applied`/`applied_at` key
+  even with an application recorded (D-5); closed roles kept with
+  `"closed": true` (Q4); order `(run_no DESC, company ASC, id ASC)`, runs
+  `run_no DESC`. Written atomically (tmp + `os.replace`) so the web app never
+  reads half a file. `runs` lists `ok` runs only.
+  **Stages [1] and [3]–[6] are now wired into `pipeline.run`** (`_funnel`):
+  resume ingest (no-op unless the resume changed) → prefilter over every open
+  posting lacking a verdict for the current `(profile_version, rules_hash)` →
+  descriptions hydrated **only for postings that already passed title +
+  location** (v1's discipline), then re-checked → vital extract → decide (cache
+  first; skipped with an `awaiting_model` count if the backend is off) →
+  shortlist. Selection is by *what is missing*, not by run number, so a rules
+  edit re-checks the corpus and a failed model call is retried next run.
+  `stats_json` now carries the §8.4 metric keys. `-k pipeline` 11/11 (3 new
+  funnel tests with a stub model), full suite 191/191.
+  **Incident, fixed:** the first wiring ran the existing pipeline tests against
+  the *real* `claude -p` backend and the real `data/shortlist.json`, because the
+  tests used the live config. Stopped within ~2 minutes; the shortlist it wrote
+  held 0 jobs and has been regenerated from the real DB. The pipeline tests are
+  now hermetic (temp paths, a fixed profile, `OffBackend` by default).
+  **Not built:** `matched_skills` on shortlist jobs (the Inbox renders it if
+  present; §8.3[6] does not list it) and per-company `coverage.accepted_count`.
 - **Do:** `shortlist.py` writes `data/shortlist.json` per §8.3[6]. Regenerated,
   never hand-edited, never holds application status (D-5). **Deterministic order:**
   `jobs` sorted by `(run_no DESC, company ASC, id ASC)`; `runs` by `run_no DESC`.

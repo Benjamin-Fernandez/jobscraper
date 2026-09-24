@@ -14,6 +14,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from jobscraper import pipeline
+from jobscraper.backends import Backend, Completion, OffBackend
 from jobscraper.config import load_config
 from jobscraper.models import FetchOutcome, RawJob
 from jobscraper.scrape.discovery import Resolution
@@ -31,9 +32,19 @@ def _world(n=12):
         f"    provider: greenhouse\n    slug: co{i:02d}\n" for i in range(1, n + 1)),
         encoding="utf-8")
     cfg = load_config()
+    # Hermetic: every path a run writes points into the temp dir, never data/.
     cfg.raw["paths"]["watchlist"] = str(wl)
+    cfg.raw["paths"]["shortlist"] = str(tmp / "shortlist.json")
+    cfg.raw["paths"]["profile"] = str(tmp / "profile.derived.yaml")
+    cfg.raw["paths"]["db"] = str(tmp / "t.db")
     cfg.raw["run"]["max_workers"] = 2
     return cfg, Store(tmp / "t.db")
+
+
+PROFILE = {"profile_version": 1, "summary": "new grad backend engineer",
+           "skills": ["python", "kafka", "kubernetes"],
+           "target_titles": ["backend engineer", "software engineer"],
+           "title_aliases": {}, "years_experience": 0}
 
 
 def _jobs(company, n=2):
@@ -64,6 +75,9 @@ class _Client:
 
 def _run(cfg, st, fetcher=ok_fetcher, **kw):
     kw.setdefault("now", T0)
+    # Never the real transport: a test must not spend the user's model quota.
+    kw.setdefault("backend", OffBackend("tests"))
+    kw.setdefault("profile", PROFILE)
     return pipeline.run(cfg, st, fetcher=fetcher, client=_Client(),
                         resolver=lambda c, co: Resolution(None, None, None, "stub"), verbose=False, **kw)
 
@@ -171,3 +185,78 @@ def test_pipeline_relinks_a_migrated_application():
     assert rep.relinked == 1
     assert st.application("v1-id") is None
     assert [a["status"] for a in st.applications()] == ["applied"]
+
+
+
+# ---------------- stages [3]-[6] wired (M4/M5) ----------------
+
+class _AcceptSingapore(Backend):
+    """Accepts Singapore postings, rejects the rest; counts its calls."""
+    name = "stub"
+
+    def __init__(self):
+        self.calls = 0
+
+    @property
+    def available(self):
+        return True
+
+    def complete(self, model, system, user, max_tokens=4096):
+        import json
+        self.calls += 1
+        out, cur = [], None
+        for line in user.splitlines():
+            if line.startswith("<posting id="):
+                cur = line.split('"')[1]
+            elif line.startswith("LOCATION:") and cur:
+                sg = "singapore" in line.lower()
+                out.append({"id": cur, "decision": "accept" if sg else "reject",
+                            "is_singapore": sg, "yoe_min": 0, "reason": "stub"})
+                cur = None
+        return Completion(json.dumps({"decisions": out}), 100, 10)
+
+
+def mixed_fetcher(client, company):
+    jobs = [RawJob(external_id=f"{company.key}-sg", title="Backend Engineer",
+                   url=f"https://{company.key}.example.com/jobs/sg",
+                   location="Singapore",
+                   description="Build Python services on Kafka and Kubernetes."),
+            RawJob(external_id=f"{company.key}-us", title="Backend Engineer",
+                   url=f"https://{company.key}.example.com/jobs/us",
+                   location="Austin, TX, United States",
+                   description="Python and Kafka."),
+            RawJob(external_id=f"{company.key}-sr", title="Senior Backend Engineer",
+                   url=f"https://{company.key}.example.com/jobs/sr",
+                   location="Singapore", description="Python.")]
+    return FetchOutcome(company.id, True, jobs=jobs, provider=company.provider)
+
+
+def test_pipeline_funnel_shortlists_only_what_survives_rules_and_model():
+    cfg, st = _world(2)
+    model = _AcceptSingapore()
+    rep = _run(cfg, st, fetcher=mixed_fetcher, backend=model)
+    s = rep.stats
+    assert s["prefilter_evaluated"] == 6 and s["prefilter_passed"] == 2
+    assert s["prefilter_rejected_by_rule"] == {"location_explicit": 2, "title_deny": 2}
+    assert s["judged"] == 2 and model.calls == 1
+    import json
+    doc = json.loads(Path(cfg.shortlist_path).read_text(encoding="utf-8"))
+    assert [j["url"].rsplit("/", 1)[1] for j in doc["jobs"]] == ["sg", "sg"]
+    assert "status" not in json.dumps(doc)             # D-5
+
+
+def test_pipeline_decisions_are_not_paid_for_twice():
+    cfg, st = _world(1)
+    model = _AcceptSingapore()
+    _run(cfg, st, fetcher=mixed_fetcher, backend=model)
+    _run(cfg, st, fetcher=mixed_fetcher, backend=model, now=shift(T0, days=15))
+    assert model.calls == 1
+
+
+def test_pipeline_without_a_model_leaves_survivors_waiting():
+    cfg, st = _world(1)
+    rep = _run(cfg, st, fetcher=mixed_fetcher)          # OffBackend
+    assert rep.stats["awaiting_model"] == 1 and "judged" not in rep.stats
+    later = _run(cfg, st, fetcher=mixed_fetcher, backend=_AcceptSingapore(),
+                 now=shift(T0, days=15))
+    assert later.stats["judged"] == 1                   # picked up next run

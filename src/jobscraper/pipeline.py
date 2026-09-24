@@ -28,9 +28,11 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from typing import Any, Callable, Optional
 
-from . import scheduler, watchlist
+from . import backends, decide, scheduler, shortlist, watchlist
+from . import filter as prefilter
 from .config import Config
-from .models import FetchOutcome, WatchedCompany
+from .models import FetchOutcome, RawJob, WatchedCompany
+from .profile import keywords, resume_ingest
 from .scrape import discovery
 from .scrape.adapters import get_adapter
 from .scrape.net import FetchError, HttpClient
@@ -91,7 +93,8 @@ def make_client(cfg: Config) -> HttpClient:
 def run(cfg: Config, store: Store, *, dry_run: bool = False,
         batch_size: Optional[int] = None, now: Optional[str] = None,
         fetcher: Fetcher = fetch_one, resolver: Optional[Resolver] = None,
-        client: Optional[HttpClient] = None, verbose: bool = True) -> RunReport:
+        client: Optional[HttpClient] = None, backend: Optional[backends.Backend] = None,
+        profile: Optional[dict[str, Any]] = None, verbose: bool = True) -> RunReport:
     """One run: sync, schedule, scrape, persist, stamp.
 
     `--dry-run` fetches and reports but writes nothing that a run produces -
@@ -100,8 +103,8 @@ def run(cfg: Config, store: Store, *, dry_run: bool = False,
     (The watchlist sync still runs: it reconciles configuration, is
     idempotent, and without it a just-added company would be invisible.)
 
-    `fetcher`, `resolver` and `client` exist so tests can run the whole
-    sequence without a network.
+    `fetcher`, `resolver`, `client`, `backend` and `profile` exist so tests
+    can run the whole sequence without a network or a model.
     """
     rc = cfg.run
     say = print if verbose else (lambda *a, **k: None)
@@ -155,6 +158,15 @@ def run(cfg: Config, store: Store, *, dry_run: bool = False,
                 except Exception as exc:     # a fetcher that broke its own contract
                     outcomes[c.id] = FetchOutcome(c.id, False, error_class="transient",
                                                   error=f"worker error: {exc}")
+
+        # One posting listed twice (overlapping pages) is one posting.
+        for c in resolved:
+            out = outcomes[c.id]
+            if out.ok:
+                uniq: dict[str, RawJob] = {}
+                for raw in out.jobs:
+                    uniq.setdefault(raw.job_id(c.id, c.provider or ""), raw)
+                out.jobs = list(uniq.values())
 
         failures = [c for c in resolved if not outcomes[c.id].ok]
         unhealthy = (len(failures) / max(len(resolved), 1)
@@ -240,7 +252,8 @@ def run(cfg: Config, store: Store, *, dry_run: bool = False,
         if rep.relinked:
             say(f"  linked {rep.relinked} earlier application(s) to their postings")
 
-        # ---- [3]-[6] prefilter, vital extract, decide, shortlist: M4-M5 ----
+        # ---- [1] profile, [3] prefilter, [4] extract, [5] decide, [6] shortlist ----
+        _funnel(cfg, store, rep, client, backend, profile, say)
 
         # ---- last: stamp the attempt and close the run ----
         if rep.status == "ok":
@@ -280,3 +293,124 @@ def _try_reresolve(client: HttpClient, store: Store, company: WatchedCompany,
         say(f"  ** re-resolved {company.name} -> {res.provider}")
         return True
     return False
+
+
+def _funnel(cfg: Config, store: Store, rep: RunReport, client: HttpClient,
+            backend: Optional[backends.Backend], profile: Optional[dict[str, Any]],
+            say) -> None:
+    """Stages [1] and [3]-[6], over everything still pending - not just this run.
+
+    Work is selected by what is missing, not by run number: postings with no
+    prefilter verdict for the current rules and profile, and survivors with no
+    decision for their current extract. So a rules edit re-checks the corpus, a
+    failed model call is retried next run, and a crash loses nothing - each
+    verdict is content-keyed and durable the moment it is written.
+    """
+    if profile is None:
+        try:
+            resume_ingest.ingest(cfg, log=say)
+            profile = resume_ingest.load_derived_profile(cfg)
+        except (resume_ingest.ProfileError, resume_ingest.ResumeError) as exc:
+            rep.message = (f"profile unavailable ({exc}); postings were stored and "
+                           "will be filtered on the next run that has one")
+            say(f"  !! {rep.message}")
+            return
+    ruleset = prefilter.load_rules(cfg.rules_path)
+    pv = int(profile.get("profile_version", 1))
+
+    # ---- [3] prefilter: free. Descriptions are fetched only for survivors ----
+    pending = store.jobs_pending_prefilter(pv, ruleset.hash)
+    rejected: dict[str, int] = {}
+    passed = hydrated = 0
+    for job in pending:
+        posting = {"title": job["title"], "location": job["location"],
+                   "description": job["jd_text"] or ""}
+        res = prefilter.evaluate(posting, ruleset, profile, keywords.overlap)
+        if res.passed and not posting["description"]:
+            text = _hydrate(client, store, job)
+            if text:
+                hydrated += 1
+                posting["description"] = text
+                res = prefilter.evaluate(posting, ruleset, profile, keywords.overlap)
+        store.save_prefilter(job["job_id"], pv, ruleset.hash, res.passed,
+                             res.reject_rule, res.reject_detail, res.overlap_score)
+        if res.passed:
+            passed += 1
+        else:
+            key = res.reject_rule or "?"
+            rejected[key] = rejected.get(key, 0) + 1
+    rep.stats.update(prefilter_evaluated=len(pending), prefilter_passed=passed,
+                     prefilter_rejected_by_rule=rejected, hydrated=hydrated)
+    say(f"  prefilter: {len(pending)} evaluated, {passed} passed"
+        + (f", {hydrated} descriptions fetched" if hydrated else ""))
+
+    # ---- [4] vital extract ----
+    limit = int(cfg.budget.get("vital_chars", 800))
+    postings = []
+    for job in store.jobs_passed_prefilter(pv, ruleset.hash):
+        vital = decide.vital_extract(job["title"] or "", job["location"] or "",
+                                     job["jd_text"] or "", limit=limit)
+        if vital != job["vital_text"]:
+            store.set_vital(job["job_id"], vital)
+        postings.append(decide.Posting(job["job_id"], job["title"] or "", vital))
+    sizes = sorted(len(p.vital_text) for p in postings)
+    if sizes:
+        rep.stats.update(vital_chars_p50=sizes[len(sizes) // 2],
+                         vital_chars_max=sizes[-1])
+
+    # ---- [5] decide: the only paid step ----
+    budget = cfg.budget
+    backend = backend or backends.build(budget)
+    if not budget.get("enable_llm", True) or not backend.available:
+        why = ("disabled in config" if not budget.get("enable_llm", True)
+               else backend.unavailable_reason or "no model transport")
+        rep.stats["awaiting_model"] = len(postings)
+        say(f"  decide: skipped ({why}); {len(postings)} postings wait for a model")
+    else:
+        def save(d: decide.Decision) -> None:
+            store.save_decision(d.job_id, pv, d.vital_hash, d.decision,
+                                d.is_singapore, d.yoe_min, d.reason, d.model)
+        _, ds = decide.decide(
+            postings, summary=str(profile.get("summary") or ""), backend=backend,
+            model=str(budget.get("model", "")),
+            lookup=lambda job_id, h: store.get_decision(job_id, pv, h), save=save,
+            batch_size=int(budget.get("decide_batch", 20)),
+            ceiling_years=int(ruleset.ceiling_years or 3),
+            max_consecutive_failures=int(budget.get("max_consecutive_failures", 3)))
+        rep.stats.update(judged=ds.judged, decisions_cached=ds.cached,
+                         undecided=ds.undecided, accepted_total=ds.accepted,
+                         rejected_by_postcondition=ds.rejected_by_postcondition,
+                         model_calls=ds.model_calls, input_tokens=ds.input_tokens,
+                         output_tokens=ds.output_tokens)
+        say(f"  decide: {ds.judged} judged in {ds.model_calls} call(s), "
+            f"{ds.cached} cached, {ds.undecided} undecided; "
+            f"{ds.input_tokens:,} tokens in")
+        for err in ds.errors[:3]:
+            say(f"  !! model: {err}")
+
+    # ---- [6] shortlist ----
+    doc = shortlist.write(store, cfg.shortlist_path, pv)
+    rep.stats["shortlisted"] = len(doc["jobs"])
+    say(f"  shortlist: {len(doc['jobs'])} roles -> {cfg.shortlist_path}")
+
+
+def _hydrate(client: HttpClient, store: Store, job: dict[str, Any]) -> str:
+    """Fetch a survivor's full description, when its listing came without one.
+
+    Only postings that already passed the title and location rules get here, so
+    no detail request is spent on a role the free rules would reject (v1's
+    discipline). A failure just leaves the posting description-less.
+    """
+    adapter = get_adapter(job["provider"])
+    company = store.get_company(job["company_id"])
+    if adapter is None or company is None:
+        return ""
+    raw = RawJob(external_id=job["external_id"] or "", title=job["title"] or "",
+                 url=job["url"] or "", location=job["location"] or "")
+    try:
+        adapter.hydrate(client, company, raw)
+    except Exception:           # an adapter bug must not sink the run
+        return ""
+    if raw.description:
+        store.set_description(job["job_id"], raw.description)
+    return raw.description

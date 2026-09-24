@@ -418,6 +418,9 @@ def cmd_filter(args) -> int:
         except ImportError:                   # Lane D's loader not merged yet
             profile = yaml.safe_load(cfg.profile_path.read_text(encoding="utf-8")) or {}
             profile_note += " (overrides not applied: profile loader not built yet)"
+        except RuntimeError as exc:           # ProfileError: malformed profile/overrides
+            print(f"cannot load the profile: {exc}", file=sys.stderr)
+            return 2
     else:
         uses_profile = [r.id for r in ruleset.rules if r.enabled and any(
             str(v).startswith("profile.") for k, v in r.spec.items()
