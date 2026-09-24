@@ -77,5 +77,9 @@ web:
   port: 8765
 
 applications:
-  # Ordered. Adding a status is a config change, not a migration (M8-T2).
+  # Ordered. Adding a status is a config change, not a migration (M8-T2):
+  # restart `web` and it is in the Applications dropdown (served by /api/stats).
+  # Keep `to_apply` and `applied` - the Inbox's "Mark applied" button writes
+  # `applied`. This list is not in rules.yaml, so editing it never
+  # invalidates stored prefilter verdicts.
   statuses: [to_apply, applied, interviewing, offer, rejected, withdrawn]

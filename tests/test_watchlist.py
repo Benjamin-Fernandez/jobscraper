@@ -219,3 +219,244 @@ def test_rendering_omits_defaults_so_a_minimal_entry_stays_minimal():
     assert "enabled:" not in text, "enabled is the default"
     assert "notes:" not in text
     assert text.count("\n") == 1, f"expected a two-line entry, got:\n{text}"
+
+
+# ---------------------------------------------------------------- M1-T5 verbs
+#
+# `add` and `disable` edit a hand-written file. The contract is that they change
+# only what they were asked to change: every comment, blank line, key order and
+# line ending elsewhere in the file comes through byte for byte.
+
+COMMENTED = """\
+# The companies JobScraper watches.
+#   a hand-written header the user cares about
+version: 1
+companies:
+  - name: Alpha
+    careers_url: https://alpha.example/careers   # trailing comment
+    provider: greenhouse
+    slug: alpha
+
+  # a comment between entries
+  - name: Beta
+    careers_url: https://beta.example/careers
+    enabled: true        # keep an eye on this one
+    notes: |
+      multi-line note
+      enabled: not a real key
+"""
+
+
+def _tmp_watchlist(text: str = COMMENTED, newline: str = "\n") -> Path:
+    p = Path(tempfile.mkdtemp()) / "watchlist.yaml"
+    p.write_bytes(text.replace("\n", newline).encode("utf-8"))
+    return p
+
+
+def _refused(fn, *args, needles=(), **kw) -> str:
+    try:
+        fn(*args, **kw)
+    except WatchlistError as exc:
+        for n in needles:
+            assert n in str(exc), f"message should mention {n!r}, got: {exc}"
+        return str(exc)
+    raise AssertionError(f"{fn.__name__}{args} should have been refused")
+
+
+def test_add_appends_a_minimal_entry_and_every_comment_survives():
+    """The M1-T5 Verify: add to a temp file, reload, new entry valid, comments kept."""
+    from jobscraper.watchlist import add_entry
+    p = _tmp_watchlist()
+    added = add_entry(p, "Jane Street",
+                      "https://www.janestreet.com/join-jane-street/open-roles/")
+    assert added.key == "jane-street"
+
+    after = p.read_text(encoding="utf-8")
+    assert after.startswith(COMMENTED), "the existing text must be untouched"
+    tail = after[len(COMMENTED):].strip("\n")
+    assert tail == ("  - name: Jane Street\n    careers_url: "
+                    "https://www.janestreet.com/join-jane-street/open-roles/"), (
+        f"expected a two-line minimal entry, got:\n{tail}")
+
+    entries = load(p)                              # re-validates the whole file
+    assert [e.key for e in entries] == ["alpha", "beta", "jane-street"]
+    assert entries[-1].enabled and entries[-1].provider is None
+    for comment in ("# The companies JobScraper watches.", "# trailing comment",
+                    "# a comment between entries", "# keep an eye on this one"):
+        assert comment in after
+
+
+def test_add_keeps_crlf_line_endings():
+    """The real file is CRLF on Windows checkouts; a mixed file is a noisy diff."""
+    from jobscraper.watchlist import add_entry
+    p = _tmp_watchlist(newline="\r\n")
+    original = p.read_bytes()
+    add_entry(p, "Gamma", "https://gamma.example/jobs")
+    raw = p.read_bytes()
+    assert raw.startswith(original)
+    assert b"\n" not in raw.replace(b"\r\n", b""), "a bare LF crept in"
+    assert [e.name for e in load(p)][-1] == "Gamma"
+
+
+def test_add_takes_an_explicit_key():
+    from jobscraper.watchlist import add_entry
+    p = _tmp_watchlist()
+    add_entry(p, "Alpha Asia", "https://asia.alpha.example/careers", key="alpha-sg")
+    assert load(p)[-1].key == "alpha-sg"
+
+
+def test_add_refuses_a_duplicate_with_the_loader_error_and_writes_nothing():
+    from jobscraper.watchlist import add_entry
+    p = _tmp_watchlist()
+    before = p.read_bytes()
+    msg = _refused(add_entry, p, "alpha", "https://other.example/jobs",
+                   needles=("duplicate", "alpha"))
+    assert msg.count("line") >= 2, f"should cite both lines, got: {msg}"
+    _refused(add_entry, p, "Beta", "https://b2.example/jobs", key="beta-2",
+             needles=("duplicate name",))
+    assert p.read_bytes() == before, "a refused add must leave the file untouched"
+
+
+def test_add_refuses_an_invalid_entry_and_writes_nothing():
+    from jobscraper.watchlist import add_entry
+    p = _tmp_watchlist()
+    before = p.read_bytes()
+    _refused(add_entry, p, "Delta", "delta.example/jobs", needles=("careers_url",))
+    _refused(add_entry, p, "", "https://x.example/jobs", needles=("name",))
+    _refused(add_entry, p, "Two\nLines", "https://x.example/jobs")
+    assert p.read_bytes() == before
+
+
+def test_add_refuses_when_companies_is_not_the_last_block():
+    """Appending text is only safe at the end of `companies:`. If something else
+    follows it, the entry would land in the wrong place - refuse, do not guess."""
+    from jobscraper.watchlist import add_entry
+    p = _tmp_watchlist(COMMENTED + "extra:\n")
+    before = p.read_bytes()
+    _refused(add_entry, p, "Gamma", "https://gamma.example/jobs",
+             needles=("companies",))
+    assert p.read_bytes() == before
+
+
+def test_add_matches_the_files_own_list_indent():
+    from jobscraper.watchlist import add_entry
+    p = _tmp_watchlist("companies:\n- name: Alpha\n  careers_url: https://a.example/c\n")
+    add_entry(p, "Gamma", "https://gamma.example/jobs")
+    assert p.read_text(encoding="utf-8").endswith(
+        "\n- name: Gamma\n  careers_url: https://gamma.example/jobs\n")
+    assert [e.name for e in load(p)] == ["Alpha", "Gamma"]
+
+
+def test_add_refuses_to_touch_an_already_broken_file():
+    from jobscraper.watchlist import add_entry
+    p = _tmp_watchlist("companies:\n  - name: Alpha\n")
+    _refused(add_entry, p, "Gamma", "https://gamma.example/jobs",
+             needles=("careers_url",))
+
+
+def _changed_lines(before: str, after: str) -> list[tuple[str, str]]:
+    import difflib
+    sm = difflib.SequenceMatcher(a=before.splitlines(), b=after.splitlines())
+    return [(" | ".join(before.splitlines()[i1:i2]), " | ".join(after.splitlines()[j1:j2]))
+            for op, i1, i2, j1, j2 in sm.get_opcodes() if op != "equal"]
+
+
+def test_disable_inserts_enabled_false_and_changes_nothing_else():
+    from jobscraper.watchlist import disable_entry
+    p = _tmp_watchlist()
+    entry, changed = disable_entry(p, "alpha")
+    assert changed and entry.key == "alpha"
+    after = p.read_text(encoding="utf-8")
+    assert _changed_lines(COMMENTED, after) == [("", "    enabled: false")], (
+        f"only one inserted line expected:\n{after}")
+    by_key = {e.key: e for e in load(p)}
+    assert by_key["alpha"].enabled is False
+    assert by_key["beta"].enabled is True
+    assert by_key["alpha"].provider == "greenhouse", "other fields untouched"
+
+
+def test_disable_flips_an_existing_enabled_line_and_keeps_its_comment():
+    from jobscraper.watchlist import disable_entry
+    p = _tmp_watchlist()
+    disable_entry(p, "Beta")                       # an exact name works too
+    after = p.read_text(encoding="utf-8")
+    assert _changed_lines(COMMENTED, after) == [
+        ("    enabled: true        # keep an eye on this one",
+         "    enabled: false        # keep an eye on this one")]
+    beta = {e.key: e for e in load(p)}["beta"]
+    assert beta.enabled is False
+    assert "enabled: not a real key" in beta.notes, "block-scalar text untouched"
+
+
+def test_disable_keeps_crlf_and_handles_the_last_line_without_a_newline():
+    from jobscraper.watchlist import disable_entry
+    p = _tmp_watchlist("companies:\n  - name: Alpha\n    careers_url: https://a.example/c",
+                       newline="\r\n")
+    disable_entry(p, "alpha")
+    raw = p.read_bytes()
+    assert b"\n" not in raw.replace(b"\r\n", b""), "a bare LF crept in"
+    assert load(p)[0].enabled is False
+
+
+def test_disable_is_a_no_op_on_a_disabled_entry():
+    from jobscraper.watchlist import disable_entry
+    p = _tmp_watchlist()
+    disable_entry(p, "beta")
+    before = p.read_bytes()
+    entry, changed = disable_entry(p, "beta")
+    assert changed is False and entry.enabled is False
+    assert p.read_bytes() == before
+
+
+def test_disable_refuses_an_unknown_key():
+    from jobscraper.watchlist import disable_entry
+    p = _tmp_watchlist()
+    before = p.read_bytes()
+    _refused(disable_entry, p, "nope", needles=("nope",))
+    assert p.read_bytes() == before
+
+
+def test_disable_refuses_a_flow_style_entry_rather_than_mangling_it():
+    from jobscraper.watchlist import disable_entry
+    text = "companies:\n  - {name: Alpha, careers_url: 'https://a.example/c'}\n"
+    p = _tmp_watchlist(text)
+    _refused(disable_entry, p, "alpha")
+    assert p.read_text(encoding="utf-8") == text
+
+
+def _cli(*argv: str) -> tuple[int, str, str]:
+    import contextlib
+    import io
+    from jobscraper.cli import main
+    out, err = io.StringIO(), io.StringIO()
+    with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+        code = main(list(argv))
+    return code, out.getvalue(), err.getvalue()
+
+
+def test_watchlist_cli_list_add_disable_round_trip():
+    p = _tmp_watchlist()
+    code, out, _ = _cli("watchlist", "list", "--file", str(p))
+    assert code == 0
+    assert out.strip().splitlines()[-1] == "2 companies, 2 enabled"
+    assert "greenhouse" in out and "Beta" in out
+
+    code, out, _ = _cli("watchlist", "add", "Gamma", "https://gamma.example/jobs",
+                        "--file", str(p))
+    assert code == 0 and "gamma" in out
+    code, out, _ = _cli("watchlist", "disable", "alpha", "--file", str(p))
+    assert code == 0 and "disabled" in out
+
+    code, out, _ = _cli("watchlist", "list", "--file", str(p))
+    assert out.strip().splitlines()[-1] == "3 companies, 2 enabled"
+
+
+def test_watchlist_cli_reports_a_refusal_on_stderr_with_exit_1():
+    p = _tmp_watchlist()
+    before = p.read_bytes()
+    code, out, err = _cli("watchlist", "add", "Alpha", "https://x.example/jobs",
+                          "--file", str(p))
+    assert code == 1 and "duplicate" in err
+    code, _, err = _cli("watchlist", "disable", "nope", "--file", str(p))
+    assert code == 1 and "nope" in err
+    assert p.read_bytes() == before

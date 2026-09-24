@@ -533,6 +533,43 @@ def cmd_profile(args) -> int:
     return 0
 
 
+def cmd_watchlist(args) -> int:
+    """Lane E's verb (PRD 0.6, M1-T5): list, add or disable watched companies.
+
+    `add` and `disable` are targeted text edits to config/watchlist.yaml that
+    keep every comment, and re-validate the file before writing it. Neither
+    touches the database or runs discovery: the next `run` syncs the file and
+    resolves a new company's provider like any other.
+    """
+    try:
+        sys.stdout.reconfigure(errors="replace")      # company names are not cp1252
+    except (AttributeError, ValueError):
+        pass
+    path = (Path(args.file) if args.file
+            else load_config(getattr(args, "config", None)).watchlist_path)
+    try:
+        if args.watchlist_cmd == "add":
+            e = watchlist.add_entry(path, args.name, args.url, key=args.key)
+            print(f"added {e.name} (key {e.key}) to {path}")
+            print("its provider is discovered on the next `run`")
+        elif args.watchlist_cmd == "disable":
+            e, changed = watchlist.disable_entry(path, args.key)
+            print(f"disabled {e.name} (key {e.key}) in {path}" if changed
+                  else f"{e.name} (key {e.key}) is already disabled")
+        else:
+            entries = watchlist.load(path)
+            width = max(len(e.key) for e in entries)
+            for e in entries:
+                print(f"{'on ' if e.enabled else 'off'}  {e.key:<{width}}  "
+                      f"{e.provider or '-':<15}  {e.name}")
+            print(f"{len(entries)} companies, "
+                  f"{len(watchlist.enabled_only(entries))} enabled")
+    except watchlist.WatchlistError as exc:
+        print(f"watchlist: {exc}", file=sys.stderr)
+        return 1
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="jobscraper",
                                 description="Fortnightly careers-site monitor")
@@ -622,6 +659,22 @@ def build_parser() -> argparse.ArgumentParser:
     prof.add_argument("--bump", action="store_true",
                       help="bump profile_version: every cached decision goes stale")
     prof.set_defaults(fn=cmd_profile)
+
+    wl = sub.add_parser("watchlist", help="list, add or disable watched companies")
+    wl_file = argparse.ArgumentParser(add_help=False)
+    wl_file.add_argument("--file", help="watchlist file (default: paths.watchlist)")
+    wl_sub = wl.add_subparsers(dest="watchlist_cmd", required=True)
+    wl_sub.add_parser("list", parents=[wl_file],
+                      help="every company with its key, provider and state")
+    wla = wl_sub.add_parser("add", parents=[wl_file],
+                            help="append a two-line entry; comments are kept")
+    wla.add_argument("name", help="display name, e.g. \"Jane Street\"")
+    wla.add_argument("url", help="the careers page URL")
+    wla.add_argument("--key", help="stable id (default: a slug of the name)")
+    wld = wl_sub.add_parser("disable", parents=[wl_file],
+                            help="set enabled: false on one entry")
+    wld.add_argument("key", help="the entry's key, or its exact name")
+    wl.set_defaults(fn=cmd_watchlist)
     return p
 
 
