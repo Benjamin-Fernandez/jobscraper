@@ -10,6 +10,9 @@ data/*.db.bak-*
 # --- personal data ---------------------------------------------------------
 # The resume drives the whole match profile (M2-T0) but is not ours to publish.
 data/resume.*
+# The repo is public. Catch a resume dropped in under any other name too.
+data/*.pdf
+data/*.docx
 
 # --- archived v1 artefacts (M0-T2) -----------------------------------------
 archive/

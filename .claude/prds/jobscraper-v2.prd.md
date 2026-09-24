@@ -1,6 +1,6 @@
 # JobScraper v2 — Product Requirements & Build Specification
 
-**Status:** ACTIVE — implementation not started
+**Status:** ACTIVE — in implementation, parallel lanes (§0.6)
 **Created:** 2026-09-23
 **Supersedes:** the v1 pipeline described in `docs/DESIGN.md`
 **Owner:** Benjamin (single user, personal job search)
@@ -16,7 +16,9 @@
 
 0. Read **§0.5 (State of play)** first. It records live on-disk state and two
    correctness landmines that the ledger does not surface.
-1. Read §10 (Build Ledger). Find the first task whose `STATUS` is not `DONE`.
+1. Read **§0.6 (Parallel lanes)** and identify which lane you are. Then read §10
+   (Build Ledger) and find the first task **in your lane** whose `STATUS` is not
+   `DONE`. If you were not told a lane, you are the Lead (Lane A).
 2. **Do not trust the flag. Verify it.** Every task carries a `Verify:` command.
    Run it. If it passes, the task is actually done — set the flag to `DONE` and
    move on. If it fails, the task is not done regardless of what the flag says.
@@ -69,8 +71,9 @@ improves the build.** Invoke a skill with the `Skill` tool, an agent with the
 **Rules for tool use:** run the reviewer *for the language you just wrote*, not all
 of them. Treat reviewer findings as advice, not orders — if a finding contradicts
 this PRD, the PRD wins and you note the disagreement in the task's `Notes:`.
-Do not spawn subagents for work you can do inline; a task sized for one sitting
-rarely needs one.
+Within a task, do not spawn subagents for work you can do inline; a task sized
+for one sitting rarely needs one. Parallelism happens **between lanes** (§0.6),
+under its 4-agent cap — not inside a task.
 
 ### 0.5 State of play — read before touching anything
 
@@ -103,13 +106,15 @@ M3-T3b, not yet).
 
 #### Blocked on the user, not on you
 
-- **M2-T0** — no `resume.pdf` in `data/`. All of M2 is blocked. **Do not invent a
-  sample resume**: a wrong profile mis-filters every posting downstream, silently.
+- ~~**M2-T0**~~ — **resolved 2026-09-24.** The resume is at `data/resume.pdf`
+  (renamed from the user's original filename so the `data/resume.*` ignore rule
+  covers it; `data/*.pdf` and `data/*.docx` are now ignored as well, because the
+  repo is **public**). M2 is unblocked and runs as Lane D (§0.6). It is ignored by
+  git, so **a fresh worktree does not have it** — copy it in from the main checkout.
 - **M1-T3** — pruning the 229 seeded companies. Non-blocking; the list works as
   seeded. Fewer companies directly eases R-7's cadence problem.
 
-If both are still outstanding, the useful path is **M1-T5 → M3** (store,
-scheduler, scrape), which depends on neither, then back to M2.
+Work now proceeds in **parallel lanes** — see §0.6 for who does what.
 
 #### Environment facts that will cost you time otherwise
 
@@ -140,6 +145,137 @@ scheduler, scrape), which depends on neither, then back to M2.
 - **Unmeasured assumptions:** the ≤800-char vital extract (Q5/R-1) and the share
   of postings with vague locations (D-2). Both are quantified at M4-T4. Do not
   tune the filter against a guess before then.
+
+### 0.6 Parallel lanes — worktrees, GitHub, roles
+
+*Added 2026-09-24. This section overrides §10's "milestones run in numeric
+order" — ordering now holds **within a lane**, not across the whole ledger.*
+
+**Why lanes at all.** Most of the ledger is one dependency chain
+(store → sync → scheduler → pipeline → decide → shortlist → API). Three blocks of
+work touch disjoint files and can run beside that chain without waiting on it.
+Parallelism beyond that buys merge conflicts, not speed.
+
+#### The cap: at most 4 agents at once
+
+**Never more than 4 agents running at the same moment, reviewers included** —
+one Lead plus up to three lane agents. A lane agent **never spawns agents of its
+own**: it uses skills inline (`ecc:tdd-workflow`, `ecc:verification-loop`) and
+leaves reviewer agents to the Lead, who runs them only when a slot is free. If
+all four slots are busy, review waits; it does not squeeze in a fifth.
+
+#### Lanes and roles
+
+| Lane | Role | Tasks, in order | Owns (may edit) | Branch / worktree |
+|---|---|---|---|---|
+| **A** | **Lead & integrator.** Builds the critical chain, reviews and merges every PR, sole editor of §0.5/§0.6, decides when a lane is blocked. | M1-T5 → M3-T1 → M3-T1b → M3-T2 → M3-T3 → M3-T3b → M3-T4 → M4-T3 → M5-T1 → M4-T4. After all lanes merge: M8-T2, M9, M10 (serial). | `store.py`, `scheduler.py`, `pipeline.py`, `shortlist.py`, `watchlist.py`, `config.py`, `models.py`, `scrape/`, `cli.py`, `config/config.yaml`, `requirements.txt`, `tests/run_tests.py`, `tests/test_layering.py`, `tests/test_{store,scheduler,scrape,watchlist}.py`, `.github/`, the PRD | main checkout, `v2-rebuild` |
+| **B** | **Filter.** The free prefilter and the vital extract. | M4-T2 → M4-T1 → M4-T1b (`filter test` first; `filter explain` after M3-T1 merges, since it reads the `prefilter` table). | `filter.py`, `decide.py` (`vital_extract` only — the rest of `decide.py` is Lead's M4-T3), `config/rules.yaml`, `tests/test_filter.py`, `tests/test_decide.py`, `tests/fixtures/jd_*` | `../JobScraper-lane-b`, `lane/b-filter` |
+| **C** | **Web.** API and UI end to end. | M7-T1 → M7-T2 → M7-T3 (against a fixture `shortlist.json`), then M6-T1 → M6-T2 once M3-T1 merges, then M7-T4 → M8-T1. | `web/` (Vue source, `package.json`), `src/jobscraper/web/`, `tests/test_web.py` | `../JobScraper-lane-c`, `lane/c-web` |
+| **D** | **Profile.** Resume → derived profile → keyword scorer. | M2-T1 → M2-T2 → M2-T3. | `src/jobscraper/profile/`, `config/profile.overrides.yaml`, `tests/test_profile.py`, `tests/fixtures/make_resume_fixture.py` | `../JobScraper-lane-d`, `lane/d-profile` |
+
+When Lane D finishes, its slot is free: the Lead may hand it M5-T1 or M4-T4, or
+leave it empty. Re-cutting lanes is a Lead decision recorded here.
+
+#### Shared files — the only exceptions to ownership
+
+- **`cli.py`** is the Lead's. Lanes B, C and D may each add **one** verb
+  (`filter`, `web`, `profile`) as a self-contained `cmd_<verb>` function plus one
+  `add_parser` block, and touch nothing else in the file. The Lead resolves any
+  merge conflict.
+- **`requirements.txt`** — a lane may *append* the dependencies it introduces;
+  never edit or reorder other lines.
+- **This PRD** — a lane edits only `STATUS`, `Completed:` and `Notes:` of **its own**
+  tasks in §10. A lane that believes the design is wrong says so in its PR
+  description; it does not edit §7–§9.
+- **`tests/test_layering.py` is law for every lane.** A lane that needs a
+  boundary changed stops and asks the Lead.
+
+#### Interface contracts — so no lane waits on another
+
+Stages may not import each other (§8.2); `pipeline.py` wires them. These
+signatures are the seams. Build against them with stubs; do not change one
+without the Lead.
+
+1. **Profile shape** (D produces → B, A consume). A plain `dict` with the §8.3[1]
+   keys: `profile_version: int`, `summary: str`, `skills: list[str]`,
+   `target_titles: list[str]`, `title_aliases: dict[str, str]`,
+   `years_experience: int`. D exposes
+   `profile.resume_ingest.load_derived_profile(cfg) -> dict` returning derived +
+   overrides already merged. B tests with a hand-written dict of this shape.
+2. **Overlap scorer** (D produces → B consumes *by injection*).
+   `profile.keywords.overlap(text: str, skills: list[str]) -> tuple[int, list[str]]`
+   — score and the matched skills. `filter.py` never imports it; it receives it.
+3. **Filter API** (B produces → A consumes in M3-T4/pipeline).
+   `filter.load_rules(path) -> RuleSet` (carrying `.hash`, the §8.4 `rules_hash`)
+   and `filter.evaluate(posting, ruleset, profile, scorer) -> FilterResult` where
+   `posting` has `title`, `location`, `description`, and `FilterResult` has
+   `passed`, `reject_rule`, `reject_detail`, `overlap_score` and a per-rule
+   `trace` (which is what `filter explain` prints).
+4. **Vital extract** (B produces → A consumes in M4-T3).
+   `decide.vital_extract(title: str, location: str, jd_text: str, limit: int = 800) -> str`.
+5. **Store API for the web** (A produces in M3-T1 → C consumes in M6).
+   `Store.list_runs()`, `Store.applications()`, `Store.application_events(job_id)`,
+   `Store.set_application_status(job_id, status, notes=None) -> bool`
+   (returns whether an `app_events` row was appended — this is M6-T2's idempotency).
+6. **Shortlist file** (A produces in M5-T1 → C consumes): exactly §8.3[6]. C builds
+   the UI against a fixture of that shape until M5-T1 lands.
+
+#### GitHub workflow
+
+- **Remote:** `origin` (see the README for the URL). The repo is **public** — nothing
+  from `data/` or `archive/` is ever committed. `master` = v1 restore point, never
+  pushed to. **`v2-rebuild` = the integration branch; every PR targets it.**
+- **Open a lane** (PowerShell, from the main checkout):
+  ```powershell
+  git fetch origin
+  git worktree add ..\JobScraper-lane-b -b lane/b-filter origin/v2-rebuild
+  ```
+  Git-ignored inputs are **not** in a new worktree. Lane D copies
+  `data\resume.pdf` in from the main checkout; `archive\` stays with the Lead.
+- **Start the lane agent** — a new Claude Code session opened *in the worktree
+  folder* (desktop app: new session → that folder; terminal: `cd` there, run
+  `claude`), with this kickoff prompt:
+  > You are **Lane B** of `.claude/prds/jobscraper-v2.prd.md`. Read §0 in full,
+  > then work your lane's tasks per §0.1 and §0.6. Edit only files your lane owns.
+  > Do not spawn agents. Open a PR to `v2-rebuild` when a coherent chunk is done.
+- **Per task:** the §0.1 protocol, then one commit named `M4-T2: <what>`. Run the
+  **full** suite (`python tests/run_tests.py`) before every push, not just `-k`.
+- **Pick up others' work:** `git fetch origin; git merge origin/v2-rebuild`. Merge,
+  never rebase a pushed branch; never force-push.
+- **Hand in:** `git push -u origin lane/b-filter`, then
+  `gh pr create --base v2-rebuild`, with a body listing each task done, its
+  `Verify:` output, and anything the Lead must know. One PR per coherent chunk.
+- **Merge gate (Lead):** (1) CI green — `.github/workflows/tests.yml` runs the full
+  suite on every PR; (2) each task's `Verify:` re-run on the PR branch; (3)
+  `git diff --name-only origin/v2-rebuild...HEAD` lists only files the lane owns,
+  plus the exceptions above; (4) a `/code-review` pass on the diff. Then
+  `gh pr merge --merge`, and update §0.5.
+- **Close a lane:** after its last PR merges, `git worktree remove ..\JobScraper-lane-b`.
+- **Stop conditions for a lane agent:** its tasks are done, or it is `BLOCKED`
+  (§0.3), or it is waiting on a contract above that has not merged yet. In all
+  three cases: push, open or update the PR, say which, and stop. Never work
+  around a missing dependency by writing into another lane's files.
+
+#### ECC skills for orchestrating this
+
+| When | Skill | Who |
+|---|---|---|
+| Re-cutting lanes, deciding what may run in parallel | `ecc:parallel-execution-optimizer` | Lead |
+| Lane contracts, ownership, board state, merge gates | `ecc:team-agent-orchestration` | Lead |
+| Branch, worktree and commit conventions | `ecc:git-workflow` | All |
+| PRs, `gh`, reviewing and merging | `ecc:github-ops` | All |
+| Proving a chunk before opening its PR | `ecc:verification-loop` | Lanes |
+| Building each task test-first | `ecc:tdd-workflow` | Lanes |
+| The merge-gate review of a PR diff | `/code-review` or `/ecc:code-review` | Lead |
+| Stack reviews at merge (spawn agents → count toward the cap) | `/ecc:python-review` (A, B, D), `/ecc:fastapi-review` + `/ecc:vue-review` (C), `ecc:database-reviewer` (M3) | Lead |
+| Snapshot before a risky merge | `/ecc:checkpoint` | Lead |
+| Handing a lane to a fresh session | `/ecc:save-session`, `/ecc:resume-session` | All |
+
+**Not recommended here:** `ecc:dmux-workflows` (needs tmux, i.e. WSL on this
+Windows machine), `ecc:claude-devfleet` (needs its own server running), the
+`ecc:epic-*` family (GitHub-issue coordination: more ceremony than four lanes
+need; worth it only if the lane count grows), and the `multi-*`/`gan-*` families
+(multi-model loops; this project uses one cheap model by design).
 
 ---
 
@@ -1195,8 +1331,9 @@ Legend: `STATUS` · `Completed` (date) · `Verify` (command that proves it) · `
 **Outcome:** the match vocabulary comes from the actual resume.
 
 #### M2-T0 · Supply the resume
-- **STATUS:** `NOT_STARTED`
-- **Completed:** —
+- **STATUS:** `DONE`
+- **Completed:** 2026-09-24 — supplied by the user; renamed to `data/resume.pdf`.
+  Verify passes (`['data\\resume.pdf']`).
 - **Do:** **User task.** Place `resume.pdf` (or `.docx`) in `data/`. `data/` currently
   holds only the workbook and the database — verified 2026-09-23.
 - **Verify:** `python -c "import glob;f=glob.glob('data/resume.*');assert f, 'no resume in data/';print(f)"`
@@ -1612,5 +1749,4 @@ Legend: `STATUS` · `Completed` (date) · `Verify` (command that proves it) · `
 
 ---
 
-*Status: SPECIFICATION — approved scope, implementation not started.
-Next action: M0-T1.*
+*Status: in implementation. Next actions: see §0.5 and each lane in §0.6.*
