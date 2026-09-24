@@ -33,7 +33,8 @@ function safeUrl(url) {
 }
 
 function years(job) {
-  return job.yoe_min === null || job.yoe_min === undefined ? null : `${job.yoe_min} yrs`
+  if (job.yoe_min === null || job.yoe_min === undefined) return null
+  return `${job.yoe_min} yr${job.yoe_min === 1 ? '' : 's'}`
 }
 
 function meta(job) {

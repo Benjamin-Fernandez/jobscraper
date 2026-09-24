@@ -33,6 +33,7 @@ describe('Inbox', () => {
     expect(okx.find('.title').text()).toBe('DevOps / Site Reliability Engineer')
     expect(okx.find('.meta').text()).toBe('Singapore · 0 yrs · seen 23 Sep')
     expect(okx.find('.reason').text()).toContain('K8s and CI/CD match')
+    expect(card(mountInbox(), 'GovTech').find('.meta').text()).toContain('1 yr ·')
   })
 
   it('lists every job for the run, with a count', () => {

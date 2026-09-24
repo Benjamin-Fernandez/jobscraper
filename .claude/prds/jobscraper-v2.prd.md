@@ -1633,14 +1633,17 @@ Legend: `STATUS` · `Completed` (date) · `Verify` (command that proves it) · `
   still appears in the selector.
 
 #### M7-T3 · Inbox tab
-- **STATUS:** `IN_PROGRESS`
-- **Completed:** —
+- **STATUS:** `DONE`
+- **Completed:** 2026-09-24
 - **Do:** Scrollable list: company, title, location, yoe, reason, matched skills,
   `Open ↗`, `Mark applied`, `Dismiss`.
 - **Verify:** Manual — open the page, mark one applied, reload, status persisted.
-- **Notes:** UI built and covered by 11 Vitest tests (`web/tests/Inbox.test.js`).
-  Stopped at the manual Verify, which needs `POST /api/applications/{id}` (M6-T2).
+- **Notes:** Verified 2026-09-24 (Lane C) in the browser, on the fixture shortlist
+  and a scratch v2 store: marked OKX applied, reloaded, and OKX showed `applied`
+  with its button disabled. The DB held one `applications` row and one `app_events`
+  row (`None -> applied`). Covered by 11 Vitest tests (`web/tests/Inbox.test.js`).
   Dismiss is **session-local** (sessionStorage, no server write) pending Q2.
+  Only `http(s)` URLs become links, since posting URLs are third-party data.
   §8.3[6] has no matched-skills field, so the card shows `matched_skills` only
   when a job carries it.
 
