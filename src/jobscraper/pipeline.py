@@ -395,7 +395,8 @@ def _funnel(cfg: Config, store: Store, rep: RunReport, client: HttpClient,
             model=model, lookup=lookup, save=save,
             batch_size=int(budget.get("decide_batch", 20)),
             ceiling_years=int(ruleset.ceiling_years or 3),
-            max_consecutive_failures=int(budget.get("max_consecutive_failures", 3)))
+            max_consecutive_failures=int(budget.get("max_consecutive_failures", 3)),
+            interests=(cfg.raw.get("judge") or {}).get("interests"))
         rep.stats.update(judged=ds.judged, decisions_cached=ds.cached,
                          undecided=ds.undecided, accepted_total=ds.accepted,
                          rejected_by_postcondition=ds.rejected_by_postcondition,

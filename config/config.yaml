@@ -57,7 +57,8 @@ budget:
   #          GPU. No key, no login. `ollama pull qwen3:14b` first. The Docker
   #          setup uses this (env JOBSCRAPER_BACKEND / JOBSCRAPER_OLLAMA_URL).
   #   off  - no model; the prefilter alone decides.
-  backend: cli
+  # 2026-09-24: the local Qwen model replaces Haiku as the judge.
+  backend: ollama
   ollama_url: http://127.0.0.1:11434
   # 9.3 GB; fits a 16 GB GPU with room for the context below. qwen3:8b (5.2 GB)
   # is the step down if memory is tight.
@@ -99,3 +100,17 @@ applications:
   # `applied`. This list is not in rules.yaml, so editing it never
   # invalidates stored prefilter verdicts.
   statuses: [to_apply, applied, interviewing, offer, rejected, withdrawn]
+
+judge:
+  # The kinds of role you are open to. The model marks a posting as a fit when
+  # it is in or near ANY of these, and leans towards yes when unsure: a wasted
+  # opportunity costs more than one extra card in the Inbox (user, 2026-09-24).
+  # Edit freely; it takes effect on the next run.
+  interests:
+    - software engineering (backend, full stack, mobile, data, AI/ML)
+    - infrastructure, platform, cloud, DevOps and site reliability
+    - technical support and support engineering
+    - operations (technology, business and finance operations)
+    - finance and fintech roles
+    - product management and product owner
+    - project and program management

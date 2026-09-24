@@ -113,7 +113,7 @@ def test_review_queue_holds_only_undecided_survivors():
     q = json.loads(path.read_text(encoding="utf-8"))
     assert n == 2 and sorted(q["ids"]) == sorted([ids["a"], ids["b"]])
     # The session is asked exactly what `claude -p` is asked.
-    assert "DO NOT judge experience" in q["system_prompt"]
+    assert "You do not make the final decision" in q["system_prompt"]
     assert ids["a"] in q["user_prompt"] and "Reply with ONLY" in q["user_prompt"]
 
 
@@ -392,6 +392,38 @@ def test_cli_system_prompt_goes_by_file_not_argv():
         B.subprocess.run = real
     assert seen["text"] == "line one\nline two"
     assert not Path(seen["path"]).exists()          # the temp file is cleaned up
+
+
+def test_fit_contract_code_decides_not_the_model():
+    """The model reports facts (fit, is_singapore, yoe_min); code decides.
+    Measured 2026-09-24: Qwen3-14B rejected 3-year roles "on experience" however
+    the prompt was worded - with `fit`, experience is not the model's call."""
+    got = DC.parse_decisions(json.dumps({"decisions": [
+        {"id": "a", "fit": True, "is_singapore": True, "yoe_min": 3, "reason": "backend"},
+        {"id": "b", "fit": False, "is_singapore": True, "yoe_min": 0, "reason": "sales"},
+        {"id": "c", "fit": "true", "is_singapore": True, "yoe_min": 1, "reason": "x"},
+        {"id": "d", "decision": "accept", "is_singapore": True, "yoe_min": 0,
+         "reason": "legacy shape"},
+        {"id": "e", "fit": "maybe", "is_singapore": True, "reason": "unparseable"}]}))
+    assert got["a"]["decision"] == "accept"     # 3 years is within the cap
+    assert got["b"]["decision"] == "reject"
+    assert got["c"]["decision"] == "accept"
+    assert got["d"]["decision"] == "accept"     # the old contract still parses
+    assert "e" not in got                       # neither fit nor decision: retried
+    final, _, downgraded = DC.guard(got["a"]["decision"], True, 3, "", 3)
+    assert final == "accept" and not downgraded
+    assert DC.guard("accept", True, 4, "", 3)[0] == "reject"   # the cap is code's
+
+
+def test_prompt_asks_for_facts_not_a_verdict():
+    s = DC.system_prompt(3, ["product management", "finance"])
+    assert '"fit": true | false' in s and '"decision"' not in s
+    assert "applied by code" in s
+    # The user's interests reach the model, with the lax instruction.
+    assert "product management; finance" in s and "When unsure, answer true" in s
+    assert "software engineering" in DC.system_prompt(3)   # defaults when unset
+    u = DC._user_prompt("x", [DC.Posting("j1", "T", "LOCATION: SG")])
+    assert '"fit": true | false' in u and '"j1"' in u
 
 
 def test_judge_runs_with_no_tools_from_the_real_config():

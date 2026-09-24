@@ -72,7 +72,8 @@ def export_queue(cfg: Config, store: Store, profile: dict[str, Any],
         "write_results_to": verdicts.name,
         "profile_version": int(profile.get("profile_version", 1)),
         "ids": [p.job_id for p in posts],
-        "system_prompt": decide.SYSTEM_PROMPT.format(ceiling=ceiling),
+        "system_prompt": decide.system_prompt(
+            ceiling, (cfg.raw.get("judge") or {}).get("interests")),
         "user_prompt": decide._user_prompt(str(profile.get("summary") or ""), posts),
     }
     queue.parent.mkdir(parents=True, exist_ok=True)

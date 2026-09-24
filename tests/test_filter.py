@@ -216,6 +216,12 @@ def test_filter_min_years_agrees_with_the_carried_over_semantics():
         assert F.min_years_required(text) == expected, text
 
 
+def _floor_on():
+    """The shipped rules.yaml disables keyword_floor (user: lax, 2026-09-24);
+    the rule's mechanics are still tested, with it switched back on here."""
+    return _rules(lambda d: _rule(d, "keyword_floor").update(enabled=True))
+
+
 def test_filter_keyword_floor_uses_the_injected_scorer():
     seen = {}
 
@@ -223,12 +229,12 @@ def test_filter_keyword_floor_uses_the_injected_scorer():
         seen["skills"] = list(skills)
         return stub_scorer(text, skills)
 
-    r = judge("Software Engineer", desc="We use Python.", scorer=spy)
+    r = judge("Software Engineer", desc="We use Python.", scorer=spy, rules=_floor_on())
     assert not r.passed and r.reject_rule == "keyword_floor", r
     assert r.overlap_score == 1, r
     assert seen["skills"][:5] == PROFILE["skills"], seen
 
-    r = judge("Software Engineer", desc="Python, Kafka and PostgreSQL.")
+    r = judge("Software Engineer", desc="Python, Kafka and PostgreSQL.", rules=_floor_on())
     assert r.passed and r.overlap_score == 3, r
 
     # No description at all is not evidence of a mismatch: leave it to the model.
@@ -273,7 +279,7 @@ def test_filter_declaration_order_is_evaluation_order():
 
 
 def test_filter_trace_covers_every_rule_in_order():
-    r = judge("Software Engineer")
+    r = judge("Software Engineer", rules=_floor_on())
     assert r.passed and r.reject_rule is None and r.reject_detail is None
     assert [t.rule_id for t in r.trace] == [x.id for x in _rules().rules]
     assert all(t.verdict == "pass" for t in r.trace), r.trace
