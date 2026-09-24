@@ -1342,14 +1342,23 @@ Legend: `STATUS` · `Completed` (date) · `Verify` (command that proves it) · `
   mis-filters every posting downstream. `.gitignore` should exclude `data/resume.*`.
 
 #### M2-T1 · Resume text extraction
-- **STATUS:** `NOT_STARTED`
-- **Completed:** —
+- **STATUS:** `DONE`
+- **Completed:** 2026-09-24
 - **Do:** `profile/resume_ingest.py` — find `data/resume.pdf|docx`, extract text
   (`pypdf`, `python-docx`), compute SHA-256, short-circuit when unchanged.
   Generate the test fixture by writing a 1-page PDF with `pypdf`/`reportlab` in
   `tests/fixtures/make_resume_fixture.py` — do **not** commit the real resume.
 - **Verify:** `python tests/run_tests.py -k resume` passes against the generated
   fixture; running ingest twice performs extraction once (assert via a call counter).
+- **Notes:** Verified 9/9 (`-k resume`), full suite 58/58. API:
+  `find_resume`, `file_hash` (`"sha256:<hex>"`), `extract_text`,
+  `load_resume(dir, previous_hash, force) -> ResumeText`; unchanged hash returns
+  `changed=False` with no extraction (`test_resume_unchanged_is_extracted_once`).
+  DOCX extraction includes table cells; an empty text layer (scanned PDF) raises
+  `ResumeError` rather than deriving a profile from nothing. The fixture PDF is
+  hand-written PDF syntax, read back by pypdf - **no reportlab dependency** - and
+  both fixtures are generated into a temp dir at test time; nothing binary is
+  committed. Real `data/resume.pdf` extracts (5.6k chars).
 
 #### M2-T2 · Derived profile via one cheap model call
 - **STATUS:** `NOT_STARTED`
