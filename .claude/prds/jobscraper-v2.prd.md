@@ -388,6 +388,23 @@ accepted role is genuinely Singapore-based, and adding a company is a two-line e
 | Spin-up from clone | 1 command | `docker compose up` → reachable on :8765 |
 | Adding a filter rule | Config only, no code | Add an `extra:` entry, confirm via `filter test` |
 
+**Measured 2026-09-24 (M4-T4, runs #1–#5: 50 companies, 5,282 postings).**
+
+| Metric | Target | Measured | Verdict |
+|---|---|---|---|
+| Tokens per posting reaching the model | ≤ 2,000 | **287** (run #5: 7,460 in / 26 judged); 1,124 for a one-posting call | ✅ — only after two fixes, below |
+| Postings reaching the model | ≤ 10% | **0.7%** (37 of 5,282 passed the prefilter) | ✅ |
+| Location precision | 100% of accepted | **4 / 4** accepted are Singapore (all Airwallex) | ✅ so far — the 30-role audit needs more accepts |
+| Vital extract size | ≤ 800 chars | p50 732–739, max 796 | ✅ (Q5 holds: every model call had enough to decide) |
+
+Two defects the measurement found, both fixed and pinned by tests: (1) on Windows
+`claude.CMD` truncated the multi-line system prompt to its first line, so the
+model never saw its output contract (run #1 decided 0 of 5) — now sent by file;
+(2) with only `--restricted`, each call carried ~21k tokens of Claude Code's own
+tool definitions — the judge now runs with no tools (536 tokens of overhead).
+Output tokens run high (~7k for a 5-posting call) and `--effort low` did not
+change them; unexplained, recorded rather than guessed at.
+
 ## 6. Scope
 
 ### MVP
@@ -1741,8 +1758,24 @@ Legend: `STATUS` · `Completed` (date) · `Verify` (command that proves it) · `
   `{"decision":"accept","is_singapore":true,"yoe_min":4}` (D-12).
 
 #### M4-T4 · Measure the hypothesis
-- **STATUS:** `NOT_STARTED`
-- **Completed:** —
+- **STATUS:** `IN_PROGRESS`
+- **Completed:** — (numbers recorded in §5 and in every run's `stats_json`; the
+  30-role hand audit is open because only 4 roles have been accepted so far)
+- **Progress 2026-09-24:** five real runs, 50 companies, 5,282 postings. Prefilter
+  pass rate 0.7%; rejections: `title_deny` 3,136, `title_allow` 1,834,
+  `location_explicit` 275, `experience_ceiling` 3, `keyword_floor` 2.
+  **R-4 audit of `title_allow`** on the 198 Singapore postings: 25 rejected, all
+  non-engineering (traders, account executives, operations, HR) except
+  "Trade Support Engineer" — borderline; add it to `title_allow.extra` if wanted.
+  `title_deny` removed 75 engineering titles in Singapore, every one senior /
+  staff / lead / manager / intern by design; "(Senior) iOS Engineer" is the one
+  where seniority was optional.
+  **D-2 works as intended:** Cloudflare lists "Hybrid" as the location; 27 such
+  postings reached the model, which read the body, found London / Austin /
+  Lisbon and rejected them (`is_singapore: false`), or rejected them as
+  unconfirmed. Model decisions: 4 accept, 28 reject, 0 accepted outside Singapore.
+  **Remaining:** keep running batches until ≥ 30 roles are accepted, then the user
+  hand-audits them for the location metric (§5) and this task closes.
 - **Do:** Run one real batch. Record in this file: tokens/posting, survivor rate,
   and a hand-audit of 30 accepted roles for the location metric (§5).
 - **Verify:** Numbers written into §5's table and into `runs.stats_json`.
