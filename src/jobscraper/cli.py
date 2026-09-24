@@ -2,7 +2,7 @@
 
     python -m jobscraper doctor     check config, watchlist, deps, judge
     python -m jobscraper sync       load the watchlist into the database
-    python -m jobscraper status     where the cursor is, what is quarantined
+    python -m jobscraper status     who is due, run cadence, what is quarantined
     python -m jobscraper run        process the next batch of companies
     python -m jobscraper resolve    resolve ATS providers without fetching jobs
     python -m jobscraper export     rewrite the trackers from the database
@@ -20,6 +20,7 @@ from pathlib import Path
 from . import backends
 from . import cursor as cursor_mod
 from . import review as review_mod
+from . import scheduler
 from .config import load_config, load_profile
 from . import watchlist
 from .net import HttpClient
@@ -119,25 +120,16 @@ def cmd_sync(args) -> int:
 
 
 def cmd_status(args) -> int:
-    cfg, _profile, store = _boot(args)
-    total = len(store.all_companies())
+    """Queue depth and cadence from the staleness scheduler (PRD 8.3[0])."""
+    cfg, store = _boot_v2(args)
+    _sync_watchlist(cfg, store)
+    st = scheduler.status(store, cfg.batch_size, cfg.cycle_days)
     print(BAR)
-    print(cursor_mod.describe(store, total, int(cfg.run["cycle_days"]),
-                              int(cfg.run["batch_size"])))
+    print(scheduler.describe(st))
     print(BAR)
     s = store.stats()
-    print(f"companies {s['companies']}   resolved {s['resolved']}   "
-          f"quarantined {s['quarantined']}")
-    print(f"jobs      {s['jobs']}   open {s['open_jobs']}   "
-          f"exported {s['exported']}   runs {s['runs']}")
-    q = store.quarantined()
-    if q:
-        print(f"\nQuarantined ({len(q)}) - see output/needs_review.xlsx")
-        for c in q[:15]:
-            print(f"  [{c.ordinal:>3}] {c.name:<26} {c.last_error_class or '':<10} "
-                  f"{(c.last_error or '')[:46]}")
-        if len(q) > 15:
-            print(f"  ... and {len(q) - 15} more")
+    print(f"jobs      {s['jobs']}   open {s['open_jobs']}   runs {s['runs']}   "
+          f"applications {s['applications']}")
     store.close()
     return 0
 
@@ -378,7 +370,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     sub.add_parser("doctor", help="check setup").set_defaults(fn=cmd_doctor)
     sub.add_parser("sync", help="load the watchlist into the db").set_defaults(fn=cmd_sync)
-    sub.add_parser("status", help="cursor and health").set_defaults(fn=cmd_status)
+    sub.add_parser("status", help="who is due, cadence, quarantine").set_defaults(fn=cmd_status)
     sub.add_parser("export", help="rewrite trackers").set_defaults(fn=cmd_export)
 
     r = sub.add_parser("resolve", help="resolve ATS providers only")

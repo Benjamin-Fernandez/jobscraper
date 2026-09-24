@@ -326,6 +326,61 @@ class Store:
             "UPDATE companies SET probation_due_run = ? WHERE id = ?", (next_run, cid))
         self.conn.commit()
 
+    def due_companies(self, cutoff: str, limit: int) -> list[WatchedCompany]:
+        """The due query (PRD 8.3[0]): never-scraped first, then longest-neglected.
+
+        `cutoff` is "now minus cycle_days"; anything last scraped at or before it
+        is due. Quarantined companies are excluded here - they come back only
+        through probation (`due_probation`), exactly as in v1. The CASE is the
+        portable spelling of "NULLs first"; the id is a stable tie-break.
+        Served by idx_companies_due.
+        """
+        rows = self.conn.execute(
+            """SELECT * FROM companies
+                WHERE enabled = 1 AND quarantined_at IS NULL
+                  AND (last_scraped_at IS NULL OR last_scraped_at <= ?)
+                ORDER BY CASE WHEN last_scraped_at IS NULL THEN 0 ELSE 1 END,
+                         last_scraped_at, id
+                LIMIT ?""", (cutoff, limit))
+        return [self._company(r) for r in rows]
+
+    def schedule_counts(self, cutoff: str, soon_cutoff: str) -> dict[str, Any]:
+        """Numbers for the `status` report. `soon_cutoff` = cutoff + 7 days."""
+        live = "enabled = 1 AND quarantined_at IS NULL"
+
+        def q(where: str, *params: Any) -> int:
+            return int(self.conn.execute(
+                f"SELECT COUNT(*) FROM companies WHERE {where}", params).fetchone()[0])
+        oldest = self.conn.execute(
+            f"""SELECT MIN(last_scraped_at) FROM companies
+                WHERE {live} AND last_scraped_at IS NOT NULL""").fetchone()[0]
+        return {
+            "enabled": q("enabled = 1"),
+            "never_scraped": q(f"{live} AND last_scraped_at IS NULL"),
+            "due_now": q(f"{live} AND (last_scraped_at IS NULL "
+                         "OR last_scraped_at <= ?)", cutoff),
+            "due_soon": q(f"{live} AND last_scraped_at > ? AND last_scraped_at <= ?",
+                          cutoff, soon_cutoff),
+            "quarantined": q("enabled = 1 AND quarantined_at IS NOT NULL"),
+            "oldest_scrape": oldest,
+        }
+
+    def quarantined_companies(self) -> list[WatchedCompany]:
+        return [self._company(r) for r in self.conn.execute(
+            """SELECT * FROM companies WHERE enabled = 1
+               AND quarantined_at IS NOT NULL ORDER BY name""")]
+
+    def finished_runs_since(self, since: str) -> tuple[int, Optional[str]]:
+        """(count, earliest start) of runs that reached the end since `since`.
+
+        The observed run rate behind the sweep projection. A run that died is
+        not a run that covered anything, so only `ok` counts.
+        """
+        r = self.conn.execute(
+            """SELECT COUNT(*), MIN(started_at) FROM runs
+               WHERE status = 'ok' AND started_at >= ?""", (since,)).fetchone()
+        return int(r[0]), r[1]
+
     def stamp_scraped(self, cids: Iterable[int], at: Optional[str] = None) -> None:
         """Record an ATTEMPT (D-9). Called last in a run, so a crash stamps nothing."""
         stamp = at or utcnow()

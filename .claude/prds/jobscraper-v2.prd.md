@@ -1446,8 +1446,24 @@ Legend: `STATUS` · `Completed` (date) · `Verify` (command that proves it) · `
   `test_aggregator_urls_never_yield_a_slug`).
 
 #### M3-T3 · Staleness scheduler
-- **STATUS:** `NOT_STARTED`
-- **Completed:** —
+- **STATUS:** `DONE`
+- **Completed:** 2026-09-24 — `-k scheduler` 10/10, full suite 81/81; live
+  `status` on the real DB: 224 due, 23 runs to drain, "a full sweep needs 1.6/day".
+  All five mandatory cases are tested. The last one ("with all 229 fresh the
+  runner exits 0 reporting the next due date") is proved at the scheduler level
+  here (`plan()` returns empty + `next_due_at` = oldest stamp + 14 days); the
+  runner half is asserted end to end in M3-T4, which builds the runner.
+  **Design notes:** the due query lives in `store.due_companies` (only store.py
+  holds SQL) with a Python-computed cut-off instead of `datetime('now', …)`, so
+  the §8.4 "SQLite-only exception" no longer exists and tests pin the clock.
+  "NULLs first" is spelled `CASE WHEN … IS NULL` (portable). **Quarantined
+  companies are excluded from the due query** — §8.3[0]'s SQL omits the clause,
+  but its prose keeps v1's quarantine/probation; they return only via
+  `store.due_probation`, which M3-T4 merges into the batch. The three v1 cursor
+  tests are ported as staleness equivalents; v1's `--force` test is retired (a
+  staleness queue has no cycle boundary to force past). `status` CLI now reads
+  the scheduler. **Pending:** the `ecc:database-reviewer` pass on the due query
+  is deferred until an agent slot frees up (4-agent cap, §0.6).
 - **Do:** `scheduler.py` per §8.3[0] — the due query, `batch_size: 10` (D-13),
   `cycle_days: 14`, stamping `last_scraped_at` on **attempt**. Port the meaningful
   `cursor.py` tests onto it. Add the `status` report (due now / due in 7 days /
