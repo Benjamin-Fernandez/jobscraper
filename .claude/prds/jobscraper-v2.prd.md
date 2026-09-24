@@ -77,12 +77,39 @@ under its 4-agent cap — not inside a task.
 
 ### 0.5 State of play — read before touching anything
 
-*Last session: 2026-09-24. Everything here is on-disk fact, verified at handoff.
-It is the state the Build Ledger does **not** capture.*
+*Last updated: 2026-09-24, after the first parallel-lane wave (§0.6). On-disk
+fact, verified at handoff.*
 
-**Where things stand:** M0 complete, M1 all but done. 8/40 tasks. 49/49 tests
-green. Branch **`v2-rebuild`**; `master` holds only the v1 restore point. Working
-tree clean at `6b36850`.
+**Where things stand:** 31/40 tasks `DONE`; **191/191 Python tests, 26/26
+Vitest** green on `v2-rebuild`. Lanes B (filter), C (web) and D (profile) are
+merged and their worktrees removed; only the main checkout remains. The
+pipeline is end to end: `python -m jobscraper run` syncs the watchlist,
+schedules, scrapes, prefilters, hydrates survivors, extracts, decides via
+`claude -p` and writes `data/shortlist.json`; `python -m jobscraper web` serves
+Inbox + Applications on 127.0.0.1:8765. `data/jobscraper.db` is the v2 schema
+holding 229 companies, **no scraped jobs yet**, and the 3 migrated v1
+applications. `data/profile.derived.yaml` was generated from the real resume.
+
+**Not yet on GitHub.** `gh` is installed (`C:\Program Files\GitHub CLI`) but
+the user has not run `gh auth login`, so there is no `origin`. Everything is
+committed locally. Once authenticated:
+`gh repo create jobscraper --public --source . --remote origin` then
+`git push -u origin master v2-rebuild` (the user chose **public**; `data/`,
+`archive/` and resumes are git-ignored).
+
+**Remaining, in order:** M1-T5 (watchlist verbs) and M8-T2 (status vocabulary)
+are small and independent — a good pair for two lanes. **M4-T4 is the first real
+run**: it spends model quota and needs the user's hand audit of 30 accepted
+roles, so do it with the user present. Then M9 (retire v1, README, acceptance)
+and M10 (Docker), serial. M1-T3 (prune) is the user's.
+
+**Reviews done at the merge gate:** `ecc:python-reviewer` (no critical findings;
+three fixed, one declined — `job_id` includes the provider, but an ATS
+migration brings new external ids anyway, so closing the old board's postings
+is correct and applications re-link by URL) and `ecc:database-reviewer` (four
+fixed; foreign keys deferred — orphaned applications are allowed by design,
+SQLite cannot add constraints to existing tables, and they belong with the
+Postgres port).
 
 #### Two landmines
 
