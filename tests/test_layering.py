@@ -50,7 +50,8 @@ WEB_MAY_IMPORT = FOUNDATION | PUBLISHER
 
 # v1 modules awaiting retirement in M9-T1. Excluded from the rules on purpose.
 LEGACY = {"runner", "output", "serve", "ingest", "cursor", "matching", "llm",
-          "review", "adapters", "discovery", "cli", "__main__", "__init__"}
+          "review", "adapters", "discovery", "cli", "__main__", "__init__",
+          "store_v1"}
 
 SQL_TOKENS = ("SELECT ", "INSERT ", "UPDATE ", "DELETE FROM", "CREATE TABLE")
 

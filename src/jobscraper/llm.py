@@ -18,7 +18,7 @@ from .backends import BackendError
 from .config import Profile
 from .matching import extract_requirements
 from .models import Candidate, JobFacts, TokenLedger, Verdict
-from .store import Store
+from .store_v1 import Store
 
 EXTRACT_SYSTEM = (
     "You extract structured facts from job postings. Return ONLY valid JSON. "

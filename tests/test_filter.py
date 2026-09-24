@@ -21,7 +21,7 @@ import tempfile
 from jobscraper.config import load_profile
 from jobscraper.matching import (location_verdict, min_years_required, stage_a)
 from jobscraper.models import Candidate, Company, RawJob, ScoreBreakdown
-from jobscraper.store import Store
+from jobscraper.store_v1 import Store
 
 def _store(n=25):
     db = Path(tempfile.mkdtemp()) / "t.db"

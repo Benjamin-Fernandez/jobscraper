@@ -86,7 +86,8 @@ tree clean at `6b36850`.
 
 #### Two landmines
 
-**1. `cli.py::_sync` is a bridge that reintroduces the exact bug §8.4 prevents.**
+**1. ~~`cli.py::_sync` is a bridge that reintroduces the exact bug §8.4 prevents.~~
+RESOLVED 2026-09-24 by M3-T1b** — `_sync` is gone; sync keys on `key`. Kept below for history.
 M1-T4 removed the Excel workbook from the config, which broke `cfg.input_workbook`
 and with it `doctor`, `sync`, `resolve` and `run`. `_sync` was repointed at the
 watchlist to keep them alive — but it still routes through **v1's
@@ -96,7 +97,9 @@ failure counters. The stable-`key` guarantee in §8.4 is written down but **not 
 real**. **M3-T1b is what makes it real.** Do not treat §8.4 as implemented until
 that task is `DONE`.
 
-**2. `data/jobscraper.db` exists and is a v1-schema database.** Created by the
+**2. ~~`data/jobscraper.db` exists and is a v1-schema database.~~ RESOLVED
+2026-09-24 by M3-T1** — archived to `archive/v2-bridge-db-2026-09-24/`; the file
+at `data/jobscraper.db` is now v2. Kept below for history. Created by the
 bridge sync above; it has `tier`/`category` columns and **no `last_scraped_at`**.
 It is not the v2 database and holds nothing worth keeping — 224 company rows and
 no jobs. **M3-T1 should delete it and create the v2 schema fresh.** Do not migrate
@@ -1379,8 +1382,23 @@ Legend: `STATUS` · `Completed` (date) · `Verify` (command that proves it) · `
 **Outcome:** postings flow from the watchlist into the new store.
 
 #### M3-T1 · Port the store to the new schema
-- **STATUS:** `NOT_STARTED`
-- **Completed:** —
+- **STATUS:** `DONE`
+- **Completed:** 2026-09-24 — `-k store` 17/17, full suite 63/63.
+  **How v1 keeps running:** v1's store was `git mv`'d to `store_v1.py` unchanged
+  (LEGACY, retired in M9-T1) and its seven importers repointed, rather than
+  rewriting `store.py` in place and breaking them all. Each store refuses the
+  other's database (`SchemaMismatch` / `RuntimeError`) because both default to
+  `data/jobscraper.db`. The bridge DB was **archived, not deleted**, to
+  `archive/v2-bridge-db-2026-09-24/`.
+  **Schema additions beyond §8.4, deliberate:** `companies.key` (the §8.4 sync
+  semantics need it and the table list omitted it), `resolve_method`/`resolved_at`
+  (discovery writes them), `applications.company/role/url` (an orphaned
+  application must stay legible, D-14), `coverage.http_status`, a `meta` table
+  holding `schema_version`. `models.WatchedCompany` is the v2 row type; v1
+  `Company` stays for legacy modules. Timestamps are UTC `YYYY-MM-DDTHH:MM:SS`
+  text; cut-offs are computed in Python (`store.shift`) so the SQL stays plain.
+  §0.6 contract 5 is implemented and tested. Until M3-T1b lands, the v1 commands
+  (`doctor`, `run`, …) fail cleanly against the v2 DB instead of corrupting it.
 - **Do:** Rewrite `store.py` to §8.4. Keep the single-writer rule and the
   `known_job_ids` / `close_missing` semantics (a failed fetch must never close jobs).
   **First delete the existing `data/jobscraper.db`** — it is a v1-schema file the
@@ -1390,8 +1408,15 @@ Legend: `STATUS` · `Completed` (date) · `Verify` (command that proves it) · `
   `test_failed_fetch_must_not_close_jobs`.
 
 #### M3-T1b · Watchlist → `companies` sync
-- **STATUS:** `NOT_STARTED`
-- **Completed:** —
+- **STATUS:** `DONE`
+- **Completed:** 2026-09-24 — `-k sync` 9/9 (8 new + v1's `sync_applied`),
+  full suite 71/71. `_sync` deleted; `doctor` and `sync` run on the v2 store
+  (live: first sync 229 added / 224 enabled, second sync 0 added — idempotent).
+  Beyond the Verify list: a resolution discovery *learned* survives a sync whose
+  YAML omits it (`COALESCE`), while a `careers_url` change keeps only what the
+  YAML states; `last_scraped_at` survives a URL move (staleness is history, not
+  resolution); `enabled: false` in the YAML is honoured. Legacy `run`/`resolve`/
+  `status` now stop with a clear "v2 database" error until M3-T3/M3-T4 replace them.
 - **Do:** `store.sync_watchlist(entries)` implementing the identity and sync
   semantics in §8.4 exactly: match on `key`, insert new as due, update descriptive
   fields only, clear resolution when `careers_url` changes, disable (never delete)
@@ -1421,8 +1446,24 @@ Legend: `STATUS` · `Completed` (date) · `Verify` (command that proves it) · `
   `test_aggregator_urls_never_yield_a_slug`).
 
 #### M3-T3 · Staleness scheduler
-- **STATUS:** `NOT_STARTED`
-- **Completed:** —
+- **STATUS:** `DONE`
+- **Completed:** 2026-09-24 — `-k scheduler` 10/10, full suite 81/81; live
+  `status` on the real DB: 224 due, 23 runs to drain, "a full sweep needs 1.6/day".
+  All five mandatory cases are tested. The last one ("with all 229 fresh the
+  runner exits 0 reporting the next due date") is proved at the scheduler level
+  here (`plan()` returns empty + `next_due_at` = oldest stamp + 14 days); the
+  runner half is asserted end to end in M3-T4, which builds the runner.
+  **Design notes:** the due query lives in `store.due_companies` (only store.py
+  holds SQL) with a Python-computed cut-off instead of `datetime('now', …)`, so
+  the §8.4 "SQLite-only exception" no longer exists and tests pin the clock.
+  "NULLs first" is spelled `CASE WHEN … IS NULL` (portable). **Quarantined
+  companies are excluded from the due query** — §8.3[0]'s SQL omits the clause,
+  but its prose keeps v1's quarantine/probation; they return only via
+  `store.due_probation`, which M3-T4 merges into the batch. The three v1 cursor
+  tests are ported as staleness equivalents; v1's `--force` test is retired (a
+  staleness queue has no cycle boundary to force past). `status` CLI now reads
+  the scheduler. **Pending:** the `ecc:database-reviewer` pass on the due query
+  is deferred until an agent slot frees up (4-agent cap, §0.6).
 - **Do:** `scheduler.py` per §8.3[0] — the due query, `batch_size: 10` (D-13),
   `cycle_days: 14`, stamping `last_scraped_at` on **attempt**. Port the meaningful
   `cursor.py` tests onto it. Add the `status` report (due now / due in 7 days /

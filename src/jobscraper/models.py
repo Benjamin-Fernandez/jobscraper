@@ -40,6 +40,34 @@ class Company:
 
 
 @dataclass
+class WatchedCompany:
+    """A v2 `companies` row: a watchlist entry plus the history the DB owns.
+
+    Identity is `key`, never `name` (PRD section 8.4). The v1 `Company` above
+    lives on only for the legacy modules and goes in M9-T1. The adapters and
+    discovery read `name`, `careers_url`, `provider`, `slug` and `feed_url`, so
+    this satisfies them unchanged.
+    """
+    id: int
+    key: str
+    name: str
+    careers_url: str
+    provider: Optional[str] = None
+    slug: Optional[str] = None
+    feed_url: Optional[str] = None
+    resolve_method: Optional[str] = None
+    resolved_at: Optional[str] = None
+    enabled: int = 1
+    last_scraped_at: Optional[str] = None
+    last_success_at: Optional[str] = None
+    consecutive_failures: int = 0
+    last_error_class: Optional[str] = None
+    last_error: Optional[str] = None
+    quarantined_at: Optional[str] = None
+    probation_due_run: Optional[int] = None
+
+
+@dataclass
 class RawJob:
     external_id: str
     title: str

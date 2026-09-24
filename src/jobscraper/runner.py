@@ -25,7 +25,7 @@ from .models import Candidate, Company, FetchOutcome, TokenLedger
 from .net import FetchError, HttpClient
 from .output import (write_application_tracker, write_html_view,
                      write_needs_review, write_run_tracker)
-from .store import Store
+from .store_v1 import Store
 
 
 @dataclass

@@ -23,7 +23,7 @@ from jobscraper import review as R
 from jobscraper.config import load_config, load_profile
 from jobscraper.llm import _key
 from jobscraper.models import Candidate, RawJob, ScoreBreakdown
-from jobscraper.store import Store
+from jobscraper.store_v1 import Store
 
 def _store(n=25):
     db = Path(tempfile.mkdtemp()) / "t.db"

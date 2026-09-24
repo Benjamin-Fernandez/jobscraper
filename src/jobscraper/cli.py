@@ -2,7 +2,7 @@
 
     python -m jobscraper doctor     check config, watchlist, deps, judge
     python -m jobscraper sync       load the watchlist into the database
-    python -m jobscraper status     where the cursor is, what is quarantined
+    python -m jobscraper status     who is due, run cadence, what is quarantined
     python -m jobscraper run        process the next batch of companies
     python -m jobscraper resolve    resolve ATS providers without fetching jobs
     python -m jobscraper export     rewrite the trackers from the database
@@ -20,6 +20,7 @@ from pathlib import Path
 from . import backends
 from . import cursor as cursor_mod
 from . import review as review_mod
+from . import scheduler
 from .config import load_config, load_profile
 from . import watchlist
 from .net import HttpClient
@@ -28,7 +29,8 @@ from .output import (cards_from_tracker, write_html_view,
 from . import discovery
 from .runner import ensure_resolved, run_batch
 from .serve import serve_view
-from .store import Store
+from .store import Store as StoreV2
+from .store_v1 import Store
 
 BAR = "-" * 66
 
@@ -40,32 +42,23 @@ def _boot(args):
     return cfg, profile, store
 
 
-def _sync(cfg, store):
-    """Load the watchlist into the companies table.
+def _boot_v2(args):
+    """Config plus the v2 store. `_boot` above serves only the legacy commands."""
+    cfg = load_config(getattr(args, "config", None))
+    return cfg, StoreV2(cfg.db_path)
 
-    A bridge, not the final design. It feeds watchlist entries through v1's
-    `sync_companies`, which still keys rows on the display name and carries
-    tier/category columns v2 has dropped. M3-T1b replaces it with
-    `store.sync_watchlist`, which keys on the stable `key` so that renaming a
-    company cannot reset its scrape history (PRD 8.4).
 
-    It exists now because M1-T4 removed the Excel workbook from the config, and
-    leaving every command raising AttributeError until M3 is not an option.
+def _sync_watchlist(cfg, store) -> dict[str, int]:
+    """Reconcile watchlist.yaml into `companies`, keyed on the stable `key`.
+
+    Runs before anything reads the companies table, so a YAML edit - an added,
+    renamed, disabled or removed company - is always seen by the next command.
     """
-    entries = watchlist.load(cfg.watchlist_path)
-    rows = [{"ordinal": i,
-             "name": e.name,
-             "tier": "",
-             "category": "",
-             "careers_url": e.careers_url,
-             "role_type_hint": ""}
-            for i, e in enumerate(watchlist.enabled_only(entries), start=1)]
-    added, updated = store.sync_companies(rows)
-    return len(rows), added, updated
+    return store.sync_watchlist(watchlist.load(cfg.watchlist_path))
 
 
 def cmd_doctor(args) -> int:
-    cfg, profile, store = _boot(args)
+    cfg, store = _boot_v2(args)
     print(BAR)
     print("JobScraper doctor")
     print(BAR)
@@ -73,21 +66,24 @@ def cmd_doctor(args) -> int:
     wl = cfg.watchlist_path
     print(f"watchlist      {wl}")
     try:
-        total, added, updated = _sync(cfg, store)
+        counts = _sync_watchlist(cfg, store)
     except watchlist.WatchlistError as exc:
         print(f"               INVALID - {exc}")
         store.close()
         return 1
-    print(f"               OK - {total} enabled companies "
-          f"({added} new, {updated} updated)")
-
-    print(f"profile        v{profile.version}, {len(profile.all_skills())} skills, "
-          f"locations={','.join(profile.loc_allow)}")
-    print(f"database       {cfg.db_path}")
     s = store.stats()
+    print(f"               OK - {s['enabled']} enabled of {s['companies']} "
+          f"({counts['added']} new, {counts['url_changed']} moved, "
+          f"{counts['disabled']} disabled)")
+
+    derived = cfg.profile_path
+    print(f"profile        {derived}")
+    print("               " + ("present" if derived.exists()
+                               else "missing - run `python -m jobscraper profile`"))
+    print(f"database       {cfg.db_path}")
     print(f"               {s['companies']} companies, {s['resolved']} resolved, "
           f"{s['quarantined']} quarantined, {s['jobs']} jobs, "
-          f"{s['exported']} exported")
+          f"{s['applications']} applications")
 
     backend = backends.build(cfg.budget)
     print(f"judge          backend={backend.name}")
@@ -108,48 +104,38 @@ def cmd_doctor(args) -> int:
     print(f"batch          {cfg.run['batch_size']} companies per run, "
           f"{cfg.run['cycle_days']}-day cycle")
     print(BAR)
-    print(cursor_mod.describe(store, total, int(cfg.run["cycle_days"]),
-                              int(cfg.run["batch_size"])))
-    print(BAR)
     store.close()
     return 0
 
 
 def cmd_sync(args) -> int:
-    cfg, _profile, store = _boot(args)
-    total, added, updated = _sync(cfg, store)
-    print(f"synced {total} companies ({added} new, {updated} updated)")
+    cfg, store = _boot_v2(args)
+    c = _sync_watchlist(cfg, store)
+    s = store.stats()
+    print(f"synced {s['enabled']} enabled of {s['companies']} companies "
+          f"({c['added']} new, {c['updated']} updated, {c['url_changed']} moved, "
+          f"{c['disabled']} disabled)")
     store.close()
     return 0
 
 
 def cmd_status(args) -> int:
-    cfg, _profile, store = _boot(args)
-    total = len(store.all_companies())
+    """Queue depth and cadence from the staleness scheduler (PRD 8.3[0])."""
+    cfg, store = _boot_v2(args)
+    _sync_watchlist(cfg, store)
+    st = scheduler.status(store, cfg.batch_size, cfg.cycle_days)
     print(BAR)
-    print(cursor_mod.describe(store, total, int(cfg.run["cycle_days"]),
-                              int(cfg.run["batch_size"])))
+    print(scheduler.describe(st))
     print(BAR)
     s = store.stats()
-    print(f"companies {s['companies']}   resolved {s['resolved']}   "
-          f"quarantined {s['quarantined']}")
-    print(f"jobs      {s['jobs']}   open {s['open_jobs']}   "
-          f"exported {s['exported']}   runs {s['runs']}")
-    q = store.quarantined()
-    if q:
-        print(f"\nQuarantined ({len(q)}) - see output/needs_review.xlsx")
-        for c in q[:15]:
-            print(f"  [{c.ordinal:>3}] {c.name:<26} {c.last_error_class or '':<10} "
-                  f"{(c.last_error or '')[:46]}")
-        if len(q) > 15:
-            print(f"  ... and {len(q) - 15} more")
+    print(f"jobs      {s['jobs']}   open {s['open_jobs']}   runs {s['runs']}   "
+          f"applications {s['applications']}")
     store.close()
     return 0
 
 
 def cmd_resolve(args) -> int:
     cfg, _profile, store = _boot(args)
-    _sync(cfg, store)
     rc = cfg.run
     client = HttpClient(user_agent=rc["user_agent"],
                         timeout=float(rc["request_timeout"]),
@@ -178,7 +164,6 @@ def cmd_resolve(args) -> int:
 
 def cmd_run(args) -> int:
     cfg, profile, store = _boot(args)
-    _sync(cfg, store)
     rep = run_batch(cfg, profile, store, force=args.force,
                     batch_size=args.batch_size, dry_run=args.dry_run)
 
@@ -465,7 +450,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     sub.add_parser("doctor", help="check setup").set_defaults(fn=cmd_doctor)
     sub.add_parser("sync", help="load the watchlist into the db").set_defaults(fn=cmd_sync)
-    sub.add_parser("status", help="cursor and health").set_defaults(fn=cmd_status)
+    sub.add_parser("status", help="who is due, cadence, quarantine").set_defaults(fn=cmd_status)
     sub.add_parser("export", help="rewrite trackers").set_defaults(fn=cmd_export)
 
     r = sub.add_parser("resolve", help="resolve ATS providers only")
