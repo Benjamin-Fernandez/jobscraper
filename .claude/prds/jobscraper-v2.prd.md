@@ -1671,12 +1671,19 @@ Legend: `STATUS` · `Completed` (date) · `Verify` (command that proves it) · `
 ### M8 — Application tracking
 
 #### M8-T1 · Applications tab
-- **STATUS:** `NOT_STARTED`
-- **Completed:** —
+- **STATUS:** `DONE`
+- **Completed:** 2026-09-24
 - **Do:** Table of everything with a status, grouped by status, with the
   `app_events` timeline per row and inline status change.
 - **Verify:** Manual — advance a role through `applied → interviewing`, confirm
   both events appear in order.
+- **Notes:** Verified 2026-09-24 (Lane C) in the browser on a scratch v2 store: OKX
+  (applied in M7-T3) moved to `interviewing` with the inline dropdown. After a
+  reload it sat in the `interviewing` group with timeline `applied 00:53 UTC` →
+  `interviewing 00:57 UTC`, no console errors. 6 Vitest tests in
+  `web/tests/Applications.test.js`. The tab ignores the run selector, since an
+  application outlives its run. The dropdown's options come from `/api/stats`
+  `statuses` (config `applications.statuses`), so M8-T2 should need no UI change.
 
 #### M8-T2 · Status vocabulary in config
 - **STATUS:** `NOT_STARTED`

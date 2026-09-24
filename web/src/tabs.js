@@ -8,4 +8,5 @@
 // and may emit `changed` to ask the shell to reload the dataset.
 export const TABS = [
   { id: 'inbox', label: 'Inbox', component: () => import('./tabs/Inbox.vue') },
+  { id: 'applications', label: 'Applications', component: () => import('./tabs/Applications.vue') },
 ]

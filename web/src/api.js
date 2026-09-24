@@ -22,6 +22,16 @@ export function getShortlist(run) {
   return request(`shortlist?run=${encodeURIComponent(run)}`)
 }
 
+// Everything with a status, each row carrying its `events` timeline.
+export function getApplications() {
+  return request('applications')
+}
+
+// Counts, plus `statuses`: the ordered status vocabulary from config.
+export function getStats() {
+  return request('stats')
+}
+
 // Record an application status. `details` (company, role, url) is kept on the
 // application row so the record survives the posting leaving the shortlist.
 export function setApplicationStatus(jobId, status, { notes, ...details } = {}) {
