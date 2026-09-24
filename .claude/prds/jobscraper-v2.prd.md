@@ -1599,12 +1599,21 @@ Legend: `STATUS` · `Completed` (date) · `Verify` (command that proves it) · `
   to 5.x: 3.x carries advisory GHSA-82fw-gwwq-j7x9.
 
 #### M7-T2 · Tab shell + run selector
-- **STATUS:** `NOT_STARTED`
-- **Completed:** —
+- **STATUS:** `DONE`
+- **Completed:** 2026-09-24
 - **Do:** The `TABS` registry (§8.5), plus the run selector that swaps the dataset
   in place. **One page for all runs** — this is the core of requirement (2).
 - **Verify:** Changing the run selector issues one `GET /api/shortlist?run=<n>` and
   navigates nowhere; no new HTML file is produced anywhere.
+- **Notes:** Verified 2026-09-24 (Lane C) in the browser against
+  `tests/fixtures/shortlist.json` and a scratch v2 store: selecting run 11 made
+  exactly one request (`/api/shortlist?run=11`), with the same document (a
+  `window` marker survived) and the same URL; `git status` showed no HTML beyond the
+  rebuilt `static/index.html`. Also asserted in Vitest (`web/tests/App.test.js`).
+  `/api/runs` and `/api/shortlist` landed here because the selector needs them;
+  they already run on the real M3-T1 store. Runs come from `Store.list_runs()`,
+  with per-run `accepted` taken from the shortlist, so a run that accepted nothing
+  still appears in the selector.
 
 #### M7-T3 · Inbox tab
 - **STATUS:** `NOT_STARTED`
