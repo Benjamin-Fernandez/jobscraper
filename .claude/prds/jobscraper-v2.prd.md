@@ -1566,8 +1566,8 @@ Legend: `STATUS` · `Completed` (date) · `Verify` (command that proves it) · `
 ### M7 — Web UI
 
 #### M7-T1 · Vite + Vue scaffold, builds into the package
-- **STATUS:** `NOT_STARTED`
-- **Completed:** —
+- **STATUS:** `DONE`
+- **Completed:** 2026-09-24
 - **Do:** `web/` project, output to `src/jobscraper/web/static/`. Document the build
   in README. FastAPI serves the built assets at `/`. Add **Vitest** + Vue Test Utils
   so M7-T3 and M8-T1 have something falsifiable to assert; wire `npm test`.
@@ -1576,6 +1576,12 @@ Legend: `STATUS` · `Completed` (date) · `Verify` (command that proves it) · `
   serves the page at `http://127.0.0.1:8765`.
 - **Notes:** Without a frontend test runner, every UI task below is manual-only and
   nothing guards against regression on day 4.
+  Verified 2026-09-24 (Lane C): `npm run build` writes `static/index.html` + hashed
+  assets; `npm test` 1/1 (Vitest 5, jsdom); `python -m jobscraper web` served the
+  mounted Vue page at `http://127.0.0.1:8765`, no console errors. Build docs are in
+  `web/README.md` (README is the Lead's; link it from there). Routers in
+  `web/routers/` are auto-discovered so M7-T4 stays a 3-file change. Vitest pinned
+  to 5.x: 3.x carries advisory GHSA-82fw-gwwq-j7x9.
 
 #### M7-T2 · Tab shell + run selector
 - **STATUS:** `NOT_STARTED`
