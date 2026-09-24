@@ -28,7 +28,7 @@ from .output import (cards_from_tracker, write_html_view,
 from . import discovery
 from .runner import ensure_resolved, run_batch
 from .serve import serve_view
-from .store import Store
+from .store_v1 import Store
 
 BAR = "-" * 66
 

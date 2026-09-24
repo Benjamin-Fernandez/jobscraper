@@ -1,4 +1,15 @@
-"""SQLite persistence. Source of truth; Excel is only a surface.
+"""v2 SQLite persistence - and the only module in the package that contains SQL.
+
+Why one module: every other module asks this one for data instead of writing a
+query, which is what makes the Postgres path in PRD section 8.4 one file's work
+rather than a search-and-replace (the layering guard enforces it). Plain SQL is
+preferred over SQLite dialect wherever an ANSI form exists; the few exceptions
+are named where they occur.
+
+Who owns what. The watchlist YAML says *which* companies exist; this database
+owns their *history* - staleness, failures, quarantine - and everything the
+pipeline derives (jobs, prefilter verdicts, decisions) plus the one thing that
+cannot be regenerated: the user's application record.
 
 All writes happen on the orchestrator thread. Fetch workers never touch the DB.
 """
@@ -6,299 +17,352 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Iterable, Optional
 
-from .models import Candidate, Company, CycleState, JobFacts, RawJob, Verdict
+from .models import RawJob, WatchedCompany
+
+SCHEMA_VERSION = 2
 
 SCHEMA = """
+CREATE TABLE IF NOT EXISTS meta (
+    key TEXT PRIMARY KEY,
+    value TEXT
+);
+
 CREATE TABLE IF NOT EXISTS companies (
     id INTEGER PRIMARY KEY,
-    ordinal INTEGER NOT NULL,
+    key TEXT NOT NULL UNIQUE,              -- stable identity; never the display name
     name TEXT NOT NULL,
-    tier TEXT, category TEXT, careers_url TEXT, role_type_hint TEXT,
-    provider TEXT, slug TEXT, feed_url TEXT, resolve_method TEXT, resolved_at TEXT,
+    careers_url TEXT NOT NULL,
+    provider TEXT, slug TEXT, feed_url TEXT,
+    resolve_method TEXT, resolved_at TEXT,
+    enabled INTEGER NOT NULL DEFAULT 1,
+    last_scraped_at TEXT,                  -- D-9: stamped on ATTEMPT
+    last_success_at TEXT,
     consecutive_failures INTEGER NOT NULL DEFAULT 0,
-    last_success_at TEXT, last_error_class TEXT, last_error TEXT,
-    quarantined_at TEXT, probation_due_run INTEGER,
-    active INTEGER NOT NULL DEFAULT 1
+    last_error_class TEXT, last_error TEXT,
+    quarantined_at TEXT, probation_due_run INTEGER
 );
-CREATE UNIQUE INDEX IF NOT EXISTS idx_companies_name ON companies(name);
+CREATE INDEX IF NOT EXISTS idx_companies_due ON companies(enabled, last_scraped_at);
 
 CREATE TABLE IF NOT EXISTS jobs (
     job_id TEXT PRIMARY KEY,
     company_id INTEGER NOT NULL,
-    external_id TEXT, title TEXT, location TEXT, url TEXT,
-    department TEXT, employment_type TEXT, posted_at TEXT,
-    jd_hash TEXT, jd_text TEXT,
+    external_id TEXT, title TEXT, location TEXT, url TEXT, posted_at TEXT,
+    jd_hash TEXT, jd_text TEXT, vital_text TEXT,
     first_seen_run INTEGER, last_seen_run INTEGER, closed_at TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_jobs_company ON jobs(company_id);
+CREATE INDEX IF NOT EXISTS idx_jobs_url ON jobs(url);
 
-CREATE TABLE IF NOT EXISTS job_facts (
-    job_id TEXT PRIMARY KEY,
-    profile_version INTEGER,
-    countries_json TEXT, is_singapore INTEGER, seniority TEXT,
-    yoe_min INTEGER, yoe_max INTEGER, intake_year INTEGER,
-    is_graduate_programme INTEGER, sponsorship TEXT, role_family TEXT,
-    tech_stack_json TEXT, requires_clearance INTEGER,
-    model TEXT, extracted_at TEXT
+CREATE TABLE IF NOT EXISTS prefilter (
+    job_id TEXT NOT NULL,
+    profile_version INTEGER NOT NULL,
+    rules_hash TEXT NOT NULL,              -- a verdict is valid only for its rules
+    passed INTEGER NOT NULL,
+    reject_rule TEXT, reject_detail TEXT, overlap_score INTEGER,
+    evaluated_at TEXT NOT NULL,
+    PRIMARY KEY (job_id, profile_version, rules_hash)
 );
 
-CREATE TABLE IF NOT EXISTS llm_cache (
-    cache_key TEXT PRIMARY KEY,
-    job_id TEXT, profile_version INTEGER, stage TEXT,
-    payload_json TEXT, model TEXT,
-    input_tokens INTEGER, output_tokens INTEGER, created_at TEXT
-);
-
-CREATE TABLE IF NOT EXISTS scores (
-    job_id TEXT, profile_version INTEGER,
-    bm25 REAL, skill_overlap REAL, title_affinity REAL, total_score REAL,
-    stage_a_pass INTEGER, filter_reason TEXT, scored_at TEXT,
-    PRIMARY KEY (job_id, profile_version)
-);
-
-CREATE TABLE IF NOT EXISTS runs (
-    run_no INTEGER PRIMARY KEY AUTOINCREMENT,
-    cycle_id INTEGER, batch_from INTEGER, batch_to INTEGER,
-    started_at TEXT, finished_at TEXT, status TEXT, stats_json TEXT
-);
-
-CREATE TABLE IF NOT EXISTS coverage (
-    run_no INTEGER, company_id INTEGER,
-    status TEXT, postings_found INTEGER, new_count INTEGER, matched_count INTEGER,
-    http_status INTEGER, error_class TEXT, error TEXT, checked_at TEXT,
-    PRIMARY KEY (run_no, company_id)
-);
-
-CREATE TABLE IF NOT EXISTS exported (
-    job_id TEXT PRIMARY KEY, exported_run INTEGER, exported_at TEXT
+CREATE TABLE IF NOT EXISTS decisions (
+    job_id TEXT NOT NULL,
+    profile_version INTEGER NOT NULL,
+    vital_hash TEXT NOT NULL,              -- a changed description is re-decided
+    decision TEXT NOT NULL CHECK (decision IN ('accept', 'reject')),
+    is_singapore INTEGER, yoe_min INTEGER, reason TEXT, model TEXT,
+    decided_at TEXT NOT NULL,
+    PRIMARY KEY (job_id, profile_version, vital_hash)
 );
 
 CREATE TABLE IF NOT EXISTS applications (
     job_id TEXT PRIMARY KEY,
-    applied INTEGER NOT NULL DEFAULT 0,
-    applied_at TEXT,
-    role TEXT, company TEXT, url TEXT,
-    updated_at TEXT
+    status TEXT NOT NULL,
+    applied_at TEXT, notes TEXT,
+    -- Kept on the row itself so an application whose posting is never scraped
+    -- again (a migrated v1 row, D-14, or a closed role) still says what it was.
+    company TEXT, role TEXT, url TEXT,
+    updated_at TEXT NOT NULL
 );
 
-CREATE TABLE IF NOT EXISTS cycle_state (
-    id INTEGER PRIMARY KEY CHECK (id = 1),
-    cycle_id INTEGER, cycle_started_at TEXT, cursor INTEGER,
-    total_companies INTEGER, last_run_no INTEGER
+CREATE TABLE IF NOT EXISTS app_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    job_id TEXT NOT NULL,
+    from_status TEXT, to_status TEXT NOT NULL,
+    at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_app_events_job ON app_events(job_id, id);
+
+CREATE TABLE IF NOT EXISTS runs (
+    run_no INTEGER PRIMARY KEY AUTOINCREMENT,
+    started_at TEXT NOT NULL, finished_at TEXT,
+    status TEXT NOT NULL,                  -- running | ok | failed | aborted_unhealthy
+    stats_json TEXT
+);
+
+CREATE TABLE IF NOT EXISTS coverage (
+    run_no INTEGER NOT NULL, company_id INTEGER NOT NULL,
+    status TEXT, postings_found INTEGER, new_count INTEGER, accepted_count INTEGER,
+    http_status INTEGER, error_class TEXT, error TEXT, checked_at TEXT,
+    PRIMARY KEY (run_no, company_id)
 );
 """
 
+# The one status that does not mean "an application went out". Moving to any
+# other status stamps `applied_at` the first time, and it is never re-stamped:
+# the date you applied does not change because you later got an interview.
+NOT_YET_APPLIED = frozenset({"to_apply"})
+
+TIME_FMT = "%Y-%m-%dT%H:%M:%S"
+
 
 def utcnow() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
+    return datetime.now(timezone.utc).strftime(TIME_FMT)
+
+
+def shift(stamp: str, *, days: float = 0, seconds: float = 0) -> str:
+    """`stamp` moved by a duration, in the same sortable text format.
+
+    Cut-offs are computed here rather than with SQLite's `datetime('now', ...)`
+    so the comparison stays plain SQL and tests can pin the clock.
+    """
+    t = datetime.strptime(stamp, TIME_FMT) + timedelta(days=days, seconds=seconds)
+    return t.strftime(TIME_FMT)
 
 
 def _b(v: Any) -> Optional[int]:
     return None if v is None else int(bool(v))
 
 
+class SchemaMismatch(RuntimeError):
+    """The file on disk is not a v2 database."""
+
+
 class Store:
     def __init__(self, path: Path, check_same_thread: bool = True):
         path.parent.mkdir(parents=True, exist_ok=True)
-        self.conn = sqlite3.connect(str(path),
-                                    check_same_thread=check_same_thread)
+        self.path = path
+        self.conn = sqlite3.connect(str(path), check_same_thread=check_same_thread)
         self.conn.row_factory = sqlite3.Row
+        self._refuse_v1()
+        # WAL lets the web app read while a run writes. SQLite-specific, and
+        # harmless to drop on any other engine.
+        self.conn.execute("PRAGMA journal_mode=WAL")
         self.conn.executescript(SCHEMA)
+        self.conn.execute(
+            "INSERT OR IGNORE INTO meta (key, value) VALUES ('schema_version', ?)",
+            (str(SCHEMA_VERSION),))
         self.conn.commit()
+
+    def _refuse_v1(self) -> None:
+        cols = {r["name"] for r in self.conn.execute("PRAGMA table_info(companies)")}
+        if cols and "key" not in cols:
+            self.conn.close()
+            raise SchemaMismatch(
+                f"{self.path} holds the v1 schema. v2 does not migrate it: move it "
+                "to archive/ and let the next run create a fresh database "
+                "(PRD section 0.5).")
 
     def close(self) -> None:
         self.conn.close()
 
+    def commit(self) -> None:
+        self.conn.commit()
+
     # ---------------- companies ----------------
 
-    def sync_companies(self, rows: list[dict[str, Any]]) -> tuple[int, int]:
-        """Upsert the workbook into `companies`. Preserves resolution and health state."""
-        added = updated = 0
-        for r in rows:
-            cur = self.conn.execute("SELECT id FROM companies WHERE name = ?", (r["name"],))
-            hit = cur.fetchone()
-            if hit:
-                self.conn.execute(
-                    """UPDATE companies SET ordinal=?, tier=?, category=?, careers_url=?,
-                       role_type_hint=? WHERE id=?""",
-                    (r["ordinal"], r["tier"], r["category"], r["careers_url"],
-                     r["role_type_hint"], hit["id"]),
-                )
-                updated += 1
-            else:
-                self.conn.execute(
-                    """INSERT INTO companies (ordinal, name, tier, category, careers_url,
-                       role_type_hint) VALUES (?,?,?,?,?,?)""",
-                    (r["ordinal"], r["name"], r["tier"], r["category"],
-                     r["careers_url"], r["role_type_hint"]),
-                )
-                added += 1
+    def _company(self, row: sqlite3.Row) -> WatchedCompany:
+        return WatchedCompany(**{k: row[k] for k in row.keys()})
+
+    def insert_company(self, key: str, name: str, careers_url: str,
+                       provider: Optional[str] = None, slug: Optional[str] = None,
+                       feed_url: Optional[str] = None, enabled: bool = True) -> int:
+        """A brand-new company: `last_scraped_at` is NULL, so it is due at once."""
+        cur = self.conn.execute(
+            """INSERT INTO companies (key, name, careers_url, provider, slug,
+               feed_url, enabled) VALUES (?,?,?,?,?,?,?)""",
+            (key, name, careers_url, provider, slug, feed_url, int(enabled)))
         self.conn.commit()
-        return added, updated
+        return int(cur.lastrowid)
 
-    def _company(self, row: sqlite3.Row) -> Company:
-        return Company(**{k: row[k] for k in row.keys()})
+    def companies(self, enabled_only: bool = False) -> list[WatchedCompany]:
+        sql = "SELECT * FROM companies"
+        if enabled_only:
+            sql += " WHERE enabled = 1"
+        return [self._company(r) for r in self.conn.execute(sql + " ORDER BY id")]
 
-    def all_companies(self) -> list[Company]:
-        cur = self.conn.execute("SELECT * FROM companies ORDER BY ordinal")
-        return [self._company(r) for r in cur.fetchall()]
-
-    def get_company(self, cid: int) -> Optional[Company]:
-        cur = self.conn.execute("SELECT * FROM companies WHERE id=?", (cid,))
-        r = cur.fetchone()
+    def get_company(self, cid: int) -> Optional[WatchedCompany]:
+        r = self.conn.execute("SELECT * FROM companies WHERE id = ?", (cid,)).fetchone()
         return self._company(r) if r else None
 
-    def quarantined(self) -> list[Company]:
-        cur = self.conn.execute(
-            "SELECT * FROM companies WHERE active=0 ORDER BY ordinal")
-        return [self._company(r) for r in cur.fetchall()]
+    def company_by_key(self, key: str) -> Optional[WatchedCompany]:
+        r = self.conn.execute("SELECT * FROM companies WHERE key = ?", (key,)).fetchone()
+        return self._company(r) if r else None
 
     def set_resolution(self, cid: int, provider: str, slug: Optional[str],
                        feed_url: Optional[str], method: str) -> None:
         self.conn.execute(
-            """UPDATE companies SET provider=?, slug=?, feed_url=?, resolve_method=?,
-               resolved_at=? WHERE id=?""",
+            """UPDATE companies SET provider = ?, slug = ?, feed_url = ?,
+               resolve_method = ?, resolved_at = ? WHERE id = ?""",
             (provider, slug, feed_url, method, utcnow(), cid))
+        self.conn.commit()
+
+    def clear_resolution(self, cid: int) -> None:
+        """Forget a cached ATS resolution so discovery runs again."""
+        self.conn.execute(
+            """UPDATE companies SET provider = NULL, slug = NULL, feed_url = NULL,
+               resolve_method = NULL, resolved_at = NULL WHERE id = ?""", (cid,))
         self.conn.commit()
 
     def record_success(self, cid: int) -> None:
         self.conn.execute(
-            """UPDATE companies SET consecutive_failures=0, last_success_at=?,
-               last_error_class=NULL, last_error=NULL, active=1,
-               quarantined_at=NULL, probation_due_run=NULL WHERE id=?""",
+            """UPDATE companies SET consecutive_failures = 0, last_success_at = ?,
+               last_error_class = NULL, last_error = NULL,
+               quarantined_at = NULL, probation_due_run = NULL WHERE id = ?""",
             (utcnow(), cid))
         self.conn.commit()
 
     def record_failure(self, cid: int, error_class: str, error: str) -> int:
+        """Count a failed fetch; returns the new consecutive-failure count."""
         self.conn.execute(
             """UPDATE companies SET consecutive_failures = consecutive_failures + 1,
-               last_error_class=?, last_error=? WHERE id=?""",
+               last_error_class = ?, last_error = ? WHERE id = ?""",
             (error_class, (error or "")[:500], cid))
         self.conn.commit()
-        cur = self.conn.execute(
-            "SELECT consecutive_failures FROM companies WHERE id=?", (cid,))
-        return int(cur.fetchone()[0])
+        r = self.conn.execute(
+            "SELECT consecutive_failures FROM companies WHERE id = ?", (cid,)).fetchone()
+        return int(r[0])
 
     def rollback_failures(self, cids: Iterable[int]) -> None:
-        """Global circuit breaker: undo this run's failure increments."""
+        """Global circuit breaker: undo this run's failure increments.
+
+        When most of a batch fails at once the fault is local (network down),
+        not the companies', so nobody should creep towards quarantine for it.
+        """
         for cid in cids:
             self.conn.execute(
-                """UPDATE companies
-                   SET consecutive_failures = MAX(consecutive_failures - 1, 0)
-                   WHERE id=?""", (cid,))
+                """UPDATE companies SET consecutive_failures =
+                   CASE WHEN consecutive_failures > 0
+                        THEN consecutive_failures - 1 ELSE 0 END
+                   WHERE id = ?""", (cid,))
         self.conn.commit()
 
     def quarantine(self, cid: int, probation_due_run: int) -> None:
         self.conn.execute(
-            """UPDATE companies SET active=0, quarantined_at=?, probation_due_run=?
-               WHERE id=?""", (utcnow(), probation_due_run, cid))
+            """UPDATE companies SET quarantined_at = ?, probation_due_run = ?
+               WHERE id = ?""", (utcnow(), probation_due_run, cid))
         self.conn.commit()
 
-    def due_probation(self, run_no: int) -> list[Company]:
-        cur = self.conn.execute(
-            """SELECT * FROM companies WHERE active=0 AND probation_due_run IS NOT NULL
-               AND probation_due_run <= ? ORDER BY ordinal""", (run_no,))
-        return [self._company(r) for r in cur.fetchall()]
+    def due_probation(self, run_no: int) -> list[WatchedCompany]:
+        rows = self.conn.execute(
+            """SELECT * FROM companies WHERE enabled = 1
+               AND quarantined_at IS NOT NULL AND probation_due_run IS NOT NULL
+               AND probation_due_run <= ? ORDER BY id""", (run_no,))
+        return [self._company(r) for r in rows]
 
     def defer_probation(self, cid: int, next_run: int) -> None:
         self.conn.execute(
-            "UPDATE companies SET probation_due_run=? WHERE id=?", (next_run, cid))
+            "UPDATE companies SET probation_due_run = ? WHERE id = ?", (next_run, cid))
         self.conn.commit()
 
-    # ---------------- cycle ----------------
-
-    def get_cycle(self) -> Optional[CycleState]:
-        cur = self.conn.execute("SELECT * FROM cycle_state WHERE id=1")
-        r = cur.fetchone()
-        if not r:
-            return None
-        return CycleState(r["cycle_id"], r["cycle_started_at"], r["cursor"],
-                          r["total_companies"], r["last_run_no"])
-
-    def save_cycle(self, st: CycleState) -> None:
-        self.conn.execute(
-            """INSERT INTO cycle_state (id, cycle_id, cycle_started_at, cursor,
-                                        total_companies, last_run_no)
-               VALUES (1,?,?,?,?,?)
-               ON CONFLICT(id) DO UPDATE SET cycle_id=excluded.cycle_id,
-                   cycle_started_at=excluded.cycle_started_at, cursor=excluded.cursor,
-                   total_companies=excluded.total_companies,
-                   last_run_no=excluded.last_run_no""",
-            (st.cycle_id, st.cycle_started_at, st.cursor, st.total_companies,
-             st.last_run_no))
+    def stamp_scraped(self, cids: Iterable[int], at: Optional[str] = None) -> None:
+        """Record an ATTEMPT (D-9). Called last in a run, so a crash stamps nothing."""
+        stamp = at or utcnow()
+        for cid in cids:
+            self.conn.execute(
+                "UPDATE companies SET last_scraped_at = ? WHERE id = ?", (stamp, cid))
         self.conn.commit()
 
     # ---------------- runs ----------------
 
-    def start_run(self, cycle_id: int, batch_from: int, batch_to: int) -> int:
+    def start_run(self, at: Optional[str] = None) -> int:
         cur = self.conn.execute(
-            """INSERT INTO runs (cycle_id, batch_from, batch_to, started_at, status)
-               VALUES (?,?,?,?,'running')""",
-            (cycle_id, batch_from, batch_to, utcnow()))
+            "INSERT INTO runs (started_at, status) VALUES (?, 'running')",
+            (at or utcnow(),))
         self.conn.commit()
         return int(cur.lastrowid)
 
     def finish_run(self, run_no: int, status: str, stats: dict[str, Any]) -> None:
         self.conn.execute(
-            "UPDATE runs SET finished_at=?, status=?, stats_json=? WHERE run_no=?",
-            (utcnow(), status, json.dumps(stats), run_no))
+            "UPDATE runs SET finished_at = ?, status = ?, stats_json = ? WHERE run_no = ?",
+            (utcnow(), status, json.dumps(stats, sort_keys=True), run_no))
         self.conn.commit()
 
+    def reap_stale_runs(self, older_than_seconds: float,
+                        now: Optional[str] = None) -> int:
+        """Crash recovery (PRD 8.3[0]): a run still `running` past its timeout died.
+
+        Its `last_scraped_at` stamps are deliberately left alone - re-fetching
+        early would let a crash loop monopolise the queue.
+        """
+        cutoff = shift(now or utcnow(), seconds=-older_than_seconds)
+        cur = self.conn.execute(
+            """UPDATE runs SET status = 'failed', finished_at = ?
+               WHERE status = 'running' AND started_at <= ?""",
+            (now or utcnow(), cutoff))
+        self.conn.commit()
+        return cur.rowcount
+
     def last_run_no(self) -> int:
-        cur = self.conn.execute("SELECT MAX(run_no) FROM runs")
-        v = cur.fetchone()[0]
+        v = self.conn.execute("SELECT MAX(run_no) FROM runs").fetchone()[0]
         return int(v or 0)
 
-    def all_runs(self) -> list[sqlite3.Row]:
-        return self.conn.execute("SELECT * FROM runs ORDER BY run_no").fetchall()
+    def list_runs(self) -> list[dict[str, Any]]:
+        """Newest first, with `stats` parsed. Feeds the web app's run selector."""
+        out = []
+        for r in self.conn.execute("SELECT * FROM runs ORDER BY run_no DESC"):
+            d = dict(r)
+            d["stats"] = json.loads(d.pop("stats_json") or "{}")
+            out.append(d)
+        return out
 
     def record_coverage(self, run_no: int, company_id: int, status: str,
-                        postings: int, new: int, matched: int,
+                        postings: int, new: int, accepted: int,
                         http_status: Optional[int], error_class: Optional[str],
                         error: Optional[str]) -> None:
+        # INSERT OR REPLACE is SQLite dialect; a re-recorded company in the same
+        # run simply supersedes its earlier row.
         self.conn.execute(
             """INSERT OR REPLACE INTO coverage (run_no, company_id, status,
-               postings_found, new_count, matched_count, http_status,
+               postings_found, new_count, accepted_count, http_status,
                error_class, error, checked_at) VALUES (?,?,?,?,?,?,?,?,?,?)""",
-            (run_no, company_id, status, postings, new, matched, http_status,
+            (run_no, company_id, status, postings, new, accepted, http_status,
              error_class, (error or "")[:500], utcnow()))
         self.conn.commit()
 
-    def coverage_rows(self) -> list[sqlite3.Row]:
-        return self.conn.execute(
-            """SELECT c.*, co.name, co.tier, co.provider, co.feed_url, co.careers_url
-               FROM coverage c JOIN companies co ON co.id = c.company_id
-               ORDER BY c.run_no DESC, co.ordinal""").fetchall()
+    def coverage_for_run(self, run_no: int) -> list[dict[str, Any]]:
+        return [dict(r) for r in self.conn.execute(
+            """SELECT c.*, co.name, co.provider FROM coverage c
+               JOIN companies co ON co.id = c.company_id
+               WHERE c.run_no = ? ORDER BY co.name""", (run_no,))]
 
     # ---------------- jobs ----------------
 
     def known_job_ids(self, company_id: int) -> set[str]:
-        cur = self.conn.execute(
-            "SELECT job_id FROM jobs WHERE company_id=?", (company_id,))
-        return {r[0] for r in cur.fetchall()}
+        return {r[0] for r in self.conn.execute(
+            "SELECT job_id FROM jobs WHERE company_id = ?", (company_id,))}
 
     def upsert_job(self, job_id: str, company_id: int, raw: RawJob,
                    run_no: int, is_new: bool) -> None:
+        """Insert a new posting, or mark a known one seen (and reopened) this run.
+
+        Does not commit: a run persists a company's jobs as one batch.
+        """
         if is_new:
             self.conn.execute(
-                """INSERT OR REPLACE INTO jobs (job_id, company_id, external_id, title,
-                   location, url, department, employment_type, posted_at, jd_hash,
-                   jd_text, first_seen_run, last_seen_run, closed_at)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,NULL)""",
-                (job_id, company_id, raw.external_id, raw.title, raw.location, raw.url,
-                 raw.department, raw.employment_type, raw.posted_at, raw.jd_hash(),
-                 raw.description, run_no, run_no))
+                """INSERT OR REPLACE INTO jobs (job_id, company_id, external_id,
+                   title, location, url, posted_at, jd_hash, jd_text, vital_text,
+                   first_seen_run, last_seen_run, closed_at)
+                   VALUES (?,?,?,?,?,?,?,?,?,NULL,?,?,NULL)""",
+                (job_id, company_id, raw.external_id, raw.title, raw.location,
+                 raw.url, raw.posted_at, raw.jd_hash(), raw.description,
+                 run_no, run_no))
         else:
             self.conn.execute(
-                "UPDATE jobs SET last_seen_run=?, closed_at=NULL WHERE job_id=?",
+                "UPDATE jobs SET last_seen_run = ?, closed_at = NULL WHERE job_id = ?",
                 (run_no, job_id))
-
-    def commit(self) -> None:
-        self.conn.commit()
 
     def close_missing(self, company_id: int, seen: set[str]) -> int:
         """Mark jobs absent from a SUCCESSFUL fetch as closed.
@@ -306,224 +370,195 @@ class Store:
         Never call this after a failed or skipped fetch: a single timeout would
         otherwise mass-close a company's postings and corrupt the next delta.
         """
-        cur = self.conn.execute(
-            "SELECT job_id FROM jobs WHERE company_id=? AND closed_at IS NULL",
-            (company_id,))
-        stale = [r[0] for r in cur.fetchall() if r[0] not in seen]
+        stale = [r[0] for r in self.conn.execute(
+            "SELECT job_id FROM jobs WHERE company_id = ? AND closed_at IS NULL",
+            (company_id,)) if r[0] not in seen]
+        now = utcnow()
         for jid in stale:
-            self.conn.execute(
-                "UPDATE jobs SET closed_at=? WHERE job_id=?", (utcnow(), jid))
+            self.conn.execute("UPDATE jobs SET closed_at = ? WHERE job_id = ?", (now, jid))
         self.conn.commit()
         return len(stale)
 
-    def save_score(self, cand: Candidate, profile_version: int) -> None:
-        s = cand.score
+    def get_job(self, job_id: str) -> Optional[dict[str, Any]]:
+        r = self.conn.execute(
+            """SELECT j.*, co.name AS company FROM jobs j
+               JOIN companies co ON co.id = j.company_id WHERE j.job_id = ?""",
+            (job_id,)).fetchone()
+        return dict(r) if r else None
+
+    def jobs_seen_in_run(self, run_no: int, new_only: bool = False) -> list[dict[str, Any]]:
+        col = "first_seen_run" if new_only else "last_seen_run"
+        return [dict(r) for r in self.conn.execute(
+            f"""SELECT j.*, co.name AS company FROM jobs j
+                JOIN companies co ON co.id = j.company_id
+                WHERE j.{col} = ? ORDER BY j.job_id""", (run_no,))]
+
+    def set_vital(self, job_id: str, vital_text: str) -> None:
         self.conn.execute(
-            """INSERT OR REPLACE INTO scores (job_id, profile_version, bm25,
-               skill_overlap, title_affinity, total_score, stage_a_pass,
-               filter_reason, scored_at) VALUES (?,?,?,?,?,?,?,?,?)""",
-            (cand.job_id, profile_version, s.bm25, s.skill_overlap, s.title_affinity,
-             s.total, int(cand.stage_a_pass), cand.filter_reason, utcnow()))
+            "UPDATE jobs SET vital_text = ? WHERE job_id = ?", (vital_text, job_id))
         self.conn.commit()
 
-    # ---------------- facts & verdicts ----------------
+    def find_job_by_url(self, url: str) -> Optional[dict[str, Any]]:
+        r = self.conn.execute(
+            "SELECT * FROM jobs WHERE url = ? ORDER BY first_seen_run LIMIT 1",
+            (url,)).fetchone()
+        return dict(r) if r else None
 
-    def get_facts(self, job_id: str, pv: int) -> Optional[JobFacts]:
-        cur = self.conn.execute(
-            "SELECT * FROM job_facts WHERE job_id=? AND profile_version=?", (job_id, pv))
-        r = cur.fetchone()
-        if not r:
-            return None
-        return JobFacts(
-            job_id=r["job_id"],
-            countries=json.loads(r["countries_json"] or "[]"),
-            is_singapore=None if r["is_singapore"] is None else bool(r["is_singapore"]),
-            seniority=r["seniority"] or "unknown",
-            yoe_min=r["yoe_min"], yoe_max=r["yoe_max"], intake_year=r["intake_year"],
-            is_graduate_programme=None if r["is_graduate_programme"] is None
-            else bool(r["is_graduate_programme"]),
-            sponsorship=r["sponsorship"] or "unclear",
-            role_family=r["role_family"] or "other",
-            tech_stack=json.loads(r["tech_stack_json"] or "[]"),
-            requires_clearance=None if r["requires_clearance"] is None
-            else bool(r["requires_clearance"]),
-            model=r["model"] or "")
+    # ---------------- prefilter ----------------
 
-    def save_facts(self, f: JobFacts, pv: int) -> None:
+    def save_prefilter(self, job_id: str, profile_version: int, rules_hash: str,
+                       passed: bool, reject_rule: Optional[str] = None,
+                       reject_detail: Optional[str] = None,
+                       overlap_score: Optional[int] = None) -> None:
         self.conn.execute(
-            """INSERT OR REPLACE INTO job_facts (job_id, profile_version, countries_json,
-               is_singapore, seniority, yoe_min, yoe_max, intake_year,
-               is_graduate_programme, sponsorship, role_family, tech_stack_json,
-               requires_clearance, model, extracted_at)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-            (f.job_id, pv, json.dumps(f.countries), _b(f.is_singapore), f.seniority,
-             f.yoe_min, f.yoe_max, f.intake_year, _b(f.is_graduate_programme),
-             f.sponsorship, f.role_family, json.dumps(f.tech_stack),
-             _b(f.requires_clearance), f.model, utcnow()))
+            """INSERT OR REPLACE INTO prefilter (job_id, profile_version, rules_hash,
+               passed, reject_rule, reject_detail, overlap_score, evaluated_at)
+               VALUES (?,?,?,?,?,?,?,?)""",
+            (job_id, profile_version, rules_hash, int(passed), reject_rule,
+             reject_detail, overlap_score, utcnow()))
         self.conn.commit()
 
-    def get_cached(self, cache_key: str) -> Optional[dict[str, Any]]:
-        cur = self.conn.execute(
-            "SELECT payload_json, model FROM llm_cache WHERE cache_key=?", (cache_key,))
-        r = cur.fetchone()
-        if not r:
-            return None
-        d = json.loads(r["payload_json"])
-        d["_model"] = r["model"]
-        return d
+    def get_prefilter(self, job_id: str, profile_version: int,
+                      rules_hash: str) -> Optional[dict[str, Any]]:
+        r = self.conn.execute(
+            """SELECT * FROM prefilter WHERE job_id = ? AND profile_version = ?
+               AND rules_hash = ?""", (job_id, profile_version, rules_hash)).fetchone()
+        return dict(r) if r else None
 
-    def save_cached(self, cache_key: str, job_id: str, pv: int, stage: str,
-                    payload: dict[str, Any], model: str,
-                    in_tok: int, out_tok: int) -> None:
+    def prefilter_rejections_by_rule(self, profile_version: int,
+                                     rules_hash: str) -> dict[str, int]:
+        return {r[0]: int(r[1]) for r in self.conn.execute(
+            """SELECT reject_rule, COUNT(*) FROM prefilter
+               WHERE passed = 0 AND profile_version = ? AND rules_hash = ?
+               GROUP BY reject_rule""", (profile_version, rules_hash))}
+
+    # ---------------- decisions ----------------
+
+    def get_decision(self, job_id: str, profile_version: int,
+                     vital_hash: str) -> Optional[dict[str, Any]]:
+        r = self.conn.execute(
+            """SELECT * FROM decisions WHERE job_id = ? AND profile_version = ?
+               AND vital_hash = ?""", (job_id, profile_version, vital_hash)).fetchone()
+        return dict(r) if r else None
+
+    def save_decision(self, job_id: str, profile_version: int, vital_hash: str,
+                      decision: str, is_singapore: Optional[bool],
+                      yoe_min: Optional[int], reason: str, model: str) -> None:
         self.conn.execute(
-            """INSERT OR REPLACE INTO llm_cache (cache_key, job_id, profile_version,
-               stage, payload_json, model, input_tokens, output_tokens, created_at)
+            """INSERT OR REPLACE INTO decisions (job_id, profile_version, vital_hash,
+               decision, is_singapore, yoe_min, reason, model, decided_at)
                VALUES (?,?,?,?,?,?,?,?,?)""",
-            (cache_key, job_id, pv, stage, json.dumps(payload), model,
-             in_tok, out_tok, utcnow()))
+            (job_id, profile_version, vital_hash, decision, _b(is_singapore),
+             yoe_min, reason, model, utcnow()))
         self.conn.commit()
 
-    def save_verdict_row(self, v: Verdict, pv: int, cache_key: str) -> None:
-        self.save_cached(cache_key, v.job_id, pv, v.stage, {
-            "verdict": v.verdict, "confidence": v.confidence,
-            "reason": v.reason, "concerns": v.concerns}, v.model, 0, 0)
+    def accepted_jobs(self, profile_version: int) -> list[dict[str, Any]]:
+        """Every accepted posting for this profile, with the run that found it.
 
-    # ---------------- export guard ----------------
-
-    def already_exported(self, job_id: str) -> bool:
-        cur = self.conn.execute("SELECT 1 FROM exported WHERE job_id=?", (job_id,))
-        return cur.fetchone() is not None
-
-    def mark_exported(self, job_id: str, run_no: int) -> None:
-        self.conn.execute(
-            "INSERT OR REPLACE INTO exported (job_id, exported_run, exported_at) "
-            "VALUES (?,?,?)", (job_id, run_no, utcnow()))
-        self.conn.commit()
-
-    # ---------------- repair ----------------
-
-    def find_companies(self, needle: str) -> list[Company]:
-        """Case-insensitive substring match on the company name."""
-        rows = self.conn.execute(
-            "SELECT * FROM companies WHERE lower(name) LIKE ? ORDER BY ordinal",
-            (f"%{needle.lower()}%",))
-        return [self._company(r) for r in rows]
-
-    def purge_company_jobs(self, cid: int) -> int:
-        """Delete every posting scraped for a company, and everything derived.
-
-        Used when a company was resolved to the wrong board: those postings are
-        another company's, so leaving them would poison future dedup and let a
-        stale row reappear in the tracker.
+        The shortlist's raw material (M5-T1). Where a posting was decided more
+        than once (its description changed) the newest decision wins.
         """
-        ids = [r["job_id"] for r in self.conn.execute(
-            "SELECT job_id FROM jobs WHERE company_id=?", (cid,))]
-        if not ids:
-            return 0
-        marks = ",".join("?" * len(ids))
-        for table in ("scores", "job_facts", "llm_cache", "exported",
-                      "applications"):
-            self.conn.execute(
-                f"DELETE FROM {table} WHERE job_id IN ({marks})", ids)
-        self.conn.execute("DELETE FROM jobs WHERE company_id=?", (cid,))
-        self.conn.commit()
-        return len(ids)
-
-    def clear_resolution(self, cid: int) -> None:
-        """Forget a cached ATS resolution so the ladder runs again."""
-        self.conn.execute(
-            """UPDATE companies SET provider=NULL, slug=NULL, feed_url=NULL,
-               resolve_method=NULL, resolved_at=NULL WHERE id=?""", (cid,))
-        self.conn.commit()
-
-    def mark_needs_feed(self, cid: int, note: str) -> None:
-        """Park a company that cannot be resolved automatically.
-
-        It stops being retried every run and shows up in needs_review.xlsx with
-        the reason, waiting for a feed URL you paste in yourself.
-        """
-        self.conn.execute(
-            """UPDATE companies SET active=0, quarantined_at=?,
-               last_error_class='needs_feed', last_error=?,
-               consecutive_failures=? WHERE id=?""",
-            (utcnow(), note, 999, cid))
-        self.conn.commit()
-
-    def unmark_needs_feed(self, cid: int) -> None:
-        self.conn.execute(
-            """UPDATE companies SET active=1, quarantined_at=NULL,
-               last_error_class=NULL, last_error=NULL, consecutive_failures=0,
-               probation_due_run=NULL WHERE id=?""", (cid,))
-        self.conn.commit()
+        return [dict(r) for r in self.conn.execute(
+            """SELECT j.job_id, j.first_seen_run AS run_no, co.name AS company,
+                      j.title, j.url, j.location, j.posted_at, j.closed_at,
+                      d.yoe_min, d.reason, d.decided_at
+                 FROM decisions d
+                 JOIN jobs j       ON j.job_id = d.job_id
+                 JOIN companies co ON co.id = j.company_id
+                WHERE d.profile_version = ? AND d.decision = 'accept'
+                  AND d.decided_at = (SELECT MAX(d2.decided_at) FROM decisions d2
+                                       WHERE d2.job_id = d.job_id
+                                         AND d2.profile_version = d.profile_version)
+                ORDER BY j.job_id""", (profile_version,))]
 
     # ---------------- applications ----------------
 
-    def set_applied(self, job_id: str, applied: bool, role: str = "",
-                    company: str = "", url: str = "",
-                    applied_at: Optional[str] = None) -> dict[str, Any]:
-        """Mark a posting applied / not applied. Returns the stored row.
+    def application(self, job_id: str) -> Optional[dict[str, Any]]:
+        r = self.conn.execute(
+            "SELECT * FROM applications WHERE job_id = ?", (job_id,)).fetchone()
+        return dict(r) if r else None
 
-        The applied date is set once, on the first tick, and is preserved if the
-        box is ticked again later. Un-ticking clears it.
+    def set_application_status(self, job_id: str, status: str,
+                               notes: Optional[str] = None, *,
+                               company: Optional[str] = None,
+                               role: Optional[str] = None,
+                               url: Optional[str] = None,
+                               at: Optional[str] = None) -> bool:
+        """Upsert an application; append to `app_events` only on a real change.
+
+        Returns whether an event was appended - re-posting the same status is a
+        no-op for the history (M6-T2), though `notes` still updates. `applied_at`
+        is stamped the first time the status leaves NOT_YET_APPLIED and is never
+        re-stamped afterwards.
         """
-        cur = self.conn.execute(
-            "SELECT applied_at FROM applications WHERE job_id=?", (job_id,))
-        row = cur.fetchone()
-        if applied:
-            stamp = applied_at or (row["applied_at"] if row and row["applied_at"]
-                                   else datetime.now(timezone.utc)
-                                   .strftime("%Y-%m-%d"))
+        now = at or utcnow()
+        prev = self.application(job_id)
+        prev_status = prev["status"] if prev else None
+        applied_at = prev["applied_at"] if prev else None
+        if applied_at is None and status not in NOT_YET_APPLIED:
+            applied_at = now[:10]
+
+        if prev is None:
+            self.conn.execute(
+                """INSERT INTO applications (job_id, status, applied_at, notes,
+                   company, role, url, updated_at) VALUES (?,?,?,?,?,?,?,?)""",
+                (job_id, status, applied_at, notes, company, role, url, now))
         else:
-            stamp = None
-        self.conn.execute("""
-            INSERT INTO applications
-                (job_id, applied, applied_at, role, company, url, updated_at)
-            VALUES (?,?,?,?,?,?,?)
-            ON CONFLICT(job_id) DO UPDATE SET
-                applied=excluded.applied,
-                applied_at=excluded.applied_at,
-                role=COALESCE(NULLIF(excluded.role,''), applications.role),
-                company=COALESCE(NULLIF(excluded.company,''),
-                                 applications.company),
-                url=COALESCE(NULLIF(excluded.url,''), applications.url),
-                updated_at=excluded.updated_at
-        """, (job_id, 1 if applied else 0, stamp, role, company, url, utcnow()))
+            self.conn.execute(
+                """UPDATE applications SET status = ?, applied_at = ?,
+                   notes = COALESCE(?, notes), company = COALESCE(?, company),
+                   role = COALESCE(?, role), url = COALESCE(?, url),
+                   updated_at = ? WHERE job_id = ?""",
+                (status, applied_at, notes, company, role, url, now, job_id))
+
+        changed = prev_status != status
+        if changed:
+            self.conn.execute(
+                """INSERT INTO app_events (job_id, from_status, to_status, at)
+                   VALUES (?,?,?,?)""", (job_id, prev_status, status, now))
         self.conn.commit()
-        return self.get_application(job_id) or {}
+        return changed
 
-    def get_application(self, job_id: str) -> Optional[dict[str, Any]]:
-        row = self.conn.execute(
-            "SELECT * FROM applications WHERE job_id=?", (job_id,)).fetchone()
-        return dict(row) if row else None
+    def applications(self) -> list[dict[str, Any]]:
+        """Everything with a status, newest change first.
 
-    def applied_map(self) -> dict[str, dict[str, Any]]:
-        """job_id -> row, for every posting currently marked applied."""
-        return {r["job_id"]: dict(r) for r in self.conn.execute(
-            "SELECT * FROM applications WHERE applied=1")}
+        LEFT JOINs, so an application whose posting is not (or no longer) in
+        `jobs` still appears, described by the fields kept on its own row.
+        """
+        return [dict(r) for r in self.conn.execute(
+            """SELECT a.job_id, a.status, a.applied_at, a.notes, a.updated_at,
+                      COALESCE(a.company, co.name) AS company,
+                      COALESCE(a.role, j.title)    AS role,
+                      COALESCE(a.url, j.url)       AS url,
+                      j.location, j.closed_at
+                 FROM applications a
+                 LEFT JOIN jobs j       ON j.job_id = a.job_id
+                 LEFT JOIN companies co ON co.id = j.company_id
+                ORDER BY a.updated_at DESC, a.job_id""")]
 
-    def applied_rows(self) -> list[sqlite3.Row]:
-        """Applied postings, oldest first, enriched with tier and score."""
-        return list(self.conn.execute("""
-            SELECT a.*, c.tier AS tier, c.category AS category,
-                   s.total_score AS score
-              FROM applications a
-              LEFT JOIN jobs j      ON j.job_id = a.job_id
-              LEFT JOIN companies c ON c.id = j.company_id
-              LEFT JOIN scores s    ON s.job_id = a.job_id
-             WHERE a.applied = 1
-             GROUP BY a.job_id
-             ORDER BY a.applied_at, a.company, a.role
-        """))
+    def application_statuses(self) -> dict[str, str]:
+        """job_id -> status. What the web app joins onto the shortlist (D-5)."""
+        return {r[0]: r[1] for r in self.conn.execute(
+            "SELECT job_id, status FROM applications")}
+
+    def application_events(self, job_id: str) -> list[dict[str, Any]]:
+        return [dict(r) for r in self.conn.execute(
+            """SELECT id, job_id, from_status, to_status, at FROM app_events
+               WHERE job_id = ? ORDER BY id""", (job_id,))]
+
+    # ---------------- reporting ----------------
 
     def stats(self) -> dict[str, int]:
-        def q(s: str) -> int:
-            return int(self.conn.execute(s).fetchone()[0])
+        def q(sql: str) -> int:
+            return int(self.conn.execute(sql).fetchone()[0])
         return {
             "companies": q("SELECT COUNT(*) FROM companies"),
+            "enabled": q("SELECT COUNT(*) FROM companies WHERE enabled = 1"),
             "resolved": q("SELECT COUNT(*) FROM companies WHERE provider IS NOT NULL"),
-            "quarantined": q("SELECT COUNT(*) FROM companies WHERE active=0"),
+            "quarantined": q(
+                "SELECT COUNT(*) FROM companies WHERE quarantined_at IS NOT NULL"),
             "jobs": q("SELECT COUNT(*) FROM jobs"),
             "open_jobs": q("SELECT COUNT(*) FROM jobs WHERE closed_at IS NULL"),
-            "exported": q("SELECT COUNT(*) FROM exported"),
             "runs": q("SELECT COUNT(*) FROM runs"),
+            "applications": q("SELECT COUNT(*) FROM applications"),
         }

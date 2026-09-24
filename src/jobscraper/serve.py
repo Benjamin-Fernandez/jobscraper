@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import Any
 
 from .output import sync_applied
-from .store import Store
+from .store_v1 import Store
 
 ALLOWED_HOSTS = {"127.0.0.1", "localhost", "[::1]"}
 MAX_BODY = 64 * 1024
