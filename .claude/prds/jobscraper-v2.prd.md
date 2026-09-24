@@ -111,6 +111,17 @@ to `title_deny`, whether to add "trade support engineer" to `title_allow`,
 Docker model transport (image has no `claude`; `review --export/--apply` is the
 in-container path), and merging `v2-rebuild` into `master`.
 
+**2026-09-24 — Qwen replaces Haiku; the funnel is lax (D-16–D-18).** A model-led
+redesign (Qwen deciding everything from a prose profile document) was planned
+and then withdrawn by the user: the traditional pipeline stays as it is, with the
+local **Qwen3-14B via Ollama** as its judge (`budget.backend: ollama`). The model
+now reports facts (`fit`, `is_singapore`, `yoe_min`) and code decides; `fit` is
+judged against the user's interests in `config.yaml` → `judge.interests`, leaning
+to yes. Title rules broadened to finance, product/project/program management,
+product owner, operations, support, platform and infrastructure;
+`keyword_floor` disabled. Measured: the user's 17 disputed cases 17/17, 0 accepts
+outside Singapore, ~0.9 s a posting on the RTX 5080; the shortlist went 29 → 90.
+
 #### Two landmines
 
 **1. ~~`cli.py::_sync` is a bridge that reintroduces the exact bug §8.4 prevents.~~
@@ -454,16 +465,19 @@ Decisions that shape the build. An agent must not silently reverse these.
 | **D-3** | Web = **FastAPI + Vue 3 + Vite** | User chose FastAPI + a JS framework. Vue picked over React: single-file components read more like HTML for a human reviewer, and no extra state library is needed at this size. | Adds a node build step to a Python repo. React is a drop-in swap if preferred — only §8.5 changes. |
 | **D-4** | **Seed the watchlist with all 229 v1 companies**, carrying their resolved `provider`/`slug`/`feed_url`. Job/decision data still starts clean. | *Revised 2026-09-23 — supersedes the earlier "clean slate" choice.* All 229 have a resolved provider and careers URL; discarding that means re-paying for a full discovery crawl. | M1-T2 generates `watchlist.yaml` from the v1 DB. The user prunes rather than builds from nothing. Old jobs/verdicts are **not** carried over. |
 | **D-5** | `shortlist.json` is **engine-owned and disposable**; application status lives **only in SQLite** | Avoids two writers on one file. The engine regenerates the shortlist freely; user state is never in a regenerated file. | Web app joins the two at read time. |
-| **D-6** | **One** model tier (cheapest), reached via the existing Claude Code CLI backend | No API key exists. Tier routing was tied to the tiering being deleted. | `backends.py` carries over unchanged. `model_high`/`model_low` collapse to `model`. |
+| **D-6** | **One** model tier (cheapest), reached via the existing Claude Code CLI backend | No API key exists. Tier routing was tied to the tiering being deleted. | `backends.py` carries over unchanged. **Superseded in part by D-16 (2026-09-24): the one model is now local Qwen3-14B via Ollama.** `model_high`/`model_low` collapse to `model`. |
 | **D-7** | Singapore means **explicitly Singapore**. Remote — including "Remote (APAC)" and "Remote, Global" — is rejected. | User: "singapore only, not even remote". | A location allow-list of exactly `singapore`/`sg`. The v1 `ambiguous_hints` escape hatch is deleted. |
 | **D-8** | Prefilter is **hard and free**; the model is the last step, never the first | Cost control. A posting the rules can reject must never reach the model. | Order in §8.3 is normative, not advisory. |
 | **D-9** | Scheduling is **per-company staleness**, not a global cursor. A company is due when `last_scraped_at` is null or older than `cycle_days`. | User: decide whether to loop back to company 1 "based on whether it has been scraped within the past 2 weeks". A cursor cannot express that; a timestamp can. | `cursor.py` retires. Self-healing: failures, additions and removals all resolve naturally. See §8.3[0]. |
-| **D-10** | The resume parser emits **`target_titles`**, used as a positive title filter alongside the deny-list. | User request. A generated allow-list catches "Site Reliability Engineer" without hand-maintaining every variant. | New `title_allow` prefilter rule. Generated list is merged with a user `extra:` list that is never overwritten (§8.4). |
+| **D-10** | The resume parser emits **`target_titles`**, used as a positive title filter alongside the deny-list. | User request. A generated allow-list catches "Site Reliability Engineer" without hand-maintaining every variant. | New `title_allow` prefilter rule. **Broadened by D-18: `extra:` now carries the user's non-engineering interest areas.** Generated list is merged with a user `extra:` list that is never overwritten (§8.4). |
 | **D-11** | **Docker packages the app**; the model transport is the one thing Docker cannot carry. | User wants easy spin-up and eventual cloud. But `claude -p` authenticates against the host's Claude Code login, which does not exist inside a container. | Local: mount `~/.claude` read-only. Cloud (later): needs an API key or a hosted transport. **Called out as Risk R-8 — do not discover this at deploy time.** |
-| **D-12** | Experience hard cap: **reject anything requiring > 3 years**. | User instruction. | `ceiling_years: 3` in `config/rules.yaml`. Applies in the free prefilter *and* as a post-condition on the model's `yoe_min`. |
+| **D-12** | Experience hard cap: **reject anything requiring > 3 years**. | User instruction. | `ceiling_years: 3` in `config/rules.yaml`. Applies in the free prefilter *and* as a post-condition on the model's `yoe_min`. **Per D-17 the model no longer judges experience at all; code alone applies the cap.** |
 | **D-13** | Batch size **10 companies per run** to start. | User instruction. v1 used 30. | See R-7: at 229 companies this needs ~1.6 runs/day to complete a 14-day cycle, where 30 needed ~0.5. The staleness queue degrades gracefully if that is not met, and the value is one config line. |
 | **D-14** | **Migrate v1 `applications` history.** Jobs and decisions still start clean. | The user's own application record is the one thing in the v1 DB that cannot be regenerated by re-scraping. "Migrating v1 job data is out of scope" (§6) was never meant to cover it. | M3-T3 ports the `applications` rows, matching on job URL. Rows whose job is not re-scraped are kept as orphans with their URL, so nothing the user recorded is lost. |
 | **D-15** | **`git init` the repo before M0.** | There is no `.git` here (verified 2026-09-23). §0.3's "archive, never delete" and M7-T4's "the diff touches exactly 3 files" both assume version control. | M0-T0. Without it, a multi-day agent-driven rebuild has no undo. |
+| **D-16** | **The judge is a local open model: Qwen3-14B via Ollama**, replacing Claude Haiku. The traditional pipeline is otherwise unchanged. | User, 2026-09-24: "keep it (traditional) as is but qwen is still needed to replace haiku". Local means no tokens, no key, no login - also in Docker. A model-led redesign was planned (§8.7 draft, reverted) and withdrawn by the user. | `budget.backend: ollama`, `ollama_model: qwen3:14b`. Decisions record the model that actually answered; a cached decision from another model is re-judged, so the switch replaced every Haiku answer. |
+| **D-17** | **The model reports facts; code decides.** The judge returns `fit`, `is_singapore`, `yoe_min`, `reason` - not a verdict. Accept = fit and Singapore confirmed and `yoe_min` ≤ the cap. | Measured 2026-09-24: Qwen3-14B rejected "requires 3 years" roles however the prompt was worded. Taking the verdict away removes the failure mode rather than arguing with it. | `decide.parse_decisions` derives the decision from `fit`; `guard()` applies location and the cap. The older `decision` shape still parses (the review transport). |
+| **D-18** | **Lax over strict; fit is judged against the user's interests.** | User, 2026-09-24: 14 of 17 disputed roles "should not be rejected ... I am interested in finance, infrastructure, platform, support, operations, product management, project management, product owner roles ... rather the system be more lax than strict." | `config.yaml` → `judge.interests` (user-editable) goes into the prompt with "false only when clearly unrelated; when unsure, true". `rules.yaml`: `manager` denied except product/project/program manager; `finance` off the deny list; the interest areas in `title_allow.extra`; `keyword_floor` disabled. Seniority (senior, staff, lead, director, manager...) and the 3-year cap still apply. |
 
 ---
 
@@ -2197,4 +2211,4 @@ Legend: `STATUS` · `Completed` (date) · `Verify` (command that proves it) · `
 
 ---
 
-*Status: in implementation. Next actions: see §0.5 and each lane in §0.6.*
+*Status: Phase 1 delivered. The judge is local Qwen3-14B (D-16–D-18). Open: M4-T4's 30-role audit (the shortlist now holds 90), M1-T3.*
