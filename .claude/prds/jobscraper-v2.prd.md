@@ -1559,8 +1559,8 @@ Legend: `STATUS` · `Completed` (date) · `Verify` (command that proves it) · `
 ### M6 — Web API
 
 #### M6-T1 · FastAPI app + read endpoints
-- **STATUS:** `NOT_STARTED`
-- **Completed:** —
+- **STATUS:** `DONE`
+- **Completed:** 2026-09-24
 - **Do:** `web/api.py` with `/api/runs`, `/api/shortlist`, `/api/applications`,
   `/api/stats`. One router file per domain (§8.5).
 - **Verify:** `python tests/run_tests.py -k web` passes with `TestClient` and
@@ -1568,13 +1568,30 @@ Legend: `STATUS` · `Completed` (date) · `Verify` (command that proves it) · `
   and `?run=<n>` return different sets; `?run=99999` returns an empty list, not a
   500; a shortlisted job with no application row still appears, with a null status
   (the join must not drop it).
+- **Notes:** Verified 2026-09-24 (Lane C): `-k web` 20/20, against the real M3-T1
+  store in a temp dir and `tests/fixtures/shortlist.json`. Routers live in
+  `web/routers/{runs,shortlist,applications,stats}.py` and are auto-discovered;
+  the D-5 join is in `web/data.py`. `/api/shortlist` returns a bare list;
+  `?run=` other than `latest|all|<n>` is a 422. `/api/applications` inlines each
+  row's `events` (oldest first) for M8-T1. `/api/stats` also serves the ordered
+  `statuses` vocabulary from config, for M8-T1's dropdown.
+  Web modules import `jobscraper.*` absolutely: the layering guard reads the first
+  segment of a relative import (`from .deps`) as a top-level module and would
+  flag it.
 
 #### M6-T2 · Write endpoint + event history
-- **STATUS:** `NOT_STARTED`
-- **Completed:** —
+- **STATUS:** `DONE`
+- **Completed:** 2026-09-24
 - **Do:** `POST /api/applications/{job_id}` upserts `applications` and appends to
   `app_events`. Idempotent; re-posting the same status must not duplicate an event.
 - **Verify:** Test posts `applied` twice and asserts exactly one `app_events` row.
+- **Notes:** Verified 2026-09-24 (Lane C):
+  `test_web_posting_applied_twice_appends_exactly_one_event` passes (the second
+  POST returns `event_appended: false`). Body is `{status, notes}` plus optional
+  `company`/`role`/`url`, passed to `set_application_status` so the row still
+  describes the job after the posting leaves the shortlist. A status outside
+  `applications.statuses` is a 422 with no write. A non-JSON body is a 422, so a
+  cross-site HTML form cannot write.
 
 ---
 

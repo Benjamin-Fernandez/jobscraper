@@ -1,10 +1,10 @@
 """The web app: the SPA is served, and the API keeps its documented shapes.
 
 Every test builds the app with `create_app(cfg, store_factory=...)`, handing it
-a config that points at a fixture shortlist and a real store in a temp
-directory. That is the seam
-the design asks for: the web layer reads what the pipeline already produced
-(PRD 8.2) and is tested without running the pipeline or touching a database.
+a config that points at a fixture shortlist (tests/fixtures/shortlist.json, the
+PRD 8.3[6] shape) and a real store in a temp directory. That is the seam the
+design asks for: the web layer reads what the pipeline already produced
+(PRD 8.2), so it is tested without running the pipeline.
 
 PRD sections 8.5 and 8.6; tasks M7-T1 onwards.
 """
@@ -175,3 +175,105 @@ def test_web_missing_shortlist_is_an_empty_queue():
         with _world(shortlist=Path(tmp) / "absent.json", runs=0) as (client, _):
             assert client.get("/api/shortlist").json() == []
             assert client.get("/api/runs").json() == []
+
+
+def test_web_applications_lists_every_status_with_its_timeline():
+    with _world() as (client, open_store):
+        store = open_store()
+        store.set_application_status("a1b2c3", "applied")
+        store.set_application_status("a1b2c3", "interviewing")
+        # An orphan: applied to, but not (or no longer) in the shortlist.
+        store.set_application_status("gone1", "applied", company="Old Co",
+                                     role="Engineer", url="https://example.org/x")
+        store.close()
+        r = client.get("/api/applications")
+    assert r.status_code == 200
+    rows = {row["job_id"]: row for row in r.json()}
+    assert set(rows) == {"a1b2c3", "gone1"}
+    okx = rows["a1b2c3"]
+    assert okx["status"] == "interviewing"
+    assert okx["company"] == "OKX", "the shortlist describes a job the store cannot"
+    assert okx["role"] == "DevOps / Site Reliability Engineer"
+    assert okx["run_no"] == 12
+    assert [e["to_status"] for e in okx["events"]] == ["applied", "interviewing"]
+    assert okx["events"][1]["from_status"] == "applied"
+    assert rows["gone1"]["company"] == "Old Co"
+    assert rows["gone1"]["run_no"] is None
+
+
+def test_web_stats_counts_per_status_and_run_in_config_order():
+    with _world() as (client, open_store):
+        store = open_store()
+        store.set_application_status("a1b2c3", "applied")
+        store.set_application_status("j1k2l3", "applied")
+        store.set_application_status("m4n5o6", "rejected")
+        store.close()
+        r = client.get("/api/stats")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["statuses"] == Config({}).application_statuses
+    assert list(body["by_status"])[:len(body["statuses"])] == body["statuses"]
+    assert body["by_status"]["applied"] == 2
+    assert body["by_status"]["rejected"] == 1
+    assert body["by_status"]["offer"] == 0
+    assert body["by_run"] == {"12": 3, "11": 2}
+
+
+# ---------------------------------------------------------------- M6-T2
+
+def _events(open_store, job_id: str) -> list[dict]:
+    store = open_store()
+    try:
+        return store.application_events(job_id)
+    finally:
+        store.close()
+
+
+def test_web_posting_applied_twice_appends_exactly_one_event():
+    with _world() as (client, open_store):
+        first = client.post("/api/applications/a1b2c3", json={"status": "applied"})
+        second = client.post("/api/applications/a1b2c3", json={"status": "applied"})
+        events = _events(open_store, "a1b2c3")
+        shown = {j["id"]: j for j in client.get("/api/shortlist?run=12").json()}
+    assert first.status_code == 200 and second.status_code == 200
+    assert first.json()["event_appended"] is True
+    assert second.json()["event_appended"] is False
+    assert len(events) == 1, events
+    assert shown["a1b2c3"]["status"] == "applied", "the write must show on read"
+
+
+def test_web_status_change_appends_and_notes_update_without_an_event():
+    with _world() as (client, open_store):
+        client.post("/api/applications/a1b2c3", json={"status": "applied"})
+        client.post("/api/applications/a1b2c3",
+                    json={"status": "applied", "notes": "referral from Sam"})
+        r = client.post("/api/applications/a1b2c3", json={"status": "interviewing"})
+        events = _events(open_store, "a1b2c3")
+    assert r.json()["application"]["notes"] == "referral from Sam"
+    assert [(e["from_status"], e["to_status"]) for e in events] == [
+        (None, "applied"), ("applied", "interviewing")]
+
+
+def test_web_rejects_a_status_outside_the_configured_vocabulary():
+    with _world() as (client, open_store):
+        r = client.post("/api/applications/a1b2c3", json={"status": "ghosted"})
+        events = _events(open_store, "a1b2c3")
+    assert r.status_code == 422
+    assert events == []
+
+
+def test_web_write_requires_a_json_body():
+    """A cross-site HTML form can only send form or text bodies; refuse them."""
+    with _world() as (client, open_store):
+        r = client.post("/api/applications/a1b2c3",
+                        content='{"status": "applied"}',
+                        headers={"Content-Type": "text/plain"})
+        events = _events(open_store, "a1b2c3")
+    assert r.status_code == 422
+    assert events == []
+
+
+def test_web_rejects_a_malformed_job_id():
+    with _world() as (client, _):
+        r = client.post("/api/applications/a%20b", json={"status": "applied"})
+    assert r.status_code == 422
