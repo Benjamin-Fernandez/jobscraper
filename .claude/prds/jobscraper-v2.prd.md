@@ -86,7 +86,8 @@ tree clean at `6b36850`.
 
 #### Two landmines
 
-**1. `cli.py::_sync` is a bridge that reintroduces the exact bug §8.4 prevents.**
+**1. ~~`cli.py::_sync` is a bridge that reintroduces the exact bug §8.4 prevents.~~
+RESOLVED 2026-09-24 by M3-T1b** — `_sync` is gone; sync keys on `key`. Kept below for history.
 M1-T4 removed the Excel workbook from the config, which broke `cfg.input_workbook`
 and with it `doctor`, `sync`, `resolve` and `run`. `_sync` was repointed at the
 watchlist to keep them alive — but it still routes through **v1's
@@ -96,7 +97,9 @@ failure counters. The stable-`key` guarantee in §8.4 is written down but **not 
 real**. **M3-T1b is what makes it real.** Do not treat §8.4 as implemented until
 that task is `DONE`.
 
-**2. `data/jobscraper.db` exists and is a v1-schema database.** Created by the
+**2. ~~`data/jobscraper.db` exists and is a v1-schema database.~~ RESOLVED
+2026-09-24 by M3-T1** — archived to `archive/v2-bridge-db-2026-09-24/`; the file
+at `data/jobscraper.db` is now v2. Kept below for history. Created by the
 bridge sync above; it has `tier`/`category` columns and **no `last_scraped_at`**.
 It is not the v2 database and holds nothing worth keeping — 224 company rows and
 no jobs. **M3-T1 should delete it and create the v2 schema fresh.** Do not migrate
@@ -1405,8 +1408,15 @@ Legend: `STATUS` · `Completed` (date) · `Verify` (command that proves it) · `
   `test_failed_fetch_must_not_close_jobs`.
 
 #### M3-T1b · Watchlist → `companies` sync
-- **STATUS:** `NOT_STARTED`
-- **Completed:** —
+- **STATUS:** `DONE`
+- **Completed:** 2026-09-24 — `-k sync` 9/9 (8 new + v1's `sync_applied`),
+  full suite 71/71. `_sync` deleted; `doctor` and `sync` run on the v2 store
+  (live: first sync 229 added / 224 enabled, second sync 0 added — idempotent).
+  Beyond the Verify list: a resolution discovery *learned* survives a sync whose
+  YAML omits it (`COALESCE`), while a `careers_url` change keeps only what the
+  YAML states; `last_scraped_at` survives a URL move (staleness is history, not
+  resolution); `enabled: false` in the YAML is honoured. Legacy `run`/`resolve`/
+  `status` now stop with a clear "v2 database" error until M3-T3/M3-T4 replace them.
 - **Do:** `store.sync_watchlist(entries)` implementing the identity and sync
   semantics in §8.4 exactly: match on `key`, insert new as due, update descriptive
   fields only, clear resolution when `careers_url` changes, disable (never delete)
@@ -1426,8 +1436,15 @@ Legend: `STATUS` · `Completed` (date) · `Verify` (command that proves it) · `
   §8.4 exists to prevent. Delete `_sync` as part of this task; do not leave both.
 
 #### M3-T2 · Point discovery and adapters at the watchlist
-- **STATUS:** `NOT_STARTED`
-- **Completed:** —
+- **STATUS:** `DONE`
+- **Completed:** 2026-09-24 — `-k scrape` 7/7 (all four discovery corroboration
+  tests), full suite 83/83, layering guard green with the three files now checked
+  as the `scrape` stage. `git mv` into `scrape/` (history preserved); the only
+  edits are import paths and the input annotation `Company` → `WatchedCompany`
+  (the fields they read — name, careers_url, provider, slug, feed_url — are
+  identical). No logic changed. Importers repointed: `cli.py`, legacy `runner.py`,
+  `tests/test_scrape.py`. `net` is still listed in the guard's FOUNDATION set;
+  harmless (no top-level `net` remains) and tidied in M9.
 - **Do:** Move `adapters.py`, `discovery.py`, `net.py` under `scrape/`. Change only
   their *input type* (watchlist entry instead of Excel-derived `Company`). No logic changes.
 - **Verify:** `python tests/run_tests.py -k scrape` passes, including the four
@@ -1436,8 +1453,24 @@ Legend: `STATUS` · `Completed` (date) · `Verify` (command that proves it) · `
   `test_aggregator_urls_never_yield_a_slug`).
 
 #### M3-T3 · Staleness scheduler
-- **STATUS:** `NOT_STARTED`
-- **Completed:** —
+- **STATUS:** `DONE`
+- **Completed:** 2026-09-24 — `-k scheduler` 10/10, full suite 81/81; live
+  `status` on the real DB: 224 due, 23 runs to drain, "a full sweep needs 1.6/day".
+  All five mandatory cases are tested. The last one ("with all 229 fresh the
+  runner exits 0 reporting the next due date") is proved at the scheduler level
+  here (`plan()` returns empty + `next_due_at` = oldest stamp + 14 days); the
+  runner half is asserted end to end in M3-T4, which builds the runner.
+  **Design notes:** the due query lives in `store.due_companies` (only store.py
+  holds SQL) with a Python-computed cut-off instead of `datetime('now', …)`, so
+  the §8.4 "SQLite-only exception" no longer exists and tests pin the clock.
+  "NULLs first" is spelled `CASE WHEN … IS NULL` (portable). **Quarantined
+  companies are excluded from the due query** — §8.3[0]'s SQL omits the clause,
+  but its prose keeps v1's quarantine/probation; they return only via
+  `store.due_probation`, which M3-T4 merges into the batch. The three v1 cursor
+  tests are ported as staleness equivalents; v1's `--force` test is retired (a
+  staleness queue has no cycle boundary to force past). `status` CLI now reads
+  the scheduler. **Pending:** the `ecc:database-reviewer` pass on the due query
+  is deferred until an agent slot frees up (4-agent cap, §0.6).
 - **Do:** `scheduler.py` per §8.3[0] — the due query, `batch_size: 10` (D-13),
   `cycle_days: 14`, stamping `last_scraped_at` on **attempt**. Port the meaningful
   `cursor.py` tests onto it. Add the `status` report (due now / due in 7 days /
@@ -1450,21 +1483,49 @@ Legend: `STATUS` · `Completed` (date) · `Verify` (command that proves it) · `
   `ecc:database-reviewer` on the due query and its index.
 
 #### M3-T3b · Migrate v1 application history
-- **STATUS:** `NOT_STARTED`
-- **Completed:** —
+- **STATUS:** `DONE`
+- **Completed:** 2026-09-24 — `scripts/migrate_v1_applications.py`; Verify reports
+  **3**, and re-running adds 0 (idempotent). **The "≥ 5" threshold below was
+  wrong and is corrected to ≥ 3:** two of the five v1 rows were test fixtures that
+  leaked into the live v1 DB (`C4`/`R4` at `https://e/4`, `C5`/`R5` at
+  `https://e/5` — no real host). They are reported and skipped, not migrated as
+  fake applications. Migrated: 2 × Jane Street `applied` (applied date
+  2026-09-16 preserved exactly via `applied_at=`) and 1 × Jane Street `to_apply`
+  (v1 `applied = 0`: ticked, then unticked). Each got one `app_events` row. All
+  three are orphans until re-scraped; `Store.relink_orphan_applications()` moves
+  an application and its history onto the real job id by URL, and **M3-T4 calls
+  it after every run's persist step.**
 - **Do:** Port the `applications` rows from `archive/v1-2026-09-23/data/jobscraper.db`
   into the new
   `applications` + `app_events` tables (D-14), matching on **job URL** — v1 job ids
   are hashed with a company id that no longer means anything. Rows whose posting is
   never re-scraped are kept as orphans, retaining company, role, URL and applied
   date. Seed one `app_events` row per migrated application.
-- **Verify:** `python -c "import sqlite3;c=sqlite3.connect('data/jobscraper.db');print(c.execute('select count(*) from applications').fetchone()[0])"` reports ≥ the archived count (v1 held 5 rows, 2 applied at 2026-09-23).
+- **Verify:** `python -c "import sqlite3;c=sqlite3.connect('data/jobscraper.db');print(c.execute('select count(*) from applications').fetchone()[0])"` reports ≥ 3 — every archived row with a real URL (v1 held 5 rows, 2 of them test fixtures; 2 applied, dated 2026-09-16).
 - **Notes:** Small in volume, but it is the only data in the v1 DB that re-scraping
   cannot regenerate. §6's "migrating v1 job data is out of scope" does not cover it.
 
 #### M3-T4 · Scrape stage in the pipeline
-- **STATUS:** `NOT_STARTED`
-- **Completed:** —
+- **STATUS:** `DONE`
+- **Completed:** 2026-09-24 — **live Verify:** `run --dry-run` twice selected the
+  same 10 (1Password → Alibaba), fetched 1,275 postings (8 ok, 2 failed), and
+  left `jobs`/`runs`/stamps at 0/0/0. `-k pipeline` 8/8 with a stub fetcher;
+  full suite 91/91. `pipeline.run` replaces `runner.run_batch` behind `run`;
+  `--force` is gone (no cycle boundary to force past).
+  **Failure policy carried over** (isolation, classify-and-skip, threshold →
+  one re-resolve → quarantine, probation) **with one v1 bug fixed:** v1's
+  global-failure guard called `rollback_failures` without ever having recorded
+  that run's failures, so an outage silently *forgave an earlier genuine
+  failure*. v2 records none and **stamps none** on `aborted_unhealthy` — a local
+  outage should not cost the batch a whole cycle; re-running retries it.
+  Crash recovery: stale `running` rows are reaped at start (`run.per_run_timeout`,
+  new config key, 3600 s); stamping is the last write. Dry run still syncs the
+  watchlist (config reconciliation, idempotent) but persists nothing a run
+  produces, including discovery results. `relink_orphan_applications` runs after
+  every persist. **Not yet wired:** stages [3]–[6] (prefilter → decide →
+  shortlist) — M4-T3/M5-T1, now that lanes B and D have landed their pieces.
+  Postings without a description are not hydrated yet; v1 hydrated only
+  prefilter survivors, and that belongs with the M4 wiring.
 - **Do:** `pipeline.py` stage [2]: sync watchlist (M3-T1b) → take the due batch
   (M3-T3) → resolve → fetch (parallel, isolated) → diff → persist jobs and coverage.
   Carry over quarantine/probation and the global-failure-abort guard from
@@ -1482,8 +1543,8 @@ Legend: `STATUS` · `Completed` (date) · `Verify` (command that proves it) · `
 **Outcome:** the expensive step is small, cheap and correct.
 
 #### M4-T1 · Prefilter rules + the rules.yaml contract
-- **STATUS:** `NOT_STARTED`
-- **Completed:** —
+- **STATUS:** `DONE`
+- **Completed:** 2026-09-24
 - **Do:** `filter.py` per §8.3[3]. Implement the four rule *kinds* (`regex_deny`,
   `any_match`, `max_number`, `overlap_floor`) behind a registry so a fifth kind is a
   new function, not a rewrite. Honour declaration order, `enabled:`, and the
@@ -1500,10 +1561,33 @@ Legend: `STATUS` · `Completed` (date) · `Verify` (command that proves it) · `
     already asserts, so the carried-over test and this one must agree).
   - Extensibility — setting `enabled: false` disables a rule, and an `extra:` entry
     takes effect without editing code.
+- **Notes:** Verify = `-k filter` 19/19 (14 new + the 4 carried-over v1 tests,
+  `test_min_years_takes_the_lowest_stated` included, + 1 watchlist match). Contract
+  3 as written: `load_rules(path)` (path optional, defaults to `config/rules.yaml`)
+  → `RuleSet(.hash = sha256 of the canonical-JSON of the parsed YAML, 64 hex, so
+  comments/spacing don't change it)`; `evaluate(posting, ruleset, profile, scorer)`
+  → `FilterResult(passed, reject_rule, reject_detail, overlap_score, trace)`;
+  posting may be a dict or an object. `filter.render(result)` formats it for the
+  CLI. Registry: `@filter.rule_kind(name, prepare=)`, proven by a test that adds a
+  fifth kind. No `profile/` or `matching.py` import — location/years logic ported.
+  **Deviations from the §8.3[3] YAML, all deliberate:** (1) the `experience_ceiling`
+  pattern is range-aware (`(?<!\d)(\d{1,2})…(?:-|–|to)…years?|yrs?`) — the PRD's
+  `(\d+)\s*\+?\s*(?:years|yrs)` reads "2-5 years" as **5** and would reject it,
+  contradicting D-12's lowest-wins; `filter.min_years_required` is held equal to
+  v1's by a test. (2) `keyword_floor` has `skip_when_empty: description` — a
+  posting with no JD text is passed to the model rather than rejected for 0
+  overlap (listing-only adapters would otherwise lose everything). (3)
+  `location_explicit` is `regex_deny` in default-deny mode (`allow_tokens` set);
+  a location that is only filler (`Hybrid`, `On-site`) passes as vague. (4) Every
+  rule is evaluated for the trace; the first reject still decides. Per the §8.3[3]
+  table, `Singapore-based role, US only` **passes** (allow token wins) — the
+  prose claim that v1's residue logic rejects it is not what v1 did either.
+  Persisting the result into the `prefilter` table is the store's/pipeline's job
+  (M3-T1/M3-T4): `FilterResult` carries every column it needs.
 
 #### M4-T1b · Filter tuning tools
-- **STATUS:** `NOT_STARTED`
-- **Completed:** —
+- **STATUS:** `DONE`
+- **Completed:** 2026-09-24
 - **Do:** `filter explain <job_id>` and `filter test --title/--location/--desc`
   per §8.3[3]. Both read-only; `test` touches no database.
 - **Verify:** `python -m jobscraper filter test --title "Senior Backend Engineer"
@@ -1511,13 +1595,37 @@ Legend: `STATUS` · `Completed` (date) · `Verify` (command that proves it) · `
   token (`senior`).
 - **Notes:** Do not defer this. Tuning five rules against 20,000 postings without
   an explain command is guesswork.
+  *2026-09-24 (Lane B):* **`filter test` done** — the Verify command prints
+  `REJECT by title_deny: senior` and marks the deciding rule; tests
+  `test_filter_cli_*`. Extra flag `--rules <file>` dry-runs a draft rules file.
+  Profile source: `data/profile.derived.yaml` when present (via Lane D's
+  `load_derived_profile(cfg)` once merged; raw YAML, overrides unapplied, until
+  then). When absent, every rule whose `source`/`aliases` reads `profile.*`
+  (today `title_allow`, `keyword_floor`) is shown `DISABLED` and a WARNING goes
+  to stderr — not silently skipped. Scorer: `profile.keywords.overlap` once
+  merged, else none (overlap rules show `SKIP`). **`filter explain <job_id|url>`
+  done after merging `v2-rebuild` (M3-T1 landed):** reads the job via the v2
+  `Store.get_job`/`find_job_by_url`, shows the stored `prefilter` row for
+  (profile_version, current rules hash) — or says why there is none — beside a
+  live re-evaluation giving every rule's verdict and matched text. Read-only; it
+  refuses to create a missing DB. Tests `test_filter_cli_explain_*`.
 
 #### M4-T2 · Vital extract
-- **STATUS:** `NOT_STARTED`
-- **Completed:** —
+- **STATUS:** `DONE`
+- **Completed:** 2026-09-24
 - **Do:** `decide.py::vital_extract()` per §8.3[4], ≤800 chars, `UNSTATED` markers.
 - **Verify:** Test asserts output ≤800 chars on a real 12k-char JD fixture **and**
   that the location and years-of-experience strings survive the reduction.
+- **Notes:** Verify = `python tests/run_tests.py -k vital` (4/4). Two *real* JDs,
+  copied verbatim from the v1 archive's `jobs` table, no composition needed:
+  `tests/fixtures/jd_edge_infrastructure_warsaw.json` (12,004 chars → 606) and
+  `jd_account_executive_singapore.json` (12,076 → 792). Budget is spent in
+  post-condition order (LOCATION, EXPERIENCE, REQUIREMENTS, ROLE) so location and
+  years are never the part that gets cut; numbered-years sentences outrank other
+  experience sentences. REQUIREMENTS drops sentences EXPERIENCE already carries.
+  v1's `REQ_HEADINGS` was **ported** into decide.py and extended (`what we require`,
+  role headings, stop-headings) rather than imported: matching.py is LEGACY (M9).
+  `title` is accepted per contract 4 but not echoed — the decide prompt carries it.
 
 #### M4-T3 · Decision call + accept guard
 - **STATUS:** `NOT_STARTED`

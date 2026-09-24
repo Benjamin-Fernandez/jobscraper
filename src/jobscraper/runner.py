@@ -16,13 +16,13 @@ from dataclasses import dataclass, field
 from typing import Optional
 
 from . import cursor as cursor_mod
-from . import discovery
-from .adapters import get_adapter
+from .scrape import discovery
+from .scrape.adapters import get_adapter
 from .config import Config, Profile
 from .llm import Judge
 from .matching import apply_facts, score_batch, stage_a
 from .models import Candidate, Company, FetchOutcome, TokenLedger
-from .net import FetchError, HttpClient
+from .scrape.net import FetchError, HttpClient
 from .output import (write_application_tracker, write_html_view,
                      write_needs_review, write_run_tracker)
 from .store_v1 import Store

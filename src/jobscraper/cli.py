@@ -2,7 +2,7 @@
 
     python -m jobscraper doctor     check config, watchlist, deps, judge
     python -m jobscraper sync       load the watchlist into the database
-    python -m jobscraper status     where the cursor is, what is quarantined
+    python -m jobscraper status     who is due, run cadence, what is quarantined
     python -m jobscraper run        process the next batch of companies
     python -m jobscraper resolve    resolve ATS providers without fetching jobs
     python -m jobscraper export     rewrite the trackers from the database
@@ -19,15 +19,18 @@ from pathlib import Path
 
 from . import backends
 from . import cursor as cursor_mod
+from . import pipeline
 from . import review as review_mod
+from . import scheduler
 from .config import load_config, load_profile
 from . import watchlist
-from .net import HttpClient
+from .scrape.net import HttpClient
 from .output import (cards_from_tracker, write_html_view,
                      write_needs_review, write_run_tracker)
-from . import discovery
+from .scrape import discovery
 from .runner import ensure_resolved, run_batch
 from .serve import serve_view
+from .store import Store as StoreV2
 from .store_v1 import Store
 
 BAR = "-" * 66
@@ -40,32 +43,23 @@ def _boot(args):
     return cfg, profile, store
 
 
-def _sync(cfg, store):
-    """Load the watchlist into the companies table.
+def _boot_v2(args):
+    """Config plus the v2 store. `_boot` above serves only the legacy commands."""
+    cfg = load_config(getattr(args, "config", None))
+    return cfg, StoreV2(cfg.db_path)
 
-    A bridge, not the final design. It feeds watchlist entries through v1's
-    `sync_companies`, which still keys rows on the display name and carries
-    tier/category columns v2 has dropped. M3-T1b replaces it with
-    `store.sync_watchlist`, which keys on the stable `key` so that renaming a
-    company cannot reset its scrape history (PRD 8.4).
 
-    It exists now because M1-T4 removed the Excel workbook from the config, and
-    leaving every command raising AttributeError until M3 is not an option.
+def _sync_watchlist(cfg, store) -> dict[str, int]:
+    """Reconcile watchlist.yaml into `companies`, keyed on the stable `key`.
+
+    Runs before anything reads the companies table, so a YAML edit - an added,
+    renamed, disabled or removed company - is always seen by the next command.
     """
-    entries = watchlist.load(cfg.watchlist_path)
-    rows = [{"ordinal": i,
-             "name": e.name,
-             "tier": "",
-             "category": "",
-             "careers_url": e.careers_url,
-             "role_type_hint": ""}
-            for i, e in enumerate(watchlist.enabled_only(entries), start=1)]
-    added, updated = store.sync_companies(rows)
-    return len(rows), added, updated
+    return store.sync_watchlist(watchlist.load(cfg.watchlist_path))
 
 
 def cmd_doctor(args) -> int:
-    cfg, profile, store = _boot(args)
+    cfg, store = _boot_v2(args)
     print(BAR)
     print("JobScraper doctor")
     print(BAR)
@@ -73,21 +67,24 @@ def cmd_doctor(args) -> int:
     wl = cfg.watchlist_path
     print(f"watchlist      {wl}")
     try:
-        total, added, updated = _sync(cfg, store)
+        counts = _sync_watchlist(cfg, store)
     except watchlist.WatchlistError as exc:
         print(f"               INVALID - {exc}")
         store.close()
         return 1
-    print(f"               OK - {total} enabled companies "
-          f"({added} new, {updated} updated)")
-
-    print(f"profile        v{profile.version}, {len(profile.all_skills())} skills, "
-          f"locations={','.join(profile.loc_allow)}")
-    print(f"database       {cfg.db_path}")
     s = store.stats()
+    print(f"               OK - {s['enabled']} enabled of {s['companies']} "
+          f"({counts['added']} new, {counts['url_changed']} moved, "
+          f"{counts['disabled']} disabled)")
+
+    derived = cfg.profile_path
+    print(f"profile        {derived}")
+    print("               " + ("present" if derived.exists()
+                               else "missing - run `python -m jobscraper profile`"))
+    print(f"database       {cfg.db_path}")
     print(f"               {s['companies']} companies, {s['resolved']} resolved, "
           f"{s['quarantined']} quarantined, {s['jobs']} jobs, "
-          f"{s['exported']} exported")
+          f"{s['applications']} applications")
 
     backend = backends.build(cfg.budget)
     print(f"judge          backend={backend.name}")
@@ -108,48 +105,38 @@ def cmd_doctor(args) -> int:
     print(f"batch          {cfg.run['batch_size']} companies per run, "
           f"{cfg.run['cycle_days']}-day cycle")
     print(BAR)
-    print(cursor_mod.describe(store, total, int(cfg.run["cycle_days"]),
-                              int(cfg.run["batch_size"])))
-    print(BAR)
     store.close()
     return 0
 
 
 def cmd_sync(args) -> int:
-    cfg, _profile, store = _boot(args)
-    total, added, updated = _sync(cfg, store)
-    print(f"synced {total} companies ({added} new, {updated} updated)")
+    cfg, store = _boot_v2(args)
+    c = _sync_watchlist(cfg, store)
+    s = store.stats()
+    print(f"synced {s['enabled']} enabled of {s['companies']} companies "
+          f"({c['added']} new, {c['updated']} updated, {c['url_changed']} moved, "
+          f"{c['disabled']} disabled)")
     store.close()
     return 0
 
 
 def cmd_status(args) -> int:
-    cfg, _profile, store = _boot(args)
-    total = len(store.all_companies())
+    """Queue depth and cadence from the staleness scheduler (PRD 8.3[0])."""
+    cfg, store = _boot_v2(args)
+    _sync_watchlist(cfg, store)
+    st = scheduler.status(store, cfg.batch_size, cfg.cycle_days)
     print(BAR)
-    print(cursor_mod.describe(store, total, int(cfg.run["cycle_days"]),
-                              int(cfg.run["batch_size"])))
+    print(scheduler.describe(st))
     print(BAR)
     s = store.stats()
-    print(f"companies {s['companies']}   resolved {s['resolved']}   "
-          f"quarantined {s['quarantined']}")
-    print(f"jobs      {s['jobs']}   open {s['open_jobs']}   "
-          f"exported {s['exported']}   runs {s['runs']}")
-    q = store.quarantined()
-    if q:
-        print(f"\nQuarantined ({len(q)}) - see output/needs_review.xlsx")
-        for c in q[:15]:
-            print(f"  [{c.ordinal:>3}] {c.name:<26} {c.last_error_class or '':<10} "
-                  f"{(c.last_error or '')[:46]}")
-        if len(q) > 15:
-            print(f"  ... and {len(q) - 15} more")
+    print(f"jobs      {s['jobs']}   open {s['open_jobs']}   runs {s['runs']}   "
+          f"applications {s['applications']}")
     store.close()
     return 0
 
 
 def cmd_resolve(args) -> int:
     cfg, _profile, store = _boot(args)
-    _sync(cfg, store)
     rc = cfg.run
     client = HttpClient(user_agent=rc["user_agent"],
                         timeout=float(rc["request_timeout"]),
@@ -177,46 +164,32 @@ def cmd_resolve(args) -> int:
 
 
 def cmd_run(args) -> int:
-    cfg, profile, store = _boot(args)
-    _sync(cfg, store)
-    rep = run_batch(cfg, profile, store, force=args.force,
-                    batch_size=args.batch_size, dry_run=args.dry_run)
-
-    print("\n" + BAR)
-    if rep.status == "blocked":
+    """One pipeline run over the most-neglected due companies (PRD 8.3)."""
+    cfg, store = _boot_v2(args)
+    try:
+        rep = pipeline.run(cfg, store, dry_run=args.dry_run,
+                           batch_size=args.batch_size)
+    finally:
+        store.close()
+    print()
+    print(BAR)
+    if rep.status == "nothing_due":
         print(rep.message)
         print(BAR)
-        store.close()
         return 0
-
-    print(f"Run #{rep.run_no}  {rep.batch_label}")
-    print(f"  companies   {rep.companies}  (ok {rep.ok}, failed {rep.failed})")
+    head = "Dry run (nothing written)" if rep.status == "dry_run" else f"Run #{rep.run_no}"
+    print(f"{head}  {len(rep.due)} due"
+          + (f" + {len(rep.probation)} on probation" if rep.probation else ""))
+    print(f"  companies   ok {rep.ok}, failed {rep.failed}")
     print(f"  postings    {rep.postings} seen, {rep.new} new")
-    print(f"  matched     {rep.matched}, exported {rep.exported}")
-    if rep.ledger and rep.ledger.calls:
-        print(f"  tokens      {rep.ledger.input_tokens:,} in / "
-              f"{rep.ledger.output_tokens:,} out over {rep.ledger.calls} calls")
     if rep.quarantined:
         print(f"  quarantined {', '.join(rep.quarantined)}")
-    if rep.errors:
-        print("\n  skipped due to fetch errors:")
-        for name, err in rep.errors:
-            print(f"    - {name}: {err[:80]}")
-    if rep.status == "aborted_unhealthy":
-        print(f"\n  {rep.message}")
-
-    out = cfg.output_dir
-    if not args.dry_run:
-        print(f"\n  tracker     {out / 'application_tracker.xlsx'}")
-        print(f"  quick view  {out / 'latest_matches.html'}")
-        print(f"  run log     {out / 'run_tracker.xlsx'}")
+    if rep.relinked:
+        print(f"  relinked    {rep.relinked} earlier application(s)")
+    if rep.message:
+        print(f"  {rep.message}")
     print(BAR)
-    total = len(store.all_companies())
-    print(cursor_mod.describe(store, total, int(cfg.run["cycle_days"]),
-                              int(cfg.run["batch_size"])))
-    print(BAR)
-    store.close()
-    return 0
+    return 0 if rep.status in ("ok", "dry_run") else 1
 
 
 def cmd_export(args) -> int:
@@ -398,6 +371,127 @@ def cmd_web(args) -> int:
     return 0
 
 
+def cmd_filter(args) -> int:
+    """Tune the prefilter (PRD 8.3[3], M4-T1b). Both subcommands are read-only.
+
+    `filter test` dry-runs the rules on a posting you type in: no scrape, no
+    database. `filter explain <job_id>` re-runs them on a stored posting for the
+    full per-rule trace, and shows the verdict stored in `prefilter` for the
+    current rules and profile beside it.
+
+    The profile is the derived one (data/profile.derived.yaml) when it exists.
+    Without it there are no target titles or skills to match, so every rule that
+    reads the profile is disabled for the run - and the output says so - rather
+    than silently skipping or rejecting everything.
+
+    Self-contained on purpose (PRD 0.6: a lane adds one verb, touches nothing
+    else here), hence the local imports.
+    """
+    import dataclasses
+
+    import yaml
+
+    from . import filter as filter_mod
+    from .store import SchemaMismatch
+    from .store import Store as V2Store
+
+    try:
+        sys.stdout.reconfigure(errors="replace")      # JD text is not cp1252
+    except (AttributeError, ValueError):
+        pass
+    cfg = load_config(args.config)
+    rules_path = Path(getattr(args, "rules", None) or cfg.rules_path)
+    try:
+        ruleset = filter_mod.load_rules(rules_path)
+    except (OSError, ValueError) as exc:
+        print(f"cannot load rules: {exc}", file=sys.stderr)
+        return 2
+    rules_hash = ruleset.hash      # before any fallback disabling: the stored key
+
+    profile: dict = {}
+    profile_note = f"{cfg.profile_path}"
+    if cfg.profile_path.exists():
+        try:
+            from .profile.resume_ingest import load_derived_profile
+            profile = dict(load_derived_profile(cfg))
+            profile_note += " (+ overrides)"
+        except ImportError:                   # Lane D's loader not merged yet
+            profile = yaml.safe_load(cfg.profile_path.read_text(encoding="utf-8")) or {}
+            profile_note += " (overrides not applied: profile loader not built yet)"
+    else:
+        uses_profile = [r.id for r in ruleset.rules if r.enabled and any(
+            str(v).startswith("profile.") for k, v in r.spec.items()
+            if k in ("source", "aliases"))]
+        ruleset = dataclasses.replace(ruleset, rules=tuple(
+            dataclasses.replace(r, enabled=False) if r.id in uses_profile else r
+            for r in ruleset.rules))
+        profile_note = "none - fallback"
+        print(f"WARNING: no derived profile at {cfg.profile_path}; rules that read "
+              f"it are DISABLED for this run: {', '.join(uses_profile) or '-'}.\n"
+              "         Build it with the resume ingest (M2) for a faithful result.",
+              file=sys.stderr)
+
+    try:
+        from .profile.keywords import overlap as scorer
+    except ImportError:                       # Lane D's matcher not merged yet
+        scorer = None
+
+    stored_line = None
+    if args.filter_cmd == "explain":
+        if not cfg.db_path.exists():
+            print(f"no database at {cfg.db_path} - nothing has been scraped yet",
+                  file=sys.stderr)
+            return 1
+        try:
+            store = V2Store(cfg.db_path)
+        except SchemaMismatch as exc:
+            print(str(exc), file=sys.stderr)
+            return 1
+        try:
+            job = store.get_job(args.job_id)
+            if job is None:                   # a URL: re-read for the company name
+                by_url = store.find_job_by_url(args.job_id)
+                job = store.get_job(by_url["job_id"]) if by_url else None
+            if job is None:
+                print(f"no posting with id or url {args.job_id!r}", file=sys.stderr)
+                return 1
+            version = profile.get("profile_version")
+            row = (store.get_prefilter(job["job_id"], int(version), rules_hash)
+                   if version is not None else None)
+        finally:
+            store.close()
+        if row:
+            verdict = ("PASS" if row["passed"] else
+                       f"REJECT by {row['reject_rule']}: {row['reject_detail']}")
+            stored_line = f"{verdict}  (at {row['evaluated_at']})"
+        elif version is None:
+            stored_line = "unknown - no profile_version without a derived profile"
+        else:
+            stored_line = ("none for these rules + profile v"
+                           f"{version} (never prefiltered, or the rules changed since)")
+        posting = {"title": job.get("title"), "location": job.get("location"),
+                   "description": job.get("jd_text")}
+        print(f"job       {job['job_id']}  {job.get('company') or ''}  "
+              f"{job.get('url') or ''}".rstrip())
+    else:
+        posting = {"title": args.title, "location": args.location,
+                   "description": args.desc}
+
+    result = filter_mod.evaluate(posting, ruleset, profile, scorer)
+    print(f"title     {posting['title'] or ''}")
+    print(f"location  {posting['location'] or '(blank)'}")
+    print(f"desc      {len(posting['description'] or '')} chars")
+    print(f"rules     {rules_path}  (hash {rules_hash[:12]})")
+    print(f"profile   {profile_note}")
+    if scorer is None and profile:
+        print("scorer    none (profile/keywords.py not built yet) - overlap rules skip")
+    if stored_line is not None:
+        print(f"stored    {stored_line}")
+    print(BAR)
+    print(filter_mod.render(result))
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="jobscraper",
                                 description="Fortnightly careers-site monitor")
@@ -407,7 +501,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     sub.add_parser("doctor", help="check setup").set_defaults(fn=cmd_doctor)
     sub.add_parser("sync", help="load the watchlist into the db").set_defaults(fn=cmd_sync)
-    sub.add_parser("status", help="cursor and health").set_defaults(fn=cmd_status)
+    sub.add_parser("status", help="who is due, cadence, quarantine").set_defaults(fn=cmd_status)
     sub.add_parser("export", help="rewrite trackers").set_defaults(fn=cmd_export)
 
     r = sub.add_parser("resolve", help="resolve ATS providers only")
@@ -456,15 +550,27 @@ def build_parser() -> argparse.ArgumentParser:
     rev.set_defaults(fn=cmd_review)
 
     run = sub.add_parser("run", help="process the next batch of companies")
-    run.add_argument("--force", action="store_true",
-                     help="start a new cycle before the 14 days are up")
-    run.add_argument("--batch-size", type=int, default=None)
+    run.add_argument("--batch-size", type=int, default=None,
+                     help="companies this run (default: run.batch_size)")
     run.add_argument("--dry-run", action="store_true",
-                     help="do everything except write the output files")
+                     help="fetch and report, write nothing, consume no queue")
     run.set_defaults(fn=cmd_run)
 
     sub.add_parser("web", help="serve the web app (inbox, applications)"
                    ).set_defaults(fn=cmd_web)
+
+    flt = sub.add_parser("filter", help="tune the prefilter rules (dry run)")
+    flt_sub = flt.add_subparsers(dest="filter_cmd", required=True)
+    ft = flt_sub.add_parser("test", help="run the rules on one made-up posting; "
+                                         "no scrape, no database")
+    ft.add_argument("--title", required=True)
+    ft.add_argument("--location", default="")
+    ft.add_argument("--desc", default="", help="description text")
+    ft.add_argument("--rules", help="rules file to test (default: config's)")
+    fe = flt_sub.add_parser("explain", help="every rule's verdict for a stored "
+                                            "posting, beside the stored verdict")
+    fe.add_argument("job_id", help="job id, or the posting's URL")
+    flt.set_defaults(fn=cmd_filter)
     return p
 
 

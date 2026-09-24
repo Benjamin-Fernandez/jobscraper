@@ -11,7 +11,7 @@ from typing import Optional
 from urllib.parse import urlparse
 
 from .adapters import parse_workday
-from .models import Company
+from ..models import WatchedCompany
 from .net import FetchError, HttpClient
 
 # Host markers that identify a provider straight from the careers URL.
@@ -313,7 +313,7 @@ def sniff_html(client: HttpClient, url: str) -> Optional[Resolution]:
     return None
 
 
-def resolve(client: HttpClient, company: Company) -> Resolution:
+def resolve(client: HttpClient, company: WatchedCompany) -> Resolution:
     """Run the ladder. Returns an unresolved Resolution rather than raising."""
     url = company.careers_url or ""
 

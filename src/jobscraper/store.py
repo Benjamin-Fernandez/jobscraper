@@ -187,6 +187,65 @@ class Store:
         self.conn.commit()
         return int(cur.lastrowid)
 
+    def sync_watchlist(self, entries: Iterable[Any]) -> dict[str, int]:
+        """Reconcile the watchlist YAML into `companies` (PRD 8.4, normative).
+
+        `entries` are watchlist entries (anything with key, name, careers_url,
+        provider, slug, feed_url, enabled). Identity is `key`, never `name`:
+        matching on the display name is exactly the bug this replaces - renaming
+        "Shopee" silently made a new row, reset its staleness and orphaned its
+        failure counters.
+
+        - new key          -> insert; `last_scraped_at` NULL, so due next run
+        - known key        -> update descriptive fields only; history untouched
+        - careers_url moved -> clear the cached resolution and the failure count:
+                             a new URL is a new board
+        - key gone from YAML -> enabled = 0, never deleted: jobs, decisions and
+                             applications still point at the row
+        """
+        existing = {c.key: c for c in self.companies()}
+        seen: set[str] = set()
+        counts = {"added": 0, "updated": 0, "disabled": 0, "url_changed": 0}
+        for e in entries:
+            seen.add(e.key)
+            row = existing.get(e.key)
+            if row is None:
+                self.conn.execute(
+                    """INSERT INTO companies (key, name, careers_url, provider, slug,
+                       feed_url, enabled) VALUES (?,?,?,?,?,?,?)""",
+                    (e.key, e.name, e.careers_url, e.provider, e.slug, e.feed_url,
+                     int(bool(e.enabled))))
+                counts["added"] += 1
+                continue
+            if e.careers_url != row.careers_url:
+                # Only what the YAML itself states survives a URL change;
+                # anything discovery learned about the old board is void.
+                self.conn.execute(
+                    """UPDATE companies SET name = ?, careers_url = ?, enabled = ?,
+                       provider = ?, slug = ?, feed_url = ?, resolve_method = NULL,
+                       resolved_at = NULL, consecutive_failures = 0
+                       WHERE id = ?""",
+                    (e.name, e.careers_url, int(bool(e.enabled)), e.provider,
+                     e.slug, e.feed_url, row.id))
+                counts["url_changed"] += 1
+            else:
+                # A resolution the YAML does not state is one discovery learned;
+                # keep it rather than making the next run rediscover it.
+                self.conn.execute(
+                    """UPDATE companies SET name = ?, enabled = ?,
+                       provider = COALESCE(?, provider), slug = COALESCE(?, slug),
+                       feed_url = COALESCE(?, feed_url) WHERE id = ?""",
+                    (e.name, int(bool(e.enabled)), e.provider, e.slug, e.feed_url,
+                     row.id))
+            counts["updated"] += 1
+        for key, row in existing.items():
+            if key not in seen and row.enabled:
+                self.conn.execute(
+                    "UPDATE companies SET enabled = 0 WHERE id = ?", (row.id,))
+                counts["disabled"] += 1
+        self.conn.commit()
+        return counts
+
     def companies(self, enabled_only: bool = False) -> list[WatchedCompany]:
         sql = "SELECT * FROM companies"
         if enabled_only:
@@ -266,6 +325,61 @@ class Store:
         self.conn.execute(
             "UPDATE companies SET probation_due_run = ? WHERE id = ?", (next_run, cid))
         self.conn.commit()
+
+    def due_companies(self, cutoff: str, limit: int) -> list[WatchedCompany]:
+        """The due query (PRD 8.3[0]): never-scraped first, then longest-neglected.
+
+        `cutoff` is "now minus cycle_days"; anything last scraped at or before it
+        is due. Quarantined companies are excluded here - they come back only
+        through probation (`due_probation`), exactly as in v1. The CASE is the
+        portable spelling of "NULLs first"; the id is a stable tie-break.
+        Served by idx_companies_due.
+        """
+        rows = self.conn.execute(
+            """SELECT * FROM companies
+                WHERE enabled = 1 AND quarantined_at IS NULL
+                  AND (last_scraped_at IS NULL OR last_scraped_at <= ?)
+                ORDER BY CASE WHEN last_scraped_at IS NULL THEN 0 ELSE 1 END,
+                         last_scraped_at, id
+                LIMIT ?""", (cutoff, limit))
+        return [self._company(r) for r in rows]
+
+    def schedule_counts(self, cutoff: str, soon_cutoff: str) -> dict[str, Any]:
+        """Numbers for the `status` report. `soon_cutoff` = cutoff + 7 days."""
+        live = "enabled = 1 AND quarantined_at IS NULL"
+
+        def q(where: str, *params: Any) -> int:
+            return int(self.conn.execute(
+                f"SELECT COUNT(*) FROM companies WHERE {where}", params).fetchone()[0])
+        oldest = self.conn.execute(
+            f"""SELECT MIN(last_scraped_at) FROM companies
+                WHERE {live} AND last_scraped_at IS NOT NULL""").fetchone()[0]
+        return {
+            "enabled": q("enabled = 1"),
+            "never_scraped": q(f"{live} AND last_scraped_at IS NULL"),
+            "due_now": q(f"{live} AND (last_scraped_at IS NULL "
+                         "OR last_scraped_at <= ?)", cutoff),
+            "due_soon": q(f"{live} AND last_scraped_at > ? AND last_scraped_at <= ?",
+                          cutoff, soon_cutoff),
+            "quarantined": q("enabled = 1 AND quarantined_at IS NOT NULL"),
+            "oldest_scrape": oldest,
+        }
+
+    def quarantined_companies(self) -> list[WatchedCompany]:
+        return [self._company(r) for r in self.conn.execute(
+            """SELECT * FROM companies WHERE enabled = 1
+               AND quarantined_at IS NOT NULL ORDER BY name""")]
+
+    def finished_runs_since(self, since: str) -> tuple[int, Optional[str]]:
+        """(count, earliest start) of runs that reached the end since `since`.
+
+        The observed run rate behind the sweep projection. A run that died is
+        not a run that covered anything, so only `ok` counts.
+        """
+        r = self.conn.execute(
+            """SELECT COUNT(*), MIN(started_at) FROM runs
+               WHERE status = 'ok' AND started_at >= ?""", (since,)).fetchone()
+        return int(r[0]), r[1]
 
     def stamp_scraped(self, cids: Iterable[int], at: Optional[str] = None) -> None:
         """Record an ATTEMPT (D-9). Called last in a run, so a crash stamps nothing."""
@@ -483,20 +597,23 @@ class Store:
                                company: Optional[str] = None,
                                role: Optional[str] = None,
                                url: Optional[str] = None,
-                               at: Optional[str] = None) -> bool:
+                               at: Optional[str] = None,
+                               applied_at: Optional[str] = None) -> bool:
         """Upsert an application; append to `app_events` only on a real change.
 
         Returns whether an event was appended - re-posting the same status is a
         no-op for the history (M6-T2), though `notes` still updates. `applied_at`
         is stamped the first time the status leaves NOT_YET_APPLIED and is never
-        re-stamped afterwards.
+        re-stamped afterwards. `applied_at` overrides that stamp's date - only
+        for importing a record whose real date is known (M3-T3b).
         """
         now = at or utcnow()
         prev = self.application(job_id)
         prev_status = prev["status"] if prev else None
+        stamp = applied_at
         applied_at = prev["applied_at"] if prev else None
         if applied_at is None and status not in NOT_YET_APPLIED:
-            applied_at = now[:10]
+            applied_at = stamp or now[:10]
 
         if prev is None:
             self.conn.execute(
@@ -518,6 +635,33 @@ class Store:
                    VALUES (?,?,?,?)""", (job_id, prev_status, status, now))
         self.conn.commit()
         return changed
+
+    def relink_orphan_applications(self) -> int:
+        """Point applications at their posting once it has been scraped.
+
+        A migrated v1 application (D-14) carries a v1 job id that no v2 job has,
+        because v1 hashed ids with a company id that no longer means anything.
+        Its URL is the durable link: when a scraped job has the same URL, the
+        application and its history move onto that job id. Safe to run every
+        run; returns how many moved.
+        """
+        orphans = self.conn.execute(
+            """SELECT a.job_id, a.url FROM applications a
+               WHERE a.url IS NOT NULL
+                 AND NOT EXISTS (SELECT 1 FROM jobs j WHERE j.job_id = a.job_id)"""
+        ).fetchall()
+        moved = 0
+        for o in orphans:
+            job = self.find_job_by_url(o["url"])
+            if not job or self.application(job["job_id"]):
+                continue
+            self.conn.execute("UPDATE applications SET job_id = ? WHERE job_id = ?",
+                              (job["job_id"], o["job_id"]))
+            self.conn.execute("UPDATE app_events SET job_id = ? WHERE job_id = ?",
+                              (job["job_id"], o["job_id"]))
+            moved += 1
+        self.conn.commit()
+        return moved
 
     def applications(self) -> list[dict[str, Any]]:
         """Everything with a status, newest change first.
