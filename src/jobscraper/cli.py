@@ -19,6 +19,7 @@ from pathlib import Path
 
 from . import backends
 from . import cursor as cursor_mod
+from . import pipeline
 from . import review as review_mod
 from . import scheduler
 from .config import load_config, load_profile
@@ -163,45 +164,32 @@ def cmd_resolve(args) -> int:
 
 
 def cmd_run(args) -> int:
-    cfg, profile, store = _boot(args)
-    rep = run_batch(cfg, profile, store, force=args.force,
-                    batch_size=args.batch_size, dry_run=args.dry_run)
-
-    print("\n" + BAR)
-    if rep.status == "blocked":
+    """One pipeline run over the most-neglected due companies (PRD 8.3)."""
+    cfg, store = _boot_v2(args)
+    try:
+        rep = pipeline.run(cfg, store, dry_run=args.dry_run,
+                           batch_size=args.batch_size)
+    finally:
+        store.close()
+    print()
+    print(BAR)
+    if rep.status == "nothing_due":
         print(rep.message)
         print(BAR)
-        store.close()
         return 0
-
-    print(f"Run #{rep.run_no}  {rep.batch_label}")
-    print(f"  companies   {rep.companies}  (ok {rep.ok}, failed {rep.failed})")
+    head = "Dry run (nothing written)" if rep.status == "dry_run" else f"Run #{rep.run_no}"
+    print(f"{head}  {len(rep.due)} due"
+          + (f" + {len(rep.probation)} on probation" if rep.probation else ""))
+    print(f"  companies   ok {rep.ok}, failed {rep.failed}")
     print(f"  postings    {rep.postings} seen, {rep.new} new")
-    print(f"  matched     {rep.matched}, exported {rep.exported}")
-    if rep.ledger and rep.ledger.calls:
-        print(f"  tokens      {rep.ledger.input_tokens:,} in / "
-              f"{rep.ledger.output_tokens:,} out over {rep.ledger.calls} calls")
     if rep.quarantined:
         print(f"  quarantined {', '.join(rep.quarantined)}")
-    if rep.errors:
-        print("\n  skipped due to fetch errors:")
-        for name, err in rep.errors:
-            print(f"    - {name}: {err[:80]}")
-    if rep.status == "aborted_unhealthy":
-        print(f"\n  {rep.message}")
-
-    out = cfg.output_dir
-    if not args.dry_run:
-        print(f"\n  tracker     {out / 'application_tracker.xlsx'}")
-        print(f"  quick view  {out / 'latest_matches.html'}")
-        print(f"  run log     {out / 'run_tracker.xlsx'}")
+    if rep.relinked:
+        print(f"  relinked    {rep.relinked} earlier application(s)")
+    if rep.message:
+        print(f"  {rep.message}")
     print(BAR)
-    total = len(store.all_companies())
-    print(cursor_mod.describe(store, total, int(cfg.run["cycle_days"]),
-                              int(cfg.run["batch_size"])))
-    print(BAR)
-    store.close()
-    return 0
+    return 0 if rep.status in ("ok", "dry_run") else 1
 
 
 def cmd_export(args) -> int:
@@ -419,11 +407,10 @@ def build_parser() -> argparse.ArgumentParser:
     rev.set_defaults(fn=cmd_review)
 
     run = sub.add_parser("run", help="process the next batch of companies")
-    run.add_argument("--force", action="store_true",
-                     help="start a new cycle before the 14 days are up")
-    run.add_argument("--batch-size", type=int, default=None)
+    run.add_argument("--batch-size", type=int, default=None,
+                     help="companies this run (default: run.batch_size)")
     run.add_argument("--dry-run", action="store_true",
-                     help="do everything except write the output files")
+                     help="fetch and report, write nothing, consume no queue")
     run.set_defaults(fn=cmd_run)
     return p
 

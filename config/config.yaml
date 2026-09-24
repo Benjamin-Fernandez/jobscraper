@@ -30,6 +30,9 @@ run:
   cycle_days: 14
   max_workers: 6
   per_company_timeout: 90
+  # A run still marked `running` this many seconds after it started is taken to
+  # have crashed, and the next run marks it failed (PRD 8.3[0], R-12).
+  per_run_timeout: 3600
   request_timeout: 25
   # Seconds between requests to the same host.
   rate_limit_delay: 0.7

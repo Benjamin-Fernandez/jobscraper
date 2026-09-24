@@ -1506,8 +1506,26 @@ Legend: `STATUS` · `Completed` (date) · `Verify` (command that proves it) · `
   cannot regenerate. §6's "migrating v1 job data is out of scope" does not cover it.
 
 #### M3-T4 · Scrape stage in the pipeline
-- **STATUS:** `NOT_STARTED`
-- **Completed:** —
+- **STATUS:** `DONE`
+- **Completed:** 2026-09-24 — **live Verify:** `run --dry-run` twice selected the
+  same 10 (1Password → Alibaba), fetched 1,275 postings (8 ok, 2 failed), and
+  left `jobs`/`runs`/stamps at 0/0/0. `-k pipeline` 8/8 with a stub fetcher;
+  full suite 91/91. `pipeline.run` replaces `runner.run_batch` behind `run`;
+  `--force` is gone (no cycle boundary to force past).
+  **Failure policy carried over** (isolation, classify-and-skip, threshold →
+  one re-resolve → quarantine, probation) **with one v1 bug fixed:** v1's
+  global-failure guard called `rollback_failures` without ever having recorded
+  that run's failures, so an outage silently *forgave an earlier genuine
+  failure*. v2 records none and **stamps none** on `aborted_unhealthy` — a local
+  outage should not cost the batch a whole cycle; re-running retries it.
+  Crash recovery: stale `running` rows are reaped at start (`run.per_run_timeout`,
+  new config key, 3600 s); stamping is the last write. Dry run still syncs the
+  watchlist (config reconciliation, idempotent) but persists nothing a run
+  produces, including discovery results. `relink_orphan_applications` runs after
+  every persist. **Not yet wired:** stages [3]–[6] (prefilter → decide →
+  shortlist) — M4-T3/M5-T1, now that lanes B and D have landed their pieces.
+  Postings without a description are not hydrated yet; v1 hydrated only
+  prefilter survivors, and that belongs with the M4 wiring.
 - **Do:** `pipeline.py` stage [2]: sync watchlist (M3-T1b) → take the due batch
   (M3-T3) → resolve → fetch (parallel, isolated) → diff → persist jobs and coverage.
   Carry over quarantine/probation and the global-failure-abort guard from
