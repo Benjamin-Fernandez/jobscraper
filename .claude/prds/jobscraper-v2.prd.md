@@ -1952,8 +1952,27 @@ Legend: `STATUS` · `Completed` (date) · `Verify` (command that proves it) · `
 ### M9 — Cutover
 
 #### M9-T1 · Retire v1 modules
-- **STATUS:** `NOT_STARTED`
-- **Completed:** —
+- **STATUS:** `DONE`
+- **Completed:** 2026-09-24 — Verify prints `[]` and exits 0; full suite 201/201.
+  `git mv` (history kept) into `archive/v1-src/`: `output`, `serve`, `ingest`,
+  `cursor`, `runner`, `matching` (entirely - its location/years logic lives in
+  `filter.py`, its requirements extraction in `decide.vital_extract`), `llm`,
+  `store_v1`, v1's `Profile`/`load_profile` (from `config.py`),
+  `config/profile.yaml` and `tests/test_legacy_v1.py`. The layering guard now
+  checks every module; `LEGACY` is just the CLI entry points.
+  **`review.py` was ported, not archived** (§9 KEEP): it is now the in-session
+  transport for the decide step - it exports the same prompt `claude -p` gets
+  and applies the answers through the same `guard()` into the same `decisions`
+  cache (4 new tests; classified ORCHESTRATOR). It is also the answer for
+  Docker, which has no `claude` binary (R-8).
+  **CLI:** `view`, `export`, `resolve`, `pin` removed; `reresolve <key>` ported
+  (clears the cached ATS - for a board that moved without its URL changing);
+  pinning is now a watchlist edit (`provider`/`slug`/`feed_url`). `run.ps1`
+  opens the web app instead of the retired viewer.
+  **Tests ported, not dropped:** the four v1 filter tests now run against
+  `filter.py`, keeping every case that still holds; the cases D-7 and D-10
+  deliberately changed are asserted in their new form. The v1-vs-v2 years
+  cross-check pins v1's answers as literals captured before archiving.
 - **Do:** Move `output.py`, `serve.py`, `ingest.py`, `cursor.py`, `runner.py` and the
   retired half of `matching.py` to `archive/`. Point `review.py` at the new schema.
 - **Verify:** `python -c "import ast,pathlib,sys; bad=[(p,n.lineno) for p in pathlib.Path('src').rglob('*.py') for n in ast.walk(ast.parse(p.read_text(encoding='utf-8'))) if (isinstance(n,ast.ImportFrom) and (n.module or '').split('.')[-1] in {'output','serve','ingest','cursor','runner'}) or (isinstance(n,ast.Import) and any(a.name.split('.')[-1] in {'output','serve','ingest','cursor','runner'} for a in n.names))]; print(bad); sys.exit(1 if bad else 0)"` exits 0, and `python tests/run_tests.py` passes.
