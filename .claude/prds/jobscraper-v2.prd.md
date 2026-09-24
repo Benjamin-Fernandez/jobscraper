@@ -1551,8 +1551,8 @@ Legend: `STATUS` · `Completed` (date) · `Verify` (command that proves it) · `
   (M3-T1/M3-T4): `FilterResult` carries every column it needs.
 
 #### M4-T1b · Filter tuning tools
-- **STATUS:** `IN_PROGRESS`
-- **Completed:** —
+- **STATUS:** `DONE`
+- **Completed:** 2026-09-24
 - **Do:** `filter explain <job_id>` and `filter test --title/--location/--desc`
   per §8.3[3]. Both read-only; `test` touches no database.
 - **Verify:** `python -m jobscraper filter test --title "Senior Backend Engineer"
@@ -1568,10 +1568,12 @@ Legend: `STATUS` · `Completed` (date) · `Verify` (command that proves it) · `
   then). When absent, every rule whose `source`/`aliases` reads `profile.*`
   (today `title_allow`, `keyword_floor`) is shown `DISABLED` and a WARNING goes
   to stderr — not silently skipped. Scorer: `profile.keywords.overlap` once
-  merged, else none (overlap rules show `SKIP`). **`filter explain <job_id>` is
-  pending M3-T1** (it reads the v2 `prefilter` table): the subcommand exists and
-  exits 2 with that message. To finish: look up the job + its `prefilter` row via
-  the new store, re-run `filter.evaluate` for the full trace, print `filter.render`.
+  merged, else none (overlap rules show `SKIP`). **`filter explain <job_id|url>`
+  done after merging `v2-rebuild` (M3-T1 landed):** reads the job via the v2
+  `Store.get_job`/`find_job_by_url`, shows the stored `prefilter` row for
+  (profile_version, current rules hash) — or says why there is none — beside a
+  live re-evaluation giving every rule's verdict and matched text. Read-only; it
+  refuses to create a missing DB. Tests `test_filter_cli_explain_*`.
 
 #### M4-T2 · Vital extract
 - **STATUS:** `DONE`
