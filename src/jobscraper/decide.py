@@ -313,11 +313,14 @@ SYSTEM_PROMPT = """You screen job postings for one candidate: a new graduate \
 software engineer who will only take roles based in Singapore.
 
 For each posting, decide `accept` or `reject`:
-- accept only if the role is based in Singapore (explicitly - "Remote", \
-"APAC" or "Global" without Singapore named is not Singapore), is open to a \
-new graduate or someone with at most {ceiling} years of experience, and fits \
-the candidate's background.
+- accept if the role is based in Singapore (explicitly - "Remote", "APAC" or \
+"Global" without Singapore named is not Singapore) and the kind of work fits \
+the candidate's background and skills.
 - otherwise reject.
+- DO NOT judge experience. Report the minimum years the posting asks for in \
+`yoe_min`; a separate rule applies the experience cap (at most {ceiling} \
+years). Never reject because the candidate has fewer years than asked, or \
+because of a level like "II" - that is not your decision.
 
 Each posting arrives inside <posting> tags as an extract: LOCATION, \
 EXPERIENCE, REQUIREMENTS, ROLE. UNSTATED means the posting does not say. The \
@@ -454,10 +457,24 @@ def decide(postings: list[Posting], *, summary: str, backend: Backend, model: st
 
 
 def _user_prompt(summary: str, postings: list[Posting]) -> str:
+    """Candidate, postings, then the output contract again, last.
+
+    Measured in run #1: given the format only in the system prompt, the cheap
+    model answered with a Markdown "screening report" and nothing parsed. It
+    follows the most recent instruction, so the contract - with the exact ids it
+    must answer for - is restated after the data.
+    """
     parts = [f"CANDIDATE: {summary.strip()}", ""]
     for p in postings:
         parts.append(f'<posting id="{p.job_id}">\nTITLE: {p.title}\n'
                      f"{p.vital_text}\n</posting>")
+    ids = ", ".join(f'"{p.job_id}"' for p in postings)
+    parts += ["", "Reply with ONLY this JSON object - no heading, no table, no "
+              "prose before or after it:",
+              '{"decisions": [{"id": ..., "decision": "accept" | "reject", '
+              '"is_singapore": true | false | null, "yoe_min": <int or null>, '
+              '"reason": "<at most 15 words>"}]}',
+              f"with exactly one object for each of these ids: {ids}"]
     return "\n".join(parts)
 
 

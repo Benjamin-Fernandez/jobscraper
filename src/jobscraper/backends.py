@@ -120,11 +120,28 @@ class ClaudeCliBackend(Backend):
 
     def _run(self, argv: list[str], user: str,
              system: str) -> subprocess.CompletedProcess:
-        return subprocess.run(
-            argv + ["--system-prompt", system],
-            input=user,
-            capture_output=True, text=True, encoding="utf-8", errors="replace",
-            timeout=self.timeout, cwd=tempfile.gettempdir())
+        """Run the CLI, passing the system prompt as a FILE, never an argument.
+
+        On Windows `claude` is `claude.CMD`, a batch wrapper, and cmd.exe cuts
+        an argument at its first newline. Measured 2026-09-24: a two-line
+        `--system-prompt` reached the model as its first line only, so every
+        instruction after it - output format included - was silently dropped.
+        `--system-prompt-file` sidesteps the command line entirely.
+        """
+        fd, path = tempfile.mkstemp(prefix="jobscraper-sys-", suffix=".txt")
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                fh.write(system)
+            return subprocess.run(
+                argv + ["--system-prompt-file", path],
+                input=user,
+                capture_output=True, text=True, encoding="utf-8", errors="replace",
+                timeout=self.timeout, cwd=tempfile.gettempdir())
+        finally:
+            try:
+                os.unlink(path)
+            except OSError:
+                pass
 
     def complete(self, model: str, system: str, user: str,
                  max_tokens: int = 4096) -> Completion:

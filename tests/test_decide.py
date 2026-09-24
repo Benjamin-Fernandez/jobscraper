@@ -382,3 +382,30 @@ def test_decide_parses_a_fenced_answer():
     got = DC.parse_decisions(text)
     assert got["j1"] == {"decision": "accept", "is_singapore": True, "yoe_min": 2,
                          "reason": "ok"}
+
+
+
+def test_cli_system_prompt_goes_by_file_not_argv():
+    """claude.CMD cuts an argument at its first newline (measured 2026-09-24):
+    a multi-line system prompt must travel as a file, whole."""
+    import subprocess
+    from jobscraper import backends as B
+
+    seen = {}
+
+    def fake_run(argv, **kw):
+        assert "--system-prompt" not in argv
+        path = argv[argv.index("--system-prompt-file") + 1]
+        seen["text"] = Path(path).read_text(encoding="utf-8")
+        seen["path"] = path
+        return subprocess.CompletedProcess(argv, 0, stdout='{"result": "ok"}', stderr="")
+
+    b = B.ClaudeCliBackend(binary="claude-fake")
+    real = subprocess.run
+    B.subprocess.run = fake_run
+    try:
+        b.complete("claude-haiku-4-5", "line one\nline two", "hi")
+    finally:
+        B.subprocess.run = real
+    assert seen["text"] == "line one\nline two"
+    assert not Path(seen["path"]).exists()          # the temp file is cleaned up
