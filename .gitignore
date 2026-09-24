@@ -20,6 +20,8 @@ archive/
 # --- generated output ------------------------------------------------------
 output/
 data/shortlist.json
+data/review_queue.json
+data/review_verdicts.json
 data/profile.derived.yaml
 
 # --- python ----------------------------------------------------------------

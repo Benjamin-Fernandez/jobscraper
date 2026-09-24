@@ -1,15 +1,15 @@
 """Command-line surface.
 
-    python -m jobscraper doctor     check config, watchlist, deps, judge
-    python -m jobscraper sync       load the watchlist into the database
-    python -m jobscraper status     who is due, run cadence, what is quarantined
-    python -m jobscraper run        process the next batch of companies
-    python -m jobscraper resolve    resolve ATS providers without fetching jobs
-    python -m jobscraper export     rewrite the trackers from the database
-    python -m jobscraper review     judge postings inside a Claude Code session
-    python -m jobscraper view       open the match page and tick off applications
-    python -m jobscraper pin        point a company at a feed URL by hand
-    python -m jobscraper reresolve  redo ATS discovery for a company
+    python -m jobscraper doctor      check config, watchlist, profile, judge
+    python -m jobscraper run         one batch: scrape, filter, decide, shortlist
+    python -m jobscraper status      who is due, run cadence, what is quarantined
+    python -m jobscraper web         the web app: Inbox and Applications
+    python -m jobscraper watchlist   list | add | disable watched companies
+    python -m jobscraper profile     build or show the resume-derived profile
+    python -m jobscraper filter      test | explain the prefilter rules
+    python -m jobscraper review      judge postings inside a Claude Code session
+    python -m jobscraper reresolve   forget a company's cached ATS
+    python -m jobscraper sync        reconcile watchlist.yaml into the database
 """
 from __future__ import annotations
 
@@ -18,29 +18,14 @@ import sys
 from pathlib import Path
 
 from . import backends
-from . import cursor as cursor_mod
 from . import pipeline
 from . import review as review_mod
 from . import scheduler
-from .config import load_config, load_profile
+from .config import load_config
 from . import watchlist
-from .scrape.net import HttpClient
-from .output import (cards_from_tracker, write_html_view,
-                     write_needs_review, write_run_tracker)
-from .scrape import discovery
-from .runner import ensure_resolved, run_batch
-from .serve import serve_view
 from .store import Store as StoreV2
-from .store_v1 import Store
 
 BAR = "-" * 66
-
-
-def _boot(args):
-    cfg = load_config(getattr(args, "config", None))
-    profile = load_profile(getattr(args, "profile", None))
-    store = Store(cfg.db_path)
-    return cfg, profile, store
 
 
 def _boot_v2(args):
@@ -135,34 +120,6 @@ def cmd_status(args) -> int:
     return 0
 
 
-def cmd_resolve(args) -> int:
-    cfg, _profile, store = _boot(args)
-    rc = cfg.run
-    client = HttpClient(user_agent=rc["user_agent"],
-                        timeout=float(rc["request_timeout"]),
-                        delay=float(rc["rate_limit_delay"]),
-                        max_retries=int(rc["max_retries"]),
-                        respect_robots=bool(rc.get("respect_robots", True)))
-    targets = [c for c in store.all_companies() if not c.provider]
-    if args.limit:
-        targets = targets[:args.limit]
-    print(f"resolving {len(targets)} unresolved companies\n")
-    counts: dict[str, int] = {}
-    try:
-        for c in targets:
-            print(f"  [{c.ordinal:>3}] {c.name}")
-            updated = ensure_resolved(client, store, c, verbose=True)
-            key = updated.provider or "unresolved"
-            counts[key] = counts.get(key, 0) + 1
-    finally:
-        client.close()
-    print("\nresolution summary")
-    for k, v in sorted(counts.items(), key=lambda kv: -kv[1]):
-        print(f"  {k:<18} {v}")
-    store.close()
-    return 0
-
-
 def cmd_run(args) -> int:
     """One pipeline run over the most-neglected due companies (PRD 8.3)."""
     cfg, store = _boot_v2(args)
@@ -192,161 +149,80 @@ def cmd_run(args) -> int:
     return 0 if rep.status in ("ok", "dry_run") else 1
 
 
-def cmd_export(args) -> int:
-    cfg, _profile, store = _boot(args)
-    write_run_tracker(cfg.output_dir / "run_tracker.xlsx", store)
-    n = write_needs_review(cfg.output_dir / "needs_review.xlsx", store)
-    print(f"wrote run_tracker.xlsx and needs_review.xlsx ({n} quarantined rows)")
-    store.close()
-    return 0
+def _profile_and_rules(cfg):
+    """The merged profile and the loaded rules, or a printed reason why not."""
+    from . import filter as prefilter
+    from .profile import resume_ingest
+    try:
+        profile = resume_ingest.load_derived_profile(cfg)
+    except RuntimeError as exc:                 # ProfileError
+        print(str(exc), file=sys.stderr)
+        return None, None
+    return profile, prefilter.load_rules(cfg.rules_path)
 
 
-def cmd_view(args) -> int:
-    cfg, _profile, store = _boot(args)
-    store.close()                    # the viewer opens its own connection
-    out = cfg.output_dir
-    tracker = out / "application_tracker.xlsx"
-
-    if args.latest:
-        page = out / "latest_matches.html"
-        if not page.exists():
-            print("No match page yet - run `.\run.ps1` first.")
+def cmd_review(args) -> int:
+    """Hand the decide step to the Claude Code session you are talking to."""
+    cfg, store = _boot_v2(args)
+    try:
+        profile, rules = _profile_and_rules(cfg)
+        if profile is None:
             return 1
-    else:
-        # Everything matched so far, rebuilt from the tracker. This is the
-        # useful default: last run's page goes stale the moment you run again.
-        cards = cards_from_tracker(tracker)
-        if not cards:
-            print(f"Nothing to show - {tracker.name} has no matches yet.")
-            return 1
-        page = out / "all_matches.html"
-        write_html_view(page, cards, 0, f"{len(cards)} match(es) in your tracker",
-                        heading="All matches")
-
-    return serve_view(cfg.db_path, page, tracker,
-                      port=args.port, open_browser=not args.no_browser)
-
-
-def _pick(store, needle: str):
-    """Resolve a name fragment to exactly one company, or explain why not."""
-    hits = store.find_companies(needle)
-    if not hits:
-        print(f"no company matching {needle!r}")
-        return None
-    # "DRW" also matches "Cumberland (DRW)" - an exact name wins outright.
-    exact = [c for c in hits if c.name.lower() == needle.lower()]
-    if len(exact) == 1:
-        return exact[0]
-    if len(hits) > 1:
-        print(f"{needle!r} matches {len(hits)} companies - be more specific:")
-        for c in hits[:12]:
-            print(f"   [{c.ordinal:>3}] {c.name}")
-        return None
-    return hits[0]
-
-
-def cmd_pin(args) -> int:
-    cfg, _profile, store = _boot(args)
-    company = _pick(store, args.company)
-    if company is None:
+        if args.apply:
+            try:
+                st = review_mod.apply_verdicts(
+                    cfg, store, profile, rules,
+                    path=Path(args.file) if args.file else None)
+            except FileNotFoundError as exc:
+                print(str(exc), file=sys.stderr)
+                return 1
+            print(f"applied {st['applied']} decisions ({st['accepted']} accepted, "
+                  f"{st['rejected_by_postcondition']} downgraded by the guard); "
+                  f"{st['not_pending']} skipped as not pending")
+            print(f"shortlist  {st['shortlisted']} roles -> {cfg.shortlist_path}")
+            return 0
+        path, n = review_mod.export_queue(cfg, store, profile, rules,
+                                          limit=args.limit or 200)
+    finally:
         store.close()
-        return 1
-
-    if args.needs_feed:
-        store.mark_needs_feed(company.id, args.note or
-                              "no supported ATS; needs a feed URL by hand")
-        print(f"{company.name}: parked for review - {args.note or 'needs a feed URL'}")
-    else:
-        store.set_resolution(company.id, args.provider or "generic_html",
-                             args.slug, args.url, "manual")
-        store.unmark_needs_feed(company.id)
-        print(f"{company.name}: pinned -> {args.provider or 'generic_html'}"
-              f"{'/' + args.slug if args.slug else ''}  {args.url or ''}")
-
-    if args.purge:
-        n = store.purge_company_jobs(company.id)
-        print(f"{company.name}: purged {n} postings scraped from the old board")
-
-    write_needs_review(cfg.output_dir / "needs_review.xlsx", store)
-    store.close()
+    if n == 0:
+        print("nothing to review - every prefilter survivor already has a decision.")
+        print("Run `python -m jobscraper run` to bring in new postings first.")
+        return 0
+    print(BAR)
+    print(f"{n} postings need a decision -> {path}")
+    print(BAR)
+    print("Ask Claude Code, in this directory:")
+    print(f'  "judge {path.name} and write the answer to {review_mod.VERDICTS_NAME}"')
+    print("Then fold it back in:")
+    print("  python -m jobscraper review --apply")
+    print(BAR)
     return 0
 
 
 def cmd_reresolve(args) -> int:
-    cfg, _profile, store = _boot(args)
-    rc = cfg.run
-    targets = []
-    for needle in args.company:
-        c = _pick(store, needle)
+    """Forget a company's cached ATS, so the next run rediscovers it.
+
+    For a board that moved without its careers URL changing. To point a company
+    at a board by hand instead, set provider / slug / feed_url in watchlist.yaml.
+    """
+    cfg, store = _boot_v2(args)
+    try:
+        _sync_watchlist(cfg, store)
+        c = store.company_by_key(args.key)
         if c is None:
-            store.close()
+            matches = [x for x in store.companies() if x.name.lower() == args.key.lower()]
+            c = matches[0] if len(matches) == 1 else None
+        if c is None:
+            print(f"no company with key or name {args.key!r} - see "
+                  "`python -m jobscraper watchlist list`", file=sys.stderr)
             return 1
-        targets.append(c)
-
-    client = HttpClient(user_agent=rc["user_agent"],
-                        timeout=float(rc["request_timeout"]),
-                        delay=float(rc["rate_limit_delay"]),
-                        max_retries=int(rc["max_retries"]),
-                        respect_robots=bool(rc["respect_robots"]))
-    for company in targets:
-        if args.purge:
-            n = store.purge_company_jobs(company.id)
-            print(f"{company.name}: purged {n} postings from the old board")
-        store.clear_resolution(company.id)
-        res = discovery.resolve(client, store.get_company(company.id))
-        if res.ok:
-            store.set_resolution(company.id, res.provider, res.slug,
-                                 res.feed_url, res.method)
-            store.unmark_needs_feed(company.id)
-            print(f"{company.name}: -> {res.provider}"
-                  f"{'/' + res.slug if res.slug else ''} ({res.method})")
-        else:
-            store.mark_needs_feed(company.id, res.note or "unresolved")
-            print(f"{company.name}: UNRESOLVED - {res.note}")
-
-    write_needs_review(cfg.output_dir / "needs_review.xlsx", store)
-    store.close()
-    return 0
-
-
-def cmd_review(args) -> int:
-    """Hand postings to the Claude Code session you are already talking to."""
-    cfg, profile, store = _boot(args)
-    out = cfg.output_dir
-
-    if args.apply:
-        src = Path(args.file) if args.file else None
-        stats = review_mod.apply_verdicts(cfg, profile, store, path=src)
-        tally = ", ".join(f"{k} {v}" for k, v in sorted(stats["tally"].items()))
-        print(f"applied {stats['applied']} verdicts" + (f"  ({tally})" if tally else ""))
-        if stats["unknown_id"]:
-            print(f"  {stats['unknown_id']} skipped: id not found in the database")
-        if stats["bad_verdict"]:
-            print(f"  {stats['bad_verdict']} skipped: verdict not one of "
-                  "strong/possible/weak/reject")
-        print(f"tracker    {out / 'application_tracker.xlsx'} "
-              f"(+{stats['exported']} rows)")
-        print(f"page       {stats['page']}")
+        store.clear_resolution(c.id)
+        print(f"{c.name}: cached ATS cleared (was {c.provider or 'unresolved'}); "
+              "the next run that schedules it will rediscover it")
+        return 0
+    finally:
         store.close()
-        return 0
-
-    path, n = review_mod.export_queue(cfg, profile, store, limit=args.limit,
-                                      include_all=args.all)
-    store.close()
-    if n == 0:
-        print("nothing to review - every scored posting already has a verdict.")
-        print("Run `python -m jobscraper run` to bring in new postings first.")
-        return 0
-    print(BAR)
-    print(f"{n} postings need a verdict -> {path}")
-    print(BAR)
-    print("Ask Claude Code, in this directory:")
-    print(f'  "review {path.name} and write the verdicts to '
-          f'{review_mod.VERDICTS_NAME}"')
-    print("Then fold them back in:")
-    print("  python -m jobscraper review --apply")
-    print(BAR)
-    return 0
 
 
 def cmd_web(args) -> int:
@@ -574,58 +450,26 @@ def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="jobscraper",
                                 description="Fortnightly careers-site monitor")
     p.add_argument("--config", help="path to config.yaml")
-    p.add_argument("--profile", help="path to profile.yaml")
     sub = p.add_subparsers(dest="cmd", required=True)
 
     sub.add_parser("doctor", help="check setup").set_defaults(fn=cmd_doctor)
     sub.add_parser("sync", help="load the watchlist into the db").set_defaults(fn=cmd_sync)
     sub.add_parser("status", help="who is due, cadence, quarantine").set_defaults(fn=cmd_status)
-    sub.add_parser("export", help="rewrite trackers").set_defaults(fn=cmd_export)
-
-    r = sub.add_parser("resolve", help="resolve ATS providers only")
-    r.add_argument("--limit", type=int, default=0)
-    r.set_defaults(fn=cmd_resolve)
-
-    v = sub.add_parser("view", help="open the match page and record applications")
-    v.add_argument("--port", type=int, default=8765)
-    v.add_argument("--no-browser", action="store_true",
-                   help="serve without opening a browser window")
-    v.add_argument("--latest", action="store_true",
-                   help="show only the last run's matches, not everything")
-    v.set_defaults(fn=cmd_view)
-
-    pin = sub.add_parser("pin", help="point a company at a feed URL by hand")
-    pin.add_argument("company", help="company name or a unique fragment of it")
-    pin.add_argument("--url", help="the feed or careers URL to scrape")
-    pin.add_argument("--provider", help="greenhouse, lever, workday, generic_html, ...")
-    pin.add_argument("--slug", help="the board slug, for ATS providers")
-    pin.add_argument("--needs-feed", action="store_true",
-                     help="park it for review instead of pinning a URL")
-    pin.add_argument("--note", help="why, shown in needs_review.xlsx")
-    pin.add_argument("--purge", action="store_true",
-                     help="also delete postings already scraped for it")
-    pin.set_defaults(fn=cmd_pin)
-
-    rr = sub.add_parser("reresolve", help="redo ATS discovery for a company")
-    rr.add_argument("company", nargs="+")
-    rr.add_argument("--purge", action="store_true",
-                    help="delete postings from the old board first")
-    rr.set_defaults(fn=cmd_reresolve)
-
     rev = sub.add_parser("review",
                          help="judge postings inside a Claude Code session")
     rev.add_argument("--export", action="store_true",
-                     help="write the queue of postings needing a verdict "
+                     help="write the queue of postings needing a decision "
                           "(the default)")
     rev.add_argument("--apply", action="store_true",
-                     help="read review_verdicts.json back in and re-export")
+                     help="read review_verdicts.json back in")
     rev.add_argument("--file", help="path to the verdicts JSON, with --apply")
     rev.add_argument("--limit", type=int, default=0,
-                     help="queue at most this many postings")
-    rev.add_argument("--all", action="store_true",
-                     help="include postings the local score already accepts, "
-                          "not just the undecided band")
+                     help="queue at most this many postings (default 200)")
     rev.set_defaults(fn=cmd_review)
+
+    rr = sub.add_parser("reresolve", help="forget a company's cached ATS")
+    rr.add_argument("key", help="the company's watchlist key, or its exact name")
+    rr.set_defaults(fn=cmd_reresolve)
 
     run = sub.add_parser("run", help="process the next batch of companies")
     run.add_argument("--batch-size", type=int, default=None,

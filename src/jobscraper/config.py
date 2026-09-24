@@ -6,17 +6,16 @@ That is what lets the same code run from a checkout and from a container without
 editing the file - PRD section 8.6 treats it as a design-time constraint, and it
 is far cheaper to honour now than to retrofit.
 
-`Profile` and `load_profile` below are v1: they read `config/profile.yaml`, which
-the derived resume profile (PRD section 8.3[1]) replaces. They stay until M9-T1
-retires the modules that still import them - matching.py, llm.py, review.py.
+The candidate profile is not here: it is derived from the resume by
+`profile/resume_ingest.py` (PRD 8.3[1]). v1's `Profile` / `config/profile.yaml`
+retired at M9-T1 (archive/v1-src/).
 """
 from __future__ import annotations
 
 import os
-import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 import yaml
 
@@ -129,69 +128,6 @@ class Config:
             "withdrawn"]
 
 
-@dataclass
-class Profile:
-    raw: dict[str, Any]
-    allow_res: list[re.Pattern] = field(default_factory=list)
-    deny_res: list[re.Pattern] = field(default_factory=list)
-    loc_deny_re: Optional[re.Pattern] = None
-
-    def __post_init__(self) -> None:
-        t = self.raw.get("titles", {})
-        self.allow_res = [re.compile(p) for p in t.get("allow_patterns", [])]
-        self.deny_res = [re.compile(p) for p in t.get("deny_patterns", [])]
-        # Word-boundary alternation so short tokens ("us", "ny", "uk") cannot
-        # match inside longer words ("houston", "company", "ukraine").
-        hints = sorted(self.loc_deny, key=len, reverse=True)
-        self.loc_deny_re = re.compile(
-            r"\b(?:" + "|".join(re.escape(h) for h in hints) + r")\b"
-        ) if hints else None
-
-    @property
-    def version(self) -> int:
-        return int(self.raw.get("profile_version", 1))
-
-    @property
-    def summary(self) -> str:
-        return " ".join(self.raw["identity"]["summary"].split())
-
-    @property
-    def loc_allow(self) -> list[str]:
-        return [s.lower() for s in self.raw["locations"]["allow"]]
-
-    @property
-    def loc_deny(self) -> list[str]:
-        return [s.lower() for s in self.raw["locations"]["deny_hints"]]
-
-    @property
-    def loc_ambiguous(self) -> list[str]:
-        return [s.lower() for s in self.raw["locations"]["ambiguous_hints"]]
-
-    @property
-    def thresholds(self) -> dict[str, Any]:
-        return self.raw["thresholds"]
-
-    @property
-    def weights(self) -> dict[str, float]:
-        return self.raw["weights"]
-
-    @property
-    def experience(self) -> dict[str, int]:
-        return self.raw["experience"]
-
-    def skill_groups(self) -> dict[str, list[str]]:
-        return {k: [s.lower() for s in v] for k, v in self.raw["skills"].items()}
-
-    def all_skills(self) -> list[str]:
-        out: list[str] = []
-        for v in self.skill_groups().values():
-            out.extend(v)
-        return out
-
-    def category_prior(self, category: str) -> list[str]:
-        return self.raw.get("category_priors", {}).get(category, [])
-
-
 def load_config(path: str | os.PathLike | None = None) -> Config:
     """Load config.yaml. An explicit path wins, then JOBSCRAPER_CONFIG."""
     if path:
@@ -208,8 +144,3 @@ def load_config(path: str | os.PathLike | None = None) -> Config:
         raise SystemExit(f"{p} must be a mapping, got {type(raw).__name__}")
     return Config(raw)
 
-
-def load_profile(path: str | os.PathLike | None = None) -> Profile:
-    p = _abs(path) if path else ROOT / "config" / "profile.yaml"
-    with open(p, "r", encoding="utf-8") as fh:
-        return Profile(yaml.safe_load(fh))

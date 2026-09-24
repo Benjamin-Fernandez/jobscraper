@@ -4,9 +4,9 @@ The backend tests cover `backends.py`, which PRD section 9 marks REUSE - it is
 the cheap-model transport v2 is built on (D-6), so these must keep passing
 through the whole rebuild.
 
-The review tests cover `review.py` (KEEP). M9-T1 repoints it at the new schema;
-until then these prove the content-hash caching discipline that v2's `decisions`
-table inherits.
+The review tests cover `review.py`, the in-session transport for the same
+decide step (ported to the v2 schema at M9-T1): its answers must go through the
+same guard, into the same cache, as the automatic path.
 """
 from __future__ import annotations
 
@@ -20,35 +20,10 @@ import tempfile
 
 from jobscraper import backends as B
 from jobscraper import review as R
-from jobscraper.config import load_config, load_profile
-from jobscraper.llm import _key
-from jobscraper.models import Candidate, RawJob, ScoreBreakdown
-from jobscraper.store_v1 import Store
+from jobscraper.config import load_config
+from jobscraper.models import RawJob
+from jobscraper.store import Store
 
-def _store(n=25):
-    db = Path(tempfile.mkdtemp()) / "t.db"
-    st = Store(db)
-    st.sync_companies([{"ordinal": i, "name": f"C{i}", "tier": "T3",
-                        "category": "Fintech", "careers_url": "https://x/careers",
-                        "role_type_hint": "SWE"} for i in range(1, n + 1)])
-    return st
-
-def _scored_job(st, cid, jid, title, score, desc="Backend role in Singapore."):
-    raw = RawJob(external_id=jid, title=title, url=f"https://x/{jid}",
-                 location="Singapore", description=desc)
-    st.upsert_job(jid, cid, raw, 1, True)
-    st.commit()
-    cand = Candidate(job_id=jid, company=st.get_company(cid), raw=raw)
-    cand.score = ScoreBreakdown(total=score)
-    st.save_score(cand, 1)
-    return raw
-
-def _review_setup(tmp):
-    """A store plus a Config/Profile pointing at a throwaway output dir."""
-    st = _store(3)
-    cfg = load_config()
-    cfg.raw["paths"]["output_dir"] = str(tmp)
-    return st, cfg, load_profile()
 
 def test_model_ids_map_onto_cli_aliases():
     assert B.cli_model_alias("claude-sonnet-5") == "sonnet"
@@ -100,82 +75,90 @@ def test_cli_envelope_survives_a_banner_line():
         except B.BackendError:
             pass
 
-def test_review_queue_holds_only_unjudged_in_band_postings():
+REVIEW_PROFILE = {"profile_version": 1, "summary": "new grad backend engineer",
+                  "skills": ["python"], "target_titles": ["backend engineer"],
+                  "title_aliases": {}, "years_experience": 0}
+
+
+def _review_world():
+    """A temp DB with two prefilter survivors and one reject, plus a config
+    whose data paths point into the temp dir."""
+    from jobscraper import filter as F
     tmp = Path(tempfile.mkdtemp())
-    st, cfg, prof = _review_setup(tmp)
-    lo, hi = prof.thresholds["llm_band"]
-    _scored_job(st, 1, "inband", "Graduate Software Engineer", (lo + hi) / 2)
-    _scored_job(st, 1, "toolow", "Cleaner", float(lo) - 5)
-    _scored_job(st, 1, "toohigh", "Perfect Match", float(hi) + 5)
+    cfg = load_config()
+    cfg.raw["paths"]["shortlist"] = str(tmp / "shortlist.json")
+    st = Store(tmp / "t.db")
+    rules = F.load_rules(cfg.rules_path)
+    cid = st.insert_company("co", "Co", "https://co.example.com")
+    ids = {}
+    for ext, passed in (("a", True), ("b", True), ("c", False)):
+        raw = RawJob(ext, f"Backend Engineer {ext}", f"https://co.example.com/{ext}",
+                     "Singapore", description="Python services.")
+        jid = raw.job_id(cid, "greenhouse")
+        st.upsert_job(jid, cid, raw, 1, True)
+        st.commit()
+        st.save_prefilter(jid, 1, rules.hash, passed, None if passed else "title_deny")
+        ids[ext] = jid
+    return tmp, cfg, st, rules, ids
 
-    path, n = R.export_queue(cfg, prof, st)
-    assert n == 1, f"expected only the in-band posting, got {n}"
-    queued = json.loads(path.read_text(encoding="utf-8"))
-    assert [j["id"] for j in queued["jobs"]] == ["inband"]
-    # The queue has to carry everything a reviewer needs to decide.
-    job = queued["jobs"][0]
-    for field in ("id", "company", "title", "location", "score", "description"):
-        assert field in job, f"queue entry is missing {field}"
-    assert queued["candidate_profile"], "reviewer needs the candidate profile"
 
-def test_applied_verdicts_are_cached_and_never_re_queued():
-    tmp = Path(tempfile.mkdtemp())
-    st, cfg, prof = _review_setup(tmp)
-    lo, hi = prof.thresholds["llm_band"]
-    mid = (float(lo) + float(hi)) / 2
-    _scored_job(st, 1, "keepme", "Graduate Backend Engineer", mid)
-    _scored_job(st, 2, "dropme", "Senior Staff Engineer", mid)
+def _verdicts(tmp, items):
+    (tmp / R.VERDICTS_NAME).write_text(json.dumps({"decisions": items}),
+                                       encoding="utf-8")
 
-    _path, n = R.export_queue(cfg, prof, st)
-    assert n == 2
 
-    (tmp / R.VERDICTS_NAME).write_text(json.dumps({"results": [
-        {"id": "keepme", "verdict": "strong", "confidence": 0.9,
-         "reason": "grad role", "concerns": []},
-        {"id": "dropme", "verdict": "reject", "confidence": 0.9,
-         "reason": "too senior", "concerns": []},
-    ]}), encoding="utf-8")
+def test_review_queue_holds_only_undecided_survivors():
+    tmp, cfg, st, rules, ids = _review_world()
+    path, n = R.export_queue(cfg, st, REVIEW_PROFILE, rules)
+    q = json.loads(path.read_text(encoding="utf-8"))
+    assert n == 2 and sorted(q["ids"]) == sorted([ids["a"], ids["b"]])
+    # The session is asked exactly what `claude -p` is asked.
+    assert "DO NOT judge experience" in q["system_prompt"]
+    assert ids["a"] in q["user_prompt"] and "Reply with ONLY" in q["user_prompt"]
 
-    stats = R.apply_verdicts(cfg, prof, st)
-    assert stats["applied"] == 2, stats
-    assert stats["tally"] == {"strong": 1, "reject": 1}, stats["tally"]
-    # Only the strong one is exportable; the rejected one must not reach the tracker.
-    assert stats["exported"] == 1, stats
 
-    _path, n = R.export_queue(cfg, prof, st)
-    assert n == 0, "a judged posting must not come round again"
+def test_review_answers_pass_the_same_guard_and_are_never_requeued():
+    tmp, cfg, st, rules, ids = _review_world()
+    _verdicts(tmp, [
+        {"id": ids["a"], "decision": "accept", "is_singapore": True, "yoe_min": 0,
+         "reason": "fits"},
+        # The model says accept, but 5 years is over the cap: the guard wins.
+        {"id": ids["b"], "decision": "accept", "is_singapore": True, "yoe_min": 5,
+         "reason": "fits"},
+    ])
+    stats = R.apply_verdicts(cfg, st, REVIEW_PROFILE, rules)
+    assert stats["applied"] == 2 and stats["accepted"] == 1
+    assert stats["rejected_by_postcondition"] == 1 and stats["shortlisted"] == 1
+    _path, n = R.export_queue(cfg, st, REVIEW_PROFILE, rules)
+    assert n == 0, "a decided posting must not come round again"
 
-def test_apply_ignores_unknown_ids_and_junk_verdicts():
-    tmp = Path(tempfile.mkdtemp())
-    st, cfg, prof = _review_setup(tmp)
-    lo, hi = prof.thresholds["llm_band"]
-    _scored_job(st, 1, "real", "Graduate Backend Engineer",
-                (float(lo) + float(hi)) / 2)
 
-    (tmp / R.VERDICTS_NAME).write_text(json.dumps({"results": [
-        {"id": "real", "verdict": "STRONG", "confidence": 5, "reason": "x"},
-        {"id": "ghost", "verdict": "strong", "confidence": 0.5, "reason": "x"},
-        {"id": "real", "verdict": "maybe-ish", "confidence": 0.5, "reason": "x"},
-    ]}), encoding="utf-8")
+def test_review_ignores_unknown_ids_and_never_overwrites():
+    tmp, cfg, st, rules, ids = _review_world()
+    _verdicts(tmp, [{"id": ids["a"], "decision": "reject", "is_singapore": False,
+                     "yoe_min": 0, "reason": "first"}])
+    R.apply_verdicts(cfg, st, REVIEW_PROFILE, rules)
+    _verdicts(tmp, [
+        {"id": ids["a"], "decision": "accept", "is_singapore": True, "yoe_min": 0,
+         "reason": "second opinion"},                      # already decided
+        {"id": "ghost", "decision": "accept", "is_singapore": True, "yoe_min": 0,
+         "reason": "x"},                                   # unknown
+        {"id": ids["c"], "decision": "accept", "is_singapore": True, "yoe_min": 0,
+         "reason": "x"},                                   # prefilter reject
+    ])
+    stats = R.apply_verdicts(cfg, st, REVIEW_PROFILE, rules)
+    assert stats["applied"] == 0 and stats["not_pending"] == 3
+    rows = st.conn.execute("SELECT decision, reason FROM decisions").fetchall()
+    assert [tuple(r) for r in rows] == [("reject", "first")]
 
-    stats = R.apply_verdicts(cfg, prof, st)
-    assert stats["applied"] == 1, stats
-    assert stats["unknown_id"] == 1 and stats["bad_verdict"] == 1, stats
-    # Upper-cased verdict normalised, out-of-range confidence clamped.
-    jd_hash = RawJob(external_id="real", title="Graduate Backend Engineer",
-                     url="https://x/real", location="Singapore",
-                     description="Backend role in Singapore.").jd_hash()
-    row = st.get_cached(_key("real", jd_hash, 1, "c2"))
-    assert row and row["verdict"] == "strong" and row["confidence"] == 1.0, row
 
 def test_missing_verdicts_file_is_a_clear_error():
-    tmp = Path(tempfile.mkdtemp())
-    st, cfg, prof = _review_setup(tmp)
+    _tmp, cfg, st, rules, _ids = _review_world()
     try:
-        R.apply_verdicts(cfg, prof, st)
+        R.apply_verdicts(cfg, st, REVIEW_PROFILE, rules)
         raise AssertionError("a missing verdicts file must not pass silently")
-    except SystemExit as exc:
-        assert "review --export" in str(exc)
+    except FileNotFoundError as exc:
+        assert "review_queue.json" in str(exc)
 
 
 # --------------------------------------------------------------------------

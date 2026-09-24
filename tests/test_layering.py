@@ -19,9 +19,8 @@ The rules, in the order they matter:
   6. Nothing imports pipeline.py. It is the top of the stack; an import of it
      from below is a cycle waiting to happen.
 
-Rules are checked against the v2 modules only. v1 modules still in the tree are
-listed in LEGACY and skipped - they are retired by M9-T1, and failing on them
-now would just mean a permanently red test with no action attached.
+Every module in the package is checked. v1's modules retired at M9-T1, so the
+only exemptions left in LEGACY are the CLI entry points.
 """
 from __future__ import annotations
 
@@ -35,7 +34,9 @@ sys.path.insert(0, str(ROOT / "src"))
 
 # The orchestrator. The one module allowed to import every stage - composing them
 # is its whole job. Nothing may import it back.
-ORCHESTRATOR = {"pipeline"}
+ORCHESTRATOR = {"pipeline", "review"}
+# review.py is the in-session transport for the decide step: like pipeline.py it
+# composes stages (filter, decide) with the publisher, so it sits at the top.
 
 # Stage modules: each does one step of the pipeline and knows nothing of the others.
 STAGES = {"scheduler", "filter", "decide", "scrape", "profile"}
@@ -48,10 +49,9 @@ FOUNDATION = {"store", "config", "models", "net", "backends", "watchlist"}
 
 WEB_MAY_IMPORT = FOUNDATION | PUBLISHER
 
-# v1 modules awaiting retirement in M9-T1. Excluded from the rules on purpose.
-LEGACY = {"runner", "output", "serve", "ingest", "cursor", "matching", "llm",
-          "review", "adapters", "discovery", "cli", "__main__", "__init__",
-          "store_v1"}
+# Not layered code: the CLI entry points. v1's modules retired at M9-T1
+# (archive/v1-src/), so the only exemptions left are these.
+LEGACY = {"cli", "__main__", "__init__"}
 
 SQL_TOKENS = ("SELECT ", "INSERT ", "UPDATE ", "DELETE FROM", "CREATE TABLE")
 

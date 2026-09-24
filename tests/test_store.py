@@ -82,18 +82,6 @@ def test_store_refuses_a_v1_database():
         raise AssertionError("a v1 database was opened as v2")
 
 
-def test_store_v1_refuses_a_v2_database():
-    from jobscraper.store_v1 import Store as V1Store
-    db = _db()
-    Store(db).close()
-    try:
-        V1Store(db)
-    except RuntimeError as e:
-        assert "v2 database" in str(e)
-    else:
-        raise AssertionError("the v1 store opened a v2 database")
-
-
 def test_new_company_is_due_immediately():
     st = _store(1)
     assert st.companies()[0].last_scraped_at is None
