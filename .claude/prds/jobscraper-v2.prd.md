@@ -2014,8 +2014,19 @@ Legend: `STATUS` · `Completed` (date) · `Verify` (command that proves it) · `
   naive grep misses entirely, letting this task pass while every import remains.
 
 #### M9-T2 · Rewrite README and DESIGN for v2
-- **STATUS:** `NOT_STARTED`
-- **Completed:** —
+- **STATUS:** `DONE`
+- **Completed:** 2026-09-24 — README rewritten for v2 (quick start, first run,
+  Docker, how a run works, every command, watchlist, filter tuning, in-session
+  review, owned-vs-generated files). `docs/DESIGN.md` is generated from PRD §8.1,
+  §8.2 and §7 so it cannot drift; v1's is at `archive/v1-src/docs/DESIGN.md`.
+  **Verify, followed literally** in a scratch dir: `git clone` from GitHub →
+  `python -m venv .venv` → `Activate.ps1` (works under the default policy) →
+  `pip install -r requirements.txt` (exit 0) → `$env:PYTHONPATH = "src"` →
+  `doctor` (exit 0) → `web` → `GET /` 200 with the SPA, `GET /api/runs` 200.
+  **Defect found by following it, fixed before DONE:** a plain `git clone`
+  checks out `master`, the v1 restore point - the README now clones
+  `-b v2-rebuild` and says why; this goes away when v2 merges to `master`.
+  No other step needed knowledge the README did not give.
 - **Do:** README reflects the watchlist, the new workflow, the web app and the build
   step. `docs/DESIGN.md` gets the §8.1 diagram and the §7 decision register.
 - **Verify:** Follow the README top to bottom in a clean clone and a fresh venv,
