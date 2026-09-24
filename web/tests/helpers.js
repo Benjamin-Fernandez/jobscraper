@@ -22,7 +22,8 @@ function respond(body, status = 200) {
 }
 
 // statuses: { job_id: status } - seeded as if each was set once.
-export function fakeApi({ fixture = shortlist, statuses = {} } = {}) {
+// vocabulary: the ordered status list config serves via /api/stats (M8-T2).
+export function fakeApi({ fixture = shortlist, statuses = {}, vocabulary = STATUSES } = {}) {
   const calls = []
   const apps = {}
   let eventId = 0
@@ -46,7 +47,7 @@ export function fakeApi({ fixture = shortlist, statuses = {} } = {}) {
   const fetch = vi.fn(async (url, init = {}) => {
     calls.push({ url, method: init.method || 'GET', body: init.body })
     if (url === 'api/runs') return respond(runsFrom(fixture))
-    if (url === 'api/stats') return respond({ statuses: STATUSES, by_status: {}, by_run: {} })
+    if (url === 'api/stats') return respond({ statuses: vocabulary, by_status: {}, by_run: {} })
     if (url === 'api/applications') {
       return respond(Object.entries(apps).map(([jobId, a]) => {
         const job = fixture.jobs.find(j => j.id === jobId) ?? {}

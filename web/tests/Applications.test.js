@@ -6,8 +6,8 @@ import { fakeApi } from './helpers.js'
 
 let api
 
-async function mountTab(statuses) {
-  api = fakeApi({ statuses })
+async function mountTab(statuses, vocabulary) {
+  api = fakeApi({ statuses, vocabulary })
   vi.stubGlobal('fetch', api.fetch)
   const wrapper = mount(Applications, { props: { run: 12, jobs: [] } })
   await flushPromises()
@@ -33,6 +33,19 @@ describe('Applications tab', () => {
     const options = row(wrapper, 'a1b2c3').findAll('option').map(o => o.text())
     expect(options).toEqual(['to_apply', 'applied', 'interviewing', 'offer', 'rejected', 'withdrawn'])
     expect(row(wrapper, 'a1b2c3').find('select').element.value).toBe('applied')
+  })
+
+  it('a status added to config (on_hold) is offered and grouped with no code change', async () => {
+    const vocabulary = ['to_apply', 'applied', 'interviewing', 'on_hold', 'offer', 'rejected', 'withdrawn']
+    const wrapper = await mountTab({ a1b2c3: 'applied' }, vocabulary)
+    const options = row(wrapper, 'a1b2c3').findAll('option').map(o => o.text())
+    expect(options).toEqual(vocabulary)
+
+    await row(wrapper, 'a1b2c3').find('select').setValue('on_hold')
+    await flushPromises()
+    const post = api.calls.find(c => c.method === 'POST')
+    expect(JSON.parse(post.body).status).toBe('on_hold')
+    expect(row(wrapper, 'a1b2c3').element.closest('.group').dataset.status).toBe('on_hold')
   })
 
   it('advancing applied -> interviewing shows both events, in order', async () => {

@@ -86,12 +86,35 @@ def test_web_verb_is_wired_into_the_cli():
 FIXTURE = ROOT / "tests" / "fixtures" / "shortlist.json"
 
 
+REAL_CONFIG = ROOT / "config" / "config.yaml"
+
+
+def _config_file(tmp: Path, statuses: list[str] | None = None, **paths: str) -> Config:
+    """The shipped config.yaml, edited as a user would, written and loaded afresh.
+
+    Going through `load_config` on a real file is the test's "restart": nothing
+    carries over from the config the process started with.
+    """
+    import yaml
+
+    from jobscraper.config import load_config
+    raw = yaml.safe_load(REAL_CONFIG.read_text(encoding="utf-8"))
+    raw["paths"].update(paths)
+    if statuses is not None:
+        raw["applications"]["statuses"] = statuses
+    p = tmp / f"config-{len(list(tmp.glob('config-*.yaml')))}.yaml"
+    p.write_text(yaml.safe_dump(raw, sort_keys=False), encoding="utf-8")
+    return load_config(p)
+
+
 @contextmanager
-def _world(shortlist: Path = FIXTURE, runs: int = 12):
+def _world(shortlist: Path = FIXTURE, runs: int = 12,
+           statuses: list[str] | None = None):
     """A real v2 store in a temp dir, `runs` finished runs, and a client.
 
     Yields (client, open_store). Every request opens and closes its own
-    connection, exactly as in production.
+    connection, exactly as in production. `statuses`, when given, builds the
+    app from a copy of the shipped config.yaml with that status vocabulary.
     """
     from jobscraper.store import Store
     with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
@@ -104,7 +127,10 @@ def _world(shortlist: Path = FIXTURE, runs: int = 12):
         for _ in range(runs):
             seed.finish_run(seed.start_run(), "ok", {})
         seed.close()
-        cfg = _cfg(shortlist=str(shortlist), db=str(db))
+        if statuses is None:
+            cfg = _cfg(shortlist=str(shortlist), db=str(db))
+        else:
+            cfg = _config_file(Path(tmp), statuses, shortlist=str(shortlist), db=str(db))
         yield TestClient(create_app(cfg, store_factory=open_store)), open_store
 
 
@@ -277,3 +303,80 @@ def test_web_rejects_a_malformed_job_id():
     with _world() as (client, _):
         r = client.post("/api/applications/a%20b", json={"status": "applied"})
     assert r.status_code == 422
+
+
+# ---------------------------------------------------------------- M8-T2
+#
+# The status vocabulary is config: config.yaml `applications.statuses` ->
+# Config.application_statuses -> `GET /api/stats` `statuses` -> the Applications
+# dropdown (web/src/tabs/Applications.vue), and the same list gates `POST`.
+# `web/tests/Applications.test.js` proves the dropdown half with no code change.
+
+WITH_ON_HOLD = ["to_apply", "applied", "interviewing", "on_hold", "offer",
+                "rejected", "withdrawn"]
+
+
+def test_web_a_status_added_to_config_is_served_and_accepted_with_no_code_change():
+    """The M8-T2 Verify: add `on_hold` to config.yaml, restart, it is live."""
+    with _world(statuses=WITH_ON_HOLD) as (client, open_store):
+        stats = client.get("/api/stats").json()
+        r = client.post("/api/applications/a1b2c3", json={"status": "on_hold"})
+        rows = {row["job_id"]: row for row in client.get("/api/applications").json()}
+        after = client.get("/api/stats").json()
+    assert stats["statuses"] == WITH_ON_HOLD, "served in config order"
+    assert r.status_code == 200, r.text
+    assert rows["a1b2c3"]["status"] == "on_hold"
+    assert after["by_status"]["on_hold"] == 1
+
+    with _world() as (client, _):                  # the shipped vocabulary
+        refused = client.post("/api/applications/a1b2c3", json={"status": "on_hold"})
+    assert refused.status_code == 422, "without the config line it is refused"
+
+
+def test_web_a_status_config_change_leaves_prefilter_verdicts_valid():
+    """M8-T2's second half: `prefilter` rows are keyed on rules_hash, which is a
+    hash of rules.yaml alone. Editing config.yaml must not change it, or every
+    stored verdict would silently go stale and be re-evaluated."""
+    from jobscraper.filter import load_rules
+    from jobscraper.models import RawJob
+    from jobscraper.store import Store
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
+        tmp = Path(tmp)
+        before = _config_file(tmp)
+        after = _config_file(tmp, WITH_ON_HOLD)
+        assert after.application_statuses == WITH_ON_HOLD
+        assert after.application_statuses != before.application_statuses
+        assert after.rules_path == before.rules_path
+
+        hash_before = load_rules(before.rules_path).hash
+        hash_after = load_rules(after.rules_path).hash
+        assert hash_after == hash_before, "a status edit re-keyed the prefilter"
+
+        store = Store(tmp / "jobscraper.db")
+        try:
+            cid = store.insert_company("acme", "Acme", "https://acme.example/careers")
+            raw = RawJob(external_id="1", title="SRE", url="https://acme.example/1",
+                         location="Singapore")
+            jid = raw.job_id(cid, "greenhouse")
+            store.upsert_job(jid, cid, raw, 1, True)
+            store.commit()
+            store.save_prefilter(jid, 1, hash_before, passed=True, overlap_score=3)
+            assert store.get_prefilter(jid, 1, hash_after) is not None
+            assert store.jobs_pending_prefilter(1, hash_after) == [], (
+                "the posting would be prefiltered again after a status edit")
+        finally:
+            store.close()
+
+    rules_doc = load_rules(before.rules_path).path.read_text(encoding="utf-8")
+    assert "statuses" not in rules_doc, "the vocabulary belongs in config.yaml only"
+
+
+def test_web_shipped_vocabulary_keeps_the_two_statuses_the_inbox_names():
+    """The Inbox has no dropdown: its one button writes `applied`, and it treats
+    `to_apply` as not applied yet. Everything else in the list is free to change,
+    but dropping either of these from config would break that button."""
+    import yaml
+    raw = yaml.safe_load(REAL_CONFIG.read_text(encoding="utf-8"))
+    statuses = raw["applications"]["statuses"]
+    assert {"to_apply", "applied"} <= set(statuses), statuses
+    assert len(statuses) == len(set(statuses)), "duplicate status in config"

@@ -1919,8 +1919,8 @@ Legend: `STATUS` · `Completed` (date) · `Verify` (command that proves it) · `
   `statuses` (config `applications.statuses`), so M8-T2 should need no UI change.
 
 #### M8-T2 · Status vocabulary in config
-- **STATUS:** `NOT_STARTED`
-- **Completed:** —
+- **STATUS:** `DONE`
+- **Completed:** 2026-09-24
 - **Do:** Put the application-status list in **`config/config.yaml`** under
   `applications.statuses`, served to the UI by `/api/stats` or a small
   `/api/meta` endpoint. **Not** `rules.yaml` — that file is the prefilter contract
@@ -1928,6 +1928,24 @@ Legend: `STATUS` · `Completed` (date) · `Verify` (command that proves it) · `
   (§8.4), needlessly re-evaluating every posting whenever a status is added.
 - **Verify:** Add `on_hold` to config, restart, confirm it appears in the UI dropdown
   with no code change and `prefilter` rows are **not** invalidated.
+- **Notes:** Verified 2026-09-24 (Lane E). **Kept `/api/stats`, no `/api/meta`:**
+  the chain already ran config → `Config.application_statuses` → `/api/stats`
+  `statuses` → Applications dropdown, with POST validated against the same
+  list; a second endpoint serving the same list would add a router, a UI change
+  and a bundle rebuild for nothing. No production code changed. Proof:
+  (1) `test_web_a_status_added_to_config_is_served_and_accepted_with_no_code_change`
+  loads an edited copy of the real config.yaml (`on_hold` added): `/api/stats`
+  serves it in order, POST `on_hold` is 200, and the shipped config refuses it
+  (422). (2) Vitest `a status added to config (on_hold) is offered and grouped`
+  (27/27). (3) Browser, committed bundle, scratch config + DB on :8799:
+  dropdown offered all 7 incl. `on_hold`; moving a row gave timeline
+  `applied → on_hold`; no console errors. (4)
+  `test_web_a_status_config_change_leaves_prefilter_verdicts_valid`: `load_rules`
+  hash identical across the config edit, a saved `prefilter` row still found and
+  `jobs_pending_prefilter` empty. `npm run build` gives byte-identical hashed
+  assets, so `static/` is not recommitted. The Inbox has no dropdown; it names
+  `applied` (its button) and `to_apply` (not-yet sentinel), so a test pins both
+  in the shipped config and the config comment says to keep them.
 
 ---
 
