@@ -1956,32 +1956,60 @@ Legend: `STATUS` · `Completed` (date) · `Verify` (command that proves it) · `
 **Outcome:** `docker compose up` and it works. Cloud is *considered*, not built.
 
 #### M10-T1 · Dockerfile
-- **STATUS:** `NOT_STARTED`
-- **Completed:** —
+- **STATUS:** `DONE`
+- **Completed:** 2026-09-24
 - **Do:** Multi-stage build per §8.6 — node stage builds the Vue bundle, slim
   Python stage runs the app. No node in the final image. Non-root user.
 - **Verify:** `docker build -t jobscraper .` succeeds and
   `docker run --rm jobscraper python -m jobscraper doctor` runs.
+- **Notes:** Verified in GitHub Actions (no Docker on the dev machine), job
+  `image` of https://github.com/Benjamin-Fernandez/jobscraper/actions/runs/35942757573:
+  build OK, doctor exits 0, `node`/`npm` absent, uid 10001. `node:22-slim` →
+  `python:3.12-slim`; code at `/app/src`, so `config.py`'s ROOT is `/app` and
+  `data/` resolves to `/app/data` (the volume). `.dockerignore` drops the
+  committed bundle so the image serves what the node stage built. In the
+  container `doctor` reports the judge `UNAVAILABLE` (no `claude` binary in the
+  image) and still exits 0; runs fall back to rules only — see M10-T2.
 
 #### M10-T2 · docker-compose + volumes
-- **STATUS:** `NOT_STARTED`
-- **Completed:** —
+- **STATUS:** `DONE`
+- **Completed:** 2026-09-24
 - **Do:** One service; `data/` as a named volume; `config/` read-only; `~/.claude`
   read-only for the model transport (D-11); port 8765 bound to `127.0.0.1`.
   Document `docker compose run --rm app run` for a batch.
 - **Verify:** `docker compose up` serves the app; stopping and restarting preserves
   application statuses (proves the volume works).
 - **Notes:** Run `/ecc:security-review` on the compose file. Do **not** bind `0.0.0.0`.
+  Verified in job `compose` of
+  https://github.com/Benjamin-Fernandez/jobscraper/actions/runs/35942757573:
+  `up --wait` serves `/` and `/api/runs`; host publish is `127.0.0.1:8765` only
+  (asserted with `compose port` and `ss`); a POSTed `applied` status survives
+  `down` (no `-v`) + `up`; `compose run --rm app doctor` works; seeding the
+  volume via `run --entrypoint cp` leaves app-writable files. Security review
+  done: no secrets in the file; `read_only`, `tmpfs /tmp`, `cap_drop: ALL`,
+  `no-new-privileges`, non-root. **The `~/.claude` mount is written but
+  commented out:** the image has no `claude` binary, so mounting the
+  credentials would expose them for no benefit. Making D-11 real needs a Lead
+  decision on putting the Claude Code CLI in the image (and a writable
+  `~/.claude`, since the CLI writes session state there). Inside the container
+  the server binds `0.0.0.0` (via `JOBSCRAPER_HOST`) so the mapping can reach
+  it; `cmd_web` prints its no-auth warning for that, which is expected.
 
 #### M10-T3 · Keep the no-Docker path working
-- **STATUS:** `NOT_STARTED`
-- **Completed:** —
+- **STATUS:** `DONE`
+- **Completed:** 2026-09-24
 - **Do:** Commit the built frontend assets so a plain `pip install -e .` +
   `python -m jobscraper web` works with no Docker and no node.
 - **Verify:** In a clean venv with node absent, `python -m jobscraper web` serves a
   working UI.
 - **Notes:** This is what stops the node toolchain becoming a single point of failure
-  (R-3).
+  (R-3). Verified in job `no-node` of
+  https://github.com/Benjamin-Fernandez/jobscraper/actions/runs/35942757573: a
+  bare `python:3.12-slim` container (node/npm asserted absent), a fresh venv
+  with `pip install -r requirements.txt`, then `PYTHONPATH=src python -m
+  jobscraper web` serves `/`, every asset it references, and `/api/runs`.
+  There is no `pyproject.toml`, so `pip install -e .` is not possible yet; the
+  path that works is requirements + `PYTHONPATH=src`.
 
 ---
 
