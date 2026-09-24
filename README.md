@@ -1,277 +1,183 @@
 # JobScraper
 
-Monitors 229 company career sites for new-grad software roles in Singapore that match
-your resume, and drops the ones worth applying to into a tracker with clickable links.
+Watches the careers pages of the companies you care about, keeps only the
+new-graduate software roles **based in Singapore** that fit your resume, and puts
+them on one web page where you open them, apply, and track what happened next.
 
-Full design rationale: `docs/DESIGN.md`.
+It is cheap by construction: free local rules throw away ~99% of postings before
+a model ever sees one, and the survivors go to the cheapest Claude model in
+batches, as ~300-token extracts rather than whole job descriptions.
+
+Design and decisions: [`docs/DESIGN.md`](docs/DESIGN.md). Full specification and
+build ledger: [`.claude/prds/jobscraper-v2.prd.md`](.claude/prds/jobscraper-v2.prd.md).
 
 ---
 
-## Run it
+## Quick start (Windows, no Docker)
+
+Needs Python 3.12 and, for the model step, [Claude Code](https://claude.com/claude-code)
+signed in on this machine. No API key.
 
 ```powershell
-cd C:\Users\Admin\Documents\All_Created_Folders\Misc\Projects\JobScraper
-.\run.ps1              # process the next 30 companies, then open the viewer
-.\run.ps1 view         # just browse matches and tick off applications
-.\run.ps1 status       # where am I in the cycle?
-.\run.ps1 doctor       # check setup
-.\run.ps1 -NoView      # run the batch without opening the viewer
-```
-
-Or directly:
-
-```powershell
+git clone https://github.com/Benjamin-Fernandez/jobscraper.git
+cd jobscraper
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+pip install -r requirements.txt
 $env:PYTHONPATH = "src"
-python -m jobscraper run
+
+python -m jobscraper doctor      # checks config, watchlist, profile, model transport
+python -m jobscraper web         # the web app: http://127.0.0.1:8765
 ```
 
-## How the batching works
+Node is **not** needed to run it: the built web app is committed under
+`src/jobscraper/web/static/`. (Node is only for changing the UI — see
+[`web/README.md`](web/README.md).)
 
-**Each run processes exactly 30 companies, then stops.** The cursor remembers where it
-got to:
+### First real run
 
-| When | What runs |
-|---|---|
-| Monday | companies 1-30 |
-| Tuesday | companies 31-60 |
-| Tuesday again | companies 61-90 |
-| ... | ... |
-| after 8 runs | all 229 done - cycle complete |
+1. Put your resume at **`data/resume.pdf`** (or `data/resume.docx`). It never
+   leaves your machine and is git-ignored.
+2. Build your profile from it — one cheap model call:
+   ```powershell
+   python -m jobscraper profile --refresh
+   python -m jobscraper profile --show     # skills, target job titles, version
+   ```
+   Correct anything it got wrong in `config/profile.overrides.yaml`; that file is
+   never regenerated.
+3. Run a batch:
+   ```powershell
+   python -m jobscraper run            # the 10 most-overdue companies
+   ```
+   or `.\run.ps1`, which runs a batch and then opens the web app.
 
-Once the whole list is done, a **new cycle cannot start until 14 days** have passed
-since that cycle's first batch. Run it early and you get told when the next cycle opens:
+## Docker
 
-```
-Cycle 1 is complete - all 229 companies checked. The next cycle opens in 86h
-(2026-09-28 09:00 UTC). Use --force to start it now.
-```
-
-Reaching the 14-day mark part-way through the list does **not** reset the cursor - the
-list is finished first, so every company gets checked once per cycle. Resetting on the
-clock alone would mean companies near the end of the list were almost never checked.
-
-`--force` starts a new cycle immediately. `--batch-size N` overrides 30 for one run.
-
-## Marking things as applied
-
-A run ends by opening the **viewer** - a small web page served from your own
-machine at `http://127.0.0.1:8765`. Every match is a card with an **Applied**
-checkbox next to the Apply button.
-
-Tick it and, before the box even finishes turning green, the tracker on disk has
-already been updated:
-
-| Where | What gets written |
-|---|---|
-| `Applications` sheet, `Status` | `Applied` |
-| `Applications` sheet, `Date Applied` | today's date |
-| `Applied` sheet | a clean log line: date, company, tier, **role name**, score, **application link** |
-
-Un-tick it and both are rolled back. A ticked card goes green-edged and struck
-through, so what is left to do is obvious at a glance.
-
-### What it will not overwrite
-
-The tick only ever moves `Status` between blank / `To Apply` and `Applied`. If you
-have already moved a row on yourself - `OA`, `Interview`, `Offer`, `Rejected` -
-ticking the box leaves that row completely alone, and so does a `Date Applied` you
-typed in by hand. `Resume Version`, `Referral`, `Notes` and `Outcome` are never
-read or written at any point. This is covered by tests, not just intent.
-
-### Why a server and not just the file
-
-A page opened straight off disk (`file://...`) cannot write to your spreadsheet -
-browsers forbid it, and there is no way around that. So the page is served over
-loopback instead. It binds `127.0.0.1` only and checks the `Host` header, so
-nothing outside this machine can reach it. Open the HTML file directly and the
-checkboxes disable themselves with a note rather than pretending to save.
-
-If `application_tracker.xlsx` is open in Excel, Windows holds a write lock and the
-tick reports that instead of failing silently - close Excel and tick again.
-
-## What you get
-
-| File | What it is |
-|---|---|
-| `output/all_matches.html` | **What the viewer serves.** Every match so far, rebuilt from the tracker, with the Applied checkboxes. |
-| `output/latest_matches.html` | Only the last run's new matches (`.\run.ps1 view --latest`). |
-| `output/application_tracker.xlsx` | The running list. Append-only. |
-| `output/run_tracker.xlsx` | `Runs` = one row per run. `Coverage` = one row per company per run, including every failure. |
-| `output/needs_review.xlsx` | Companies that were quarantined and need a feed URL pasted in. |
-
-### The application tracker
-
-Columns A-N are written by the program. Columns O-T are **yours**:
-`Status, Date Applied, Resume Version, Referral, Notes, Outcome`.
-
-The program writes `Status` and `Date Applied` only when you tick **Applied** in
-the viewer, and only in the safe direction described above. It never touches
-`Resume Version`, `Referral`, `Notes` or `Outcome`, and never rewrites or reorders
-a row you have edited - this is verified behaviour, not an intention. `Status` has a
-dropdown matching your existing legend (To Apply / Applied / OA / Interview / Offer /
-Rejected). The **Role** and **Apply** cells are both clickable links straight to the
-posting. Score >= 70 shades green, 50-69 amber. Backups of the last 5 versions live in
-`output/backups/`.
-
-## When a site fails
-
-Failures never stop a run. Each one is classified and the company is skipped:
-
-- `transient` (timeout, 429, 5xx) - retried 3x with backoff inside the run
-- `blocked` (403, bot-wall) - not retried
-- `gone` (404) - not retried
-- `schema` (200 but unparseable, or no job links found) - signals an ATS change
-
-Three consecutive failures triggers **one automatic re-resolution attempt** (most
-breakage is a company moving ATS, which this repairs silently). If that fails the
-company is **quarantined**: skipped in future runs, listed in `needs_review.xlsx`, and
-retried once every 4th run. One success un-quarantines it automatically.
-
-If more than half a batch fails, the run assumes your network is at fault rather than
-five sites dying at once: it quarantines nobody, rolls back the failure counters, and
-exits marked `aborted_unhealthy`.
-
-## When a careers URL is wrong
-
-Resolving a company to an ATS is a guess: the probe tries likely slugs and keeps
-whichever board answers. A slug existing does **not** mean it is yours - anyone can
-register `google.recruitee.com`. So a probed board now has to prove it:
-
-- **Aggregators are never scraped.** A `careers_url` pointing at LinkedIn, Indeed,
-  Glassdoor and friends yields no slug and is never sniffed. Mathrix's URL was a
-  LinkedIn company page, which once resolved it to *LinkedIn's own* Greenhouse
-  board and scraped 53 of LinkedIn's postings.
-- **The board must agree it is you.** Its self-reported name has to overlap the
-  company name; where the ATS exposes no name, the slug itself must look like the
-  company name.
-- **Demo boards are rejected.** A board whose every posting is titled "Sample",
-  "Test Job" or similar is somebody's abandoned trial account.
-
-Anything that fails these falls through to `needs_review.xlsx` rather than being
-silently monitored. Fix one with:
-
-```powershell
-.
-un.ps1 reresolve "Mathrix" --purge        # redo discovery, drop old postings
-.
-un.ps1 pin "Acme" --url https://...       # point it somewhere by hand
-.
-un.ps1 pin "Acme" --needs-feed --note "why"
+```bash
+docker compose up -d --build          # web app on http://127.0.0.1:8765
+docker compose run --rm app run       # one batch; any command works: doctor, status, ...
+docker compose down                   # stop; the jobscraper_data volume keeps the database
 ```
 
-Some sites cannot be scraped at all: Google, Meta and Microsoft render their
-careers pages entirely in JavaScript and expose no public feed, so they sit in
-`needs_review.xlsx` until you supply a URL one of the adapters understands.
+The image has no `claude` program, so inside Docker the model step is skipped
+and survivors wait. Judge them with the in-session review below, or run batches
+from the host. Details and the security notes are in `docker-compose.yml`.
 
-## The matching engine
+---
 
-Four stages, each cheaper than the next:
+## How a run works
 
-1. **Stage A - rules, free.** Title deny-list (senior/staff/intern/non-engineering),
-   Singapore-only location, 5+ years reject. Deliberately conservative: it only rejects
-   what is unambiguous. Vague locations (`APAC`, `All Offices`, blank) are *not*
-   rejected - they go to stage 3 to be normalized.
-2. **Stage B - local scoring, free.** BM25 over the JD against your resume and skill
-   list, plus weighted skill overlap, title affinity, tier and category priors. 0-100.
-3. **Stage C1 - extraction.** Pulls structured facts (`is_singapore`, `seniority`,
-   `yoe_min`, `intake_year`, `sponsorship`, `role_family`, `tech_stack`) into the
-   database. These persist and improve every future run.
-4. **Stage C2/D - adjudication.** A verdict per posting, Sonnet for T1/T2 companies and
-   Haiku for the rest, with a second opinion on borderline high-tier roles. Disagreement
-   surfaces as `contested` rather than being silently resolved.
-
-Stages 3-4 need a model. **Without one the pipeline still runs** on rules and local
-scoring alone - you just get more noise, because vague-location and vague-title postings
-cannot be resolved. Which model, and how it is reached, is the next section.
-
-### Stages 3-4 run through Claude Code - no API key
-
-Judging is a transport question, and `budget.backend` in `config/config.yaml` answers it:
-
-| `backend` | How it judges | Needs |
-|---|---|---|
-| `cli` *(default)* | Shells out to `claude -p`, the Claude Code CLI | Claude Code signed in |
-| `api` | The `anthropic` SDK | `ANTHROPIC_API_KEY` |
-| `off` | Nothing - rules and local scoring only | - |
-
-With `cli`, a run judges postings using the Claude Code subscription you are already
-signed into. There is no API key and no per-token bill. Check it with:
-
-```powershell
-.\run.ps1 doctor        # judge  backend=cli / OK - cli (...\claude.CMD)
+```
+watchlist.yaml -> who is due? -> scrape -> free prefilter -> ~800-char extract
+               -> cheap model (accept/reject) -> data/shortlist.json -> web app
 ```
 
-Each `claude -p` call carries roughly 12k prompt tokens of Claude Code's own overhead on
-top of the postings, and takes 5-60s depending on batch size. A 30-company run is
-normally 15-20 calls. Raise `extraction_batch` / `verdict_batch` to trade fewer, larger
-calls for more; lower them if a call times out.
-
-If the transport fails `max_consecutive_failures` times in a row (logged out, rate
-limited), the judge stands down for the rest of that run and local scoring carries the
-batch - it does not burn a 300-second timeout per remaining call.
-
-### Judging inside a Claude Code session instead
-
-`review` is the other way round: rather than the program calling Claude Code, you hand
-the postings to the session you are already talking to. Useful when you want to read the
-reasoning as it happens, or when the CLI is unavailable.
-
-```powershell
-python -m jobscraper review --export      # writes output/review_queue.json
-#   then, to Claude Code:  "review review_queue.json and write review_verdicts.json"
-python -m jobscraper review --apply       # folds the verdicts back in, re-exports
-```
-
-The queue holds only postings in the undecided band that nothing has judged yet, best
-score first; `--all` widens it to the auto-accepts too, `--limit N` caps it. Verdicts
-land in the same cache the automatic backends use, so the two paths never duplicate work.
-
-Nothing is ever judged twice: extraction and verdicts are cached by
-`hash(job_id + jd_text + profile_version)`.
-
-## Tuning the matching
-
-Everything lives in `config/profile.yaml` - skills, title patterns, locations, weights,
-thresholds. It is meant to be edited by hand.
-
-Because `ambiguous_hints` is the only escape hatch from the Singapore-only filter, a
-location string that is not blank, not Singapore, and not listed there is treated as
-elsewhere. That default-deny is intentional; without it, `Zug, Switzerland` and
-`Aarhus, Denmark` sail straight through.
-
-After editing, bump `profile_version` so cached verdicts are recomputed.
+- **Scheduling.** Every company is re-checked once per 14 days. Each run takes the
+  10 companies that have gone longest without a check (never-checked first), so
+  "loop back to the first company" is automatic. At 229 companies a full sweep
+  needs about 1.6 runs a day; `python -m jobscraper status` shows whether you
+  are keeping up and when the queue drains.
+- **Prefilter (free).** Rules in `config/rules.yaml`: drop senior/staff/lead/
+  intern/non-engineering titles, keep only titles matching your resume's target
+  roles, drop any location that is not explicitly Singapore (every `Remote`
+  included), drop anything asking for more than 3 years, drop postings with too
+  little skill overlap. A blank or vague location ("APAC", "Hybrid") is not
+  guessed at — it goes to the model, which reads the description.
+- **Decide (the only paid step).** The model answers accept/reject per posting.
+  Two things are enforced in code whatever it says: a role is accepted only if
+  it is confirmed Singapore, and never if it asks for more than 3 years.
+  A posting is never judged twice unless its description changes.
+- **Shortlist.** `data/shortlist.json` is regenerated every run; your
+  application status lives in the database, never in that file.
 
 ## Commands
 
 | Command | What it does |
 |---|---|
-| `run` | Process the next 30 companies, then open the viewer |
-| `view` | Serve the match page so you can tick off applications |
-| `view --latest` | Same, but only the last run's matches |
-| `view --port N` | Use a different port (default 8765) |
-| `run --force` | Start a new cycle without waiting 14 days |
-| `run --dry-run` | Everything except writing the output files |
-| `status` | Cursor position, counts, quarantine list |
-| `doctor` | Verify workbook, config, deps, judge transport |
-| `review --export` | Queue postings for a Claude Code session to judge |
-| `review --apply` | Fold `review_verdicts.json` back in and re-export |
-| `resolve` | Work out each company's ATS without fetching jobs |
-| `reresolve NAME` | Redo ATS discovery for one company (`--purge` drops its old postings) |
-| `pin NAME --url U` | Point a company at a feed URL by hand |
-| `pin NAME --needs-feed` | Park a company for review with a reason |
-| `sync` | Reload the workbook into the database |
-| `export` | Rewrite run_tracker and needs_review from the database |
+| `run [--dry-run] [--batch-size N]` | One batch. `--dry-run` fetches and reports but writes nothing and consumes nothing. |
+| `status` | Due now, due this week, never checked, quarantined, run rate vs the rate a sweep needs. |
+| `web` | The web app: **Inbox** (open, mark applied, dismiss) and **Applications** (status and history). |
+| `doctor` | Checks the whole setup, including which model transport is live. |
+| `watchlist list` / `add "Name" URL` / `disable KEY` | Manage companies; edits keep your comments. |
+| `profile [--show \| --refresh \| --bump]` | Build or inspect the resume-derived profile. |
+| `filter test --title … --location … [--desc …]` | Dry-run the rules on a made-up posting. |
+| `filter explain JOB_ID_OR_URL` | Every rule's verdict for a stored posting. |
+| `review --export` / `review --apply` | Judge postings in a Claude Code session instead of `claude -p` (below). |
+| `reresolve KEY` | Forget a company's cached job-board provider so the next run rediscovers it. |
+| `sync` | Reconcile `watchlist.yaml` into the database (every run does this anyway). |
 
-## Layout
+Run each as `python -m jobscraper <command>` (with `PYTHONPATH=src`), or through
+`.\run.ps1 <command>`.
 
-```
-config/config.yaml     batch size, cycle days, timeouts, budget
-config/profile.yaml    the matching spec  <- tune this
-data/                  input workbook + SQLite database
-output/                trackers, HTML view, backups
-src/jobscraper/        the package (serve.py is the local viewer)
-docs/DESIGN.md         architecture and rationale
+## Changing what it watches
+
+`config/watchlist.yaml` is the list. The smallest entry is two lines:
+
+```yaml
+  - name: Jane Street
+    careers_url: https://www.janestreet.com/join-jane-street/open-roles/
 ```
 
-SQLite is the source of truth; the spreadsheets are a surface. Deleting
-`data/jobscraper.db` resets all history, including which postings you have already seen.
+Rename a company freely — its history is keyed on `key` (a slug of the name by
+default), not the display name. Remove an entry and it is disabled, never
+deleted, so your applications to it stay. If discovery cannot find a company's
+job board, set `provider`, `slug` or `feed_url` on the entry yourself.
+
+## Tuning the filter
+
+Every rule in `config/rules.yaml` has `enabled:` and an `extra:` list you own:
+
+```yaml
+  - id: title_allow
+    extra: ["trade support engineer"]     # a title your resume did not produce
+```
+
+Check a change before it runs for real:
+
+```powershell
+python -m jobscraper filter test --title "Trade Support Engineer" --location "Singapore"
+```
+
+Editing the rules re-checks every stored posting on the next run, for free.
+
+## Judging inside a Claude Code session
+
+If `claude -p` is unavailable (Docker, or you would rather watch it think):
+
+```powershell
+python -m jobscraper review --export     # writes data/review_queue.json
+# ask Claude Code: "judge data/review_queue.json and write data/review_verdicts.json"
+python -m jobscraper review --apply
+```
+
+It asks exactly what the automatic path asks, and its answers go through the same
+Singapore / 3-year checks into the same cache — the two paths are interchangeable.
+
+## Files you own vs files the engine owns
+
+| Yours — edit freely | Engine's — regenerated, safe to delete |
+|---|---|
+| `config/watchlist.yaml` | `data/shortlist.json` |
+| `config/rules.yaml` (the `extra:` lists, `enabled:`) | `data/profile.derived.yaml` |
+| `config/profile.overrides.yaml` | `data/review_*.json` |
+| `config/config.yaml` | |
+| `data/resume.pdf` | |
+
+`data/jobscraper.db` holds your application history — back it up, do not delete it.
+
+## Configuration
+
+`config/config.yaml` — batch size, 14-day cycle, model, the model transport
+(`budget.backend: cli | api | off`), web host/port. Environment overrides:
+`JOBSCRAPER_CONFIG`, `JOBSCRAPER_DB`, `JOBSCRAPER_HOST`, `JOBSCRAPER_PORT`.
+Keep the host at `127.0.0.1`: the app has no login.
+
+## Development
+
+```powershell
+python tests/run_tests.py            # full suite; -k <text> to select
+cd web; npm ci; npm test             # UI tests (Vitest)
+```
+
+CI runs both on every push and pull request, plus the Docker checks.
+`tests/test_layering.py` enforces the module boundaries in `docs/DESIGN.md`.
