@@ -2204,27 +2204,38 @@ updated_at`) with `Store.get_setting(key, default)` / `Store.set_setting(key,
 value)`. `cli.cmd_run` reads the stored `batch_size`.
 
 #### M11-T1 · Stored settings + effective batch size
-- **STATUS:** `NOT_STARTED`
-- **Completed:** —
+- **STATUS:** `DONE`
+- **Completed:** 2026-09-25
 - **Do:** `settings` table and accessors in `store.py`; `cmd_run` resolves the
   batch size flag → setting → config; `status` uses the same effective value for
   its cadence line.
 - **Verify:** `python tests/run_tests.py -k settings` — a stored `batch_size` of 25
   makes `run` plan 25 companies; the flag overrides it; with no setting, config's
   value is used.
+- **Notes:** Verify 7/7 (`tests/test_settings.py`); full suite 248/248. One
+  helper, `cli._batch_size(cfg, store, flag)`, serves `run` and `status`; a
+  stored value that is not a positive integer falls through to config. The
+  table is `CREATE TABLE IF NOT EXISTS`, so existing databases gain it on open.
 
 #### M11-T2 · Settings and profile endpoints
-- **STATUS:** `NOT_STARTED`
-- **Completed:** —
+- **STATUS:** `DONE`
+- **Completed:** 2026-09-25
 - **Do:** `GET/PUT /api/settings`, `GET /api/profile` per the contract, in one new
   router file.
 - **Verify:** `python tests/run_tests.py -k web` — round-trip a batch size; `0`,
   `-1` and `enabled+1` answer `422`; `/api/profile` with no derived profile answers
   `{present: false}` rather than an error.
+- **Notes:** Verify 33/33 (`-k web`; new `tests/test_web_control.py`). Router
+  `web/routers/settings.py`; the shared logic is `web/control.py`. `batch_size`
+  is `StrictInt`, so `"12"`, `2.5` and `true` answer `422` as well. Enabled count
+  = `companies.enabled` in the store (as of the last sync). `/api/profile` reads
+  `data/profile.derived.yaml` directly, because `web/` may not import
+  `profile/`. So it shows the derived profile *without*
+  `profile.overrides.yaml` merged in; a malformed file reads as `present: false`.
 
 #### M11-T3 · Runs and profile refreshes as background jobs
-- **STATUS:** `NOT_STARTED`
-- **Completed:** —
+- **STATUS:** `DONE`
+- **Completed:** 2026-09-25
 - **Do:** `POST /api/jobs/run`, `POST /api/jobs/profile`, `GET /api/jobs/current`,
   `POST /api/jobs/cancel` per the contract, launching the CLI as a child process
   with its log captured under `data/jobs/`.
@@ -2233,10 +2244,26 @@ value)`. `cli.cmd_run` reads the stored `batch_size`.
   exit code and log lines; cancel terminates it; a job whose process vanished is
   reported `failed`, not `running` forever. Plus one live check: start a
   `--dry-run` from the API and read its log.
+- **Notes:** `-k web` 48/48 (15 new job tests); full suite 271/271. The live check
+  used a temp config and DB (224 enabled), port 8799, `{batch_size: 2, dry_run:
+  true}`: `202`/`running`; a second start gave `409`; the job ended `succeeded`,
+  exit 0, with the log "2 due ... ok 2, failed 0, 66 seen". Cancel on a batch of
+  8 gave `200` `failed` `[cancelled from the web app]`. `web/jobs.py` holds the
+  manager. The job record is also saved to `data/jobs/current.json`, so after a
+  web restart a live PID keeps the slot (`409`) and a dead one with no exit code
+  reads `failed`. It never kills a PID it did not spawn: cancelling such a job
+  answers `409`. On Windows, cancel is `taskkill /T /F`, which takes the child's
+  own children with it. `create_app(job_command=, config_path=)`: **for
+  `python -m jobscraper --config X web` to launch jobs with X, `cmd_web` must pass
+  `config_path=args.config`** (Lead-owned line). `JOBSCRAPER_CONFIG` already works,
+  because the child inherits it. Added `CrossSiteWriteGuard` (`api.py`): a
+  write to `/api` whose `Origin` is foreign or `null`, or whose `Sec-Fetch-Site`
+  is `cross-site`, gets `403`. A cross-site `<form>` POST needs no preflight and
+  could otherwise start a run or a model call.
 
 #### M11-T4 · Resume upload
-- **STATUS:** `NOT_STARTED`
-- **Completed:** —
+- **STATUS:** `DONE`
+- **Completed:** 2026-09-25
 - **Do:** `PUT /api/resume` per the contract: size cap, magic-byte check, atomic
   write to `data/resume.pdf|docx` (removing the other format so exactly one
   resume exists), sha256 in the answer. The UI then starts `POST /api/jobs/profile`.
@@ -2244,6 +2271,26 @@ value)`. `cli.cmd_run` reads the stored `batch_size`.
   a text file labelled `application/pdf` answers `415`; a `multipart/form-data`
   post is refused (the CSRF guard); `data/` never holds a partial file.
 - **Notes:** run `/ecc:security-review` on this task before `DONE`.
+  Verify 10/10 (`-k resume_upload`); `-k web` 61/61; full suite 284/284. Router
+  `web/routers/resume.py`. Accepts only `application/pdf` and the DOCX type
+  (media-type parameters and case ignored); forms, `text/plain`, octet-stream
+  and a missing type answer `415`. Size is capped from `Content-Length` and from
+  the bytes read (a chunked 7 MB body answers `413`). A DOCX must also be a real
+  ZIP holding `word/document.xml`, so a spreadsheet labelled DOCX answers `415`.
+  The body is validated in memory, written to a temp file, fsynced and
+  `os.replace`d under a lock, then the other format is deleted. A failed rename
+  leaves the old resume and no temp file, which is tested. Live check on :8799:
+  PDF saved with a matching sha256; `curl -F` gave `415`; 6 MB gave `413`.
+  **Security review** (`ecc:security-review`, inline) found and fixed:
+  (1) clickjacking - the UI now starts runs and uploads, and a framed page's
+  clicks would be same-origin, so every response now carries
+  `X-Frame-Options: DENY`, `CSP: frame-ancestors 'none'` and `nosniff`;
+  (2) unbounded `data/jobs/` - only the newest 50 logs are kept;
+  (3) a failed job start echoed `str(OSError)` (paths) - it now gives only the
+  strerror. Clean: parameterised SQL, no shell, fixed filenames, no path
+  traversal from the job record, strict validation on every input. The
+  cross-site write guard is in T3's note. Lane H: render log lines as text,
+  never `v-html` - they carry scraped job titles.
 
 ---
 

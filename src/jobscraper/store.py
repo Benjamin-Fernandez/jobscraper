@@ -114,6 +114,15 @@ CREATE TABLE IF NOT EXISTS coverage (
     http_status INTEGER, error_class TEXT, error TEXT, checked_at TEXT,
     PRIMARY KEY (run_no, company_id)
 );
+
+-- Values the user changes from the web app (M11). They cannot live in
+-- config.yaml: Docker mounts config/ read-only. Values are text; the caller
+-- that owns a key parses it.
+CREATE TABLE IF NOT EXISTS settings (
+    key TEXT PRIMARY KEY,
+    value TEXT,
+    updated_at TEXT NOT NULL
+);
 """
 
 # The one status that does not mean "an application went out". Moving to any
@@ -753,6 +762,27 @@ class Store:
         return [dict(r) for r in self.conn.execute(
             """SELECT id, job_id, from_status, to_status, at FROM app_events
                WHERE job_id = ? ORDER BY id""", (job_id,))]
+
+    # ---------------- settings ----------------
+
+    def get_setting(self, key: str, default: Optional[str] = None) -> Optional[str]:
+        """The stored value for `key` as text, or `default` when it is unset."""
+        row = self.conn.execute("SELECT value FROM settings WHERE key = ?",
+                                (key,)).fetchone()
+        return default if row is None or row["value"] is None else str(row["value"])
+
+    def set_setting(self, key: str, value: Any) -> None:
+        """Store `value` (as text) under `key`, replacing any earlier value.
+
+        `ON CONFLICT ... DO UPDATE` is the upsert both SQLite and Postgres
+        speak, so this stays portable (PRD 8.4).
+        """
+        self.conn.execute(
+            """INSERT INTO settings (key, value, updated_at) VALUES (?, ?, ?)
+               ON CONFLICT (key) DO UPDATE
+               SET value = excluded.value, updated_at = excluded.updated_at""",
+            (key, None if value is None else str(value), utcnow()))
+        self.conn.commit()
 
     # ---------------- reporting ----------------
 

@@ -23,6 +23,11 @@ def get_config(request: Request) -> Config:
     return request.app.state.cfg
 
 
+def get_jobs(request: Request) -> Any:
+    """The app's one `JobManager` (web/jobs.py), built by `create_app`."""
+    return request.app.state.jobs
+
+
 @contextmanager
 def open_store(request: Request) -> Iterator[Any]:
     """Yield a store for this request and close it afterwards."""
