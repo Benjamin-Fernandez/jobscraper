@@ -55,7 +55,11 @@ rules:
     extra: ["trade support engineer", "finance", "financial", "infrastructure",
             "platform", "support", "operations", "product manager",
             "product management", "product owner", "project manager",
-            "project management", "program manager"]
+            "project management", "program manager", "trade desk engineer",
+            "trade associate", "trade operations", "analyst", "associate",
+            "business analyst", "AI engineer", "Machine learning engineer",
+            AI agent"] 
+            
     match: token_subset             # all words of a target title present, any order
 
   # 3. Location, default-deny (D-7). First match wins:
