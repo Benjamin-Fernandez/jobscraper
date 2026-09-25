@@ -9,6 +9,7 @@ import { tabFromHash } from '../src/route.js'
 import { fakeApi, runsFrom, setHash } from './helpers.js'
 
 let api
+const LAST = TABS.at(-1).id
 
 beforeEach(() => {
   setHash('')
@@ -63,7 +64,8 @@ describe('App shell', () => {
     const wrapper = await mountApp()
     const labels = wrapper.findAll('[role="tab"] .tab-label').map(b => b.text())
     expect(labels).toEqual(TABS.map(t => t.label))
-    expect(labels).toEqual(['Inbox', 'Applications', 'Runs', 'Profile', 'Settings'])
+    // M12's five, first and in this order; a later tab (M7-T4 probe) goes after them.
+    expect(labels.slice(0, 5)).toEqual(['Inbox', 'Applications', 'Runs', 'Profile', 'Settings'])
     expect(wrapper.find('header [role="tablist"]').exists()).toBe(true)
   })
 
@@ -221,7 +223,7 @@ describe('Keyboard: WAI-ARIA tabs', () => {
   it('only the selected tab is in the Tab order', async () => {
     const wrapper = await mountApp()
     const stops = wrapper.findAll('[role="tab"]').map(t => t.attributes('tabindex'))
-    expect(stops).toEqual(['0', '-1', '-1', '-1', '-1'])
+    expect(stops).toEqual(TABS.map((t, i) => (i === 0 ? '0' : '-1')))
   })
 
   it('ArrowRight / ArrowLeft move focus and selection, wrapping at the ends', async () => {
@@ -237,18 +239,18 @@ describe('Keyboard: WAI-ARIA tabs', () => {
     expect(selectedId(wrapper)).toBe('inbox')
 
     await tab(wrapper, 'inbox').trigger('keydown', { key: 'ArrowLeft' })
-    expect(selectedId(wrapper)).toBe('settings')
-    expect(document.activeElement).toBe(tab(wrapper, 'settings').element)
+    expect(selectedId(wrapper)).toBe(LAST)
+    expect(document.activeElement).toBe(tab(wrapper, LAST).element)
 
-    await tab(wrapper, 'settings').trigger('keydown', { key: 'ArrowRight' })
+    await tab(wrapper, LAST).trigger('keydown', { key: 'ArrowRight' })
     expect(selectedId(wrapper)).toBe('inbox')
   })
 
   it('Home and End jump to the first and last tab; other keys do nothing', async () => {
     const wrapper = await mountApp({ attachTo: document.body })
     await tab(wrapper, 'inbox').trigger('keydown', { key: 'End' })
-    expect(selectedId(wrapper)).toBe('settings')
-    await tab(wrapper, 'settings').trigger('keydown', { key: 'Home' })
+    expect(selectedId(wrapper)).toBe(LAST)
+    await tab(wrapper, LAST).trigger('keydown', { key: 'Home' })
     expect(selectedId(wrapper)).toBe('inbox')
     await tab(wrapper, 'inbox').trigger('keydown', { key: 'a' })
     expect(selectedId(wrapper)).toBe('inbox')

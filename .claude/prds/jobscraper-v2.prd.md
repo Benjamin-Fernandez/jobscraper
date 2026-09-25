@@ -2254,8 +2254,8 @@ top, every screen one click away, the browser's back/forward and refresh keep yo
 where you were, and each tab says what it holds before you open it.
 
 #### M12-T1 · App shell: top tabs and real navigation
-- **STATUS:** `NOT_STARTED`
-- **Completed:** —
+- **STATUS:** `DONE`
+- **Completed:** 2026-09-25
 - **Do:** a sticky header with the app name and a top tab bar - **Inbox,
   Applications, Runs, Profile, Settings** - driven by the existing `TABS` registry
   (the M7-T4 three-file rule must still hold). The active tab lives in the URL
@@ -2267,6 +2267,21 @@ where you were, and each tab says what it holds before you open it.
 - **Verify:** `npm test` — route ↔ tab sync both ways; unknown hash falls back to
   Inbox; badges reflect the data; arrow-key navigation; M7-T4's probe still adds
   a tab in exactly three files.
+- **Notes:** Verified 2026-09-25 (Lane H). `npm test` 49/49 (`web/tests/App.test.js`:
+  hash → tab on load, tab click → hash, hashchange (back/forward) → tab, unknown or
+  empty hash → `#/inbox` via `replaceState`, roving tabindex, ArrowLeft/Right wrap,
+  Home/End; badges from data, and they move when a role is marked applied or
+  dismissed). M7-T4 probe re-run on disk: `git status --porcelain` listed exactly
+  ` M web/src/tabs.js`, `?? web/src/tabs/Stats.vue`,
+  `?? src/jobscraper/web/routers/stats_probe.py`; `npm test` stayed green with the
+  sixth tab (keyboard tests derive from `TABS`) and `/api/stats-probe` answered; then
+  reverted. `web/tests/extensibility.test.js` keeps a registry-only probe tab in the
+  suite. No router dependency: `route.js` is 10 lines. The tab contract is
+  `web/src/shell.js` (`defineProps(tabProps)`, `defineEmits(tabEmits)`) so the shared
+  props never leak onto a tab as attributes. Badges: Inbox = the selected run's roles
+  with no status and not dismissed; Applications = `/api/stats` `by_status` minus
+  `rejected`/`withdrawn`. The Applications tab's run selector is its own filter and
+  starts on "all runs" (M8-T1: an application outlives its run).
 
 #### M12-T2 · Runs tab
 - **STATUS:** `NOT_STARTED`
