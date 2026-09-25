@@ -105,12 +105,23 @@ def cmd_sync(args) -> int:
     return 0
 
 
+def _positive_int(text: str) -> int:
+    """argparse type for --batch-size: a run of 0 companies is not a run."""
+    try:
+        n = int(text)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"{text!r} is not a whole number")
+    if n < 1:
+        raise argparse.ArgumentTypeError("must be at least 1")
+    return n
+
+
 def _batch_size(cfg, store, flag=None) -> int:
     """Companies per run (M11): the flag, else the stored setting the web app
     writes, else `run.batch_size` in config. `run` and `status` both use this,
     so the cadence `status` reports is the one `run` actually keeps."""
-    if flag:
-        return int(flag)
+    if flag is not None:            # an explicit flag always wins (argparse
+        return int(flag)            # already refused anything below 1)
     stored = store.get_setting("batch_size")
     if stored and stored.isdigit() and int(stored) > 0:
         return int(stored)
@@ -255,7 +266,10 @@ def cmd_web(args) -> int:
         print(f"warning: binding {host} - this app has no authentication",
               file=sys.stderr)
     print(f"JobScraper web: http://{host}:{port}  (Ctrl+C to stop)")
-    uvicorn.run(create_app(cfg), host=host, port=port, log_level="warning")
+    # Jobs started from the web app re-invoke the CLI; they must use the same
+    # config the web app was started with (`--config X web`).
+    uvicorn.run(create_app(cfg, config_path=getattr(args, "config", None)),
+                host=host, port=port, log_level="warning")
     return 0
 
 
@@ -484,7 +498,7 @@ def build_parser() -> argparse.ArgumentParser:
     rr.set_defaults(fn=cmd_reresolve)
 
     run = sub.add_parser("run", help="process the next batch of companies")
-    run.add_argument("--batch-size", type=int, default=None,
+    run.add_argument("--batch-size", type=_positive_int, default=None,
                      help="companies this run (default: the web app's "
                           "setting, else run.batch_size)")
     run.add_argument("--dry-run", action="store_true",
