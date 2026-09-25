@@ -145,7 +145,10 @@ def test_web_runs_lists_every_run_newest_first_with_accepted_counts():
     assert r.status_code == 200
     runs = r.json()
     assert [x["run_no"] for x in runs] == list(range(12, 0, -1))
-    assert {"run_no", "finished_at", "status", "accepted"} <= set(runs[0])
+    assert {"run_no", "started_at", "finished_at", "status", "accepted",
+            "stats"} <= set(runs[0])
+    # The Runs tab's history reads companies/postings out of `stats` (M12-T2).
+    assert all(isinstance(x["stats"], dict) for x in runs)
     by_no = {x["run_no"]: x for x in runs}
     assert by_no[12]["accepted"] == 3 and by_no[11]["accepted"] == 2
     # A run that accepted nothing still appears, and says so.
