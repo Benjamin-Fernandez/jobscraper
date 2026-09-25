@@ -1,47 +1,39 @@
 <script setup>
-// Every role with a status, across all runs, grouped by status (PRD 8.5, M8-T1).
-// Each row shows its app_events timeline and lets the status be changed in
-// place. The status list comes from config via /api/stats, never hardcoded, so
-// adding a status is a config change (M8-T2).
+// Every role with a status, grouped by status (PRD 8.5, M8-T1). Each row shows
+// its app_events timeline and lets the status be changed in place. The status
+// list comes from config via /api/stats, never hardcoded, so adding a status is
+// a config change (M8-T2).
 //
-// This tab ignores the run selector on purpose: an application outlives the run
-// that found it.
+// The run selector here is this tab's own filter and starts on "all runs": an
+// application outlives the run that found it, so picking a run in the Inbox
+// must not hide applications from other runs (M12-T1).
 import { computed, onMounted, ref } from 'vue'
-import { getApplications, getStats, setApplicationStatus } from '../api.js'
+import { describeError, getApplications, getStats, setApplicationStatus } from '../api.js'
+import { plural, safeUrl, when } from '../format.js'
+import { tabEmits, tabProps } from '../shell.js'
+import RunSelector from '../components/RunSelector.vue'
+import TabLoading from '../components/TabLoading.vue'
 
-defineProps({
-  run: { type: [Number, String], default: null },
-  jobs: { type: Array, required: true },
-})
-const emit = defineEmits(['changed'])
+defineProps(tabProps)
+const emit = defineEmits(tabEmits)
 
 const rows = ref([])
 const statuses = ref([])
 const loading = ref(true)
 const error = ref('')
 const saving = ref('')
+const runFilter = ref('all')
 
-const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-  'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
-
-// "2026-09-24T08:50:05" (stored in UTC) -> "24 Sep 08:50 UTC".
-function when(iso) {
-  const m = /^(\d{4})-(\d{2})-(\d{2})(?:T(\d{2}):(\d{2}))?/.exec(iso || '')
-  if (!m) return ''
-  const day = `${Number(m[3])} ${MONTHS[Number(m[2]) - 1]}`
-  return m[4] ? `${day} ${m[4]}:${m[5]} UTC` : day
-}
-
-function safeUrl(url) {
-  return /^https?:\/\//i.test(url || '') ? url : null
-}
+const shown = computed(() => (runFilter.value === 'all'
+  ? rows.value
+  : rows.value.filter(r => r.run_no === runFilter.value)))
 
 // Groups in config order; a status config no longer lists goes last, not missing.
 const groups = computed(() => {
   const order = [...statuses.value]
-  for (const r of rows.value) if (!order.includes(r.status)) order.push(r.status)
+  for (const r of shown.value) if (!order.includes(r.status)) order.push(r.status)
   return order
-    .map(status => ({ status, rows: rows.value.filter(r => r.status === status) }))
+    .map(status => ({ status, rows: shown.value.filter(r => r.status === status) }))
     .filter(g => g.rows.length)
 })
 
@@ -57,10 +49,15 @@ async function load() {
     rows.value = apps
     statuses.value = stats.statuses
   } catch (e) {
-    error.value = `Could not load applications: ${e.message || e}`
+    error.value = `Could not load applications: ${describeError(e)}`
   } finally {
     loading.value = false
   }
+}
+
+function retry() {
+  loading.value = true
+  load()
 }
 
 async function change(row, status) {
@@ -72,7 +69,7 @@ async function change(row, status) {
     await load()
     emit('changed')
   } catch (e) {
-    error.value = `Could not change ${row.company ?? row.job_id}: ${e.message || e}`
+    error.value = `Could not change ${row.company ?? row.job_id}: ${describeError(e)}`
   } finally {
     saving.value = ''
   }
@@ -82,18 +79,30 @@ onMounted(load)
 </script>
 
 <template>
-  <section class="applications">
-    <p v-if="error" class="error" role="alert">{{ error }}</p>
-    <p v-if="loading" class="muted">Loading…</p>
-    <p v-else-if="!rows.length && !error" class="muted">
-      Nothing tracked yet. Mark a role applied in the Inbox and it appears here.
-    </p>
+  <section class="applications" :aria-busy="loading ? 'true' : 'false'">
+    <div class="toolbar">
+      <RunSelector :runs="runs" :model-value="runFilter" @update:model-value="v => { runFilter = v }" />
+      <p v-if="!loading && rows.length" class="count">{{ plural(shown.length, 'application') }}</p>
+    </div>
+
+    <div v-if="error" class="notice error" role="alert">
+      <p>{{ error }}</p>
+      <button type="button" @click="retry">Try again</button>
+    </div>
+    <TabLoading v-if="loading" :rows="3" />
+    <div v-else-if="!rows.length && !error" class="empty">
+      <p class="empty-title">Nothing tracked yet.</p>
+      <p class="muted">Mark a role applied in the Inbox and it appears here.</p>
+    </div>
+    <div v-else-if="!shown.length && !error" class="empty">
+      <p class="empty-title">No applications from this run.</p>
+    </div>
 
     <section v-for="group in groups" :key="group.status" class="group" :data-status="group.status">
-      <h2>{{ group.status }} <span class="n">{{ group.rows.length }}</span></h2>
+      <h2><span class="pill" :data-status="group.status">{{ group.status }}</span> <span class="n">{{ group.rows.length }}</span></h2>
       <table>
         <thead>
-          <tr><th>Role</th><th>Status</th><th>History</th></tr>
+          <tr><th scope="col">Role</th><th scope="col">Status</th><th scope="col">History</th></tr>
         </thead>
         <tbody>
           <tr v-for="row in group.rows" :key="row.job_id" :data-job="row.job_id">
@@ -130,22 +139,37 @@ onMounted(load)
 </template>
 
 <style scoped>
-.muted { color: var(--muted); }
-.error { color: var(--warn); }
-.group { margin-bottom: 1.5rem; }
-h2 { font-size: 0.95rem; text-transform: capitalize; margin: 0 0 0.4rem; }
-.n { color: var(--muted); font-weight: 400; }
-table { width: 100%; border-collapse: collapse; }
-th { text-align: left; font-weight: 500; color: var(--muted); font-size: 0.8rem; border-bottom: 1px solid var(--border); padding: 0.3rem 0.4rem; }
-td { vertical-align: top; border-bottom: 1px solid var(--border); padding: 0.5rem 0.4rem; }
-.role a { text-decoration: none; }
-.notes { color: var(--muted); font-size: 0.85rem; }
-.timeline { list-style: none; margin: 0; padding: 0; font-size: 0.85rem; }
-.timeline li { display: flex; gap: 0.5rem; }
-.at { color: var(--muted); }
-@media (max-width: 600px) {
+.toolbar {
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between;
+  gap: var(--space-2) var(--space-4); margin-bottom: var(--space-4);
+  min-height: var(--control-h);
+}
+.count { color: var(--muted); margin: 0; font-size: var(--text-sm); }
+.group { margin-bottom: var(--space-6); }
+h2 { display: flex; align-items: center; gap: var(--space-2); font-size: var(--text-sm); margin: 0 0 var(--space-2); }
+h2 .pill { font-size: var(--text-sm); padding: 0 var(--space-3); }
+.n { font-family: var(--mono); color: var(--muted); font-weight: 400; }
+table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+th {
+  text-align: left; font-weight: 500; color: var(--muted); font-size: var(--text-xs);
+  text-transform: uppercase; letter-spacing: 0.06em;
+  border-bottom: 1px solid var(--border); padding: var(--space-2);
+}
+th:nth-child(2) { width: 11rem; }
+th:nth-child(3) { width: 14rem; }
+td { vertical-align: top; border-bottom: 1px solid var(--border); padding: var(--space-3) var(--space-2); overflow-wrap: anywhere; }
+.role { font-weight: 500; }
+.role a { text-decoration: none; color: var(--text); }
+.role a:hover { color: var(--accent); text-decoration: underline; }
+.notes { color: var(--muted); font-size: var(--text-sm); font-weight: 400; }
+td select { width: 100%; }
+.timeline { list-style: none; margin: 0; padding: 0; font-size: var(--text-sm); }
+.timeline li { display: flex; justify-content: space-between; gap: var(--space-2); }
+.at { color: var(--muted); font-family: var(--mono); font-size: var(--text-xs); white-space: nowrap; }
+@media (max-width: 640px) {
+  table { table-layout: auto; }
   thead { display: none; }
-  tr, td { display: block; border: none; padding: 0.2rem 0; }
-  tr { border-bottom: 1px solid var(--border); padding: 0.5rem 0; }
+  tr, td { display: block; border: none; padding: var(--space-1) 0; }
+  tr { border-bottom: 1px solid var(--border); padding: var(--space-3) 0; }
 }
 </style>

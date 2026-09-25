@@ -2301,8 +2301,8 @@ top, every screen one click away, the browser's back/forward and refresh keep yo
 where you were, and each tab says what it holds before you open it.
 
 #### M12-T1 · App shell: top tabs and real navigation
-- **STATUS:** `NOT_STARTED`
-- **Completed:** —
+- **STATUS:** `DONE`
+- **Completed:** 2026-09-25
 - **Do:** a sticky header with the app name and a top tab bar - **Inbox,
   Applications, Runs, Profile, Settings** - driven by the existing `TABS` registry
   (the M7-T4 three-file rule must still hold). The active tab lives in the URL
@@ -2314,37 +2314,87 @@ where you were, and each tab says what it holds before you open it.
 - **Verify:** `npm test` — route ↔ tab sync both ways; unknown hash falls back to
   Inbox; badges reflect the data; arrow-key navigation; M7-T4's probe still adds
   a tab in exactly three files.
+- **Notes:** Verified 2026-09-25 (Lane H). `npm test` 49/49 (`web/tests/App.test.js`:
+  hash → tab on load, tab click → hash, hashchange (back/forward) → tab, unknown or
+  empty hash → `#/inbox` via `replaceState`, roving tabindex, ArrowLeft/Right wrap,
+  Home/End; badges from data, and they move when a role is marked applied or
+  dismissed). M7-T4 probe re-run on disk: `git status --porcelain` listed exactly
+  ` M web/src/tabs.js`, `?? web/src/tabs/Stats.vue`,
+  `?? src/jobscraper/web/routers/stats_probe.py`; `npm test` stayed green with the
+  sixth tab (keyboard tests derive from `TABS`) and `/api/stats-probe` answered; then
+  reverted. `web/tests/extensibility.test.js` keeps a registry-only probe tab in the
+  suite. No router dependency: `route.js` is 10 lines. The tab contract is
+  `web/src/shell.js` (`defineProps(tabProps)`, `defineEmits(tabEmits)`) so the shared
+  props never leak onto a tab as attributes. Badges: Inbox = the selected run's roles
+  with no status and not dismissed; Applications = `/api/stats` `by_status` minus
+  `rejected`/`withdrawn`. The Applications tab's run selector is its own filter and
+  starts on "all runs" (M8-T1: an application outlives its run).
 
 #### M12-T2 · Runs tab
-- **STATUS:** `NOT_STARTED`
-- **Completed:** —
+- **STATUS:** `DONE`
+- **Completed:** 2026-09-25
 - **Do:** start a run (companies for this run, prefilled from the setting; a
   dry-run toggle), a live log that polls `/api/jobs/current` while running, cancel,
   and the run history (date, companies, postings, accepted, status) from
   `/api/runs`. When a run finishes, Inbox reloads.
 - **Verify:** Vitest with a mocked API: start → polling shows log lines → done
   refreshes the run list; `409` shows "a job is already running"; cancel works.
+- **Notes:** Verified 2026-09-25 (Lane H), `web/tests/Runs.test.js` 14 tests against a
+  fake that plays the M11 table (`web/tests/helpers.js`): prefill from
+  `/api/settings`; start posts `{batch_size, dry_run?}`; log lines appear on each
+  1.5 s poll; the end of the run emits `changed {runs: true}` once, after which the
+  shell refetches `/api/runs` and moves the Inbox to the new run (App-level test);
+  `409` → "A job is already running"; cancel → `POST /api/jobs/cancel`, state
+  `failed (exit -15)`; no polling while idle, after the end, or after unmount
+  (mutating `schedule()` to always poll fails 3 tests). Polling lives in
+  `web/src/composables/useJob.js`. A run that ends while the tab is closed is reported when the tab
+  reopens, once. Without the M11 routes the tab shows "404 Not Found ... this server
+  does not offer that yet" and still lists the history. **Backend gap:** `/api/runs`
+  returns only `run_no, finished_at, status, accepted`, so Companies and Postings show
+  `—`. The tab reads `companies`/`postings`, else `stats.companies_due`/`stats.postings_seen`
+  (`Store.list_runs()` already parses `stats`), so passing `stats` through in
+  `routers/runs.py` fills them with no UI change.
 
 #### M12-T3 · Profile tab
-- **STATUS:** `NOT_STARTED`
-- **Completed:** —
+- **STATUS:** `DONE`
+- **Completed:** 2026-09-25
 - **Do:** drag-and-drop or pick a resume (PDF/DOCX), upload with `PUT
   /api/resume`, then start the profile refresh and show its progress; display the
   current profile (summary, skills, target titles, interests, version, source).
 - **Verify:** Vitest: a PDF uploads and triggers the refresh; a `.txt` is refused
   in the browser before upload; the profile renders; a `413`/`415` shows a readable
   error.
+- **Notes:** Verified 2026-09-25 (Lane H), `web/tests/Profile.test.js` 13 tests: the PDF goes
+  up as `PUT api/resume` with the `File` itself as body (asserted not `FormData`) and
+  `Content-Type: application/pdf`, then `POST /api/jobs/profile`; progress polls the
+  job's log and on success reloads `/api/profile` (version 2 → 3). A dropped `.docx`
+  with an empty browser type is sent as the DOCX mime (by extension). `.txt` and
+  files over 5 MB are refused before any request. Server `415` (the fake checks magic
+  bytes) and `413` are shown in words, with no refresh started. `409` on the refresh
+  keeps the saved resume and says to refresh later. `{present: false}` → "No profile
+  yet", not an error. Without M11 → readable 404. Uploads and refreshes are disabled
+  while any job runs.
 
 #### M12-T4 · Settings tab
-- **STATUS:** `NOT_STARTED`
-- **Completed:** —
+- **STATUS:** `DONE`
+- **Completed:** 2026-09-25
 - **Do:** companies per run (number input with the cadence hint "a full 14-day
   sweep needs N runs/day at this size"), saved with `PUT /api/settings`.
 - **Verify:** Vitest: saving calls the API and shows the saved value; out-of-range
   is blocked in the form and a server `422` is shown.
+- **Notes:** Verified 2026-09-25 (Lane H), `web/tests/Settings.test.js` 7 tests: saving 25 sends
+  `PUT /api/settings {batch_size: 25}` and shows "Saved: 25 companies per run."; empty,
+  `0`, `-1`, `225` (enabled = 224) and `2.5` disable Save with a reason and send
+  nothing; a server `422` (the watchlist shrank to 150 after load) shows the server's
+  detail. The hint reads "A full 14-day sweep needs 1.6 runs/day at this size (23 runs
+  to cover 224 companies)". For the saved value it uses the server's
+  `runs_per_day_needed`; for a draft it uses `ceil(enabled / n) / cycle_days`, rounded
+  to one decimal. It matched the merged M11 server live (10 → 1.6, 12 → 1.3). With
+  0 enabled companies (before the first sync) the form sends the value and shows the
+  server's 422 text. Without M11: a readable 404 and a retry button.
 
 #### M12-T5 · Look and feel pass
-- **STATUS:** `NOT_STARTED`
+- **STATUS:** `IN_PROGRESS`
 - **Completed:** —
 - **Do:** one consistent visual system (spacing, type scale, colour tokens,
   light/dark), responsive down to a phone width, focus rings, no layout shift
@@ -2352,6 +2402,31 @@ where you were, and each tab says what it holds before you open it.
 - **Verify:** `npm test` green; `npm run build`; the Lead opens every tab in a
   browser at desktop and phone widths; `/ecc:vue-review` has no unresolved
   high-severity finding.
+- **Notes:** 2026-09-25 (Lane H). Lane H's part is done: `npm test` 88/88, `npm run build`,
+  and the rebuilt `static/` is committed after merging M11 from master. What is left
+  for the Lead is the Verify's own browser pass and `/ecc:vue-review`, which runs as an
+  agent, so lanes may not run it. Direction: a quiet "ledger desk". Warm paper
+  neutrals, graphite in dark mode, one ink-blue for actions, and green/amber/red only
+  for state. Every number (counts, badges, run numbers, the log) is set in tabular
+  monospace. Roles are ruled lines, not boxed cards, and the judge's reason is a ruled
+  pull-quote. System fonts only. Tokens (colour, type scale, 4px space scale, radius,
+  control height) live in `web/src/style.css`. `prefers-color-scheme` handles dark
+  mode, `:focus-visible` gives one ring for everything, and `prefers-reduced-motion` is
+  respected. Lane H's own browser pass ran the built app on :8798 against copies of
+  the real DB and shortlist, with M11 merged, in Chrome at 1280 px and 375 px, light
+  and dark, on every tab:
+  - no horizontal page overflow at 375 px; the tab bar scrolls and keeps the current
+    tab in view;
+  - cold-load CLS 0; badge slots are reserved, so counts arriving do not move the bar;
+  - no console errors;
+  - a live `PUT /api/settings` (12 → "1.3 runs/day", matching the server) and a live
+    1-company dry run, whose log streamed and whose state went to finished;
+  - ArrowRight moved tab and URL, with a visible focus ring.
+
+  Lead notices handled: a cancel that gets `409` while the job still reports running
+  says the job survived a web restart and cannot be cancelled here. With 0 enabled
+  companies the forms defer to the server's 422 text. Log lines are text only (no
+  `v-html` anywhere). No new dependency: bundle 78 kB JS (31 kB gzip) + 8 kB CSS.
 
 ---
 

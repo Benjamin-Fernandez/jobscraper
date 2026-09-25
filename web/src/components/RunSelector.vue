@@ -1,25 +1,16 @@
 <script setup>
-// Picks which run the page shows. It only reports the choice; the shell does
-// the fetching, so switching runs never navigates (M7-T2).
+// Picks which run a tab shows. It only reports the choice; whoever owns the
+// data does the fetching, so switching runs never navigates (M7-T2).
+import { plural, shortDate } from '../format.js'
+
 const props = defineProps({
   runs: { type: Array, required: true },
   modelValue: { type: [Number, String], default: null },
 })
 const emit = defineEmits(['update:modelValue'])
 
-const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-  'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
-
-// "2026-09-23T14:30:00" -> "23 Sep". Parsed by hand so the label does not
-// depend on the browser's locale or time zone.
-function shortDate(iso) {
-  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso || '')
-  return m ? `${Number(m[3])} ${MONTHS[Number(m[2]) - 1]}` : 'unfinished'
-}
-
 function label(run) {
-  const roles = `${run.accepted} role${run.accepted === 1 ? '' : 's'}`
-  return `run ${run.run_no} · ${shortDate(run.finished_at)} · ${roles}`
+  return `run ${run.run_no} · ${shortDate(run.finished_at) || 'unfinished'} · ${plural(run.accepted ?? 0, 'role')}`
 }
 
 function onChange(event) {
@@ -29,17 +20,24 @@ function onChange(event) {
 </script>
 
 <template>
-  <select
-    class="run-selector"
-    aria-label="Run"
-    :value="props.modelValue"
-    :disabled="!props.runs.length"
-    @change="onChange"
-  >
-    <option v-if="!props.runs.length" :value="null">no runs yet</option>
-    <option v-for="run in props.runs" :key="run.run_no" :value="run.run_no">
-      {{ label(run) }}
-    </option>
-    <option v-if="props.runs.length" value="all">all runs</option>
-  </select>
+  <label class="run-selector">
+    <span class="run-label">Run</span>
+    <select
+      :value="props.modelValue"
+      :disabled="!props.runs.length"
+      @change="onChange"
+    >
+      <option v-if="!props.runs.length" :value="null">no runs yet</option>
+      <option v-for="run in props.runs" :key="run.run_no" :value="run.run_no">
+        {{ label(run) }}
+      </option>
+      <option v-if="props.runs.length" value="all">all runs</option>
+    </select>
+  </label>
 </template>
+
+<style scoped>
+.run-selector { display: inline-flex; align-items: center; gap: var(--space-2); max-width: 100%; }
+.run-label { color: var(--muted); font-size: var(--text-sm); font-weight: 500; }
+select { max-width: 100%; min-width: 0; font-family: var(--mono); font-size: var(--text-xs); }
+</style>
