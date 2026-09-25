@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils'
 import Runs from '../src/tabs/Runs.vue'
 import App from '../src/App.vue'
-import { POLL_MS, resetSeenJobs } from '../src/job.js'
+import { POLL_MS, resetSeenJobs } from '../src/composables/useJob.js'
 import { fakeApi, runsFrom, setHash } from './helpers.js'
 
 let api
@@ -166,6 +166,37 @@ describe('Runs tab: watching a run', () => {
   })
 })
 
+describe('Runs tab: jobs it cannot control', () => {
+  it('a job left running across a web restart says it cannot be cancelled here', async () => {
+    useApi({ job: { id: 3, kind: 'run', state: 'running', started_at: '2026-09-25T08:00:00', log: ['run 13: 10 companies due'] } })
+    api.server.orphaned = true
+    const wrapper = await mountRuns()
+    await wrapper.find('button.cancel').trigger('click')
+    await flushPromises()
+
+    const alert = wrapper.find('[role="alert"]').text()
+    expect(alert).toContain('cannot be cancelled from here')
+    expect(alert).toContain('restarted')
+    expect(wrapper.find('.job-status').attributes('data-state')).toBe('running')
+  })
+
+  it('a 409 on cancel after the job ended just says nothing is running', async () => {
+    const wrapper = await mountRuns()
+    await start(wrapper)
+    api.finishJob()
+    await wrapper.find('button.cancel').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('[role="alert"]').text()).toBe('Nothing is running any more.')
+  })
+
+  it('with no company enabled yet, the form defers to the server', async () => {
+    useApi({ settings: { batch_size: 10, batch_size_default: 10, enabled_companies: 0, cycle_days: 14, runs_per_day_needed: 0 } })
+    const wrapper = await mountRuns()
+    expect(wrapper.find('#run-batch-hint').text()).toContain('No companies are enabled yet')
+    expect(wrapper.find('button.start-run').attributes('disabled')).toBeUndefined()
+  })
+})
+
 describe('Runs tab: history', () => {
   it('lists date, companies, postings, accepted and status per run', async () => {
     const runs = [
@@ -189,6 +220,7 @@ describe('Runs tab: history', () => {
     const alerts = wrapper.findAll('[role="alert"]').map(a => a.text()).join(' ')
     expect(alerts).toContain('404')
     expect(alerts).toContain('does not offer that yet')
+    expect(alerts).not.toContain('Not Found - Not Found')
     expect(wrapper.findAll('tr[data-run]')).toHaveLength(2)
   })
 })

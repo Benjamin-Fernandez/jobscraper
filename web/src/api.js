@@ -7,7 +7,9 @@ const BASE = 'api/'
 // about a 409 or a 422 instead of printing the raw response.
 export class ApiError extends Error {
   constructor(status, statusText, detail) {
-    const shown = detail === undefined || detail === '' ? '' : ` - ${typeof detail === 'string' ? detail : JSON.stringify(detail)}`
+    // FastAPI's own 404 says "Not Found" twice; say it once.
+    const quiet = detail === undefined || detail === '' || detail === statusText
+    const shown = quiet ? '' : ` - ${typeof detail === 'string' ? detail : JSON.stringify(detail)}`
     super(`${status} ${statusText}${shown}`)
     this.name = 'ApiError'
     this.status = status

@@ -94,6 +94,30 @@ describe('Settings tab: companies per run', () => {
     expect(wrapper.find('[role="status"]').exists()).toBe(false)
   })
 
+  it('before the first sync (0 enabled), the server\'s 422 message is what you see', async () => {
+    useApi({ settings: { batch_size: 10, batch_size_default: 10, enabled_companies: 0, cycle_days: 14, runs_per_day_needed: 0 } })
+    const wrapper = await mountSettings()
+    expect(hint(wrapper)).toBe('No companies are enabled yet - sync the watchlist first.')
+    await input(wrapper).setValue('12')
+    expect(save(wrapper).attributes('disabled')).toBeUndefined()
+    await wrapper.find('form').trigger('submit')
+    await flushPromises()
+    expect(puts()).toHaveLength(1)
+    expect(wrapper.find('[role="alert"]').text()).toBe('The server did not accept 12: batch_size must be between 1 and 0')
+  })
+
+  it('a FastAPI validation 422 (a list of errors) is shown as its messages', async () => {
+    const real = api.fetch
+    vi.stubGlobal('fetch', vi.fn(async (url, init) => (url === 'api/settings' && init?.method === 'PUT'
+      ? { ok: false, status: 422, statusText: 'Unprocessable Entity', json: async () => ({ detail: [{ loc: ['body', 'batch_size'], msg: 'Input should be a valid integer' }] }) }
+      : real(url, init))))
+    const wrapper = await mountSettings()
+    await input(wrapper).setValue('12')
+    await wrapper.find('form').trigger('submit')
+    await flushPromises()
+    expect(wrapper.find('[role="alert"]').text()).toBe('The server did not accept 12: Input should be a valid integer')
+  })
+
   it('without the M11 routes, shows a readable error and a retry', async () => {
     useApi({ m11: false })
     const wrapper = await mountSettings()

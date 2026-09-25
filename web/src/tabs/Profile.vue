@@ -11,7 +11,7 @@ import { computed, onMounted, ref } from 'vue'
 import {
   ApiError, RESUME_TYPES, describeError, getProfile, startProfileRefresh, uploadResume,
 } from '../api.js'
-import { useJob } from '../job.js'
+import { useJob } from '../composables/useJob.js'
 import { when } from '../format.js'
 import { tabEmits, tabProps } from '../shell.js'
 import JobStatus from '../components/JobStatus.vue'
@@ -210,26 +210,34 @@ onMounted(() => Promise.all([loadProfile(), refresh()]))
 </template>
 
 <style scoped>
-.section-title { font-size: 0.95rem; margin: 1.5rem 0 0.6rem; }
-.section-title:first-child { margin-top: 0; }
 .drop {
-  display: grid; gap: 0.25rem; justify-items: center; text-align: center;
-  padding: 1.75rem 1rem; border: 2px dashed var(--border); border-radius: 8px;
+  display: grid; gap: var(--space-1); justify-items: center; text-align: center;
+  padding: var(--space-6) var(--space-4);
+  border: 2px dashed var(--border-strong); border-radius: var(--radius-lg);
   background: var(--surface); cursor: pointer;
+  transition: border-color 0.12s, background-color 0.12s;
 }
-.drop:focus-within { outline: 2px solid var(--accent); outline-offset: 2px; }
-.drop.dragging { border-color: var(--accent); }
-.drop.disabled { opacity: 0.6; cursor: default; }
+.drop:hover { border-color: var(--accent); }
+.drop:focus-within { outline: 2px solid var(--focus); outline-offset: 2px; }
+.drop.dragging { border-color: var(--accent); background: var(--accent-soft); }
+.drop.disabled { opacity: 0.6; cursor: not-allowed; }
+.drop.disabled:hover { border-color: var(--border-strong); }
 .drop-title { font-weight: 600; }
-.buttons { margin: 0.75rem 0 1rem; }
-.notice.ok { color: var(--ok); }
-.job { margin-bottom: 1rem; }
-.facts { display: flex; flex-wrap: wrap; gap: 0.5rem 2rem; margin: 0 0 0.75rem; }
-.facts dt { font-size: 0.8rem; color: var(--muted); }
-.facts dd { margin: 0; }
-.summary { margin: 0 0 1rem; }
-h3 { font-size: 0.85rem; margin: 1rem 0 0.4rem; color: var(--muted); font-weight: 500; }
-.chips { list-style: none; padding: 0; margin: 0; display: flex; flex-wrap: wrap; gap: 0.35rem; }
-.chips li { font-size: 0.85rem; background: var(--surface); border: 1px solid var(--border); border-radius: 4px; padding: 0.05rem 0.5rem; }
-.titles { margin: 0; padding-left: 1.2rem; }
+.drop .muted { font-size: var(--text-sm); }
+.buttons { margin: var(--space-3) 0 var(--space-4); }
+.job { margin-bottom: var(--space-4); }
+.facts {
+  display: flex; flex-wrap: wrap; gap: var(--space-2) var(--space-6);
+  margin: 0 0 var(--space-4); padding-bottom: var(--space-3); border-bottom: 1px solid var(--border);
+}
+.facts dt { font-size: var(--text-xs); color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; }
+.facts dd { margin: 0; font-family: var(--mono); font-size: var(--text-sm); }
+.summary { margin: 0 0 var(--space-4); max-width: 68ch; }
+h3 { font-size: var(--text-sm); margin: var(--space-5) 0 var(--space-2); font-weight: 600; }
+.chips { list-style: none; padding: 0; margin: 0; display: flex; flex-wrap: wrap; gap: var(--space-1); }
+.chips li {
+  font-family: var(--mono); font-size: var(--text-xs);
+  background: var(--surface-2); border-radius: var(--radius-sm); padding: 0.15rem var(--space-2);
+}
+.titles { margin: 0; padding-left: var(--space-5); font-size: var(--text-sm); }
 </style>

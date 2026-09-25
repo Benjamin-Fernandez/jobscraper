@@ -16,13 +16,12 @@ defineProps({ rows: { type: Number, default: 3 } })
 </template>
 
 <style scoped>
-.skeleton-row { padding: 0.9rem 0; border-bottom: 1px solid var(--border); }
+.skeleton-row { padding: var(--space-4) 0; border-bottom: 1px solid var(--border); }
 .line {
-  display: block; height: 0.8rem; width: 40%; margin: 0.35rem 0;
-  border-radius: 4px; background: var(--border);
+  display: block; height: 0.8rem; width: 40%; margin: var(--space-2) 0;
+  border-radius: var(--radius-sm); background: var(--surface-2);
   animation: pulse 1.4s ease-in-out infinite;
 }
 .line.wide { width: 70%; height: 1rem; }
 @keyframes pulse { 50% { opacity: 0.45; } }
-@media (prefers-reduced-motion: reduce) { .line { animation: none; } }
 </style>

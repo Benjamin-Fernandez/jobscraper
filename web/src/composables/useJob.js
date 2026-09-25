@@ -5,7 +5,7 @@
 // is mounted: every POLL_MS until the job ends, then it stops. Unmounting the
 // tab stops it too, so a closed tab never keeps a timer going.
 import { computed, onBeforeUnmount, ref } from 'vue'
-import { describeError, getCurrentJob } from './api.js'
+import { describeError, getCurrentJob } from '../api.js'
 
 export const POLL_MS = 1500
 

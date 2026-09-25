@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils'
 import Profile from '../src/tabs/Profile.vue'
-import { POLL_MS, resetSeenJobs } from '../src/job.js'
+import { POLL_MS, resetSeenJobs } from '../src/composables/useJob.js'
 import { DOCX, MB, fakeApi } from './helpers.js'
 
 let api

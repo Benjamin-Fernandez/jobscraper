@@ -5,7 +5,7 @@
 // and the shortlist, so the Inbox shows what the run found.
 import { computed, onMounted, ref, watch } from 'vue'
 import { ApiError, cancelJob, describeError, getSettings, startRun } from '../api.js'
-import { useJob } from '../job.js'
+import { useJob } from '../composables/useJob.js'
 import { shortDate } from '../format.js'
 import { tabEmits, tabProps } from '../shell.js'
 import JobStatus from '../components/JobStatus.vue'
@@ -28,6 +28,11 @@ const { job, error: jobError, running, refresh, track } = useJob({
   onFinish: () => emit('changed', { runs: true }),
 })
 
+const ORPHANED = 'This job cannot be cancelled from here: it was started before the web app last '
+  + 'restarted, so the web app no longer controls it. It shows as running until it ends. To stop '
+  + 'it sooner, end its "python -m jobscraper" process on this machine.'
+
+// 0 before the first sync: then the server, not this form, says what is wrong.
 const max = computed(() => settings.value?.enabled_companies ?? null)
 
 // Empty is allowed: the server then uses the saved setting (M11).
@@ -79,10 +84,15 @@ async function cancel() {
   try {
     track(await cancelJob())
   } catch (e) {
-    actionError.value = e instanceof ApiError && e.status === 409
-      ? 'Nothing is running any more.'
-      : `Could not cancel: ${describeError(e)}`
-    refresh()
+    if (e instanceof ApiError && e.status === 409) {
+      // 409 means the server has no job it can stop. If the job still reports
+      // running, the web app was restarted under it and no longer owns it (M11).
+      await refresh()
+      actionError.value = running.value ? ORPHANED : 'Nothing is running any more.'
+    } else {
+      actionError.value = `Could not cancel: ${describeError(e)}`
+      refresh()
+    }
   } finally {
     cancelling.value = false
   }
@@ -121,13 +131,16 @@ onMounted(async () => {
           inputmode="numeric"
           min="1"
           :max="max ?? undefined"
-          :placeholder="settings ? String(settings.batch_size) : 'saved setting'"
+          :placeholder="settings ? String(settings.batch_size) : 'default'"
           :aria-invalid="batchError ? 'true' : 'false'"
           aria-describedby="run-batch-hint"
           :disabled="running"
         >
         <p id="run-batch-hint" class="hint" :class="{ invalid: batchError }">
           <template v-if="batchError">{{ batchError }}</template>
+          <template v-else-if="settings && !settings.enabled_companies">
+            No companies are enabled yet - sync the watchlist first.
+          </template>
           <template v-else-if="settings">
             Saved setting: {{ settings.batch_size }} of {{ settings.enabled_companies }} enabled companies.
           </template>
@@ -198,21 +211,27 @@ onMounted(async () => {
 </template>
 
 <style scoped>
-.section-title { font-size: 0.95rem; margin: 1.5rem 0 0.6rem; }
-.section-title:first-child { margin-top: 0; }
-.start { display: grid; gap: 0.75rem; max-width: 32rem; }
-.field label { display: block; font-weight: 500; margin-bottom: 0.25rem; }
+.start {
+  display: grid; gap: var(--space-4); max-width: 34rem;
+  padding: var(--space-4); background: var(--surface);
+  border: 1px solid var(--border); border-radius: var(--radius-lg); box-shadow: var(--shadow);
+}
+.field label { display: block; font-weight: 600; font-size: var(--text-sm); margin-bottom: var(--space-1); }
 .field input { width: 8rem; }
-.hint { margin: 0.25rem 0 0; font-size: 0.85rem; color: var(--muted); }
-.hint.invalid { color: var(--warn); }
-.check { display: flex; align-items: center; gap: 0.5rem; }
-.buttons { display: flex; flex-wrap: wrap; gap: 0.5rem; }
-.table-wrap { overflow-x: auto; }
-.history { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
-.history th { text-align: left; font-weight: 500; color: var(--muted); font-size: 0.8rem; border-bottom: 1px solid var(--border); padding: 0.3rem 0.5rem; }
-.history td { border-bottom: 1px solid var(--border); padding: 0.45rem 0.5rem; white-space: nowrap; }
+.hint { margin: var(--space-1) 0 0; font-size: var(--text-sm); color: var(--muted); }
+.hint.invalid { color: var(--danger); }
+.check { display: flex; align-items: center; gap: var(--space-2); font-size: var(--text-sm); cursor: pointer; }
+.buttons { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+.cancel { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 45%, var(--border-strong)); }
+.notice { margin-top: var(--space-4); max-width: 34rem; }
+.table-wrap { overflow-x: auto; border-top: 1px solid var(--border); }
+.history { width: 100%; border-collapse: collapse; font-size: var(--text-sm); }
+.history th {
+  text-align: left; font-weight: 500; color: var(--muted); font-size: var(--text-xs);
+  text-transform: uppercase; letter-spacing: 0.06em;
+  border-bottom: 1px solid var(--border); padding: var(--space-2);
+}
+.history td { border-bottom: 1px solid var(--border); padding: var(--space-2); white-space: nowrap; }
+.history td:first-child, .history td.num { font-family: var(--mono); font-variant-numeric: tabular-nums; }
 .history .num { text-align: right; }
-.pill { font-size: 0.75rem; border: 1px solid currentColor; border-radius: 999px; padding: 0.05rem 0.5rem; color: var(--muted); }
-.pill[data-status="ok"] { color: var(--ok); }
-.pill[data-status="failed"], .pill[data-status="aborted_unhealthy"] { color: var(--warn); }
 </style>

@@ -8,7 +8,7 @@
 // list, the selected run's shortlist, and the stats behind the badges - and
 // hands it to every tab (see shell.js). Choosing a run fetches that run's
 // shortlist and swaps it in place: one request, no navigation (M7-T2).
-import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { describeError, getRuns, getShortlist, getStats } from './api.js'
 import { TABS } from './tabs.js'
 import { hashFor, tabFromHash } from './route.js'
@@ -135,6 +135,13 @@ async function onChanged(options = {}) {
 
 watch(active, tab => { document.title = tab ? `${tab.label} · JobScraper` : 'JobScraper' }, { immediate: true })
 
+// On a narrow screen the tab bar scrolls sideways; keep the current tab in view
+// (after back/forward or a bookmark, it may be off to the right).
+watch(activeId, async id => {
+  await nextTick()
+  tabEls[id]?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' })
+})
+
 onMounted(async () => {
   window.addEventListener('hashchange', onHashChange)
   try {
@@ -171,8 +178,12 @@ onBeforeUnmount(() => window.removeEventListener('hashchange', onHashChange))
               @keydown="onTabKey($event, i)"
             >
               <span class="tab-label">{{ tab.label }}</span>
-              <span v-if="badgeOf(tab) !== null" class="badge">
-                {{ badgeOf(tab) }}<span class="visually-hidden"> {{ tab.badgeLabel || '' }}</span>
+              <!-- A tab that can carry a badge keeps its slot even while the
+                   count is loading or zero, so the bar never shifts. -->
+              <span v-if="tab.badge" class="badge-slot">
+                <span v-if="badgeOf(tab) !== null" class="badge">
+                  {{ badgeOf(tab) }}<span class="visually-hidden"> {{ tab.badgeLabel || '' }}</span>
+                </span>
               </span>
             </button>
           </div>
@@ -208,34 +219,88 @@ onBeforeUnmount(() => window.removeEventListener('hashchange', onHashChange))
   position: sticky;
   top: 0;
   z-index: 10;
-  background: var(--bg);
+  background: color-mix(in srgb, var(--bg) 92%, transparent);
+  backdrop-filter: blur(6px);
   border-bottom: 1px solid var(--border);
 }
 .masthead-inner {
-  max-width: 960px;
+  max-width: var(--page-w);
   margin: 0 auto;
-  padding: 0 16px;
+  padding: 0 var(--gutter);
+  display: flex;
+  align-items: stretch;
+  gap: var(--space-5);
+  min-height: var(--header-h);
+}
+.brand {
   display: flex;
   align-items: center;
-  gap: 1.5rem;
+  margin: 0;
+  font-size: var(--text-lg);
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
 }
-.brand { font-size: 1.1rem; margin: 0; white-space: nowrap; }
 .brand a { color: var(--text); text-decoration: none; }
-.tabbar { min-width: 0; flex: 1; }
-.tablist { display: flex; gap: 0.25rem; overflow-x: auto; scrollbar-width: none; }
+.brand a:hover { color: var(--text); }
+.tabbar { min-width: 0; flex: 1; display: flex; }
+.tablist {
+  display: flex;
+  gap: var(--space-1);
+  overflow-x: auto;
+  scrollbar-width: none;
+  overscroll-behavior-x: contain;
+}
+.tablist::-webkit-scrollbar { display: none; }
 .tab {
-  display: inline-flex; align-items: center; gap: 0.4rem;
-  border: none; border-bottom: 2px solid transparent; border-radius: 0;
-  background: none; padding: 0.9rem 0.8rem; color: var(--muted); white-space: nowrap;
+  position: relative;
+  gap: var(--space-2);
+  min-height: var(--header-h);
+  padding: 0 var(--space-3);
+  border: none;
+  border-radius: 0;
+  background: none;
+  color: var(--muted);
+  font-size: var(--text-sm);
+  font-weight: 500;
 }
-.tab.current { color: var(--text); border-bottom-color: var(--accent); }
+.tab:hover:not(:disabled) { background: none; color: var(--text); }
+/* The current tab's underline sits on the header's bottom rule. */
+.tab::after {
+  content: '';
+  position: absolute;
+  left: var(--space-2);
+  right: var(--space-2);
+  bottom: -1px;
+  height: 2px;
+  border-radius: 2px 2px 0 0;
+  background: transparent;
+}
+.tab.current { color: var(--text); }
+.tab.current::after { background: var(--accent); }
+.tab:focus-visible { outline-offset: -4px; }
+.badge-slot { display: inline-flex; min-width: 2.4em; }
 .badge {
-  font-size: 0.75rem; line-height: 1; padding: 0.15rem 0.45rem; border-radius: 999px;
-  background: var(--accent); color: var(--accent-text); font-variant-numeric: tabular-nums;
+  font-family: var(--mono);
+  font-size: var(--text-xs);
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+  padding: 0.2rem 0.4rem;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent);
 }
-.panel { max-width: 960px; margin: 0 auto; padding: 1rem 16px 48px; }
-@media (max-width: 600px) {
-  .masthead-inner { flex-direction: column; align-items: stretch; gap: 0; }
-  .brand { padding-top: 0.6rem; }
+.tab.current .badge { background: var(--accent); color: var(--accent-text); }
+.panel {
+  max-width: var(--page-w);
+  margin: 0 auto;
+  padding: var(--space-5) var(--gutter) var(--space-7);
+}
+.panel:focus-visible { outline-offset: -2px; }
+@media (max-width: 640px) {
+  .masthead-inner { flex-direction: column; gap: 0; }
+  .brand { min-height: 2.5rem; font-size: var(--text-md); }
+  .tab { min-height: 2.75rem; }
+  .tablist { margin: 0 calc(-1 * var(--space-3)); }
 }
 </style>

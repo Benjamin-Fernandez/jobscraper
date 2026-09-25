@@ -23,13 +23,16 @@ const saveError = ref('')
 const saved = ref('')
 
 const max = computed(() => settings.value?.enabled_companies ?? 0)
+// Before the first sync no company is enabled and the server refuses every
+// value. The form then does not guess an upper bound: the server says why.
+const noneEnabled = computed(() => Boolean(settings.value) && max.value < 1)
 
 const invalid = computed(() => {
   const n = draft.value
   if (n === '' || n === null) return 'Enter how many companies a run should take.'
   if (!Number.isInteger(n)) return 'Enter a whole number.'
   if (n < 1) return 'A run needs at least 1 company.'
-  if (n > max.value) return `At most ${max.value} - that is every enabled company.`
+  if (!noneEnabled.value && n > max.value) return `At most ${max.value} - that is every enabled company.`
   return ''
 })
 
@@ -43,6 +46,7 @@ function oneDecimal(x) {
 const cadence = computed(() => {
   const s = settings.value
   if (!s || invalid.value) return ''
+  if (noneEnabled.value) return 'No companies are enabled yet - sync the watchlist first.'
   const runsPerCycle = Math.ceil(s.enabled_companies / draft.value)
   const perDay = unchanged.value && s.runs_per_day_needed !== undefined
     ? s.runs_per_day_needed
@@ -64,6 +68,13 @@ async function load() {
   }
 }
 
+// The server's 422 in words: a plain message, or FastAPI's list of field errors.
+function reason(detail) {
+  if (typeof detail === 'string' && detail) return detail
+  if (Array.isArray(detail) && detail.length) return detail.map(d => d?.msg ?? String(d)).join('; ')
+  return 'out of range'
+}
+
 async function save() {
   if (invalid.value || unchanged.value || saving.value) return
   saving.value = true
@@ -74,9 +85,8 @@ async function save() {
     draft.value = settings.value.batch_size
     saved.value = `Saved: ${plural(settings.value.batch_size, 'company', 'companies')} per run.`
   } catch (e) {
-    const detail = e instanceof ApiError ? e.detail : ''
     saveError.value = e instanceof ApiError && e.status === 422
-      ? `The server did not accept ${draft.value}: ${typeof detail === 'string' && detail ? detail : 'out of range'}.`
+      ? `The server did not accept ${draft.value}: ${reason(e.detail)}`
       : `Could not save: ${describeError(e)}`
   } finally {
     saving.value = false
@@ -103,7 +113,7 @@ onMounted(load)
           type="number"
           inputmode="numeric"
           min="1"
-          :max="max"
+          :max="noneEnabled ? undefined : max"
           :aria-invalid="invalid ? 'true' : 'false'"
           aria-describedby="batch-size-hint"
           @input="saved = ''"
@@ -117,7 +127,7 @@ onMounted(load)
         <template v-else>{{ cadence }}</template>
       </p>
       <p class="muted small">
-        Between 1 and {{ max }}. The config default is {{ settings.batch_size_default }}.
+        <template v-if="!noneEnabled">Between 1 and {{ max }}. </template>The config default is {{ settings.batch_size_default }}.
         A run started with its own count (Runs tab) uses that instead.
       </p>
     </form>
@@ -127,13 +137,16 @@ onMounted(load)
 </template>
 
 <style scoped>
-.section-title { font-size: 0.95rem; margin: 0 0 0.6rem; }
-.batch { display: grid; gap: 0.4rem; max-width: 36rem; }
-.batch label { font-weight: 500; }
-.row { display: flex; gap: 0.5rem; align-items: center; }
+.batch {
+  display: grid; gap: var(--space-2); max-width: 34rem;
+  padding: var(--space-4); background: var(--surface);
+  border: 1px solid var(--border); border-radius: var(--radius-lg); box-shadow: var(--shadow);
+}
+.batch label { font-weight: 600; font-size: var(--text-sm); }
+.row { display: flex; gap: var(--space-2); align-items: center; }
 .row input { width: 8rem; }
-.hint { margin: 0; color: var(--muted); }
-.hint.invalid { color: var(--warn); }
-.small { font-size: 0.85rem; margin: 0; }
-.notice.ok { color: var(--ok); }
+.hint { margin: 0; color: var(--text); font-size: var(--text-sm); }
+.hint.invalid { color: var(--danger); }
+.small { font-size: var(--text-sm); margin: 0; }
+.notice { margin-top: var(--space-4); max-width: 34rem; }
 </style>

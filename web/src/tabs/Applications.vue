@@ -99,7 +99,7 @@ onMounted(load)
     </div>
 
     <section v-for="group in groups" :key="group.status" class="group" :data-status="group.status">
-      <h2>{{ group.status }} <span class="n">{{ group.rows.length }}</span></h2>
+      <h2><span class="pill" :data-status="group.status">{{ group.status }}</span> <span class="n">{{ group.rows.length }}</span></h2>
       <table>
         <thead>
           <tr><th scope="col">Role</th><th scope="col">Status</th><th scope="col">History</th></tr>
@@ -139,22 +139,37 @@ onMounted(load)
 </template>
 
 <style scoped>
-.toolbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0.5rem 1rem; margin-bottom: 0.75rem; }
-.count { color: var(--muted); margin: 0; }
-.group { margin-bottom: 1.5rem; }
-h2 { font-size: 0.95rem; text-transform: capitalize; margin: 0 0 0.4rem; }
-.n { color: var(--muted); font-weight: 400; }
-table { width: 100%; border-collapse: collapse; }
-th { text-align: left; font-weight: 500; color: var(--muted); font-size: 0.8rem; border-bottom: 1px solid var(--border); padding: 0.3rem 0.4rem; }
-td { vertical-align: top; border-bottom: 1px solid var(--border); padding: 0.5rem 0.4rem; }
-.role a { text-decoration: none; }
-.notes { color: var(--muted); font-size: 0.85rem; }
-.timeline { list-style: none; margin: 0; padding: 0; font-size: 0.85rem; }
-.timeline li { display: flex; gap: 0.5rem; }
-.at { color: var(--muted); }
-@media (max-width: 600px) {
+.toolbar {
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between;
+  gap: var(--space-2) var(--space-4); margin-bottom: var(--space-4);
+  min-height: var(--control-h);
+}
+.count { color: var(--muted); margin: 0; font-size: var(--text-sm); }
+.group { margin-bottom: var(--space-6); }
+h2 { display: flex; align-items: center; gap: var(--space-2); font-size: var(--text-sm); margin: 0 0 var(--space-2); }
+h2 .pill { font-size: var(--text-sm); padding: 0 var(--space-3); }
+.n { font-family: var(--mono); color: var(--muted); font-weight: 400; }
+table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+th {
+  text-align: left; font-weight: 500; color: var(--muted); font-size: var(--text-xs);
+  text-transform: uppercase; letter-spacing: 0.06em;
+  border-bottom: 1px solid var(--border); padding: var(--space-2);
+}
+th:nth-child(2) { width: 11rem; }
+th:nth-child(3) { width: 14rem; }
+td { vertical-align: top; border-bottom: 1px solid var(--border); padding: var(--space-3) var(--space-2); overflow-wrap: anywhere; }
+.role { font-weight: 500; }
+.role a { text-decoration: none; color: var(--text); }
+.role a:hover { color: var(--accent); text-decoration: underline; }
+.notes { color: var(--muted); font-size: var(--text-sm); font-weight: 400; }
+td select { width: 100%; }
+.timeline { list-style: none; margin: 0; padding: 0; font-size: var(--text-sm); }
+.timeline li { display: flex; justify-content: space-between; gap: var(--space-2); }
+.at { color: var(--muted); font-family: var(--mono); font-size: var(--text-xs); white-space: nowrap; }
+@media (max-width: 640px) {
+  table { table-layout: auto; }
   thead { display: none; }
-  tr, td { display: block; border: none; padding: 0.2rem 0; }
-  tr { border-bottom: 1px solid var(--border); padding: 0.5rem 0; }
+  tr, td { display: block; border: none; padding: var(--space-1) 0; }
+  tr { border-bottom: 1px solid var(--border); padding: var(--space-3) 0; }
 }
 </style>

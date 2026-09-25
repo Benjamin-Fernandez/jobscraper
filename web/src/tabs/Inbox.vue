@@ -82,17 +82,17 @@ async function markApplied(job) {
       <p class="empty-title">Everything here is dismissed for this session.</p>
     </div>
 
-    <ul v-if="!error && visible.length" class="cards" :class="{ stale: loading }">
+    <ul v-if="!error && visible.length" class="cards" :class="{ refreshing: loading }">
       <li v-for="job in visible" :key="job.id" class="card" :class="{ closed: job.closed }">
         <div class="head">
           <span class="company">{{ job.company }}</span>
           <span class="sep" aria-hidden="true">·</span>
           <span class="title">{{ job.title }}</span>
-          <span v-if="job.status" class="status" :data-status="job.status">{{ job.status }}</span>
-          <span v-if="job.closed" class="stale" title="The posting has been taken down">closed</span>
+          <span v-if="job.status" class="status pill" :data-status="job.status">{{ job.status }}</span>
+          <span v-if="job.closed" class="stale pill" title="The posting has been taken down">closed</span>
         </div>
         <div class="meta">{{ meta(job) }}</div>
-        <p v-if="job.reason" class="reason">“{{ job.reason }}”</p>
+        <p v-if="job.reason" class="reason">{{ job.reason }}</p>
         <ul v-if="job.matched_skills && job.matched_skills.length" class="skills" aria-label="Matched skills">
           <li v-for="skill in job.matched_skills" :key="skill">{{ skill }}</li>
         </ul>
@@ -120,20 +120,41 @@ async function markApplied(job) {
 </template>
 
 <style scoped>
-.toolbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0.5rem 1rem; margin-bottom: 0.75rem; }
-.count { color: var(--muted); margin: 0; }
-.cards { list-style: none; margin: 0; padding: 0; transition: opacity 0.15s; }
-.cards.stale { opacity: 0.55; }
-.card { border-bottom: 1px solid var(--border); padding: 0.9rem 0; }
-.card.closed { opacity: 0.6; }
-.head { font-weight: 600; display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.35rem; }
-.sep { color: var(--muted); font-weight: 400; }
-.status, .stale { font-size: 0.75rem; font-weight: 500; border-radius: 999px; padding: 0.05rem 0.5rem; border: 1px solid currentColor; }
-.status { color: var(--ok); }
+.toolbar {
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between;
+  gap: var(--space-2) var(--space-4); margin-bottom: var(--space-4);
+  min-height: var(--control-h);
+}
+.count { color: var(--muted); margin: 0; font-size: var(--text-sm); }
+
+/* Roles read like ledger lines: ruled, not boxed. */
+.cards {
+  list-style: none; margin: 0; padding: 0;
+  border-top: 1px solid var(--border);
+  transition: opacity 0.15s;
+}
+.cards.refreshing { opacity: 0.55; }
+.card { border-bottom: 1px solid var(--border); padding: var(--space-4) 0; }
+.card.closed .head, .card.closed .meta, .card.closed .reason { opacity: 0.6; }
+.head { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--space-1) var(--space-2); font-size: var(--text-md); }
+.company { font-weight: 700; }
+.title { font-weight: 500; }
+.sep { color: var(--muted); }
 .stale { color: var(--warn); }
-.meta { color: var(--muted); font-size: 0.9rem; }
-.reason { margin: 0.35rem 0; }
-.skills { list-style: none; padding: 0; margin: 0.35rem 0; display: flex; flex-wrap: wrap; gap: 0.3rem; }
-.skills li { font-size: 0.8rem; background: var(--surface); border: 1px solid var(--border); border-radius: 4px; padding: 0 0.4rem; }
-.actions { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; margin-top: 0.5rem; }
+.meta { color: var(--muted); font-size: var(--text-sm); margin-top: var(--space-1); }
+/* The judge's reason: the one line that says why this role is here. */
+.reason {
+  margin: var(--space-2) 0 0;
+  padding-left: var(--space-3);
+  border-left: 2px solid var(--border-strong);
+  font-size: var(--text-sm);
+  max-width: 68ch;
+}
+.skills { list-style: none; padding: 0; margin: var(--space-2) 0 0; display: flex; flex-wrap: wrap; gap: var(--space-1); }
+.skills li {
+  font-family: var(--mono); font-size: var(--text-xs);
+  background: var(--surface-2); border-radius: var(--radius-sm); padding: 0.1rem var(--space-2);
+}
+.actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); margin-top: var(--space-3); }
+.dismiss { color: var(--muted); }
 </style>

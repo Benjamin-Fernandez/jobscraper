@@ -37,7 +37,7 @@ function onChange(event) {
 </template>
 
 <style scoped>
-.run-selector { display: inline-flex; align-items: center; gap: 0.5rem; }
-.run-label { color: var(--muted); font-size: 0.875rem; }
-select { max-width: 100%; }
+.run-selector { display: inline-flex; align-items: center; gap: var(--space-2); max-width: 100%; }
+.run-label { color: var(--muted); font-size: var(--text-sm); font-weight: 500; }
+select { max-width: 100%; min-width: 0; font-family: var(--mono); font-size: var(--text-xs); }
 </style>

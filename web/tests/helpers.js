@@ -119,7 +119,8 @@ export function fakeApi({
     if (url === 'api/jobs/profile' && method === 'POST') return startJob('profile')
     if (/^api\/jobs\/current(\?|$)/.test(url)) return respond(server.job)
     if (url === 'api/jobs/cancel' && method === 'POST') {
-      if (server.job.state !== 'running') return respond({ detail: 'no job is running' }, 409)
+      // server.orphaned: the job outlived a web restart, so this process cannot stop it.
+      if (server.job.state !== 'running' || server.orphaned) return respond({ detail: 'no job this process can cancel' }, 409)
       server.job = { ...server.job, state: 'failed', exit_code: -15, finished_at: stamp(), log: [...server.job.log, 'cancelled'] }
       return respond(server.job)
     }

@@ -57,16 +57,16 @@ watch(() => lines.value.length, async () => {
 </template>
 
 <style scoped>
-.summary { display: flex; align-items: center; gap: 0.5rem; margin: 0 0 0.5rem; }
+.summary { display: flex; align-items: center; gap: var(--space-2); margin: 0 0 var(--space-2); font-size: var(--text-sm); }
 .dot { width: 0.6rem; height: 0.6rem; border-radius: 50%; background: var(--muted); flex: none; }
 [data-state="running"] .dot { background: var(--accent); animation: blink 1.2s ease-in-out infinite; }
 [data-state="succeeded"] .dot { background: var(--ok); }
-[data-state="failed"] .dot { background: var(--warn); }
+[data-state="failed"] .dot { background: var(--danger); }
 @keyframes blink { 50% { opacity: 0.3; } }
-@media (prefers-reduced-motion: reduce) { [data-state="running"] .dot { animation: none; } }
 .log {
-  margin: 0; max-height: 20rem; overflow: auto; padding: 0.75rem;
-  background: var(--surface); border: 1px solid var(--border); border-radius: 6px;
-  font-size: 0.8rem; line-height: 1.5; white-space: pre-wrap; word-break: break-word;
+  margin: 0; max-height: 20rem; overflow: auto; padding: var(--space-3);
+  background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius);
+  font-family: var(--mono); font-size: var(--text-xs); line-height: 1.6;
+  white-space: pre-wrap; overflow-wrap: anywhere;
 }
 </style>
