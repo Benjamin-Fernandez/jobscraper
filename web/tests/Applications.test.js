@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import Applications from '../src/tabs/Applications.vue'
 import App from '../src/App.vue'
-import { fakeApi } from './helpers.js'
+import { fakeApi, runsFrom, setHash } from './helpers.js'
 
 let api
 
@@ -81,7 +81,34 @@ describe('Applications tab', () => {
     expect(wrapper.text()).not.toContain('Nothing tracked yet')
   })
 
+  it('shows every run by default and can be narrowed to one run', async () => {
+    api = fakeApi({ statuses: { a1b2c3: 'applied', j1k2l3: 'interviewing' } })
+    vi.stubGlobal('fetch', api.fetch)
+    const wrapper = mount(Applications, { props: { run: 12, runs: runsFrom(), jobs: [] } })
+    await flushPromises()
+    // The Inbox is on run 12, but applications outlive their run.
+    expect(wrapper.find('.run-selector select').element.value).toBe('all')
+    expect(row(wrapper, 'a1b2c3').exists()).toBe(true)
+    expect(row(wrapper, 'j1k2l3').exists()).toBe(true)
+
+    await wrapper.find('.run-selector select').setValue('11')
+    expect(row(wrapper, 'a1b2c3').exists()).toBe(false)
+    expect(row(wrapper, 'j1k2l3').exists()).toBe(true)
+    expect(wrapper.emitted('select-run')).toBeUndefined()
+  })
+
+  it('shows a loading placeholder until the data arrives', async () => {
+    api = fakeApi()
+    vi.stubGlobal('fetch', api.fetch)
+    const wrapper = mount(Applications, { props: { run: 12, jobs: [] } })
+    expect(wrapper.find('[role="status"][aria-busy="true"]').exists()).toBe(true)
+    expect(wrapper.text()).not.toContain('Nothing tracked yet')
+    await flushPromises()
+    expect(wrapper.find('[role="status"]').exists()).toBe(false)
+  })
+
   it('a status set in the Inbox is on the Applications tab when you switch to it', async () => {
+    setHash('')
     api = fakeApi()
     vi.stubGlobal('fetch', api.fetch)
     const wrapper = mount(App)
@@ -92,7 +119,7 @@ describe('Applications tab', () => {
     await wrapper.find('.inbox .card button.apply').trigger('click')
     await flushPromises()
 
-    const tab = wrapper.findAll('[role="tab"]').find(b => b.text() === 'Applications')
+    const tab = wrapper.findAll('[role="tab"]').find(b => b.find('.tab-label').text() === 'Applications')
     await tab.trigger('click')
     await vi.waitFor(async () => {
       await flushPromises()

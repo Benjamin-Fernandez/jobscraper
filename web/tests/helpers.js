@@ -8,6 +8,11 @@ import shortlist from '../../tests/fixtures/shortlist.json'
 export const FIXTURE = shortlist
 export const STATUSES = ['to_apply', 'applied', 'interviewing', 'offer', 'rejected', 'withdrawn']
 
+// jsdom keeps one URL per test file; start every test from a known hash.
+export function setHash(hash = '') {
+  window.history.replaceState(null, '', `${window.location.pathname}${hash}`)
+}
+
 export function runsFrom(fixture = shortlist) {
   return fixture.runs.map(r => ({ ...r, status: 'ok' }))
 }
@@ -47,7 +52,11 @@ export function fakeApi({ fixture = shortlist, statuses = {}, vocabulary = STATU
   const fetch = vi.fn(async (url, init = {}) => {
     calls.push({ url, method: init.method || 'GET', body: init.body })
     if (url === 'api/runs') return respond(runsFrom(fixture))
-    if (url === 'api/stats') return respond({ statuses: vocabulary, by_status: {}, by_run: {} })
+    if (url === 'api/stats') {
+      const byStatus = Object.fromEntries(vocabulary.map(s => [s, 0]))
+      for (const a of Object.values(apps)) byStatus[a.status] = (byStatus[a.status] ?? 0) + 1
+      return respond({ statuses: vocabulary, by_status: byStatus, by_run: {} })
+    }
     if (url === 'api/applications') {
       return respond(Object.entries(apps).map(([jobId, a]) => {
         const job = fixture.jobs.find(j => j.id === jobId) ?? {}
