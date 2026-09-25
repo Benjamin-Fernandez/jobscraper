@@ -37,8 +37,10 @@ def _start(jobs: JobManager, kind: str, opts: dict[str, Any]) -> dict[str, Any]:
     except JobBusy as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except OSError as exc:
+        # strerror only: str(exc) carries filesystem paths.
+        reason = exc.strerror or type(exc).__name__
         raise HTTPException(status_code=500,
-                            detail=f"could not start the {kind}: {exc}") from exc
+                            detail=f"could not start the {kind}: {reason}") from exc
 
 
 @router.post("/jobs/run", status_code=202)

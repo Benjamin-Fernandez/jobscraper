@@ -153,10 +153,11 @@ class JobManager:
     """The one background job this web process is allowed at a time."""
 
     def __init__(self, jobs_dir: Path, command: CommandBuilder,
-                 grace_seconds: float = 5.0):
+                 grace_seconds: float = 5.0, keep_logs: int = 50):
         self.jobs_dir = Path(jobs_dir)
         self.command = command
         self.grace_seconds = grace_seconds
+        self.keep_logs = keep_logs          # newest N job logs kept on disk
         self._lock = threading.Lock()
         self._proc: Optional[subprocess.Popen] = None
         self._record: Optional[dict[str, Any]] = self._load()
@@ -190,12 +191,14 @@ class JobManager:
                         argv, stdout=fh, stderr=subprocess.STDOUT,
                         stdin=subprocess.DEVNULL, env=child_env(), close_fds=True)
                 except OSError as exc:
-                    fh.write(f"could not start: {exc}\n".encode("utf-8"))
+                    reason = exc.strerror or type(exc).__name__   # no paths
+                    fh.write(f"could not start: {reason}\n".encode("utf-8"))
                     self._record = self._new_record(job_id, kind, log, None)
                     self._finish(None)
                     raise
             self._record = self._new_record(job_id, kind, log, self._proc.pid)
             self._save()
+            self._prune_logs()
             return self._view(tail)
 
     def cancel(self, tail: int = 200) -> dict[str, Any]:
@@ -274,6 +277,15 @@ class JobManager:
         return {"id": job_id, "kind": kind, "state": "running",
                 "started_at": utcnow(), "finished_at": None, "exit_code": None,
                 "pid": pid, "log": log.name}
+
+    def _prune_logs(self) -> None:
+        """Keep the newest `keep_logs` logs. Names start with a UTC stamp, so
+        name order is age order; the current job's log is never removed."""
+        current = self._record.get("log") if self._record else None
+        logs = sorted(self.jobs_dir.glob("*.log"), key=lambda p: p.name)
+        for old in logs[:max(0, len(logs) - self.keep_logs)]:
+            if old.name != current:
+                old.unlink(missing_ok=True)
 
     def _append_log(self, line: str) -> None:
         if self._record and self._record.get("log"):

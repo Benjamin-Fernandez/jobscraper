@@ -2262,8 +2262,8 @@ value)`. `cli.cmd_run` reads the stored `batch_size`.
   could otherwise start a run or a model call.
 
 #### M11-T4 · Resume upload
-- **STATUS:** `NOT_STARTED`
-- **Completed:** —
+- **STATUS:** `DONE`
+- **Completed:** 2026-09-25
 - **Do:** `PUT /api/resume` per the contract: size cap, magic-byte check, atomic
   write to `data/resume.pdf|docx` (removing the other format so exactly one
   resume exists), sha256 in the answer. The UI then starts `POST /api/jobs/profile`.
@@ -2271,6 +2271,26 @@ value)`. `cli.cmd_run` reads the stored `batch_size`.
   a text file labelled `application/pdf` answers `415`; a `multipart/form-data`
   post is refused (the CSRF guard); `data/` never holds a partial file.
 - **Notes:** run `/ecc:security-review` on this task before `DONE`.
+  Verify 10/10 (`-k resume_upload`); `-k web` 61/61; full suite 284/284. Router
+  `web/routers/resume.py`. Accepts only `application/pdf` and the DOCX type
+  (media-type parameters and case ignored); forms, `text/plain`, octet-stream
+  and a missing type answer `415`. Size is capped from `Content-Length` and from
+  the bytes read (a chunked 7 MB body answers `413`). A DOCX must also be a real
+  ZIP holding `word/document.xml`, so a spreadsheet labelled DOCX answers `415`.
+  The body is validated in memory, written to a temp file, fsynced and
+  `os.replace`d under a lock, then the other format is deleted. A failed rename
+  leaves the old resume and no temp file, which is tested. Live check on :8799:
+  PDF saved with a matching sha256; `curl -F` gave `415`; 6 MB gave `413`.
+  **Security review** (`ecc:security-review`, inline) found and fixed:
+  (1) clickjacking - the UI now starts runs and uploads, and a framed page's
+  clicks would be same-origin, so every response now carries
+  `X-Frame-Options: DENY`, `CSP: frame-ancestors 'none'` and `nosniff`;
+  (2) unbounded `data/jobs/` - only the newest 50 logs are kept;
+  (3) a failed job start echoed `str(OSError)` (paths) - it now gives only the
+  strerror. Clean: parameterised SQL, no shell, fixed filenames, no path
+  traversal from the job record, strict validation on every input. The
+  cross-site write guard is in T3's note. Lane H: render log lines as text,
+  never `v-html` - they carry scraped job titles.
 
 ---
 

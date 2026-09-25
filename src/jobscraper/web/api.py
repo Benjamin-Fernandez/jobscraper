@@ -120,6 +120,36 @@ class CrossSiteWriteGuard:
         return not _host_allowed(host, self.hosts)
 
 
+class SecurityHeaders:
+    """Headers on every response that stop another site framing the app.
+
+    Since M11 the UI has buttons that start runs and upload a resume. A page
+    that framed it could trick a click into one (clickjacking), and those
+    requests would be same-origin, so no Host or Origin check would catch them.
+    """
+
+    HEADERS = [(b"x-frame-options", b"DENY"),
+               (b"content-security-policy", b"frame-ancestors 'none'"),
+               (b"x-content-type-options", b"nosniff")]
+
+    def __init__(self, app: Any):
+        self.app = app
+
+    async def __call__(self, scope: dict, receive: Any, send: Any) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        async def with_headers(message: dict) -> None:
+            if message["type"] == "http.response.start":
+                names = {k.lower() for k, _ in message.get("headers", [])}
+                message["headers"] = list(message.get("headers", [])) + [
+                    (k, v) for k, v in self.HEADERS if k not in names]
+            await send(message)
+
+        await self.app(scope, receive, with_headers)
+
+
 def create_app(cfg: Optional[Config] = None,
                store_factory: Optional[Callable[[], Any]] = None,
                static_dir: Path = STATIC_DIR,
@@ -143,6 +173,7 @@ def create_app(cfg: Optional[Config] = None,
     # Added last runs first: the Host check wraps the cross-site check.
     app.add_middleware(CrossSiteWriteGuard, hosts=hosts)
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=hosts)
+    app.add_middleware(SecurityHeaders)          # outermost: every response
     app.state.cfg = cfg
     app.state.store_factory = store_factory or _default_store_factory(cfg)
     app.state.jobs = JobManager(cfg.db_path.parent / "jobs",

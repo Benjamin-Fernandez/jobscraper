@@ -416,3 +416,192 @@ def test_web_refuses_a_cross_site_write():
                                              "Sec-Fetch-Site": "same-origin"})
         assert r.status_code == 202, r.text
         _wait(c)
+
+
+# ---------------------------------------------------------------- M11-T4
+
+import hashlib  # noqa: E402
+import io  # noqa: E402
+import zipfile  # noqa: E402
+
+PDF = "application/pdf"
+DOCX = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+MB = 1024 * 1024
+
+
+def _pdf(size: int = 2048) -> bytes:
+    head = b"%PDF-1.7\n% resume\n"
+    return head + b"x" * max(0, size - len(head))
+
+
+def _docx() -> bytes:
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as z:
+        z.writestr("[Content_Types].xml", "<Types/>")
+        z.writestr("word/document.xml", "<w:document>Jane Doe</w:document>")
+    return buf.getvalue()
+
+
+def _files(d: Path) -> set[str]:
+    """What is in the resume directory, ignoring the database's own files."""
+    return {p.name for p in d.iterdir()
+            if p.is_file() and not p.name.startswith("jobscraper.db")}
+
+
+def _put(c: TestClient, body, content_type: str | None = PDF, **headers):
+    if content_type is not None:
+        headers["Content-Type"] = content_type
+    return c.put("/api/resume", content=body, headers=headers)
+
+
+def test_resume_upload_saves_a_pdf_and_hashes_it():
+    body = _pdf()
+    with _world() as (c, cfg, data):
+        r = _put(c, body)
+        assert r.status_code == 200, r.text
+        assert r.json() == {"saved": "resume.pdf", "bytes": len(body),
+                            "sha256": hashlib.sha256(body).hexdigest()}
+        assert (cfg.resume_dir / "resume.pdf").read_bytes() == body
+        assert _files(data) == {"resume.pdf"}          # no temp file left behind
+
+
+def test_resume_upload_accepts_media_type_parameters_and_case():
+    with _world() as (c, cfg, data):
+        assert _put(c, _pdf(), "Application/PDF; charset=binary").status_code == 200
+
+
+def test_resume_upload_keeps_exactly_one_resume():
+    with _world() as (c, cfg, data):
+        assert _put(c, _pdf()).status_code == 200
+        r = _put(c, _docx(), DOCX)
+        assert r.status_code == 200 and r.json()["saved"] == "resume.docx", r.text
+        assert _files(data) == {"resume.docx"}
+        assert _put(c, _pdf()).status_code == 200
+        assert _files(data) == {"resume.pdf"}
+
+
+def test_resume_upload_over_5_mb_is_413_and_writes_nothing():
+    with _world() as (c, cfg, data):
+        assert _put(c, _pdf(6 * MB)).status_code == 413
+        assert _put(c, _pdf(5 * MB + 1)).status_code == 413
+        assert _files(data) == set()
+        assert _put(c, _pdf(5 * MB)).status_code == 200    # the cap itself is fine
+
+
+def test_resume_upload_counts_the_bytes_not_just_the_header():
+    """A chunked body has no Content-Length to check; the cap still holds."""
+    def chunks():
+        yield b"%PDF-1.7\n"
+        for _ in range(7):
+            yield b"x" * MB
+
+    with _world() as (c, cfg, data):
+        r = _put(c, chunks())
+        assert r.status_code == 413
+        assert _files(data) == set()
+
+
+def test_resume_upload_refuses_a_file_that_is_not_what_it_claims():
+    with _world() as (c, cfg, data):
+        assert _put(c, b"just some text, not a pdf").status_code == 415
+        assert _put(c, _docx(), PDF).status_code == 415          # zip labelled pdf
+        assert _put(c, _pdf(), DOCX).status_code == 415          # pdf labelled docx
+        assert _put(c, b"PK\x03\x04 not a zip", DOCX).status_code == 415
+        other_zip = io.BytesIO()
+        with zipfile.ZipFile(other_zip, "w") as z:
+            z.writestr("xl/workbook.xml", "<workbook/>")          # a spreadsheet
+        assert _put(c, other_zip.getvalue(), DOCX).status_code == 415
+        assert _put(c, b"").status_code == 415
+        assert _files(data) == set()
+
+
+def test_resume_upload_refuses_forms_and_other_types():
+    """A cross-site page can send these three with no CORS preflight; the
+    raw-body, non-form content type is the CSRF guard (PRD M11)."""
+    with _world() as (c, cfg, data):
+        r = c.put("/api/resume", files={"file": ("resume.pdf", _pdf(), PDF)})
+        assert r.status_code == 415                               # multipart/form-data
+        assert _put(c, b"a=b", "application/x-www-form-urlencoded").status_code == 415
+        assert _put(c, _pdf(), "text/plain").status_code == 415
+        assert _put(c, _pdf(), None).status_code == 415           # no content type
+        assert _put(c, _pdf(), "application/octet-stream").status_code == 415
+        assert c.post("/api/resume", content=_pdf(),
+                      headers={"Content-Type": PDF}).status_code == 405
+        assert _files(data) == set()
+
+
+def test_resume_upload_rejected_keeps_the_existing_resume():
+    with _world() as (c, cfg, data):
+        good = _pdf()
+        assert _put(c, good).status_code == 200
+        assert _put(c, b"not a pdf").status_code == 415
+        assert _put(c, _pdf(6 * MB)).status_code == 413
+        assert (cfg.resume_dir / "resume.pdf").read_bytes() == good
+        assert _files(data) == {"resume.pdf"}
+
+
+def test_resume_upload_a_failed_write_leaves_no_partial_file():
+    """If the final rename fails, the old resume stands and no temp file remains."""
+    from jobscraper.web.routers import resume as resume_router
+    with _world() as (c, cfg, data):
+        good = _pdf()
+        assert _put(c, good).status_code == 200
+        real = resume_router.os.replace
+
+        def broken(src, dst):
+            raise OSError("disk full")
+
+        resume_router.os.replace = broken
+        try:
+            r = _put(c, _pdf(4096))
+        finally:
+            resume_router.os.replace = real
+        assert r.status_code == 500
+        assert (cfg.resume_dir / "resume.pdf").read_bytes() == good
+        assert _files(data) == {"resume.pdf"}
+
+
+def test_web_pages_cannot_be_framed_by_another_site():
+    """Security review (M11-T4): the UI now has buttons that start runs and
+    upload files, so a foreign page must not be able to frame it and trick a
+    click (clickjacking) - those requests would be same-origin."""
+    with _world() as (c, cfg, data):
+        for path in ("/", "/api/settings"):
+            r = c.get(path)
+            assert r.headers["x-frame-options"] == "DENY", path
+            assert "frame-ancestors 'none'" in r.headers["content-security-policy"]
+            assert r.headers["x-content-type-options"] == "nosniff"
+
+
+def test_web_jobs_old_logs_are_pruned():
+    with _world(job_command=_stub(QUICK)) as (c, cfg, data):
+        jobs_dir = data / "jobs"
+        jobs_dir.mkdir()
+        for i in range(5):
+            (jobs_dir / f"2026010{i}T000000Z-run.log").write_text("old\n",
+                                                                  encoding="utf-8")
+        c.app.state.jobs.keep_logs = 3
+        assert c.post("/api/jobs/run").status_code == 202
+        job = _wait(c)
+        logs = sorted(p.name for p in jobs_dir.glob("*.log"))
+        assert len(logs) == 3 and f"{job['id']}.log" in logs, logs
+        assert "20260104T000000Z-run.log" in logs          # the newest old ones stay
+
+
+def test_web_jobs_a_start_failure_does_not_leak_paths():
+    def missing(kind, opts):
+        return [str(ROOT / "no-such-dir" / "no-such-python.exe")]
+
+    with _world(job_command=missing) as (c, cfg, data):
+        r = c.post("/api/jobs/run")
+        assert r.status_code == 500
+        assert "no-such-dir" not in r.text, r.text
+        assert c.get("/api/jobs/current").json()["state"] == "failed"
+        assert c.post("/api/jobs/cancel").status_code == 409
+
+
+def test_resume_upload_refuses_a_cross_site_put():
+    with _world() as (c, cfg, data):
+        r = _put(c, _pdf(), Origin="https://attacker.example")
+        assert r.status_code == 403
+        assert _files(data) == set()
