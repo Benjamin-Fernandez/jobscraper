@@ -108,9 +108,15 @@ async function loadStats() {
 
 // `follow`: a run just finished - if the newest run was on screen, move to the
 // new newest one, so the Inbox shows what the run found.
+// Same guard as loadJobs (Vue review, M12): only the newest call may write.
+let runsSeq = 0
+
 async function loadRuns({ follow = false } = {}) {
+  const seq = ++runsSeq
   const newest = runs.value[0]?.run_no ?? null
-  runs.value = await getRuns()
+  const data = await getRuns()
+  if (seq !== runsSeq) return
+  runs.value = data
   if (run.value === null || (follow && run.value === newest)) {
     run.value = runs.value[0]?.run_no ?? null
   }
