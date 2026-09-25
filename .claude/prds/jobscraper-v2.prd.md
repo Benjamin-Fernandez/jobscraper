@@ -86,8 +86,8 @@ tests for all 8 ATS adapters and HTTP failure classification, every CLI verb end
 to end, and the judge's no-tools flag),
 CI green (tests + Docker) on `v2-rebuild`, pushed to
 https://github.com/Benjamin-Fernandez/jobscraper. v1 is retired to
-`archive/v1-src/`; `master` still holds the v1 restore point - merging
-`v2-rebuild` into `master` is the user's call.
+`archive/v1-src/`. **v2 is merged into `master`** (2026-09-24, fast-forward);
+v1 is kept at the `v1-final` tag.
 
 **Live data:** one full cycle done - 224 companies, 21,600 postings, 23 roles
 on the shortlist, 3 migrated v1 applications. Profile v2 (re-derived after the
@@ -105,11 +105,13 @@ Morgan Stanley, PayPal, NCS. Agents may not edit the watchlist (M1-T3), so
 verified replacement entries are being prepared as a proposal for the user to
 paste - see the latest ledger note or the handoff message for its location.
 
-**Decisions waiting on the user:** Q2 (Dismiss: session-only today), Q3
-(profile change re-decides everything - accepted cost?), whether to add `avp`
-to `title_deny`, whether to add "trade support engineer" to `title_allow`,
-Docker model transport (image has no `claude`; `review --export/--apply` is the
-in-container path), and merging `v2-rebuild` into `master`.
+**Decisions taken 2026-09-24:** Q2 leave Dismiss session-only; Q3 re-deciding on a
+profile change is acceptable; `avp` not denied; "trade support engineer" allowed;
+the 22 verified watchlist fixes applied; v2 merged into `master`; Docker's judge
+is Qwen via Ollama (D-16), not `claude`.
+
+**Next: M11 + M12 (2026-09-25)** — run control, resume upload and companies-per-run
+in the web app, and a tabbed, navigable UI. Wave-3 lanes in §0.6.
 
 **2026-09-24 — Qwen replaces Haiku; the funnel is lax (D-16–D-18).** A model-led
 redesign (Qwen deciding everything from a prose profile document) was planned
@@ -228,6 +230,16 @@ leave it empty. Re-cutting lanes is a Lead decision recorded here.
 M9-T1 (retire v1, which rewrites `cli.py`) waits for Lane E's merge so the two
 do not collide in `cli.py`. Lane F is independent of M9: it builds from
 `requirements.txt` and `src/`.
+
+#### Wave 3 (2026-09-25, M11 + M12)
+
+| Lane | Role | Tasks | Owns (may edit) | Branch / worktree |
+|---|---|---|---|---|
+| **A** | Lead | Contracts (M11 table), merge gate, reviews, PRD | the PRD, `README.md` | main checkout, `master` |
+| **G** | Web backend | M11-T1 → T2 → T3 → T4 | `store.py` (settings only), `cli.py` (`cmd_run`/`cmd_status` batch-size lines only), `src/jobscraper/web/` except `static/`, `tests/test_web*.py`, `tests/test_settings.py` | `../JobScraper-lane-g`, `lane/g-control` |
+| **H** | Web frontend | M12-T1 → T2 → T3 → T4 → T5 | `web/`, `src/jobscraper/web/static/` | `../JobScraper-lane-h`, `lane/h-ui` |
+
+H builds against the M11 contract with a mocked API and merges after G.
 
 #### Shared files — the only exceptions to ownership
 
@@ -2149,6 +2161,150 @@ Legend: `STATUS` · `Completed` (date) · `Verify` (command that proves it) · `
   jobscraper web` serves `/`, every asset it references, and `/api/runs`.
   There is no `pyproject.toml`, so `pip install -e .` is not possible yet; the
   path that works is requirements + `PYTHONPATH=src`.
+
+---
+
+### M11 — Control from the web app
+
+**Outcome:** everything a fortnightly session needs happens in the browser: start
+a run and watch it, upload a new resume, set how many companies a run takes. The
+CLI keeps working and stays the source of truth for *how* a run behaves.
+
+**Design constraints (normative).**
+- **The web app never imports `pipeline.py`** (§8.2). It starts work as a child
+  process - `python -m jobscraper [--config X] run …` / `profile --refresh` -
+  with stdout captured to `data/jobs/<started_at>.log`. A crash in a run cannot
+  take the web app down, and the layering guard stays green.
+- **One job at a time.** A run or a profile refresh already in flight answers
+  `409` to a second start. The lock lives in the web process; a stale lock
+  (process gone) is cleared on the next request.
+- **Companies per run is a stored setting**, not a config edit: `config/` is
+  read-only in Docker. Effective batch size = `--batch-size` flag, else the stored
+  setting, else `run.batch_size` in config.
+- **No new attack surface on the loopback-only app (R-9):** uploads are raw
+  bodies with a non-form content type (a cross-site page cannot send one without
+  a CORS preflight the app never grants), capped at 5 MB, and checked by magic
+  bytes (`%PDF` / ZIP for DOCX) before they touch `data/`.
+
+**API contract (both lanes build against this; change it only through the Lead).**
+
+| Method | Route | Body / query | Answer |
+|---|---|---|---|
+| `GET` | `/api/settings` | - | `{batch_size, batch_size_default, enabled_companies, cycle_days, runs_per_day_needed}` |
+| `PUT` | `/api/settings` | `{batch_size: int}`, 1 ≤ n ≤ enabled companies | the same shape; `422` out of range |
+| `POST` | `/api/jobs/run` | `{batch_size?: int, dry_run?: bool}` | `202` + job; `409` if a job is running |
+| `POST` | `/api/jobs/profile` | - | `202` + job (re-derives the profile from the stored resume); `409` if busy |
+| `GET` | `/api/jobs/current` | `?tail=200` | job: `{id, kind: run\|profile, state: idle\|running\|succeeded\|failed, started_at, finished_at, exit_code, log: [lines]}` |
+| `POST` | `/api/jobs/cancel` | - | `200` + job (terminated); `409` if idle |
+| `GET` | `/api/profile` | - | `{present, profile_version, source_file, parsed_at, summary, skills, target_titles, interests}` |
+| `PUT` | `/api/resume` | raw body, `Content-Type: application/pdf` or DOCX mime | `{saved: "resume.pdf", bytes, sha256}`; `413` > 5 MB; `415` wrong type or bad magic |
+
+Store additions: a `settings` table (`key TEXT PRIMARY KEY, value TEXT,
+updated_at`) with `Store.get_setting(key, default)` / `Store.set_setting(key,
+value)`. `cli.cmd_run` reads the stored `batch_size`.
+
+#### M11-T1 · Stored settings + effective batch size
+- **STATUS:** `NOT_STARTED`
+- **Completed:** —
+- **Do:** `settings` table and accessors in `store.py`; `cmd_run` resolves the
+  batch size flag → setting → config; `status` uses the same effective value for
+  its cadence line.
+- **Verify:** `python tests/run_tests.py -k settings` — a stored `batch_size` of 25
+  makes `run` plan 25 companies; the flag overrides it; with no setting, config's
+  value is used.
+
+#### M11-T2 · Settings and profile endpoints
+- **STATUS:** `NOT_STARTED`
+- **Completed:** —
+- **Do:** `GET/PUT /api/settings`, `GET /api/profile` per the contract, in one new
+  router file.
+- **Verify:** `python tests/run_tests.py -k web` — round-trip a batch size; `0`,
+  `-1` and `enabled+1` answer `422`; `/api/profile` with no derived profile answers
+  `{present: false}` rather than an error.
+
+#### M11-T3 · Runs and profile refreshes as background jobs
+- **STATUS:** `NOT_STARTED`
+- **Completed:** —
+- **Do:** `POST /api/jobs/run`, `POST /api/jobs/profile`, `GET /api/jobs/current`,
+  `POST /api/jobs/cancel` per the contract, launching the CLI as a child process
+  with its log captured under `data/jobs/`.
+- **Verify:** tests with a stub command (no network, no model): start → `202`
+  and `running`; a second start → `409`; the job finishes → `succeeded` with its
+  exit code and log lines; cancel terminates it; a job whose process vanished is
+  reported `failed`, not `running` forever. Plus one live check: start a
+  `--dry-run` from the API and read its log.
+
+#### M11-T4 · Resume upload
+- **STATUS:** `NOT_STARTED`
+- **Completed:** —
+- **Do:** `PUT /api/resume` per the contract: size cap, magic-byte check, atomic
+  write to `data/resume.pdf|docx` (removing the other format so exactly one
+  resume exists), sha256 in the answer. The UI then starts `POST /api/jobs/profile`.
+- **Verify:** `-k resume_upload` — a PDF saves and hashes; 6 MB answers `413`;
+  a text file labelled `application/pdf` answers `415`; a `multipart/form-data`
+  post is refused (the CSRF guard); `data/` never holds a partial file.
+- **Notes:** run `/ecc:security-review` on this task before `DONE`.
+
+---
+
+### M12 — A better web app
+
+**Outcome:** the web app feels like one application, not a page: tabs across the
+top, every screen one click away, the browser's back/forward and refresh keep you
+where you were, and each tab says what it holds before you open it.
+
+#### M12-T1 · App shell: top tabs and real navigation
+- **STATUS:** `NOT_STARTED`
+- **Completed:** —
+- **Do:** a sticky header with the app name and a top tab bar - **Inbox,
+  Applications, Runs, Profile, Settings** - driven by the existing `TABS` registry
+  (the M7-T4 three-file rule must still hold). The active tab lives in the URL
+  (`#/inbox`, `#/runs`, …) so refresh, back and forward work and a tab can be
+  bookmarked. Count badges on Inbox (new roles) and Applications (active ones).
+  Keyboard: arrow keys move between tabs (ARIA `tablist` / `tab` / `tabpanel`).
+  The run selector belongs to the tabs that use it (Inbox, Applications), not
+  the global header. Loading, empty and error states on every tab.
+- **Verify:** `npm test` — route ↔ tab sync both ways; unknown hash falls back to
+  Inbox; badges reflect the data; arrow-key navigation; M7-T4's probe still adds
+  a tab in exactly three files.
+
+#### M12-T2 · Runs tab
+- **STATUS:** `NOT_STARTED`
+- **Completed:** —
+- **Do:** start a run (companies for this run, prefilled from the setting; a
+  dry-run toggle), a live log that polls `/api/jobs/current` while running, cancel,
+  and the run history (date, companies, postings, accepted, status) from
+  `/api/runs`. When a run finishes, Inbox reloads.
+- **Verify:** Vitest with a mocked API: start → polling shows log lines → done
+  refreshes the run list; `409` shows "a job is already running"; cancel works.
+
+#### M12-T3 · Profile tab
+- **STATUS:** `NOT_STARTED`
+- **Completed:** —
+- **Do:** drag-and-drop or pick a resume (PDF/DOCX), upload with `PUT
+  /api/resume`, then start the profile refresh and show its progress; display the
+  current profile (summary, skills, target titles, interests, version, source).
+- **Verify:** Vitest: a PDF uploads and triggers the refresh; a `.txt` is refused
+  in the browser before upload; the profile renders; a `413`/`415` shows a readable
+  error.
+
+#### M12-T4 · Settings tab
+- **STATUS:** `NOT_STARTED`
+- **Completed:** —
+- **Do:** companies per run (number input with the cadence hint "a full 14-day
+  sweep needs N runs/day at this size"), saved with `PUT /api/settings`.
+- **Verify:** Vitest: saving calls the API and shows the saved value; out-of-range
+  is blocked in the form and a server `422` is shown.
+
+#### M12-T5 · Look and feel pass
+- **STATUS:** `NOT_STARTED`
+- **Completed:** —
+- **Do:** one consistent visual system (spacing, type scale, colour tokens,
+  light/dark), responsive down to a phone width, focus rings, no layout shift
+  when data loads. Rebuild `src/jobscraper/web/static/` and commit it.
+- **Verify:** `npm test` green; `npm run build`; the Lead opens every tab in a
+  browser at desktop and phone widths; `/ecc:vue-review` has no unresolved
+  high-severity finding.
 
 ---
 
