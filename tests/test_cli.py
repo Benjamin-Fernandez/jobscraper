@@ -136,6 +136,21 @@ def test_cli_reresolve_clears_a_cached_provider():
     assert code == 1 and "no company" in out, out
 
 
+def test_cli_batch_size_below_one_is_refused_not_ignored():
+    """M11 review finding: `--batch-size 0` used to fall through silently to
+    the stored setting. A run of zero companies is refused at parse time."""
+    tmp, cfg = _world()
+    for bad in ("0", "-3", "ten"):
+        err = io.StringIO()
+        try:
+            with contextlib.redirect_stderr(err):
+                cli.main(["--config", cfg, "run", "--batch-size", bad])
+            raise AssertionError(f"--batch-size {bad} was accepted")
+        except SystemExit as exc:
+            assert exc.code == 2, bad
+        assert "--batch-size" in err.getvalue(), bad
+
+
 def test_cli_every_verb_is_wired():
     """Each registered verb has a handler; a verb that parses but has no `fn`
     would only fail when someone types it."""
