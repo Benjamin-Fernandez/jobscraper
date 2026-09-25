@@ -2234,8 +2234,8 @@ value)`. `cli.cmd_run` reads the stored `batch_size`.
   `profile.overrides.yaml` merged in; a malformed file reads as `present: false`.
 
 #### M11-T3 · Runs and profile refreshes as background jobs
-- **STATUS:** `NOT_STARTED`
-- **Completed:** —
+- **STATUS:** `DONE`
+- **Completed:** 2026-09-25
 - **Do:** `POST /api/jobs/run`, `POST /api/jobs/profile`, `GET /api/jobs/current`,
   `POST /api/jobs/cancel` per the contract, launching the CLI as a child process
   with its log captured under `data/jobs/`.
@@ -2244,6 +2244,22 @@ value)`. `cli.cmd_run` reads the stored `batch_size`.
   exit code and log lines; cancel terminates it; a job whose process vanished is
   reported `failed`, not `running` forever. Plus one live check: start a
   `--dry-run` from the API and read its log.
+- **Notes:** `-k web` 48/48 (15 new job tests); full suite 271/271. The live check
+  used a temp config and DB (224 enabled), port 8799, `{batch_size: 2, dry_run:
+  true}`: `202`/`running`; a second start gave `409`; the job ended `succeeded`,
+  exit 0, with the log "2 due ... ok 2, failed 0, 66 seen". Cancel on a batch of
+  8 gave `200` `failed` `[cancelled from the web app]`. `web/jobs.py` holds the
+  manager. The job record is also saved to `data/jobs/current.json`, so after a
+  web restart a live PID keeps the slot (`409`) and a dead one with no exit code
+  reads `failed`. It never kills a PID it did not spawn: cancelling such a job
+  answers `409`. On Windows, cancel is `taskkill /T /F`, which takes the child's
+  own children with it. `create_app(job_command=, config_path=)`: **for
+  `python -m jobscraper --config X web` to launch jobs with X, `cmd_web` must pass
+  `config_path=args.config`** (Lead-owned line). `JOBSCRAPER_CONFIG` already works,
+  because the child inherits it. Added `CrossSiteWriteGuard` (`api.py`): a
+  write to `/api` whose `Origin` is foreign or `null`, or whose `Sec-Fetch-Site`
+  is `cross-site`, gets `403`. A cross-site `<form>` POST needs no preflight and
+  could otherwise start a run or a model call.
 
 #### M11-T4 · Resume upload
 - **STATUS:** `NOT_STARTED`

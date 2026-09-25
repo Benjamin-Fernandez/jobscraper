@@ -11,9 +11,11 @@ the real routes with no database on disk.
 from __future__ import annotations
 
 import importlib
+import os
 import pkgutil
 from pathlib import Path
 from typing import Any, Callable, Optional
+from urllib.parse import urlsplit
 
 from fastapi import FastAPI
 from fastapi.responses import PlainTextResponse
@@ -22,6 +24,7 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from jobscraper.config import Config, load_config
 from jobscraper.web import routers
+from jobscraper.web.jobs import CommandBuilder, JobManager, cli_command
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 
@@ -60,22 +63,90 @@ def _include_routers(app: FastAPI) -> None:
 # rebinding). Such a request carries the attacker's hostname, not one of these.
 DEFAULT_ALLOWED_HOSTS = ["127.0.0.1", "localhost", "::1"]
 
+UNSAFE_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
+
+
+def _host_allowed(host: Optional[str], hosts: list[str]) -> bool:
+    """`host` against the allowed list, with TrustedHost's `*` / `*.x` forms."""
+    if not host:
+        return False
+    host = host.lower()
+    for pattern in hosts:
+        pattern = pattern.lower()
+        if pattern == "*" or pattern == host:
+            return True
+        if pattern.startswith("*.") and host.endswith(pattern[1:]):
+            return True
+    return False
+
+
+class CrossSiteWriteGuard:
+    """Refuse a write to `/api` that a browser says came from another site.
+
+    The Host check stops DNS rebinding, but not a plain cross-site request: a
+    page anywhere on the web can make the user's browser POST a form to
+    http://127.0.0.1:8765 with no CORS preflight, and its Host header is ours.
+    Since M11 such a request could start a run or a model call. Browsers mark
+    it: `Origin` names the other site (or is "null"), `Sec-Fetch-Site` says
+    "cross-site". Either one gets a 403. Requests with neither - curl, the
+    CLI, tests - are not from a browser page and pass. The origin's port is
+    ignored, so the Vite dev server's proxy (localhost:5173) still works.
+    """
+
+    def __init__(self, app: Any, hosts: list[str]):
+        self.app = app
+        self.hosts = hosts
+
+    async def __call__(self, scope: dict, receive: Any, send: Any) -> None:
+        if (scope["type"] == "http" and scope["method"] in UNSAFE_METHODS
+                and scope["path"].startswith("/api/") and self._cross_site(scope)):
+            response = PlainTextResponse("cross-site request refused", status_code=403)
+            await response(scope, receive, send)
+            return
+        await self.app(scope, receive, send)
+
+    def _cross_site(self, scope: dict) -> bool:
+        headers = {k.decode("latin-1").lower(): v.decode("latin-1")
+                   for k, v in scope.get("headers", [])}
+        if headers.get("sec-fetch-site", "").lower() == "cross-site":
+            return True
+        origin = headers.get("origin")
+        if origin is None:
+            return False
+        try:
+            host = urlsplit(origin.strip()).hostname
+        except ValueError:
+            return True
+        return not _host_allowed(host, self.hosts)
+
 
 def create_app(cfg: Optional[Config] = None,
                store_factory: Optional[Callable[[], Any]] = None,
                static_dir: Path = STATIC_DIR,
-               allowed_hosts: Optional[list[str]] = None) -> FastAPI:
+               allowed_hosts: Optional[list[str]] = None,
+               job_command: Optional[CommandBuilder] = None,
+               config_path: Optional[str | os.PathLike] = None) -> FastAPI:
     """Build the app. Every argument has a production default.
 
     `allowed_hosts` defaults to `web.allowed_hosts` in config.yaml, else the
     loopback names - extend it only if you deliberately serve under another name.
+
+    `job_command` builds the argv of a background job (M11-T3); the default is
+    the CLI itself, given `--config config_path` when that is set. Without it
+    the child finds its config as this process did (`JOBSCRAPER_CONFIG`, which
+    it inherits, else `config/config.yaml`). Jobs log under `data/jobs/`, beside
+    the database.
     """
     cfg = cfg or load_config()
     app = FastAPI(title="JobScraper", version="2")
     hosts = allowed_hosts or list(cfg.web.get("allowed_hosts") or DEFAULT_ALLOWED_HOSTS)
+    # Added last runs first: the Host check wraps the cross-site check.
+    app.add_middleware(CrossSiteWriteGuard, hosts=hosts)
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=hosts)
     app.state.cfg = cfg
     app.state.store_factory = store_factory or _default_store_factory(cfg)
+    app.state.jobs = JobManager(cfg.db_path.parent / "jobs",
+                                job_command or cli_command(config_path))
 
     # API first: the static mount below catches every path it is given, so
     # anything registered after it would be unreachable.
