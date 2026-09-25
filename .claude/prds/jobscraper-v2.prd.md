@@ -2309,14 +2309,24 @@ where you were, and each tab says what it holds before you open it.
   `routers/runs.py` fills them with no UI change.
 
 #### M12-T3 · Profile tab
-- **STATUS:** `NOT_STARTED`
-- **Completed:** —
+- **STATUS:** `DONE`
+- **Completed:** 2026-09-25
 - **Do:** drag-and-drop or pick a resume (PDF/DOCX), upload with `PUT
   /api/resume`, then start the profile refresh and show its progress; display the
   current profile (summary, skills, target titles, interests, version, source).
 - **Verify:** Vitest: a PDF uploads and triggers the refresh; a `.txt` is refused
   in the browser before upload; the profile renders; a `413`/`415` shows a readable
   error.
+- **Notes:** Verified 2026-09-25 (Lane H), `web/tests/Profile.test.js` 13 tests: the PDF goes
+  up as `PUT api/resume` with the `File` itself as body (asserted not `FormData`) and
+  `Content-Type: application/pdf`, then `POST /api/jobs/profile`; progress polls the
+  job's log and on success reloads `/api/profile` (version 2 → 3). A dropped `.docx`
+  with an empty browser type is sent as the DOCX mime (by extension). `.txt` and
+  files over 5 MB are refused before any request. Server `415` (the fake checks magic
+  bytes) and `413` are shown in words, with no refresh started. `409` on the refresh
+  keeps the saved resume and says to refresh later. `{present: false}` → "No profile
+  yet", not an error. Without M11 → readable 404. Uploads and refreshes are disabled
+  while any job runs.
 
 #### M12-T4 · Settings tab
 - **STATUS:** `NOT_STARTED`
