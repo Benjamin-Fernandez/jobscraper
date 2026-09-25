@@ -20,8 +20,9 @@ export function when(iso) {
   return m[4] ? `${day} ${m[4]}:${m[5]} UTC` : day
 }
 
-export function plural(n, word) {
-  return `${n} ${word}${n === 1 ? '' : 's'}`
+// plural(3, 'role') -> "3 roles"; plural(2, 'company', 'companies').
+export function plural(n, word, many = `${word}s`) {
+  return `${n} ${n === 1 ? word : many}`
 }
 
 // Posting URLs are scraped from third-party boards. Only http(s) becomes a

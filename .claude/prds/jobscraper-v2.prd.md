@@ -2329,12 +2329,21 @@ where you were, and each tab says what it holds before you open it.
   while any job runs.
 
 #### M12-T4 · Settings tab
-- **STATUS:** `NOT_STARTED`
-- **Completed:** —
+- **STATUS:** `DONE`
+- **Completed:** 2026-09-25
 - **Do:** companies per run (number input with the cadence hint "a full 14-day
   sweep needs N runs/day at this size"), saved with `PUT /api/settings`.
 - **Verify:** Vitest: saving calls the API and shows the saved value; out-of-range
   is blocked in the form and a server `422` is shown.
+- **Notes:** Verified 2026-09-25 (Lane H), `web/tests/Settings.test.js` 7 tests: saving 25 sends
+  `PUT /api/settings {batch_size: 25}` and shows "Saved: 25 companies per run."; empty,
+  `0`, `-1`, `225` (enabled = 224) and `2.5` disable Save with a reason and send
+  nothing; a server `422` (the watchlist shrank to 150 after load) shows the server's
+  detail. The hint reads "A full 14-day sweep needs 1.6 runs/day at this size (23 runs
+  to cover 224 companies)". For the saved value it uses the server's
+  `runs_per_day_needed`; for a draft it uses `ceil(enabled / n) / cycle_days`, rounded
+  to one decimal. Lane G should confirm the server rounds the same way. Without M11:
+  a readable 404 and a retry button.
 
 #### M12-T5 · Look and feel pass
 - **STATUS:** `NOT_STARTED`
