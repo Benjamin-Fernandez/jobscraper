@@ -2347,7 +2347,7 @@ where you were, and each tab says what it holds before you open it.
   `409` → "A job is already running"; cancel → `POST /api/jobs/cancel`, state
   `failed (exit -15)`; no polling while idle, after the end, or after unmount
   (mutating `schedule()` to always poll fails 3 tests). Polling lives in
-  `web/src/job.js`. A run that ends while the tab is closed is reported when the tab
+  `web/src/composables/useJob.js`. A run that ends while the tab is closed is reported when the tab
   reopens, once. Without the M11 routes the tab shows "404 Not Found ... this server
   does not offer that yet" and still lists the history. **Backend gap:** `/api/runs`
   returns only `run_no, finished_at, status, accepted`, so Companies and Postings show
@@ -2389,11 +2389,12 @@ where you were, and each tab says what it holds before you open it.
   detail. The hint reads "A full 14-day sweep needs 1.6 runs/day at this size (23 runs
   to cover 224 companies)". For the saved value it uses the server's
   `runs_per_day_needed`; for a draft it uses `ceil(enabled / n) / cycle_days`, rounded
-  to one decimal. Lane G should confirm the server rounds the same way. Without M11:
-  a readable 404 and a retry button.
+  to one decimal. It matched the merged M11 server live (10 → 1.6, 12 → 1.3). With
+  0 enabled companies (before the first sync) the form sends the value and shows the
+  server's 422 text. Without M11: a readable 404 and a retry button.
 
 #### M12-T5 · Look and feel pass
-- **STATUS:** `NOT_STARTED`
+- **STATUS:** `IN_PROGRESS`
 - **Completed:** —
 - **Do:** one consistent visual system (spacing, type scale, colour tokens,
   light/dark), responsive down to a phone width, focus rings, no layout shift
@@ -2401,6 +2402,31 @@ where you were, and each tab says what it holds before you open it.
 - **Verify:** `npm test` green; `npm run build`; the Lead opens every tab in a
   browser at desktop and phone widths; `/ecc:vue-review` has no unresolved
   high-severity finding.
+- **Notes:** 2026-09-25 (Lane H). Lane H's part is done: `npm test` 88/88, `npm run build`,
+  and the rebuilt `static/` is committed after merging M11 from master. What is left
+  for the Lead is the Verify's own browser pass and `/ecc:vue-review`, which runs as an
+  agent, so lanes may not run it. Direction: a quiet "ledger desk". Warm paper
+  neutrals, graphite in dark mode, one ink-blue for actions, and green/amber/red only
+  for state. Every number (counts, badges, run numbers, the log) is set in tabular
+  monospace. Roles are ruled lines, not boxed cards, and the judge's reason is a ruled
+  pull-quote. System fonts only. Tokens (colour, type scale, 4px space scale, radius,
+  control height) live in `web/src/style.css`. `prefers-color-scheme` handles dark
+  mode, `:focus-visible` gives one ring for everything, and `prefers-reduced-motion` is
+  respected. Lane H's own browser pass ran the built app on :8798 against copies of
+  the real DB and shortlist, with M11 merged, in Chrome at 1280 px and 375 px, light
+  and dark, on every tab:
+  - no horizontal page overflow at 375 px; the tab bar scrolls and keeps the current
+    tab in view;
+  - cold-load CLS 0; badge slots are reserved, so counts arriving do not move the bar;
+  - no console errors;
+  - a live `PUT /api/settings` (12 → "1.3 runs/day", matching the server) and a live
+    1-company dry run, whose log streamed and whose state went to finished;
+  - ArrowRight moved tab and URL, with a visible focus ring.
+
+  Lead notices handled: a cancel that gets `409` while the job still reports running
+  says the job survived a web restart and cannot be cancelled here. With 0 enabled
+  companies the forms defer to the server's 422 text. Log lines are text only (no
+  `v-html` anywhere). No new dependency: bundle 78 kB JS (31 kB gzip) + 8 kB CSS.
 
 ---
 

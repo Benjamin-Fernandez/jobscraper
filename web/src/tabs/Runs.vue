@@ -232,6 +232,7 @@ onMounted(async () => {
   border-bottom: 1px solid var(--border); padding: var(--space-2);
 }
 .history td { border-bottom: 1px solid var(--border); padding: var(--space-2); white-space: nowrap; }
+.history th { font-family: var(--font); }
 .history td:first-child, .history td.num { font-family: var(--mono); font-variant-numeric: tabular-nums; }
 .history .num { text-align: right; }
 </style>
