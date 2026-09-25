@@ -21,7 +21,9 @@ router = APIRouter(tags=["runs"])
 @router.get("/runs")
 def list_runs(request: Request,
               cfg: Config = Depends(get_config)) -> list[dict[str, Any]]:
-    """Newest first: `run_no`, `finished_at`, `status`, `accepted`."""
+    """Newest first: `run_no`, `started_at`, `finished_at`, `status`,
+    `accepted`, and the run's `stats` (companies_due, postings_seen, ... -
+    what the Runs tab's history table shows)."""
     shortlist = load_shortlist(cfg.shortlist_path)
     with open_store(request) as store:
         stored = [dict(r) for r in store.list_runs()]
@@ -29,12 +31,15 @@ def list_runs(request: Request,
     runs: dict[int, dict[str, Any]] = {}
     for row in stored:
         n = int(row["run_no"])
-        runs[n] = {"run_no": n, "finished_at": row.get("finished_at"),
-                   "status": row.get("status"), "accepted": None}
+        runs[n] = {"run_no": n, "started_at": row.get("started_at"),
+                   "finished_at": row.get("finished_at"),
+                   "status": row.get("status"), "accepted": None,
+                   "stats": row.get("stats") or {}}
     for row in shortlist["runs"]:
         n = int(row["run_no"])
-        entry = runs.setdefault(n, {"run_no": n, "finished_at": None,
-                                    "status": None, "accepted": None})
+        entry = runs.setdefault(n, {"run_no": n, "started_at": None,
+                                    "finished_at": None, "status": None,
+                                    "accepted": None, "stats": {}})
         entry["finished_at"] = entry["finished_at"] or row.get("finished_at")
         entry["accepted"] = row.get("accepted")
 
