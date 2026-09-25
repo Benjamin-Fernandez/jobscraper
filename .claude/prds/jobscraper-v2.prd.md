@@ -2395,7 +2395,13 @@ where you were, and each tab says what it holds before you open it.
 
 #### M12-T5 · Look and feel pass
 - **STATUS:** `IN_PROGRESS`
-- **Completed:** —
+- **Completed:** — (merge gate 2026-09-25: `/ecc:vue-review` found no critical or
+  high issue - one medium, `loadRuns` lacking the stale-response guard, fixed in
+  `1ab4d84`; Vitest 88/88, Python 285/285, bundle rebuilt on merged master and
+  served. Lane H's own browser pass: Chrome at 1280 px and 375 px, light and
+  dark, every tab, CLS 0, clean console. **Open:** the Lead's visual pass could
+  not be done in this session (no browser tool) - the user is looking at the
+  live app; DONE when they confirm.)
 - **Do:** one consistent visual system (spacing, type scale, colour tokens,
   light/dark), responsive down to a phone width, focus rings, no layout shift
   when data loads. Rebuild `src/jobscraper/web/static/` and commit it.
