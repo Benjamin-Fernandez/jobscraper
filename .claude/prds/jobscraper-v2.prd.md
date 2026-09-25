@@ -2218,13 +2218,20 @@ value)`. `cli.cmd_run` reads the stored `batch_size`.
   table is `CREATE TABLE IF NOT EXISTS`, so existing databases gain it on open.
 
 #### M11-T2 · Settings and profile endpoints
-- **STATUS:** `NOT_STARTED`
-- **Completed:** —
+- **STATUS:** `DONE`
+- **Completed:** 2026-09-25
 - **Do:** `GET/PUT /api/settings`, `GET /api/profile` per the contract, in one new
   router file.
 - **Verify:** `python tests/run_tests.py -k web` — round-trip a batch size; `0`,
   `-1` and `enabled+1` answer `422`; `/api/profile` with no derived profile answers
   `{present: false}` rather than an error.
+- **Notes:** Verify 33/33 (`-k web`; new `tests/test_web_control.py`). Router
+  `web/routers/settings.py`; the shared logic is `web/control.py`. `batch_size`
+  is `StrictInt`, so `"12"`, `2.5` and `true` answer `422` as well. Enabled count
+  = `companies.enabled` in the store (as of the last sync). `/api/profile` reads
+  `data/profile.derived.yaml` directly, because `web/` may not import
+  `profile/`. So it shows the derived profile *without*
+  `profile.overrides.yaml` merged in; a malformed file reads as `present: false`.
 
 #### M11-T3 · Runs and profile refreshes as background jobs
 - **STATUS:** `NOT_STARTED`
