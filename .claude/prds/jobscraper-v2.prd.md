@@ -2284,14 +2284,29 @@ where you were, and each tab says what it holds before you open it.
   starts on "all runs" (M8-T1: an application outlives its run).
 
 #### M12-T2 · Runs tab
-- **STATUS:** `NOT_STARTED`
-- **Completed:** —
+- **STATUS:** `DONE`
+- **Completed:** 2026-09-25
 - **Do:** start a run (companies for this run, prefilled from the setting; a
   dry-run toggle), a live log that polls `/api/jobs/current` while running, cancel,
   and the run history (date, companies, postings, accepted, status) from
   `/api/runs`. When a run finishes, Inbox reloads.
 - **Verify:** Vitest with a mocked API: start → polling shows log lines → done
   refreshes the run list; `409` shows "a job is already running"; cancel works.
+- **Notes:** Verified 2026-09-25 (Lane H), `web/tests/Runs.test.js` 14 tests against a
+  fake that plays the M11 table (`web/tests/helpers.js`): prefill from
+  `/api/settings`; start posts `{batch_size, dry_run?}`; log lines appear on each
+  1.5 s poll; the end of the run emits `changed {runs: true}` once, after which the
+  shell refetches `/api/runs` and moves the Inbox to the new run (App-level test);
+  `409` → "A job is already running"; cancel → `POST /api/jobs/cancel`, state
+  `failed (exit -15)`; no polling while idle, after the end, or after unmount
+  (mutating `schedule()` to always poll fails 3 tests). Polling lives in
+  `web/src/job.js`. A run that ends while the tab is closed is reported when the tab
+  reopens, once. Without the M11 routes the tab shows "404 Not Found ... this server
+  does not offer that yet" and still lists the history. **Backend gap:** `/api/runs`
+  returns only `run_no, finished_at, status, accepted`, so Companies and Postings show
+  `—`. The tab reads `companies`/`postings`, else `stats.companies_due`/`stats.postings_seen`
+  (`Store.list_runs()` already parses `stats`), so passing `stats` through in
+  `routers/runs.py` fills them with no UI change.
 
 #### M12-T3 · Profile tab
 - **STATUS:** `NOT_STARTED`
