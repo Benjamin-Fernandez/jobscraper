@@ -2204,14 +2204,18 @@ updated_at`) with `Store.get_setting(key, default)` / `Store.set_setting(key,
 value)`. `cli.cmd_run` reads the stored `batch_size`.
 
 #### M11-T1 · Stored settings + effective batch size
-- **STATUS:** `NOT_STARTED`
-- **Completed:** —
+- **STATUS:** `DONE`
+- **Completed:** 2026-09-25
 - **Do:** `settings` table and accessors in `store.py`; `cmd_run` resolves the
   batch size flag → setting → config; `status` uses the same effective value for
   its cadence line.
 - **Verify:** `python tests/run_tests.py -k settings` — a stored `batch_size` of 25
   makes `run` plan 25 companies; the flag overrides it; with no setting, config's
   value is used.
+- **Notes:** Verify 7/7 (`tests/test_settings.py`); full suite 248/248. One
+  helper, `cli._batch_size(cfg, store, flag)`, serves `run` and `status`; a
+  stored value that is not a positive integer falls through to config. The
+  table is `CREATE TABLE IF NOT EXISTS`, so existing databases gain it on open.
 
 #### M11-T2 · Settings and profile endpoints
 - **STATUS:** `NOT_STARTED`
