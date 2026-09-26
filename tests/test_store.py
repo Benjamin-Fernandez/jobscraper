@@ -287,8 +287,8 @@ def test_sync_enabled_false_in_yaml_is_respected():
 def test_sync_the_real_watchlist_loads_every_entry():
     from jobscraper.watchlist import load
     st = _synced(*load())
-    assert len(st.companies()) == 257            # 229 + 28 added 2026-09-27
-    assert len(st.companies(enabled_only=True)) == 252
+    assert len(st.companies()) == 300            # 229 + 71 added 2026-09-27
+    assert len(st.companies(enabled_only=True)) == 295
 
 
 # ---------------- M3-T3b: migrated v1 applications ----------------

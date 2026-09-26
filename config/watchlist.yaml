@@ -356,8 +356,10 @@ companies:
 
   - name: Deutsche Bank
     careers_url: https://www.db.com/careers/
-    provider: generic_html
-    feed_url: https://www.db.com/careers/
+    provider: workday
+    slug: db
+    feed_url: https://db.wd3.myworkdayjobs.com/DBWebsite
+    notes: "Workday tenant; was generic_html (9 links). 2026-09-27: 600 postings (capped), 8 in Singapore"
 
   - name: Didi
     careers_url: https://careers.didiglobal.com/
@@ -529,9 +531,11 @@ companies:
     feed_url: https://www.hcltech.com/careers
 
   - name: HP Inc / HPE
-    careers_url: https://jobs.hp.com/
-    provider: generic_html
-    feed_url: https://jobs.hp.com/
+    careers_url: https://careers.hpe.com/
+    provider: workday
+    slug: hpe
+    feed_url: https://hpe.wd5.myworkdayjobs.com/Jobsathpe
+    notes: "HPE's Workday tenant; was HP Inc's careers page scraped as generic_html (17 links). 2026-09-27: 600 postings (capped), 16 in Singapore"
 
   - name: HRT
     careers_url: https://www.hudsonrivertrading.com/careers/
@@ -1434,3 +1438,312 @@ companies:
     provider: workable
     slug: careers-at-sleek
     notes: SG corporate-services and business-banking platform; Series B. Board rate-limited when checked - count unverified.
+
+  # ---------------------------------------------------------------------------
+  # Added 2026-09-27, second batch: more established firms with Singapore teams.
+  # Same checks as the first batch - a readable board and Singapore postings
+  # that are not only sales/admin on the day (count in `notes`).
+  # ---------------------------------------------------------------------------
+
+  # Trading, hedge funds and alternatives
+  - name: Point72
+    careers_url: https://careers.point72.com/
+    provider: greenhouse
+    slug: point72
+    notes: "Global hedge fund; SG office; Point72 Academy graduate programme. 11 SG roles."
+
+  - name: Schonfeld
+    careers_url: https://www.schonfeld.com/careers/
+    provider: greenhouse
+    slug: schonfeld
+    notes: "Multi-manager hedge fund; SG office. 3 SG roles."
+
+  - name: GSR
+    careers_url: https://www.gsr.io/careers
+    provider: greenhouse
+    slug: gsrmarkets
+    notes: "Crypto market maker since 2013; SG office. 2 SG roles."
+
+  - name: Blackstone
+    careers_url: https://www.blackstone.com/careers/
+    provider: workday
+    slug: blackstone
+    feed_url: https://blackstone.wd1.myworkdayjobs.com/Blackstone_Careers
+    notes: "World's largest alternatives manager; SG office. 5 SG roles."
+
+  - name: Brookfield
+    careers_url: https://www.brookfield.com/careers
+    provider: workday
+    slug: brookfield
+    feed_url: https://brookfield.wd5.myworkdayjobs.com/brookfield
+    notes: "Global alternatives manager (infrastructure, real estate); SG office. 3 SG roles."
+
+
+  # Asset managers
+  - name: Capital Group
+    careers_url: https://careers.capitalgroup.com/
+    provider: workday
+    slug: capgroup
+    feed_url: https://capgroup.wd1.myworkdayjobs.com/capitalgroupcareers
+    notes: "Top-3 global active manager; SG rotational graduate programme. 23 SG roles."
+
+  - name: BlackRock
+    careers_url: https://careers.blackrock.com/
+    provider: workday
+    slug: blackrock
+    feed_url: https://blackrock.wd1.myworkdayjobs.com/BlackRock_Professional
+    notes: "Largest asset manager; SG hub incl. Aladdin tech. 8 SG roles."
+
+  - name: PIMCO
+    careers_url: https://www.pimco.com/en-us/careers
+    provider: workday
+    slug: pimco
+    feed_url: https://pimco.wd1.myworkdayjobs.com/pimco-careers
+    notes: "Global fixed-income manager; SG office; 2027 internships. 6 SG roles."
+
+  - name: Wellington Management
+    careers_url: https://www.wellington.com/en/careers
+    provider: workday
+    slug: wellington
+    feed_url: https://wellington.wd5.myworkdayjobs.com/External
+    notes: "Global asset manager; SG office. 5 SG roles."
+
+  - name: Neuberger Berman
+    careers_url: https://www.nb.com/careers
+    provider: workday
+    slug: nb
+    feed_url: https://nb.wd1.myworkdayjobs.com/NBCareers
+    notes: "Global asset manager; SG office. 3 SG roles."
+
+  - name: Prudential / Eastspring
+    careers_url: https://www.eastspring.com/careers
+    provider: workday
+    slug: prudential
+    feed_url: https://prudential.wd3.myworkdayjobs.com/prudential_eastspring
+    notes: "Prudential plc and its asset manager Eastspring (SG-HQ). 17 SG roles."
+
+  - name: SS&C Technologies
+    careers_url: https://www.ssctech.com/careers
+    provider: workday
+    slug: ssctech
+    feed_url: https://ssctech.wd1.myworkdayjobs.com/SSCTechnologies
+    notes: "Fund-admin and investment software; SG operations hub. 6 SG roles."
+
+
+  # Banks, insurers and brokers
+  - name: Julius Baer
+    careers_url: https://www.juliusbaer.com/en/careers/
+    provider: workday
+    slug: juliusbaer
+    feed_url: https://juliusbaer.wd3.myworkdayjobs.com/External
+    notes: "Swiss private bank; Asia hub in Singapore; tech and ops contracts too. 58 SG roles."
+
+  - name: RBC
+    careers_url: https://jobs.rbc.com/
+    provider: workday
+    slug: rbc
+    feed_url: https://rbc.wd3.myworkdayjobs.com/RBCGLOBAL1
+    notes: "Royal Bank of Canada; SG branch (capital markets). 2 SG roles."
+
+  - name: Northern Trust
+    careers_url: https://careers.northerntrust.com/
+    provider: workday
+    slug: ntrs
+    feed_url: https://ntrs.wd1.myworkdayjobs.com/northerntrust
+    notes: "Custody and fund-services bank; SG office. 2 SG roles."
+
+  - name: AIA
+    careers_url: https://www.aia.com/en/careers
+    provider: workday
+    slug: aia
+    feed_url: https://aia.wd3.myworkdayjobs.com/External
+    notes: "Pan-Asian insurer (HKEX-listed); large SG group office. 31 SG roles."
+
+  - name: Manulife
+    careers_url: https://careers.manulife.com/
+    provider: workday
+    slug: manulife
+    feed_url: https://manulife.wd3.myworkdayjobs.com/MFCJH_Jobs
+    notes: "Global insurer; SG office. 23 SG roles."
+
+  - name: FWD
+    careers_url: https://www.fwd.com/careers
+    provider: workday
+    slug: fwd
+    feed_url: https://fwd.wd3.myworkdayjobs.com/FWDcareersite
+    notes: "Pan-Asian insurer; SG business and data teams. 10 SG roles."
+
+  - name: Sun Life
+    careers_url: https://www.sunlife.com/careers
+    provider: workday
+    slug: sunlife
+    feed_url: https://sunlife.wd3.myworkdayjobs.com/Experienced-Jobs
+    notes: "Global insurer; Asia operations in SG. 5 SG roles."
+
+  - name: Marsh McLennan
+    careers_url: https://careers.marshmclennan.com/
+    provider: workday
+    slug: mmc
+    feed_url: https://mmc.wd1.myworkdayjobs.com/MMC
+    notes: "Insurance broking and consulting (Marsh, Mercer, Oliver Wyman); SG hub. 8 SG roles."
+
+
+  # Market infrastructure, data and payments
+  - name: LSEG
+    careers_url: https://www.lseg.com/en/careers
+    provider: workday
+    slug: lseg
+    feed_url: https://lseg.wd3.myworkdayjobs.com/Careers
+    notes: "London Stock Exchange Group (incl. Refinitiv); SG engineering. 6 SG roles."
+
+  - name: S&P Global
+    careers_url: https://careers.spglobal.com/
+    provider: workday
+    slug: spgi
+    feed_url: https://spgi.wd5.myworkdayjobs.com/SPGI_Careers
+    notes: "Ratings and market data; SG office. 9 SG roles."
+
+  - name: FactSet
+    careers_url: https://www.factset.com/careers
+    provider: workday
+    slug: factset
+    feed_url: https://factset.wd108.myworkdayjobs.com/FactSetCareers
+    notes: "Financial data and analytics; SG office. 2 SG roles."
+
+  - name: CME Group
+    careers_url: https://www.cmegroup.com/careers.html
+    provider: workday
+    slug: cmegroup
+    feed_url: https://cmegroup.wd1.myworkdayjobs.com/cme_careers
+    notes: "Largest derivatives exchange; SG office. 1 SG roles."
+
+  - name: Cboe
+    careers_url: https://www.cboe.com/about/careers/
+    provider: workday
+    slug: cboe
+    feed_url: https://cboe.wd1.myworkdayjobs.com/External_Career_CBOE
+    notes: "Exchange operator; SG office. 2 SG roles."
+
+  - name: Global Payments
+    careers_url: https://jobs.globalpayments.com/
+    provider: workday
+    slug: tsys
+    feed_url: https://tsys.wd1.myworkdayjobs.com/TSYS
+    notes: "Payments processor (TSYS); SG office. 1 SG roles."
+
+  - name: BitGo
+    careers_url: https://www.bitgo.com/company/careers
+    provider: greenhouse
+    slug: bitgo
+    notes: "Regulated digital-asset custodian; SG office. 3 SG roles."
+
+  - name: Paxos
+    careers_url: https://paxos.com/careers/
+    provider: ashby
+    slug: paxos
+    notes: "Regulated stablecoin issuer; MAS-licensed in SG. 1 SG roles."
+
+  - name: StraitsX
+    careers_url: https://www.straitsx.com/careers
+    provider: greenhouse
+    slug: straitsx
+    notes: "SG stablecoin/payments (Fazz group); MAS major payment institution. 13 SG roles."
+
+
+  # Tech
+  - name: Red Hat
+    careers_url: https://www.redhat.com/en/jobs
+    provider: workday
+    slug: redhat
+    feed_url: https://redhat.wd5.myworkdayjobs.com/jobs
+    notes: "Open-source enterprise software (IBM); SG office; interns. 19 SG roles."
+
+  - name: Equinix
+    careers_url: https://careers.equinix.com/
+    provider: workday
+    slug: equinix
+    feed_url: https://equinix.wd1.myworkdayjobs.com/External
+    notes: "Data-centre operator; large SG footprint. 17 SG roles."
+
+  - name: Thales
+    careers_url: https://careers.thalesgroup.com/
+    provider: workday
+    slug: thales
+    feed_url: https://thales.wd3.myworkdayjobs.com/Careers
+    notes: "Defence, security and digital identity; large SG engineering hub. 15 SG roles."
+
+  - name: Trend Micro
+    careers_url: https://www.trendmicro.com/en_us/about/careers.html
+    provider: workday
+    slug: trendmicro
+    feed_url: https://trendmicro.wd3.myworkdayjobs.com/External
+    notes: "Cybersecurity vendor; SG office. 6 SG roles."
+
+  - name: F5
+    careers_url: https://www.f5.com/company/careers
+    provider: workday
+    slug: ffive
+    feed_url: https://ffive.wd5.myworkdayjobs.com/f5jobs
+    notes: "Application delivery and security; SG office; SRE roles. 3 SG roles."
+
+  - name: Motorola Solutions
+    careers_url: https://www.motorolasolutions.com/en_us/about/careers.html
+    provider: workday
+    slug: motorolasolutions
+    feed_url: https://motorolasolutions.wd5.myworkdayjobs.com/Careers
+    notes: "Public-safety tech; SG office; business-analyst interns. 6 SG roles."
+
+  - name: Autodesk
+    careers_url: https://www.autodesk.com/careers
+    provider: workday
+    slug: autodesk
+    feed_url: https://autodesk.wd1.myworkdayjobs.com/Ext
+    notes: "Design software; SG hub with SWE/PM intern programme. 19 SG roles."
+
+  - name: Adobe
+    careers_url: https://careers.adobe.com/
+    provider: workday
+    slug: adobe
+    feed_url: https://adobe.wd5.myworkdayjobs.com/external_experienced
+    notes: "Creative and document software; SG office. 3 SG roles."
+
+  - name: Kyndryl
+    careers_url: https://www.kyndryl.com/careers
+    provider: workday
+    slug: kyndryl
+    feed_url: https://kyndryl.wd5.myworkdayjobs.com/KyndrylProfessionalCareers
+    notes: "IT infrastructure services (IBM spin-off); SG engineering. 16 SG roles."
+
+  - name: DXC Technology
+    careers_url: https://dxc.com/careers
+    provider: workday
+    slug: dxctechnology
+    feed_url: https://dxctechnology.wd1.myworkdayjobs.com/DXCJobs
+    notes: "IT services; SG office; GRIT graduate programme. 13 SG roles."
+
+  - name: PwC
+    careers_url: https://www.pwc.com/gx/en/careers.html
+    provider: workday
+    slug: pwc
+    feed_url: https://pwc.wd3.myworkdayjobs.com/Global_Experienced_Careers
+    notes: "Big Four; SG tax, advisory and tech graduate intake. 14 SG roles."
+
+  - name: Rakuten Asia
+    careers_url: https://rakuten.careers/
+    provider: workday
+    slug: rakuten
+    feed_url: https://rakuten.wd1.myworkdayjobs.com/RakutenAsia
+    notes: "Rakuten's regional HQ in Singapore (engineering, SRE). 24 SG roles."
+
+  - name: Workato
+    careers_url: https://www.workato.com/careers
+    provider: greenhouse
+    slug: workato
+    notes: "Integration/automation SaaS unicorn; SG office; data interns. 8 SG roles."
+
+  - name: Dataiku
+    careers_url: https://www.dataiku.com/careers/
+    provider: greenhouse
+    slug: dataiku
+    notes: "Enterprise AI platform unicorn; SG office. 3 SG roles."
+

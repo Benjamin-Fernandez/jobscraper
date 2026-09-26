@@ -22,8 +22,8 @@ paths:
   output_dir: output                          # legacy, for review.py; retired in M9-T1
 
 run:
-  # Companies per run. PRD R-7: at 257 companies this needs ~3.7 runs/day to
-  # finish a 7-day sweep (~1/day at 40). Raise it if you run less often than that.
+  # Companies per run. PRD R-7: at 295 companies this needs ~4.2 runs/day to
+  # finish a 7-day sweep (~1/day at 45). Raise it if you run less often than that.
   batch_size: 10
   # A company becomes due again this many days after it was last scraped.
   # This is the whole cycle: there is no separate cursor (D-9). 14 until
