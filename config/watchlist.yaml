@@ -19,7 +19,7 @@
 #
 # Seeded from the v1 database: 229 companies, 229 with a resolved
 # provider, 133 with a cached feed URL. Prune freely - fewer companies means
-# the fortnightly sweep completes more comfortably.
+# the weekly sweep completes more comfortably.
 #
 # Edited by hand. Regenerating this file is not part of the normal workflow.
 version: 1
@@ -1251,3 +1251,186 @@ companies:
     careers_url: https://www.zscaler.com/careers
     provider: greenhouse
     slug: zscaler
+
+  # ---------------------------------------------------------------------------
+  # Added 2026-09-27: smaller, established fintech and tech firms with Singapore
+  # teams and graduate-level roles. Each was checked for (a) a board the scraper
+  # can read and (b) Singapore postings on the day it was added; the count in
+  # `notes` is that day's. Bar for "solid": licensed/regulated, listed, owned by
+  # a large group, or well-funded and operating for 5+ years.
+  # ---------------------------------------------------------------------------
+
+  # Fintech - payments, banking, wealth, brokerage, digital assets
+  - name: Thunes
+    careers_url: https://www.thunes.com/careers/
+    provider: greenhouse
+    slug: thunes
+    notes: SG-HQ cross-border payments network; MAS-licensed; Series C. 9 SG roles.
+
+  - name: Xendit
+    careers_url: https://www.xendit.co/en/careers/
+    provider: greenhouse
+    slug: xendit
+    notes: SEA payments unicorn (ID/PH/SG). 11 SG roles.
+
+  - name: YouTrip
+    careers_url: https://www.you.co/careers
+    provider: workable
+    slug: youtrip
+    notes: SG multi-currency wallet; MAS major payment institution. 15 SG roles.
+
+  - name: Trust Bank
+    careers_url: https://trustbank.sg/careers
+    provider: greenhouse
+    slug: trustbank
+    notes: SG digital bank (Standard Chartered + FairPrice Group). 11 SG roles.
+
+  - name: Futu / Moomoo
+    careers_url: https://www.futuholdings.com/en/join
+    provider: workable
+    slug: moomoo
+    notes: Nasdaq-listed brokerage; Moomoo SG is MAS-licensed. 28 SG roles.
+
+  - name: Endowus
+    careers_url: https://endowus.com/careers
+    provider: generic_html
+    feed_url: https://endowus.careers-page.com/
+    notes: SG digital wealth platform; MAS-licensed; UBS/SoftBank-backed. Generic page - no locations, the model reads each posting.
+
+  - name: MoneySmart
+    careers_url: https://www.moneysmart.sg/careers
+    provider: greenhouse
+    slug: moneysmart
+    notes: SG personal-finance platform since 2009. 8 SG roles.
+
+  - name: Coda Payments
+    careers_url: https://www.coda.co/careers
+    provider: lever
+    slug: Coda
+    notes: SG-HQ digital-content payments since 2011; GIC-backed. 4 SG roles.
+
+  - name: 2C2P
+    careers_url: https://www.2c2p.com/careers
+    provider: workable
+    slug: 2c2p
+    notes: Payments platform owned by Antom (Ant International). 4 SG roles.
+
+  - name: Ripple
+    careers_url: https://ripple.com/careers
+    provider: greenhouse
+    slug: ripple
+    notes: Blockchain payments; APAC hub in Singapore; MAS-licensed. 3 SG roles.
+
+  - name: Coinhako
+    careers_url: https://www.coinhako.com/careers
+    provider: ashby
+    slug: coinhako
+    notes: SG crypto exchange; MAS major payment institution licence. 7 SG roles.
+
+  - name: Hex Trust
+    careers_url: https://hextrust.com/careers
+    provider: workable
+    slug: hextrust
+    notes: Digital-asset custodian (HK/SG), licensed in both. 6 SG roles.
+
+  - name: Igloo
+    careers_url: https://iglooinsure.com/careers
+    provider: workable
+    slug: iglooinsure
+    notes: SG-HQ insurtech; Series B. 3 SG roles.
+
+  - name: IG Group
+    careers_url: https://www.iggroup.com/careers
+    provider: workday
+    slug: ig
+    feed_url: https://ig.wd103.myworkdayjobs.com/EXT_IG
+    notes: LSE-listed trading platform; SG office is MAS-licensed. 8 SG roles.
+
+  - name: Saxo Markets
+    careers_url: https://www.home.saxo/about-us/careers
+    provider: workday
+    slug: saxobank
+    feed_url: https://saxobank.wd3.myworkdayjobs.com/CareeratSaxoBank
+    notes: Danish investment bank; APAC HQ in Singapore. 3 SG roles.
+
+  - name: Murex
+    careers_url: https://www.murex.com/en/careers
+    provider: workday
+    slug: murex
+    feed_url: https://murex.wd3.myworkdayjobs.com/MurexCareerPage1
+    notes: Capital-markets trading/risk software used by most banks; SG office. 1 SG role - few, but graduate intakes.
+
+  # Trading and quant - technology-heavy, run graduate programmes in Singapore
+  - name: Squarepoint Capital
+    careers_url: https://www.squarepoint-capital.com/careers
+    provider: greenhouse
+    slug: squarepointcapital
+    notes: Global quant hedge fund; large SG office. 46 SG roles.
+
+  - name: Qube Research & Technologies
+    careers_url: https://www.qube-rt.com/careers/
+    provider: greenhouse
+    slug: quberesearchandtechnologies
+    notes: Global quant firm; SG office; graduate and intern tracks. 9 SG roles.
+
+  - name: Grasshopper
+    careers_url: https://www.grasshopperasia.com/careers
+    provider: greenhouse
+    slug: grasshopperasia
+    notes: SG-HQ proprietary trading firm since 2012. 6 SG roles.
+
+  - name: XTX Markets
+    careers_url: https://www.xtxmarkets.com/careers/
+    provider: greenhouse
+    slug: xtxmarketstechnologies
+    notes: Global algorithmic market maker; SG office. 2 SG roles.
+
+  # Tech - established product companies with Singapore engineering teams
+  - name: Ahrefs
+    careers_url: https://ahrefs.com/jobs
+    provider: greenhouse
+    slug: ahrefsjobs
+    notes: SG-HQ SEO SaaS; profitable and self-funded. 6 SG roles.
+
+  - name: ShopBack
+    careers_url: https://corporate.shopback.com/careers/
+    provider: lever
+    slug: shopback-2
+    notes: SG-HQ shopping/rewards platform; well-funded; also runs ShopBack PayLater. 22 SG roles.
+
+  - name: PatSnap
+    careers_url: https://www.patsnap.com/careers
+    provider: recruitee
+    slug: patsnap
+    notes: SG-HQ innovation-intelligence SaaS; unicorn. 18 SG roles.
+
+  - name: Agoda
+    careers_url: https://careersatagoda.com/
+    provider: greenhouse
+    slug: agoda
+    notes: Booking Holdings subsidiary; SG-registered, large tech teams. 6 SG roles.
+
+  - name: Thoughtworks
+    careers_url: https://www.thoughtworks.com/careers
+    provider: greenhouse
+    slug: thoughtworks
+    notes: Global software consultancy; SG office; graduate intake. 13 SG roles.
+
+  - name: Lalamove
+    careers_url: https://www.lalamove.com/careers
+    provider: lever
+    slug: lalamove
+    notes: Logistics-tech unicorn; SG operations. 9 SG roles.
+
+  - name: Rakuten Viki
+    careers_url: https://www.viki.com/careers
+    provider: workday
+    slug: rakuten
+    feed_url: https://rakuten.wd1.myworkdayjobs.com/RakutenVikiSingapore
+    notes: Rakuten's streaming arm, engineering hub in Singapore. 9 SG roles.
+
+  - name: Sleek
+    careers_url: https://sleek.com/careers
+    provider: workable
+    slug: careers-at-sleek
+    notes: SG corporate-services and business-banking platform; Series B. Board rate-limited when checked - count unverified.

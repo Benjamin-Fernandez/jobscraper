@@ -99,8 +99,8 @@ class Config:
 
     @property
     def cycle_days(self) -> int:
-        """Days before a company is due again. The whole two-week cycle (D-9)."""
-        return int(self.run.get("cycle_days", 14))
+        """Days before a company is due again. The whole weekly cycle (D-9)."""
+        return int(self.run.get("cycle_days", 7))
 
     @property
     def web(self) -> dict[str, Any]:

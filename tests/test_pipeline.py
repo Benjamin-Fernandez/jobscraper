@@ -118,7 +118,7 @@ def test_pipeline_nothing_due_exits_with_next_due_date():
     _run(cfg, st)
     rep = _run(cfg, st, now=shift(T0, days=1))
     assert rep.status == "nothing_due" and rep.run_no == 0
-    assert rep.next_due_at == shift(T0, days=14)
+    assert rep.next_due_at == shift(T0, days=7)          # the weekly cycle
     assert _count(st, "runs") == 1
 
 

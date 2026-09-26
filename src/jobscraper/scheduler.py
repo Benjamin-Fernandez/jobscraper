@@ -4,7 +4,7 @@ A company is due when it has never been scraped, or was last scraped more than
 `cycle_days` ago. Each run takes the `batch_size` most-neglected due companies.
 
 This replaces v1's global cursor. A cursor answers "how far through the list are
-we"; it cannot answer "has *this company* been checked in the past two weeks",
+we"; it cannot answer "has *this company* been checked in the past cycle",
 which is the actual question - and the one that makes looping back to the first
 company stop being a special case.
 

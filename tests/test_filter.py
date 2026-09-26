@@ -80,8 +80,9 @@ def test_stage_a_rejects_and_keeps_the_right_things():
                      desc="Requires 7+ years experience with Python on Kubernetes").passed
     # A vague location survives rather than being guessed away.
     assert judge("Software Engineer", location="APAC").passed
-    # D-10: not a target title, so no longer kept (v1 kept both).
-    assert judge("Graduate Technology Analyst").reject_rule == "title_allow"
+    # "analyst" is in title_allow.extra since the user asked for analyst roles
+    # (2026-09-24), so this is kept; D-10 still drops titles matching nothing.
+    assert judge("Graduate Technology Analyst").passed
     assert judge("Quantitative Developer").reject_rule == "title_allow"
 
 

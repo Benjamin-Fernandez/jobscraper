@@ -179,11 +179,11 @@ def test_settings_status_reports_cadence_at_the_effective_batch_size():
     try:
         code, out = _cli(cfg, "status")
         assert code == 0 and seen[-1] == CONFIG_BATCH, out
-        # 30 companies / 10 per run / 14 days
-        assert "a full sweep needs 0.2/day" in out, out
+        # 30 companies / 10 per run / 7 days
+        assert "a full sweep needs 0.4/day" in out, out
         _store_setting(tmp, "batch_size", 25)
         code, out = _cli(cfg, "status")
         assert code == 0 and seen[-1] == 25, out
-        assert "a full sweep needs 0.1/day" in out, out
+        assert "a full sweep needs 0.2/day" in out, out
     finally:
         cli.scheduler.status = real

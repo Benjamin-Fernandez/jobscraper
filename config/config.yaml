@@ -22,12 +22,13 @@ paths:
   output_dir: output                          # legacy, for review.py; retired in M9-T1
 
 run:
-  # Companies per run. PRD R-7: at 229 companies this needs ~1.6 runs/day to
-  # finish a 14-day sweep. Raise it if you run less often than that.
+  # Companies per run. PRD R-7: at 257 companies this needs ~3.7 runs/day to
+  # finish a 7-day sweep (~1/day at 40). Raise it if you run less often than that.
   batch_size: 10
   # A company becomes due again this many days after it was last scraped.
-  # This is the whole two-week cycle: there is no separate cursor (D-9).
-  cycle_days: 14
+  # This is the whole cycle: there is no separate cursor (D-9). 14 until
+  # 2026-09-27, when the user moved to a weekly sweep.
+  cycle_days: 7
   max_workers: 6
   per_company_timeout: 90
   # A run still marked `running` this many seconds after it started is taken to
