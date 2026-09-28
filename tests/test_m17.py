@@ -224,6 +224,24 @@ def test_web_titles_say_when_the_recommendations_are_repeats():
     assert s["repeated"] is True and [i["title"] for i in s["items"]] == ["data engineer"]
 
 
+# ---------------------------------------------------------------- an update shows at once
+
+def test_the_page_is_always_revalidated_and_the_bundle_cached():
+    """An old copy of index.html kept the M16 app on screen after M17 was
+    installed: the page must be revalidated, the hashed bundle may be kept."""
+    import re
+    from test_web_control import _world
+    with _world() as (c, cfg, _):
+        page = c.get("/")
+        assert page.status_code == 200 and page.headers["cache-control"] == "no-cache"
+        asset = re.search(r'/?(assets/[^"]+\.js)', page.text).group(1)
+        js = c.get("/" + asset)
+        assert js.status_code == 200
+        assert js.headers["cache-control"] == "public, max-age=31536000, immutable"
+        again = c.get("/", headers={"If-None-Match": page.headers["etag"]})
+        assert again.status_code == 304, "revalidating an unchanged page is cheap"
+
+
 # ---------------------------------------------------------------- companies CSV
 
 def test_web_every_watched_company_with_whether_it_can_be_scanned():
