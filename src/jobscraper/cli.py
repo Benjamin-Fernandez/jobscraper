@@ -11,6 +11,7 @@
     python -m jobscraper companies   show | search your own list of companies
     python -m jobscraper reresolve   forget a company's cached ATS
     python -m jobscraper sync        reconcile watchlist.yaml into the database
+    python -m jobscraper purge       delete job descriptions past their time to live
 """
 from __future__ import annotations
 
@@ -425,7 +426,7 @@ def cmd_titles(args) -> int:
         current = user or t.dedupe(profile.get("target_titles") or [])
 
         if args.titles_cmd == "suggest":
-            limit = min(args.limit or plan.max_title_suggestions, plan.max_title_suggestions)
+            limit = min(args.limit or t.SUGGEST_BATCH, plan.max_title_suggestions)
             try:
                 resume = ri.load_resume(cfg.resume_dir, force=True)
             except RuntimeError as exc:                 # ResumeError
@@ -433,13 +434,20 @@ def cmd_titles(args) -> int:
                 return 1
             backend = backends.build(cfg.budget)
             ceiling = filter_mod.load_rules(cfg.rules_path).ceiling_years or 3
-            print(f"recommending up to {limit} titles with "
+            print(f"recommending {limit} new titles with "
                   f"{backend.model_id or backend.name} ...", flush=True)
+            previous = None
+            raw_prev = store.get_setting(t.SUGGESTIONS_KEY)
+            if raw_prev:
+                try:
+                    previous = json.loads(raw_prev)
+                except ValueError:
+                    previous = None
             try:
                 judge = cfg.raw.get("judge") or {}
-                result = t.suggest(backend, resume.text, profile, current, limit,
-                                   ceiling_years=int(ceiling),
-                                   interests=list(judge.get("interests") or []))
+                result = t.recommend(backend, resume.text, profile, current, previous,
+                                     limit=limit, ceiling_years=int(ceiling),
+                                     interests=list(judge.get("interests") or []))
             except ri.ProfileError as exc:
                 print(f"titles: {exc}", file=sys.stderr)
                 return 1
@@ -448,6 +456,8 @@ def cmd_titles(args) -> int:
             print(f"field of study: {result['field_of_study'] or '-'}")
             for e in result["experience"]:
                 print(f"experience:     {e}")
+            if result.get("repeated"):
+                print("nothing new found - showing earlier recommendations again")
             print(f"{len(result['suggestions'])} recommended titles:")
             for item in result["suggestions"]:
                 print(f"  + {item['title']:<42} {item['why']}")
@@ -469,6 +479,26 @@ def cmd_titles(args) -> int:
             for item in last.get("suggestions", []):
                 print(f"  + {item.get('title')}")
         print(BAR)
+        return 0
+    finally:
+        store.close()
+
+
+def cmd_purge(args) -> int:
+    """M17: delete stored job descriptions past their time to live (config
+    `retention.description_days`, 7 by default) and give the space back to the
+    disk. Every run does this at its end; this does it now."""
+    cfg, store = _boot_v2(args)
+    try:
+        days = args.days if args.days is not None else pipeline.description_days(cfg)
+        before = cfg.db_path.stat().st_size
+        purged = store.purge_descriptions(days) if days > 0 else 0
+        compacted = store.compact() if (purged or args.compact) else False
+        after = cfg.db_path.stat().st_size
+        print(f"descriptions older than {days:g} days deleted: {purged}")
+        note = "" if compacted or not purged else \
+            " (not compacted: the database is in use - the next run retries)"
+        print(f"database file: {before / 1e6:.1f} MB -> {after / 1e6:.1f} MB{note}")
         return 0
     finally:
         store.close()
@@ -547,6 +577,11 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("doctor", help="check setup").set_defaults(fn=cmd_doctor)
     sub.add_parser("sync", help="load the watchlist into the db").set_defaults(fn=cmd_sync)
     sub.add_parser("status", help="who is due, cadence, quarantine").set_defaults(fn=cmd_status)
+    pg = sub.add_parser("purge", help="delete job descriptions past their time to live")
+    pg.add_argument("--days", type=float, default=None,
+                    help="time to live in days (default: config retention.description_days)")
+    pg.add_argument("--compact", action="store_true", help="compact the database even if nothing was deleted")
+    pg.set_defaults(fn=cmd_purge)
     rr = sub.add_parser("reresolve", help="forget a company's cached ATS")
     rr.add_argument("key", help="the company's watchlist key, or its exact name")
     rr.set_defaults(fn=cmd_reresolve)

@@ -270,14 +270,29 @@ def run(cfg: Config, store: Store, *, dry_run: bool = False,
         # ---- [1] profile, [3] prefilter, [4] extract, [5] decide, [6] shortlist ----
         _funnel(cfg, store, rep, client, backend, profile, say)
 
+        # ---- housekeeping: stored descriptions expire (M17) ----
+        days = description_days(cfg)
+        purged = store.purge_descriptions(days) if days > 0 else 0
+        if purged:
+            rep.stats["descriptions_purged"] = purged
+            say(f"  descriptions: {purged} older than {days:g} days deleted")
+
         # ---- last: stamp the attempt and close the run ----
         if rep.status == "ok":
             scheduler.mark_attempted(store, resolved, now=now)
         store.finish_run(rep.run_no, rep.status, rep.stats)
+        if purged and store.compact():
+            say("  database compacted")
         return rep
     finally:
         if own_client:
             client.close()
+
+
+def description_days(cfg: Config) -> float:
+    """How long a stored job description is kept (config `retention`); 0 keeps
+    every description."""
+    return float((cfg.raw.get("retention") or {}).get("description_days", 7))
 
 
 def _ensure_resolved(client: HttpClient, store: Store, company: WatchedCompany,
@@ -369,8 +384,13 @@ def _funnel(cfg: Config, store: Store, rep: RunReport, client: HttpClient,
     limit = int(cfg.budget.get("vital_chars", 800))
     postings = []
     for job in store.jobs_passed_prefilter(pv, rules_key):
-        vital = decide.vital_extract(job["title"] or "", job["location"] or "",
-                                     job["jd_text"] or "", limit=limit)
+        if not job["jd_text"] and job["vital_text"]:
+            # The description expired and was deleted (M17): keep the extract
+            # the judge already read, so the answer - and the cache - stand.
+            vital = job["vital_text"]
+        else:
+            vital = decide.vital_extract(job["title"] or "", job["location"] or "",
+                                         job["jd_text"] or "", limit=limit)
         if vital != job["vital_text"]:
             store.set_vital(job["job_id"], vital)
         postings.append(decide.Posting(job["job_id"], job["title"] or "", vital))

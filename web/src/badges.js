@@ -5,9 +5,10 @@ import { CLOSED_STATUSES } from './stages.js'
 
 export { CLOSED_STATUSES }
 
-// New roles: in the shown shortlist, with no application status, not dismissed.
+// New roles: in the shown shortlist, with no application status, not marked
+// Not interested, and not a second listing of a role already tracked (M17).
 export function newRoleCount(jobs = []) {
-  return jobs.filter(j => !j.status && !isDismissed(j.id)).length
+  return jobs.filter(j => !j.status && !j.tracked_as && !isDismissed(j)).length
 }
 
 // Active applications, from /api/stats `by_status`.

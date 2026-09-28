@@ -111,6 +111,18 @@ export function company(position, name, fields = {}) {
   return { position, name, status: 'pending', careers_url: null, provider: null, postings: null, detail: null, searched_at: null, ...fields }
 }
 
+// M17: what GET /api/companies/health answers - every watched company's scan state.
+export function defaultHealth() {
+  return {
+    total: 3, counts: { ok: 2, failed: 1, not_scanned: 0 },
+    items: [
+      { company: 'Grab', state: 'ok', reason: '', open_roles: 40 },
+      { company: 'OKX', state: 'ok', reason: '', open_roles: 12 },
+      { company: 'Akamai', state: 'failed', reason: 'the site blocks automated access', open_roles: null },
+    ],
+  }
+}
+
 // statuses: { job_id: status } - seeded as if each was set once.
 // vocabulary: the ordered status list config serves via /api/stats (M8-T2).
 // postings: { job_id: description } overrides (M16); '' for a posting with none.
@@ -118,6 +130,7 @@ export function fakeApi({
   fixture = shortlist, statuses = {}, vocabulary = STATUSES,
   m11 = true, settings = defaultSettings(), profile = defaultProfile(), job = null,
   titles = defaultTitles(), companies = [], maxCompanies = null, postings = {},
+  dismissals = {}, health = defaultHealth(),
 } = {}) {
   const calls = []
   const apps = {}
@@ -126,6 +139,8 @@ export function fakeApi({
     settings: { ...settings }, profile: { ...profile }, job: job ? { ...IDLE, ...job } : { ...IDLE }, resume: null,
     titles: JSON.parse(JSON.stringify(titles)),
     companies: companies.map((c, i) => (typeof c === 'string' ? company(i + 1, c) : company(i + 1, c.name, c))),
+    dismissals: { ...dismissals },           // M17: job id -> dismissed_at
+    health,                                  // M17: GET /api/companies/health
   }
 
   function companiesView() {
@@ -289,9 +304,24 @@ export function fakeApi({
       } else wanted = new Set(m[1].split(',').map(Number))
       const jobs = fixture.jobs
         .filter(j => !wanted || wanted.has(j.run_no))
-        .map(j => ({ ...j, closed: false, status: apps[j.id]?.status ?? null, notes: null }))
+        .map(j => ({
+          ...j, closed: false, status: apps[j.id]?.status ?? null, notes: null,
+          dismissed_at: server.dismissals[j.id] ?? null, tracked_as: j.tracked_as ?? null,
+        }))
       return respond(jobs)
     }
+    // M17: Not interested, stored.
+    const ni = /^api\/dismissals\/([\w.:-]+)$/.exec(url)
+    if (ni && init.method === 'PUT') {
+      server.dismissals[ni[1]] = server.dismissals[ni[1]] ?? stamp()
+      return respond({ job_id: ni[1], dismissed_at: server.dismissals[ni[1]] })
+    }
+    if (ni && init.method === 'DELETE') {
+      const removed = ni[1] in server.dismissals
+      delete server.dismissals[ni[1]]
+      return respond({ job_id: ni[1], removed })
+    }
+    if (url === 'api/companies/health') return respond(server.health)
     const posting = /^api\/postings\/([\w.:-]+)$/.exec(url)
     if (posting) {
       const j = fixture.jobs.find(x => x.id === posting[1])

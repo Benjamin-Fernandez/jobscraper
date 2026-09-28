@@ -52,6 +52,7 @@ CREATE TABLE IF NOT EXISTS jobs (
     company_id INTEGER NOT NULL,
     external_id TEXT, title TEXT, location TEXT, url TEXT, posted_at TEXT,
     jd_hash TEXT, jd_text TEXT, vital_text TEXT,
+    jd_fetched_at TEXT,                    -- when jd_text was stored; it expires (M17)
     first_seen_run INTEGER, last_seen_run INTEGER, closed_at TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_jobs_company ON jobs(company_id);
@@ -124,6 +125,13 @@ CREATE TABLE IF NOT EXISTS settings (
     updated_at TEXT NOT NULL
 );
 
+-- Roles marked "Not interested" in the Inbox (M17). They stay listed, in their
+-- own section at the bottom, instead of coming back as new after a restart.
+CREATE TABLE IF NOT EXISTS dismissals (
+    job_id TEXT PRIMARY KEY,
+    dismissed_at TEXT NOT NULL
+);
+
 -- The user's own list of companies (M16), in their order of preference.
 -- A found company also becomes a watched company: it is synced into
 -- `companies` beside watchlist.yaml's entries (watchlist.all_entries).
@@ -180,6 +188,7 @@ class Store:
         # harmless to drop on any other engine.
         self.conn.execute("PRAGMA journal_mode=WAL")
         self.conn.executescript(SCHEMA)
+        self._migrate()
         self.conn.execute(
             "INSERT OR IGNORE INTO meta (key, value) VALUES ('schema_version', ?)",
             (str(SCHEMA_VERSION),))
@@ -193,6 +202,19 @@ class Store:
                 f"{self.path} holds the v1 schema. v2 does not migrate it: move it "
                 "to archive/ and let the next run create a fresh database "
                 "(PRD section 0.5).")
+
+    def _migrate(self) -> None:
+        """Columns added after a database was created: CREATE TABLE IF NOT
+        EXISTS never changes a table that is already there."""
+        cols = {r["name"] for r in self.conn.execute("PRAGMA table_info(jobs)")}
+        if "jd_fetched_at" not in cols:
+            # When each stored description arrived. The posting's first run is
+            # the best record an older database has.
+            self.conn.execute("ALTER TABLE jobs ADD COLUMN jd_fetched_at TEXT")
+            self.conn.execute(
+                """UPDATE jobs SET jd_fetched_at = COALESCE(
+                       (SELECT started_at FROM runs WHERE runs.run_no = jobs.first_seen_run), ?)
+                    WHERE jd_text IS NOT NULL""", (utcnow(),))
 
     def close(self) -> None:
         self.conn.close()
@@ -491,13 +513,13 @@ class Store:
             self.conn.execute(
                 """INSERT INTO jobs (job_id, company_id, external_id,
                    title, location, url, posted_at, jd_hash, jd_text, vital_text,
-                   first_seen_run, last_seen_run, closed_at)
-                   VALUES (?,?,?,?,?,?,?,?,?,NULL,?,?,NULL)
+                   jd_fetched_at, first_seen_run, last_seen_run, closed_at)
+                   VALUES (?,?,?,?,?,?,?,?,?,NULL,?,?,?,NULL)
                    ON CONFLICT (job_id) DO UPDATE SET
                        last_seen_run = excluded.last_seen_run, closed_at = NULL""",
                 (job_id, company_id, raw.external_id, raw.title, raw.location,
                  raw.url, raw.posted_at, raw.jd_hash(), raw.description,
-                 run_no, run_no))
+                 utcnow() if raw.description else None, run_no, run_no))
         else:
             self.conn.execute(
                 "UPDATE jobs SET last_seen_run = ?, closed_at = NULL WHERE job_id = ?",
@@ -557,13 +579,40 @@ class Store:
 
     def set_description(self, job_id: str, text: str) -> None:
         """Store a description fetched after the listing (hydration)."""
-        self.conn.execute("UPDATE jobs SET jd_text = ? WHERE job_id = ?", (text, job_id))
+        self.conn.execute("UPDATE jobs SET jd_text = ?, jd_fetched_at = ? WHERE job_id = ?",
+                          (text, utcnow() if text else None, job_id))
         self.conn.commit()
 
     def set_vital(self, job_id: str, vital_text: str) -> None:
         self.conn.execute(
             "UPDATE jobs SET vital_text = ? WHERE job_id = ?", (vital_text, job_id))
         self.conn.commit()
+
+    def purge_descriptions(self, older_than_days: float, now: Optional[str] = None) -> int:
+        """Delete stored descriptions older than their time to live (M17), to
+        keep the database small. Kept: roles the judge accepted - the Inbox
+        shows their description - and roles with an application. Each
+        posting's short `vital_text`, what the judge reads, is never deleted,
+        so nothing is re-judged; a purged posting that passes the prefilter
+        again simply has its description fetched again."""
+        cutoff = shift(now or utcnow(), days=-float(older_than_days))
+        cur = self.conn.execute(
+            """UPDATE jobs SET jd_text = NULL, jd_fetched_at = NULL
+                WHERE jd_text IS NOT NULL AND jd_fetched_at < ?
+                  AND job_id NOT IN (SELECT job_id FROM decisions WHERE decision = 'accept')
+                  AND job_id NOT IN (SELECT job_id FROM applications)""", (cutoff,))
+        self.conn.commit()
+        return int(cur.rowcount or 0)
+
+    def compact(self) -> bool:
+        """Give freed space back to the disk (VACUUM). False when another
+        connection is using the database; the next run tries again."""
+        try:
+            self.conn.execute("VACUUM")
+            self.conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+            return True
+        except sqlite3.OperationalError:
+            return False
 
     def find_job_by_url(self, url: str) -> Optional[dict[str, Any]]:
         r = self.conn.execute(
@@ -743,6 +792,43 @@ class Store:
             moved += 1
         self.conn.commit()
         return moved
+
+    # ---------------- Not interested (M17) ----------------
+
+    def dismissals(self) -> dict[str, str]:
+        """Job id -> when it was marked Not interested."""
+        return {r["job_id"]: r["dismissed_at"] for r in self.conn.execute(
+            "SELECT job_id, dismissed_at FROM dismissals")}
+
+    def dismiss(self, job_id: str) -> str:
+        """Mark a role Not interested; marking it again keeps the first time."""
+        self.conn.execute(
+            "INSERT INTO dismissals (job_id, dismissed_at) VALUES (?, ?) "
+            "ON CONFLICT (job_id) DO NOTHING", (job_id, utcnow()))
+        self.conn.commit()
+        return self.conn.execute(
+            "SELECT dismissed_at FROM dismissals WHERE job_id = ?", (job_id,)).fetchone()[0]
+
+    def undismiss(self, job_id: str) -> bool:
+        cur = self.conn.execute("DELETE FROM dismissals WHERE job_id = ?", (job_id,))
+        self.conn.commit()
+        return cur.rowcount > 0
+
+    # ---------------- company health (M17) ----------------
+
+    def company_health(self) -> list[dict[str, Any]]:
+        """Every enabled company with its failure record and its latest scan."""
+        return [dict(r) for r in self.conn.execute(
+            """SELECT co.key, co.name, co.careers_url, co.provider, co.slug, co.feed_url,
+                      co.last_scraped_at, co.last_success_at, co.consecutive_failures,
+                      co.last_error_class, co.last_error, co.quarantined_at,
+                      cv.status AS last_status, cv.postings_found AS last_postings,
+                      cv.http_status AS last_http_status
+                 FROM companies co
+                 LEFT JOIN coverage cv ON cv.company_id = co.id
+                  AND cv.run_no = (SELECT MAX(run_no) FROM coverage WHERE company_id = co.id)
+                WHERE co.enabled = 1
+                ORDER BY co.name COLLATE NOCASE""")]
 
     def applications(self) -> list[dict[str, Any]]:
         """Everything with a status, newest change first.

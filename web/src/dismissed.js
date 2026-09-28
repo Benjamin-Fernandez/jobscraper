@@ -1,49 +1,73 @@
-// Dismiss, session-scoped. Open question Q2 (PRD section 11) asks whether Dismiss
-// hides a role forever or only for a run, and it is the user's call. Until it is
-// decided, Dismiss changes nothing on the server: it hides the role in this
-// browser tab only (sessionStorage), and a new tab or session shows it again.
-// Deciding Q2 means replacing this module, not patching around it.
+// "Not interested" (M17). It used to hide a role for this browser tab only
+// (sessionStorage), so after a restart the role came back at the top as new.
+// It is now stored on the server (PUT/DELETE /api/dismissals/<id>) and the
+// shortlist says when each role was dismissed (`dismissed_at`); the Inbox lists
+// those roles in their own section at the bottom.
+//
+// `changes` holds this page's own marks until the next shortlist reload
+// reflects them, so a card moves the moment it is clicked.
 import { reactive } from 'vue'
+import { dismissRole, undismissRole } from './api.js'
 
-const KEY = 'jobscraper.dismissed'
+const changes = reactive(new Map())       // job id -> dismissed_at (string) or null
 
-function read() {
+export function dismissedAt(job) {
+  return changes.has(job.id) ? changes.get(job.id) : (job.dismissed_at ?? null)
+}
+
+export function isDismissed(job) {
+  return Boolean(dismissedAt(job))
+}
+
+export async function dismiss(job) {
+  changes.set(job.id, new Date().toISOString())
   try {
-    const raw = window.sessionStorage.getItem(KEY)
-    const ids = raw ? JSON.parse(raw) : []
-    return Array.isArray(ids) ? ids : []
-  } catch {
-    return []
+    await dismissRole(job.id)
+  } catch (e) {
+    changes.delete(job.id)
+    throw e
   }
 }
 
-function write(set) {
+export async function restore(job) {
+  changes.set(job.id, null)
   try {
-    window.sessionStorage.setItem(KEY, JSON.stringify([...set]))
-  } catch {
-    // Storage blocked (private mode, sandboxed preview): the in-memory set
-    // still works for the life of the page.
+    await undismissRole(job.id)
+  } catch (e) {
+    changes.delete(job.id)
+    throw e
   }
 }
 
-const ids = reactive(new Set(read()))
+// Before M17 a dismissal lived only in this tab's sessionStorage: carry any
+// still there over to the server, once. Returns how many were carried.
+const LEGACY_KEY = 'jobscraper.dismissed'
 
-export function isDismissed(id) {
-  return ids.has(id)
+export async function migrateSessionDismissals() {
+  let ids = []
+  try {
+    const raw = window.sessionStorage.getItem(LEGACY_KEY)
+    ids = raw ? JSON.parse(raw) : []
+  } catch {
+    return 0
+  }
+  if (!Array.isArray(ids) || !ids.length) return 0
+  let moved = 0
+  for (const id of ids) {
+    try {
+      await dismissRole(String(id))
+      changes.set(String(id), new Date().toISOString())
+      moved++
+    } catch {
+      // A role that no longer exists: nothing to carry.
+    }
+  }
+  try { window.sessionStorage.removeItem(LEGACY_KEY) } catch { /* blocked */ }
+  return moved
 }
 
-export function dismiss(id) {
-  ids.add(id)
-  write(ids)
-}
-
-export function restoreAll(idsToRestore) {
-  for (const id of idsToRestore) ids.delete(id)
-  write(ids)
-}
-
-// For tests: forget everything, including what sessionStorage held.
+// For tests: forget this page's marks.
 export function resetDismissed() {
-  ids.clear()
-  write(ids)
+  changes.clear()
+  try { window.sessionStorage.removeItem(LEGACY_KEY) } catch { /* blocked */ }
 }

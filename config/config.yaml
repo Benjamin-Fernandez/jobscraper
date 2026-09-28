@@ -114,3 +114,9 @@ judge:
     - project management
     - trade desk engineer, trade associate, trade operations analyst
     - analyst, associate in financial firms
+
+retention:
+  # Stored job descriptions are deleted this many days after they were fetched,
+  # to keep the database small (M17). Roles the judge accepted and roles you
+  # track in Applications keep theirs - the Inbox shows it. 0 keeps everything.
+  description_days: 7

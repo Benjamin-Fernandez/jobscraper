@@ -12,8 +12,8 @@ from typing import Any
 from fastapi import APIRouter, Depends, Query, Request
 
 from jobscraper.config import Config
-from jobscraper.web.data import (jobs_for, load_shortlist, resolve_run,
-                                 status_map, with_status)
+from jobscraper.web.data import (jobs_for, load_shortlist, mark_tracked_twins,
+                                 resolve_run, status_map, with_status)
 from jobscraper.web.deps import get_config, open_store
 
 router = APIRouter(tags=["shortlist"])
@@ -32,10 +32,14 @@ def get_shortlist(
     if not jobs:
         return []
     with open_store(request) as store:
-        statuses = status_map(store.applications())
+        apps = store.applications()
         ranks = store.company_list_ranks()
-    out = with_status(jobs, statuses)
-    # The company's place in the user's own list (M16), for "Your company order".
+        dismissed = store.dismissals()
+    # A posting already tracked under another id is not new (M17).
+    out = mark_tracked_twins(with_status(jobs, status_map(apps)), apps)
     for job in out:
+        # The company's place in the user's own list (M16), for "Your company order".
         job["company_rank"] = ranks.get(str(job.get("company") or "").lower())
+        # Not interested (M17): listed in its own section, not as new.
+        job["dismissed_at"] = dismissed.get(str(job.get("id")))
     return out

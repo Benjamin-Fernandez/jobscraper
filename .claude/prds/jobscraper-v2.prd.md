@@ -2746,6 +2746,41 @@ from the JD itself."
 pass on the live database (Companies upload and live search, Inbox JD, Runs,
 Developer).
 
+### M17 — Not interested kept, descriptions expire, new titles, company CSV, no repeats
+
+*Built on the frozen personal line (branch `personal`) at the owner's request, 2026-09-28.*
+
+**Why (user, 2026-09-28):** "(1) Once a listing is selected to be 'not interested', it
+should move to the bottom of the inbox in a different section … so that when i close and
+restart the app, it does not reappear at the top (2) Are the descriptions of the job
+posting stored in the database? if so, there should be a 1 week time to live … (3) For the
+generated recommended titles, it should always aim to generate 5 new titles … only if
+there is truly nothing relevant, then it should return nothing or repeated items (4)
+generate a downloadable csv document for my current list of companies that are able to be
+scanned through and those that failed the fetch (5) Ensure that if the role is already
+applied for, do not add it to inbox. If unsure if it has been applied for, add it to
+inbox anyway."
+
+| # | Decision | Why |
+|---|---|---|
+| M17-D1 | Not interested is stored (`dismissals` table, `PUT/DELETE /api/dismissals/{id}`; the shortlist carries `dismissed_at`). The Inbox lists those roles in a collapsible section under the new roles, newest first; the detail pane offers "Move back to new roles". Dismissals made before M17 (sessionStorage) are carried over once. Closes Q2. | A session-only dismissal came back at the top after every restart. |
+| M17-D2 | `jobs.jd_fetched_at` dates every stored description (backfilled from the posting's first run). At the end of every run, descriptions older than `retention.description_days` (7) are deleted and the database is compacted (VACUUM); `jobscraper purge` does it on demand. **Kept:** roles the judge accepted (the Inbox shows their description) and roles with an application - under 1 MB of the 86 MB. `vital_text`, what the judge reads, is never deleted, and a purged posting keeps its extract, so nothing is re-judged. | Descriptions were 86 of 200 MB; the shortlisted ones are what the Inbox needs. |
+| M17-D3 | "Recommend titles" asks for 5 titles that are neither chosen nor suggested before (the prompt lists both; a `seen` history is stored); a second call tops up a short answer. Only when nothing new is found do earlier, still-unchosen recommendations come back, marked as repeats. | Each request returned the same titles the owner had already declined. |
+| M17-D4 | `GET /api/companies/health` and `/api/companies/export.csv`: every enabled company, whether its last fetch worked, and why not in words (blocked / page gone / no listings readable / temporary). Companies tab: "Your watched companies" with the counts and "Download all (.csv)". Cells are formula-safe. | The owner's request. |
+| M17-D5 | A job with no status whose posting URL (normalised: host case, trailing slash, fragment, `utm_*`) equals a tracked application's gets `tracked_as` and is left out of the Inbox and its badge; the header counts them. Same company + same title with another URL is **not** a match. | Observed: Grab's "Associate, Business Projects" came back as new under Grab Financial Group (one board, two ids). Jane Street, PayPal and Julius Baer each had several open postings with identical titles and different requisitions - separate openings, so "unsure" keeps them. |
+
+**Verify:** `tests/test_m17.py` (11: purge keeps accepted/applied/new, backfill,
+dating, no re-judge after purge, dismissals API + shortlist, URL keys, tracked twins,
+recommend top-up and repeats, repeated flag, health + CSV); M15 tests updated for
+"exactly N new" and 5 per request; Vitest Inbox (6 new Not interested / duplicate tests),
+`m17.test.js` (5).
+**Live (2026-09-28):** database migrated (40,147 descriptions dated; the oldest from
+2026-09-24, so the first ~27,500 expire from 2026-10-01); 295 companies - 258 scannable,
+37 failed (13 blocked, 8 unreadable, 6 gone, 10 temporary); the Grab duplicate hidden;
+a role marked Not interested moved to the section, stayed there after a reload, and moved
+back.
+**Results:** Python 323/323 (+11), Vitest 160/160 (+8), bundle rebuilt.
+
 ---
 
 ## 11. Open Questions
