@@ -1,7 +1,8 @@
 # mullti_user_prd — JobScraper as a public, multi-user cloud service
 
-**Status:** DRAFT r2 — requirements + target design, revised after an ECC architect
-review (2026-09-25). Nothing here is built yet.
+**Status:** DRAFT r3 — requirements + target design. r2 (2026-09-25) took in an ECC
+architect review; r3 (2026-09-28) closes logic gaps found in a second review (listed in
+§17) and adds free / student hosting (§10.4). Nothing here is built yet.
 **Created:** 2026-09-25 · **Owner:** Benjamin
 **Builds on:** the single-user v2 in `.claude/prds/jobscraper-v2.prd.md` (M0–M12:
 watchlist → staleness scheduler → ATS scrape → free prefilter → Qwen facts →
@@ -71,7 +72,7 @@ infrastructure cost that stays **below US$0.50 per active user per month**.
 
 | Metric | Target | How measured |
 |---|---|---|
-| Onboarding → first shortlist | ≤ 10 min, ≥ 70% of sign-ups | events `signed_up` → `first_shortlist_ready` |
+| Onboarding → first shortlist | first results ≤ 10 min when every chosen company is already in the catalog (new companies need a crawl first; the UI shows progress), ≥ 70% of sign-ups | events `signed_up` → `first_results_shown` |
 | Weekly retention | ≥ 40% open Inbox in 3 of first 6 weeks | Inbox view events |
 | Paid conversion | ≥ 5% of monthly active users | Stripe subscriptions ÷ MAU |
 | Location precision | 100% of accepted roles in the user's chosen locations | automated check + monthly hand audit of 30 |
@@ -100,6 +101,9 @@ infrastructure cost that stays **below US$0.50 per active user per month**.
 7. **Hosting in Singapore** at the cost in §10.
 8. **Privacy for a public service:** consent, withdrawal, deletion, export, encryption,
    a privacy policy (PDPA, §12.3).
+9. **An email digest after a scheduled run that found new roles** (D-30). Without it a
+   scheduled product is silent: runs finish while the user is away, and the retention
+   metric depends on them remembering to look.
 
 ### Out of scope (MVP)
 
@@ -108,7 +112,7 @@ infrastructure cost that stays **below US$0.50 per active user per month**.
 | **Scraping LinkedIn** | Prohibited by LinkedIn's User Agreement; §9.7 gives the compliant route. |
 | Auto-apply / filling application forms | Different product; abuse and ToS risk. |
 | Non-Singapore locations | Launch market; the data model keeps locations per user (§9.8). |
-| Email/Telegram alerts | First post-MVP item; not needed to test the hypothesis. |
+| Instant / Telegram / push alerts | The per-run email digest (MVP item 9) is enough to test the hypothesis. |
 | Mobile apps | The responsive web app (v2 M12) covers phones. |
 | Per-user or self-hosted LLMs | Cost-prohibitive at this scale (§9.5). |
 | University/cohort accounts | Secondary segment; after the hypothesis holds. |
@@ -128,11 +132,16 @@ Numbered from D-19 so they sit beside v2's decisions (D-1–D-18).
 | **D-22** | **Two prompts, two steps.** A **facts** prompt with *no user data* (Singapore?, locations, yoe_min, employment type, seniority) runs once per posting version; a **fit** prompt built from *one user's* profile and interests runs per (user, posting). Code still decides (D-17). | v2's single prompt hard-codes one persona ("a new graduate software engineer … Singapore"); a public service needs the user-independent facts separated from the user-dependent fit. |
 | **D-23** | **Google sign-in only (OIDC), keyed on Google `sub`, `email_verified` required; server-side sessions.** | The owner's requirement; no passwords; stable identity even if the email changes. |
 | **D-24** | **No LinkedIn scraping.** Postings come from company ATS feeds (as v2) and generic `JobPosting` markup on careers pages; LinkedIn appears only as links users paste. | §9.7: no read API exists; scraping breaches LinkedIn's terms and was enforced in 2025. |
-| **D-25** | **Start on one small Singapore VM** (DigitalOcean 2 GB) running Docker Compose with Postgres, one worker process, Caddy; backups encrypted off-VM. Scale out on *measured* triggers. | Cheapest viable at ≤ 200 users (§10); every piece is separable later. |
+| **D-25** | **One small Singapore VM** running Docker Compose with Postgres, one worker process, Caddy; backups encrypted off-VM. **Phased:** build and non-commercial beta on a **free tier** (Oracle Cloud Always Free in Singapore, or Azure for Students — §10.4); before charging anyone (P7), be on a host whose terms allow commercial use (Oracle if its terms allow, else a DigitalOcean 2 GB droplet). Scale out on *measured* triggers. | Cheapest viable at ≤ 200 users (§10); student credits forbid commercial use and the DigitalOcean student credit ended 2026-08-01, so the free phase must end at billing; every piece is separable later. |
 | **D-26** | **Quota is an append-only ledger**, charged atomically at run start, refunded by rule; one active run per user. | Auditable, race-free, and maps runs to cost (§8.5). |
 | **D-27** | **Postgres replaces SQLite; `store.py` stays the only SQL module**; row-level security is enforced, not decorative. | v2 §8.4 designed for this swap; multi-user needs concurrency and isolation. |
 | **D-28** | **Cache keys are content hashes of everything that shapes an answer.** | v2 caches decisions by `profile_version` only — editing `judge.interests` today serves stale verdicts. Multi-user must not inherit that (§8.3). |
 | **D-29** | **Shared facts are protected against poisoning:** facts batches hold one company's postings only; facts from user-added companies stay private to that user until the company is reviewed. | One hostile posting or attacker page must not write `is_singapore: true` into facts every user sees (§12.2). |
+| **D-30** | **Email digest in the MVP:** after a scheduled run with ≥ 1 new shortlisted role, one email (count + top titles + link to the Inbox; no job-description text). One-click unsubscribe. | A scheduled run nobody hears about tests nothing (§6 item 9). |
+| **D-31** | **A board is identified by its normalised endpoint — (provider, tenant, site) — not (provider, slug).** Several catalog companies may share one board with an `entity_filter` (department / legal entity). | Seen in v2 on 2026-09-27: Rakuten Asia and Rakuten Viki are two sites on one Workday tenant (`rakuten`), and "Grab Financial Group" resolves to Grab's own SmartRecruiters board. `UNIQUE(provider, board_slug)` would merge the first pair and duplicate-scrape the second. |
+| **D-32** | **A run that finds nothing to do is not charged.** If no watched company is past its window and no posting changed, the run ends as `nothing_new` with a refund, and "Run now" shows when fresh data can next exist. | Otherwise a user pays a run for re-reading an unchanged catalog — the quota would bill for nothing. |
+| **D-33** | **Large boards are fetched with a location facet, not truncated.** Workday, SmartRecruiters and others are queried for the locations some user allows; the 600-posting cap applies after the facet. | v2 caps every board at 600 postings (`MAX_JOBS`); on 2026-09-27 Visa, AIA, Manulife, PwC, Kyndryl, DXC, HPE and Deutsche Bank all hit it, so Singapore roles past the cap are silently missed. |
+| **D-34** | **Platform spend guard:** a daily token budget across all users; at 80% alert the owner, at 100% pause new judging (runs park as `awaiting_llm`, resume free next day). | Per-user quotas bound one user; nothing bounded the sum — a bug, a mass re-judge or abuse could burn a month's LLM budget in a day. |
 
 ---
 
@@ -144,7 +153,8 @@ Numbered from D-19 so they sit beside v2's decisions (D-1–D-18).
 |---|---|
 | ATS adapters, discovery, `net.py` (rate limits, robots) | **Kept**, fed by the shared catalog. **Plus** SSRF protection for user-added URLs (§12.2) and a generic schema.org `JobPosting` (JSON-LD) adapter for careers pages on no known ATS. |
 | `RawJob.employment_type` (filled by Lever, Ashby, SmartRecruiters, Workable, Recruitee) — *dropped by v2's schema today* | **Persisted** as `postings.employment_type_raw`; the model is asked only when it is empty (Greenhouse, Workday, generic). |
-| Staleness scheduler (per company, 14 days, stamped on attempt) | **Kept for the shared crawl**; the deadline becomes the *shortest tier window among the company's watchers*, measured from `last_success_at` (not the attempt stamp). A separate **per-user run scheduler** is new (§8.5). |
+| Staleness scheduler (per company, 7 days since 2026-09-27, stamped on attempt) | **Kept for the shared crawl**; the deadline becomes the *shortest tier window among the company's watchers*, measured from `last_success_at` (not the attempt stamp). A separate **per-user run scheduler** is new (§8.5). |
+| Adapters' 600-posting cap (`MAX_JOBS`) | **Location-faceted fetch** for large boards (D-33); the cap stays as a safety limit after the facet. |
 | Description hydration inside the funnel (`_hydrate`) | **Moved to the crawler** (`postings.jd_fetched_at`): user runs never make network calls. |
 | Free prefilter (`rules.yaml`, rule registry) | **Kept, per user**, with rules *generated from the user's preferences*. v2's defaults are not copied: its `title_deny` rejects "intern", which an internship seeker needs. |
 | Vital extract | **Kept, global** (one per posting version). |
@@ -204,11 +214,16 @@ own process or VM without code changes (§9.8).
 
 **Shared catalog (no personal data):**
 - `companies` — v2's fields plus `status` (active / unresolvable / blocked / pending_review),
-  `added_by` (null for curated), `crawl_deadline` (derived, §8.1).
-  **Identity:** `UNIQUE (provider, board_slug)` for ATS boards, and a normalised
-  careers URL for the rest — *not* `slug(name)`, or two users adding "Grab" create
-  duplicates.
-- `postings` — v2's `jobs` plus `employment_type_raw`, `jd_fetched_at`, `vital_hash`.
+  `added_by` (null for curated), `crawl_deadline` (derived, §8.1), `board_id`,
+  `entity_filter` (nullable: department / legal-entity match within a shared board).
+  **Identity (D-31):** a separate `boards` table keyed `UNIQUE (provider, tenant, site)`
+  — the normalised feed endpoint — and a normalised careers URL for the rest; *not*
+  `slug(name)` (two users adding "Grab" would duplicate it) and *not* `(provider, slug)`
+  (Rakuten Asia and Rakuten Viki share tenant `rakuten`). A board is crawled once however
+  many companies point at it.
+- `postings` — v2's `jobs` plus `employment_type_raw`, `jd_fetched_at`, `vital_hash`,
+  `closed_at`. **Retention:** closed postings are kept 90 days (so an Inbox or an
+  application can still show them), then purged unless an application references them.
 - `posting_facts` — PK `(posting_id, vital_hash, prompt_version, model)` → `is_singapore`,
   `locations[]`, `yoe_min`, `employment_type`, `seniority`, `extracted_at`,
   `visibility` (`shared` | `private:<user_id>`, D-29).
@@ -232,8 +247,13 @@ own process or VM without code changes (§9.8).
   `fit_input_hash = sha256(profile summary + skills + interests + experience ceiling +
   role types + fit prompt version + model)`; `first_shortlisted_run` (so the Inbox can
   show what is new).
+- `user_posting_state` — PK `(user_id, posting_id)`: `new | seen | dismissed | applied`,
+  `dismissed_reason` (optional). Without it the Inbox only grows: nothing records "I've
+  looked at this" or "not for me", and a dismissed role would reappear after a re-judge.
 - `applications` — PK `(user_id, application_id)`; `posting_id` **nullable** so a
-  pasted LinkedIn link can be tracked; `app_events` carries `user_id`.
+  pasted LinkedIn link can be tracked; a **snapshot** (title, company, location, URL,
+  captured at apply time) so the record survives the posting closing or being purged;
+  `app_events` carries `user_id`.
 - `settings` — per-user UI settings (v2's M11 table, per user).
 - `quota_ledger` — append-only: `(user_id, run_id, kind: charge|refund|grant, amount, at)`,
   `UNIQUE (run_id, kind)`.
@@ -246,7 +266,10 @@ own process or VM without code changes (§9.8).
 - `audit_log` — sign-ins, consent changes, exports, deletions, admin actions.
 
 **Deletion is designed in, not bolted on:** every per-user table cascades from `users`;
-deleting an account removes the live data at once; backups expire it (§12.3).
+deleting an account removes the live data at once; backups expire it (§12.3). Shared rows
+the user touched: companies they added that are still `pending_review` with no other
+watcher are deleted, reviewed ones keep the company and null `added_by`; facts with
+`visibility = private:<user>` are deleted.
 
 ### 8.4 Work model: one worker, three queues
 
@@ -254,14 +277,19 @@ A Postgres table-backed queue (`FOR UPDATE SKIP LOCKED`) — no Redis at this si
 
 | Queue | Unit of work | Enqueued when |
 |---|---|---|
-| **crawl** | one company: resolve ATS (shared), fetch listings, diff, persist; then fetch descriptions for new postings that pass a **global location-only screen** | the company's crawl deadline passes, or a run finds it stale |
+| **crawl** | one **board** (D-31): resolve ATS (shared), fetch listings (location-faceted, D-33), diff, persist; then fetch descriptions for new postings that pass a **global location-only screen** — the *union of every user's allowed locations*, not a hard-coded Singapore, or a user who allows "Remote" would get postings with no description | the board's crawl deadline passes, or a run finds it stale |
 | **facts** | one company's new/changed postings → the facts prompt (one company per batch, D-29) | a run reaches step 3 and survivors lack facts (on demand, not "whatever any user might want") |
 | **run** | one step of one user run (§8.5) | schedule tick, "Run now", or a run's crawls/facts finishing |
 
 Fairness: the run queue round-robins across users; all model calls go through one
-rate-limited client with per-user token metering; scheduled runs are **staggered**
-(a user choosing "Monday 09:00" is placed at a random offset within the hour) so a
-popular slot does not hit the provider's rate limit at once.
+rate-limited client with per-user token metering and the platform spend guard (D-34);
+scheduled runs are **staggered** (a user choosing "Monday 09:00" is placed at a random
+offset within the hour) so a popular slot does not hit the provider's rate limit at once.
+
+**Crawl budget:** the crawl queue has a daily ceiling (e.g. 3,000 board fetches). Tier
+freshness windows are targets, not promises: past the ceiling the stalest boards go
+first and the Companies tab shows each board's real age. A few Pro users each watching
+200 niche companies at a 1-day window must not be able to starve everyone else.
 
 ### 8.5 What "a run" means now
 
@@ -270,7 +298,8 @@ v2's run = scrape 10 companies. Multi-user, crawling is shared, so a user's run 
 so a waiting run never holds a worker:
 
 ```
-queued → awaiting_crawl → filtering → judging → done | partial | failed
+queued → awaiting_crawl → filtering → judging → done | partial | failed | nothing_new
+                                         ↘ awaiting_llm (spend guard / provider down) ↗
 ```
 
 1. **queued → awaiting_crawl:** freeze the company list (`run_companies`); enqueue crawls
@@ -281,15 +310,31 @@ queued → awaiting_crawl → filtering → judging → done | partial | failed
 3. **judging:** ensure facts for survivors (enqueue facts jobs, park, resume); then the fit
    prompt, batched per user, skipping any with a `user_fit` row for the current keys;
    code decides (D-17).
-4. **done / partial / failed**, and the UI is notified.
+4. **done / partial / failed / nothing_new**; the UI is notified, and a scheduled run with
+   new shortlisted roles sends the digest (D-30).
+
+**Results appear as they are ready.** A first run can be large (40 companies, ~300
+survivors, facts for most of them), so judging works in batches and each finished batch
+is visible in the Inbox at once; the run's progress shows "12 of 40 companies, 80 of 300
+roles judged". The onboarding metric (§5) counts *first results shown*, not run end.
 
 **Quota (D-26):**
 - **Charge** at `queued`, inside a transaction that locks the user's subscription row;
   refuse if the balance is zero. At most **one active run per user** (partial unique
   index on `runs(user_id) WHERE state not in (done, partial, failed)`).
-- **Refund rules:** `failed` for a system reason → refund. Model provider down → the run
-  pauses and resumes free. Some companies blocked or failing → `partial`, **no refund**
-  (the rest of the run was delivered).
+- **Refund rules:** `failed` for a system reason → refund. Model provider down or the
+  spend guard tripped → `awaiting_llm`, resumes free. Some companies blocked or failing →
+  `partial`, **no refund** (the rest of the run was delivered). Nothing to do →
+  `nothing_new`, refunded (D-32).
+- **Quota period:** Free resets on the 1st of the month (SGT); paid tiers reset on the
+  subscription's billing date. No rollover.
+- **Plan changes:** an upgrade applies at once and grants the difference in runs for the
+  rest of the period (a `grant` ledger entry); a downgrade applies at the period end. A
+  failed payment keeps the paid tier through Stripe's retry window, then drops to Free at
+  the period end — watched companies beyond the Free limit are paused, not deleted.
+- **A scheduled run with no quota left** is not started: it is recorded as
+  `skipped_no_quota` (still unique on `(user_id, scheduled_for)`) and the user gets one
+  email per period, not one per skipped run.
 - **Scheduler dedupe:** `UNIQUE (user_id, scheduled_for)` on runs, so a restart or a double
   tick never runs or charges twice.
 - **Re-judge cost:** editing the profile or interests changes `fit_input_hash`, so the next
@@ -305,11 +350,11 @@ due runs if quota remains.
 | User input | Feeds |
 |---|---|
 | Resume | profile ingest (v2 M2), after stripping contact details → skills, target titles, summary |
-| Role types (intern / FT / contract, multi-select) | generated rules: seniority/intern words in `title_deny` depend on the selection; a rule on `employment_type_raw` → `posting_facts.employment_type` (unknown passes to fit, as D-2) |
+| Role types (intern / FT / contract, multi-select) | generated rules: seniority/intern words in `title_deny` depend on the selection; a rule on employment type (unknown passes to fit, as D-2). **Precedence:** an internship signal in the title or the facts beats the ATS field — ATSs routinely label a 6-month internship "Full-time" (the *schedule*), so `employment_type_raw = Full-time` + title "Intern" = internship. Graduate programmes count as full-time; part-time and temporary map to contract. |
 | Keywords / interests | `title_allow.extra` + the fit prompt's interests (v2 D-18) |
 | Experience ceiling | `experience_ceiling` rule + the guard's `yoe_min` cap, per user |
 | Target companies | `user_companies`; new URLs → shared discovery (SSRF-checked, pending review) |
-| Locations (default Singapore) | `location_explicit` allow tokens, per user |
+| Locations (default Singapore) | `location_explicit` allow tokens, per user; and the **guard** — v2's "Singapore confirmed" becomes "`posting_facts.locations` ∩ the user's allowed locations is non-empty", so the facts prompt must return locations, not only `is_singapore` |
 | Schedule | the per-user run scheduler (§8.5) |
 
 ### 8.7 Web app changes (building on M12)
@@ -321,7 +366,12 @@ due runs if quota remains.
 - **Tabs** (M12 shell kept): Inbox · Applications · Runs · Profile · **Companies** (search
   the catalog, add by URL, crawl health) · **Billing** (plan, runs left, upgrade via
   Stripe) · Settings. Inbox shows a short extract and the employer's link, not the full
-  description.
+  description; each card can be **dismissed** ("not for me", optional reason) and new cards
+  are marked until seen (`user_posting_state`).
+- **"Why wasn't this shown?"** A user can paste a posting URL, or open a *Filtered out*
+  list, and see which rule or check rejected it (v2's `filter explain`, per user), with a
+  one-click "add this title to my keywords". A public user cannot read YAML; without this
+  a too-strict rule is invisible and trust erodes.
 - **Admin** (owner only): users, crawl health and block rate, companies pending review,
   queue depth, LLM spend, manual quota grants.
 
@@ -397,7 +447,8 @@ this — i.e. thousands of active users. Revisit at 2,000 MAU.
 - Storage: ~33k postings for 224 companies today → ~300k postings (~2 GB) at 2,000 companies.
 - **Biggest unmeasured risk: datacenter-IP blocking.** Sites behind Cloudflare/Akamai bot
   protection often block cloud IPs that a home connection passes. **P0 runs a 48-hour
-  crawl of the full catalog from a US$6 Singapore droplet** and compares coverage with v2's.
+  crawl of the full catalog from a free Singapore VM** (Oracle Always Free or Azure for
+  Students, §10.4 — the same IP range the beta will use) and compares coverage with v2's.
   If coverage drops materially, the design needs an answer *before* P1 (slower crawling,
   conditional requests, a residential-grade egress for blocked hosts only, or dropping
   those companies).
@@ -444,8 +495,16 @@ without touching LinkedIn's servers:
 | D. Serverless (Cloud Run + Neon) | scale-to-zero containers + serverless Postgres | ~US$0–30 | Free tiers mostly in US regions; long crawls and a scheduler fit poorly. |
 | E. Hetzner Singapore | CPX11 (2 GB) US$20.49 / CPX21 (4 GB) US$37.49 | ~US$21–38 | No longer cheapest in Singapore after the 2026 price rise; 0.5–1 TB traffic. |
 
-**Recommendation (D-25): Option A.** If backups must stay in Singapore rather than R2's
-nearest region, use DigitalOcean Spaces SGP (US$5) instead.
+**Recommendation (D-25), phased:**
+1. **Build, P0 test and non-commercial beta (P0–P6): free** — Oracle Cloud Always Free in
+   Singapore (§10.4), which fits the whole Option-A stack at US$0.
+2. **From billing (P7): Option A on a host whose terms allow commercial use** — stay on
+   Oracle if its agreement permits it, else a DigitalOcean 2 GB SGP droplet (US$12–18).
+   The move is a Compose deployment plus a Postgres restore — rehearsed by the restore
+   drill anyway.
+
+If backups must stay in Singapore rather than R2's nearest region, use DigitalOcean
+Spaces SGP (US$5) or Oracle Object Storage (20 GB free) instead.
 
 **Durability:** nightly `pg_dump` alone risks up to a day of lost data (applications,
 payments). Use **continuous WAL archiving** (e.g. WAL-G) to object storage plus a nightly
@@ -477,6 +536,31 @@ first response is resizing the VM; the next is managed Postgres (C) and a second
 | Stripe fees | per payment (§11) |
 | **Total** | **≈ US$30–45** (≈ US$0.15–0.25 per user) |
 
+During the free phase (§10.4) the VM and backups cost US$0, so the beta costs roughly the
+LLM bill alone — ≈ US$5–15/month for 20–50 beta users, less while Model Studio's free
+token allowance lasts.
+
+### 10.4 Free and student hosting *(checked 2026-09-28)*
+
+The owner is a student, so the student offers were checked. **None of them can host the
+paid service**: every student credit is for learning and non-commercial use, and the
+biggest one (DigitalOcean) is gone. What they *can* do is make P0–P6 free.
+
+| Offer | What you get | Singapore? | Commercial use? | Verdict |
+|---|---|---|---|---|
+| **Azure for Students** | US$100 credit for 12 months, no card; 12 months of 750 h/month each of B1s, B2pts v2 and B2ats v2 VMs (**1 GB RAM each**); 750 h/month of PostgreSQL Flexible Server B1ms (2 GB RAM, 32 GB storage + 32 GB backup); always-free Container Apps, Functions, App Service F1 (1 h CPU/day) | Southeast Asia region exists; free-size VM availability there is not guaranteed — confirm in the portal | **No** — the offer terms limit credits to "education, non-commercial research" and development; the subscription is disabled when the credit runs out. Renewal: the offer terms say one subscription per student, the marketing page says it renews yearly — treat renewal as unconfirmed | **Usable for the free beta, not for launch.** Split: API + worker + Caddy on a 1 GB B2ats v2, Postgres on the free B1ms Flexible Server. 1 GB is tight — the worker must run one queue at a time. |
+| **Oracle Cloud Always Free** (not a student offer; free for anyone) | Ampere A1 **2 OCPU + 12 GB RAM** (halved from 4/24 without notice on 2026-06-15), 2 AMD micro VMs, 200 GB block storage, 20 GB object storage, **10 TB/month egress**, all in the home region | **Yes** — `ap-singapore-1` can be the home region | Not confirmed — check the Oracle Cloud Services Agreement before P7 | **Best free fit**: the whole Option-A stack on one 12 GB VM at US$0. Upgrade the account to Pay-As-You-Go (card needed, still US$0 within the limits): PAYG accounts are exempt from idle-instance reclamation (A1 VMs under 20% CPU, network and memory for 7 days — which describes this workload). Risk: Oracle changes the free limits without notice (R-M16). |
+| **GitHub Student Developer Pack — DigitalOcean** | *Was* US$200 for 1 year | — | — | **Ended**: DigitalOcean left the pack; every credit expired 2026-08-01. |
+| **GitHub Student Developer Pack — Heroku** | US$13/month credit for 24 months | **No** — Common Runtime is US/EU only | Student credit | Not suitable: overseas hosting of resumes adds a PDPA s.26 transfer and ~200 ms latency. |
+| **GitHub Student Developer Pack — others** | Azure (same offer as above), MongoDB Atlas US$50, Datadog Pro 2 years, Sentry, New Relic, a free `.tech` / `.me` domain | — | — | Useful around the edges: **a free domain for the beta** and free monitoring/error tracking. |
+| AWS Free plan (any new account) | US$100–200 credits, expires after **6 months** | Yes (`ap-southeast-1`) | Yes | Too short-lived to matter. |
+| Google Cloud | US$300 for 90 days; always-free e2-micro is **US regions only** | Credits yes, free VM no | Yes | Too short-lived; the free VM is in the wrong country. |
+
+**Decision:** Oracle Always Free (PAYG-upgraded) in Singapore for P0–P6, with Azure for
+Students as the fallback if Oracle has no A1 capacity or rejects the sign-up; move to a
+commercial-use host before P7 (D-25). Model Studio's free token allowance (1M tokens per
+model for 90 days) covers the P3 quality gate.
+
 ---
 
 ## 11. Tiers, quotas and unit economics
@@ -485,14 +569,18 @@ first response is resizing the VM; the next is managed Postgres (C) and a second
 
 | Tier | Price | Runs / month | Companies | Crawl freshness | Schedules |
 |---|---|---|---|---|---|
-| Free | S$0 | 4 | 20 | ≤ 7 days | manual, weekly |
+| Free | S$0 | 5 | 20 | ≤ 7 days | manual, weekly |
 | Plus | S$5 / month | 16 | 60 | ≤ 3 days | + fortnightly, twice weekly |
 | Pro | S$12 / month | 60 | 200 | ≤ 1 day | + daily |
 
+- **Free is 5 runs, not 4:** a weekly schedule fires 5 times in a 5-week month, so 4 runs
+  would make every such month's last scheduled run fail for want of quota.
 - **Payments:** Stripe Checkout + Customer Portal + webhooks (signature-verified,
   idempotent via `stripe_events`). Singapore fees *(verified)*: PayNow **1.3%**, cards
-  **3.4% + S$0.50** — ~13% of a S$5 card payment, so **offer PayNow and annual plans**
-  (e.g. S$50/year for Plus).
+  **3.4% + S$0.50** — ~13% of a S$5 card payment. **PayNow cannot auto-renew**: it is a
+  one-off, customer-initiated payment, usable for a subscription only as a manually paid
+  invoice. So: **monthly plans auto-renew on cards; PayNow is for annual plans and prepaid
+  run packs** (e.g. Plus S$50/year, paid by invoice), which also keeps the fee share low.
 - **Break-even:** ~US$40/month ≈ S$52 → ~10 Plus subscribers, or ~5 Pro.
 - **Cost per run** (estimate): ~US$0.01–0.02 in LLM plus a share of crawling; quotas mainly
   bound abuse and set the upgrade path.
@@ -506,7 +594,11 @@ first response is resizing the VM; the next is managed Postgres (C) and a second
 ### 12.1 Authentication and sessions
 
 Google OIDC authorization-code flow with PKCE, scopes `openid email profile` only;
-validate the ID token; key the account on `sub` and require `email_verified`.
+validate the ID token; key the account on `sub` and require `email_verified`. Publish the
+OAuth consent screen to *In production* before the beta opens beyond a handful of people
+(in *Testing* only listed test users, at most 100, can sign in); `openid email profile`
+are non-sensitive scopes and need no Google security review, though showing a logo
+needs brand verification.
 Server-side sessions (`sessions` table), cookie HttpOnly + Secure + SameSite=Lax, rotated
 at sign-in; CSRF protection on every state-changing request (v2's cross-site write guard,
 generalised from loopback to the public origin); sign-out everywhere.
@@ -527,7 +619,12 @@ generalised from loopback to the public origin); sign-out everywhere.
   subprocess** with memory and time limits; resumes are never served back as files. (An
   antivirus daemon such as ClamAV needs ~1 GB of RAM — not worth it on a 2 GB box when the
   file is only parsed, never served.)
-- **Rate limits:** per user and per IP (Caddy + application); queue fairness (§8.4).
+- **Rate limits:** per user and per IP (Caddy + application); queue fairness (§8.4);
+  company additions capped per user per day (each one triggers discovery crawls).
+- **Free-tier multi-accounting:** Google accounts are free, so one person can hold many
+  Free accounts. Each costs little (fit on ~20 companies), so the defence is proportionate:
+  the platform spend guard (D-34), per-IP sign-up limits, and review if one IP holds more
+  than a few accounts — not identity checks.
 - **Logs:** never log prompts, resume text or job-description bodies; scrub personal data
   from error-tracker events.
 - **Secrets:** Qwen and Stripe keys only in the processes that use them.
@@ -556,6 +653,21 @@ generalised from loopback to the public origin); sign-out everywhere.
 - **Content:** show a short extract and link to the employer's posting; do not republish full
   job descriptions to many users.
 
+### 12.4 Scraping careers sites as a service *(new in r3)*
+
+v2 is one person reading public careers pages for their own job search. A service that
+crawls hundreds of employers' boards and serves the results to paying users is a
+different legal and ethical position, and the PRD addressed only LinkedIn's. Before P7:
+- **Terms review:** public ATS job-board APIs (Greenhouse, Lever, Ashby) are published for
+  embedding and are the safest; Workday's `/wday/cxs/` JSON is an *internal, undocumented*
+  endpoint of each employer's site — check the employers' and Workday's terms, and prefer
+  the published `JobPosting` markup where it exists.
+- **Keep honouring robots.txt**, identify the crawler in its User-Agent with a contact URL,
+  and keep v2's per-host rate limits.
+- **Employer opt-out:** a published contact and a `companies.status = opted_out` that stops
+  crawling within 48 hours.
+- **Link, don't host:** the extract-and-link rule above.
+
 ---
 
 ## 13. Delivery milestones
@@ -564,15 +676,15 @@ Business outcomes, not engineering tasks — `/plan` turns each into a plan.
 
 | # | Milestone | Outcome | Status | Plan |
 |---|---|---|---|---|
-| P0 | Validate the premises | Landing page + waitlist + 10 interviews; **48-hour datacenter-IP crawl test** (§9.6); LinkedIn coverage sample (§9.7); pricing test | pending | — |
-| P1 | Multi-tenant core | Postgres; shared vs per-user tables with content-hash keys (D-28); user-scoped `store.py` + forced RLS; **deletion cascade and export built in**; the owner's v2 data migrated as user #1 | pending | — |
+| P0 | Validate the premises | Landing page + waitlist + 10 interviews; free Oracle (or Azure for Students) Singapore VM set up; **48-hour datacenter-IP crawl test** from it (§9.6); LinkedIn coverage sample (§9.7); pricing test; **location-faceted fetch for large boards** (D-33 — also a v2 fix) | pending | — |
+| P1 | Multi-tenant core | Postgres; `boards` separate from companies (D-31); shared vs per-user tables with content-hash keys (D-28); `user_posting_state`; user-scoped `store.py` + forced RLS; **deletion cascade and export built in**; the owner's v2 data migrated as user #1 | pending | — |
 | P2 | Accounts and onboarding | Google sign-in, consents, onboarding wizard, per-user profile, preferences, companies | pending | — |
 | P3 | Queue, workers, two-step judging | crawl/facts/run queues; run state machine; facts + fit prompts (D-22); **the quality gate on the split pipeline** (§9.4); one-time facts backfill for the catalog | pending | — |
-| P4 | Private beta in Singapore | Option A live behind an allowlist; TLS, WAL archiving, restore drill; **SSRF, RLS and isolation tests passing**; monitoring | pending | — |
-| P5 | Schedules and quotas | per-user schedules (staggered), quota ledger, refund rules | pending | — |
+| P4 | Private beta in Singapore | Option A live **on the free tier** (§10.4) behind an allowlist; OAuth consent screen published; TLS, WAL archiving, restore drill; **SSRF, RLS and isolation tests passing**; spend guard (D-34); monitoring | pending | — |
+| P5 | Schedules, quotas, digest | per-user schedules (staggered), quota ledger, refund / period / plan-change rules (§8.5), email digest (D-30) | pending | — |
 | P6 | Retention beta | 20–50 waitlist users for 4+ weeks; measure §5's retention before charging | pending | — |
-| P7 | Billing | Stripe tiers with PayNow, customer portal, idempotent webhooks | pending | — |
-| P8 | Public launch | privacy policy, terms, PDPA checklist (§12.3), minimum age; open sign-ups | pending | — |
+| P7 | Billing | **move to a commercial-use host first** (D-25); scraping terms review (§12.4); Stripe: cards for monthly, PayNow invoices for annual / run packs, customer portal, idempotent webhooks | pending | — |
+| P8 | Public launch | privacy policy, terms, PDPA checklist (§12.3), employer opt-out (§12.4), minimum age; open sign-ups | pending | — |
 | P9 | LinkedIn gap closure | missing ATS feeds added per the P0 sample; JSON-LD `JobPosting` adapter; paste-a-link tracking | pending | — |
 | P10 | Scale-out readiness | managed Postgres, per-queue workers, a second VM — when §10.1's measured triggers fire | pending | — |
 
@@ -594,6 +706,12 @@ Business outcomes, not engineering tasks — `/plan` turns each into a plan.
 - [ ] **Minimum age** — which age, and is parental consent needed below it?
 - [ ] **Operator** — personal or company entity for Stripe and PDPA purposes?
 - [ ] **Support promise** — channel and response time at launch.
+- [ ] **Oracle Always Free for a paid service** — does the Oracle Cloud Services Agreement
+      allow commercial use of Always Free resources? Decides whether P7 needs a move (§10.4).
+- [ ] **Azure for Students fallback** — are the free VM sizes available in Southeast Asia,
+      and does the offer renew each year (the offer terms and the marketing page disagree)?
+- [ ] **Workday and other internal job endpoints** — do the terms allow a commercial
+      service to use them, or must those employers be read from `JobPosting` markup (§12.4)?
 
 ## 15. Risks
 
@@ -614,6 +732,10 @@ Business outcomes, not engineering tasks — `/plan` turns each into a plan.
 | R-M13 | Card fees eat small payments | High | Low | PayNow and annual plans (§11) |
 | R-M14 | Qwen provider price or availability changes | Low | Medium | pluggable OpenAI-compatible backend; second provider configured |
 | R-M15 | Demand lower than assumed | Medium | High | P0 and the P6 retention beta come before billing |
+| R-M16 | A free or student offer changes or ends mid-beta (Oracle halved Always Free without notice on 2026-06-15; DigitalOcean ended its student credit, retroactively, on 2026-08-01) | Medium | Medium | Compose + restore drill keep the move to a paid host to hours; backups off the free host; never depend on a free tier past P6 |
+| R-M17 | Employers or ATS vendors object to commercial crawling | Medium | High | §12.4: terms review before P7, robots, identified crawler, opt-out within 48 h, extract-and-link only |
+| R-M18 | Large boards silently truncated (v2's 600-posting cap) | **High** (observed) | Medium | D-33 location-faceted fetch; alert when a board returns exactly the cap |
+| R-M19 | Free-tier abuse through many Google accounts | Low | Low | spend guard (D-34), per-IP sign-up limits (§12.2) |
 
 ---
 
@@ -623,9 +745,34 @@ Business outcomes, not engineering tasks — `/plan` turns each into a plan.
 - Qwen3-14B / 30B-A3B hosted prices: [OpenRouter Qwen3 14B](https://openrouter.ai/qwen/qwen3-14b), [OpenRouter Qwen3 30B A3B](https://openrouter.ai/qwen/qwen3-30b-a3b), [DeepInfra Qwen pricing guide](https://deepinfra.com/blog/qwen-api-pricing-2026-guide)
 - LinkedIn: [Job Posting API overview (Microsoft Learn)](https://learn.microsoft.com/en-us/linkedin/talent/job-postings/api/overview?view=li-lts-2026-03), [LinkedIn API access in 2026 (Phyllo)](https://www.getphyllo.com/post/linkedin-api-access-in-2026-partner-program-approval-timeline-alternatives), [Proxycurl shutdown](https://nubela.co/blog/goodbye-proxycurl/), [LinkedIn wins case against Proxycurl](https://www.socialmediatoday.com/news/linkedin-wins-legal-case-data-scrapers-proxycurl/756101/)
 - Hosting: [DigitalOcean droplet pricing](https://www.digitalocean.com/pricing/droplets), [DigitalOcean managed Postgres pricing](https://docs.digitalocean.com/products/databases/postgresql/details/pricing/), [Hetzner 2026 price adjustment](https://docs.hetzner.com/general/infrastructure-and-availability/price-adjustment/), [Hetzner CPX11](https://sparecores.com/server/hcloud/cpx11), [Supabase pricing](https://supabase.com/pricing), [Cloud Run pricing](https://cloud.google.com/run/pricing), [Neon pricing](https://neon.com/pricing)
-- Payments: [Stripe Singapore pricing](https://stripe.com/en-sg/pricing), [Stripe local payment methods](https://stripe.com/en-sg/pricing/local-payment-methods)
+- Payments: [Stripe Singapore pricing](https://stripe.com/en-sg/pricing), [Stripe local payment methods](https://stripe.com/en-sg/pricing/local-payment-methods), [Stripe PayNow](https://stripe.com/payment-method/paynow), [PayNow is one-off only (MemberPress / Stripe)](https://memberpress.com/docs/enable-paynow-with-stripe-and-memberpress/) *(checked 2026-09-28)*
+- Free / student hosting *(checked 2026-09-28)*: [Azure for Students](https://azure.microsoft.com/en-us/free/students), [Azure for Students offer terms](https://azure.microsoft.com/en-us/pricing/offers/ms-azr-0170p), [Azure free services](https://learn.microsoft.com/en-us/azure/cost-management-billing/manage/create-free-services), [GitHub Student Developer Pack](https://education.github.com/pack), [Heroku for GitHub students](https://www.heroku.com/github-students/), [DigitalOcean student credit ended](https://aistudentdiscount.com/digitalocean-github-student-developer-pack-credits/), [Oracle Always Free resources](https://docs.oracle.com/en-us/iaas/Content/FreeTier/freetier_topic-Always_Free_Resources.htm), [Oracle halves A1 free limits (InfoQ)](https://www.infoq.com/news/2026/07/oracle-cloud-free-tier-limits/), [Oracle PAYG avoids idle reclamation](https://blog.51sec.org/2023/02/oracle-cloud-cleaning-up-idle-compute.html), [AWS Free plan](https://aws.amazon.com/about-aws/whats-new/2025/07/aws-free-tier-credits-month-free-plan/), [Google Cloud free features](https://docs.cloud.google.com/free/docs/free-cloud-features)
+
+## 17. r3 review — logic gaps closed
+
+| # | Gap in r2 | Fix |
+|---|---|---|
+| 1 | Board identity `(provider, slug)` merges Rakuten Asia / Rakuten Viki (one Workday tenant) and double-crawls Grab / Grab Financial (one board) | D-31, `boards` table, `entity_filter` |
+| 2 | Large boards truncated at 600 postings — observed on 8 companies | D-33, R-M18 |
+| 3 | A run with nothing new was still charged | D-32, `nothing_new` state |
+| 4 | Free = 4 runs but a weekly schedule fires 5 times in some months | Free = 5 (§11) |
+| 5 | Quota period, upgrades, downgrades, failed payments and quota-exhausted schedules undefined | §8.5 quota rules |
+| 6 | Scheduled runs finish silently (alerts were out of scope) | D-30 email digest in MVP |
+| 7 | No way to mark a role seen or not-for-me; Inbox only grows | `user_posting_state`, dismiss (§8.3, §8.7) |
+| 8 | Applications broke when a posting closed or was purged; no posting retention | application snapshot, 90-day closed-posting retention |
+| 9 | Users could not see why a role was filtered out | "Why wasn't this shown?" (§8.7) |
+| 10 | Global description screen hard-coded to Singapore; guard used `is_singapore` only | union of allowed locations; guard on `locations ∩ allowed` (§8.4, §8.6) |
+| 11 | ATS "Full-time" on internships would misfile interns | employment-type precedence (§8.6) |
+| 12 | Nothing bounded total LLM spend | D-34 spend guard, `awaiting_llm` |
+| 13 | Nothing bounded total crawling (Pro × 200 companies × daily) | crawl budget (§8.4) |
+| 14 | "First shortlist ≤ 10 min" unreachable for companies not yet crawled | progressive results; metric redefined (§5, §8.5) |
+| 15 | PayNow assumed to work for monthly subscriptions — it cannot auto-renew | cards monthly; PayNow for annual / packs (§11) |
+| 16 | Commercial crawling of employers' sites not assessed (only LinkedIn was) | §12.4, R-M17 |
+| 17 | Account deletion left user-added companies and private facts undefined | §8.3 deletion rules |
+| 18 | Free-tier multi-accounting; per-user company-add rate | §12.2 |
+| 19 | Hosting assumed a paid droplet from day one; DigitalOcean student credit no longer exists | §10.4 free phase, D-25 phased |
 
 ---
-*Status: DRAFT r2 — requirements and target design, architect-reviewed. Next step: P0
-(validate the premises — above all the datacenter-IP crawl test), then
-`/plan .claude/prds/mullti_user_prd.md` for P1.*
+*Status: DRAFT r3 — requirements and target design, architect-reviewed (r2) and
+logic-reviewed (r3). Next step: P0 — set up the free Singapore VM (§10.4) and run the
+datacenter-IP crawl test from it — then `/plan .claude/prds/mullti_user_prd.md` for P1.*
