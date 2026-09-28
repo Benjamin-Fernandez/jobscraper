@@ -33,4 +33,9 @@ def get_shortlist(
         return []
     with open_store(request) as store:
         statuses = status_map(store.applications())
-    return with_status(jobs, statuses)
+        ranks = store.company_list_ranks()
+    out = with_status(jobs, statuses)
+    # The company's place in the user's own list (M16), for "Your company order".
+    for job in out:
+        job["company_rank"] = ranks.get(str(job.get("company") or "").lower())
+    return out

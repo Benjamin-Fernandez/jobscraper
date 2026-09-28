@@ -8,6 +8,7 @@
     python -m jobscraper profile     build or show the resume-derived profile
     python -m jobscraper filter      test | explain the prefilter rules
     python -m jobscraper titles      show | suggest the job titles searched for
+    python -m jobscraper companies   show | search your own list of companies
     python -m jobscraper reresolve   forget a company's cached ATS
     python -m jobscraper sync        reconcile watchlist.yaml into the database
 """
@@ -39,7 +40,7 @@ def _sync_watchlist(cfg, store) -> dict[str, int]:
     Runs before anything reads the companies table, so a YAML edit - an added,
     renamed, disabled or removed company - is always seen by the next command.
     """
-    return store.sync_watchlist(watchlist.load(cfg.watchlist_path))
+    return store.sync_watchlist(watchlist.all_entries(cfg.watchlist_path, store))
 
 
 def cmd_doctor(args) -> int:
@@ -455,8 +456,10 @@ def cmd_titles(args) -> int:
 
         print(BAR)
         source = "yours (set in the web app)" if user else "from your resume"
-        print(f"titles {source}: {len(current)} of {plan.max_target_titles} "
-              f"(plan: {plan.name})")
+        cap = plan.max_target_titles
+        print(f"titles {source}: {len(current)}"
+              + (f" of {cap}" if cap is not None else " (no limit)")
+              + f" (plan: {plan.name})")
         for title in current:
             print(f"  - {title}")
         raw = store.get_setting(t.SUGGESTIONS_KEY)
@@ -465,6 +468,33 @@ def cmd_titles(args) -> int:
             print(f"last recommendations ({last.get('generated_at', '?')}):")
             for item in last.get("suggestions", []):
                 print(f"  + {item.get('title')}")
+        print(BAR)
+        return 0
+    finally:
+        store.close()
+
+
+def cmd_companies(args) -> int:
+    """M16: the user's own list of companies. `show` prints it with each search
+    result; `search` finds careers sites for the ones not searched yet (Qwen
+    suggests the site, discovery proves it), in the user's order. The web app's
+    Companies tab starts `search` as a background job after an upload."""
+    from . import company_search
+
+    cfg, store = _boot_v2(args)
+    try:
+        if args.companies_cmd == "search":
+            counts = company_search.search(cfg, store)
+            print(BAR)
+            print("  ".join(f"{k} {v}" for k, v in counts.items()))
+            print(BAR)
+            return 0
+        rows = store.company_list()
+        print(BAR)
+        if not rows:
+            print("no list uploaded - add one on the web app's Companies tab")
+        for r in rows:
+            print(f"{r['position']:>4}. {r['name']:<34} {r['status']:<10} {r.get('detail') or ''}")
         print(BAR)
         return 0
     finally:
@@ -562,6 +592,12 @@ def build_parser() -> argparse.ArgumentParser:
     ts.add_argument("--limit", type=_positive_int, default=0,
                     help="at most this many (capped by the plan)")
     tl.set_defaults(fn=cmd_titles, titles_cmd="show")
+
+    cl = sub.add_parser("companies", help="your own list of companies: show it, or search it")
+    cl_sub = cl.add_subparsers(dest="companies_cmd")
+    cl_sub.add_parser("show", help="the list, each with its search result")
+    cl_sub.add_parser("search", help="find careers sites for the companies not searched yet")
+    cl.set_defaults(fn=cmd_companies, companies_cmd="show")
 
     wl = sub.add_parser("watchlist", help="list, add or disable watched companies")
     wl_file = argparse.ArgumentParser(add_help=False)

@@ -42,7 +42,7 @@ def get_titles(request: Request, cfg: Config = Depends(get_config)) -> dict[str,
 def put_titles(body: TitlesChange, request: Request,
                cfg: Config = Depends(get_config)) -> dict[str, Any]:
     """Replace the user's titles. `422` for an empty list, a title over
-    MAX_TITLE_CHARS, or more titles than the plan allows."""
+    MAX_TITLE_CHARS, or more titles than the plan allows (if it caps them)."""
     too_long = [t for t in body.titles if len(" ".join(str(t).split())) > MAX_TITLE_CHARS]
     if too_long:
         raise HTTPException(status_code=422,
@@ -51,8 +51,8 @@ def put_titles(body: TitlesChange, request: Request,
     if not titles:
         raise HTTPException(status_code=422,
                             detail="keep at least one job title - or reset to your resume's")
-    limit = cfg.plan.max_target_titles
-    if len(titles) > limit:
+    limit = cfg.plan.max_target_titles          # None: no cap (the owner's plan)
+    if limit is not None and len(titles) > limit:
         raise HTTPException(
             status_code=422,
             detail=f"the {cfg.plan.name} plan allows {limit} job titles; got {len(titles)}")

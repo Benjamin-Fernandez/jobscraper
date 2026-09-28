@@ -83,28 +83,23 @@ describe('Runs tab: starting a run', () => {
     await start(wrapper)
 
     expect(wrapper.find('[role="alert"]').text()).toMatch(/a job is already running/i)
-    expect(wrapper.find('.job-status').attributes('data-state')).toBe('running')
-    expect(wrapper.find('.log').text()).toContain('parsing resume')
+    // The log itself is on the Developer tab (M16); Runs says what is busy.
+    expect(wrapper.find('.run-busy').text()).toContain('A profile refresh in progress')
+    expect(wrapper.find('.run-busy a').attributes('href')).toBe('#/developer')
+    expect(wrapper.find('.log').exists()).toBe(false)
     expect(wrapper.find('button.start-run').attributes('disabled')).toBeDefined()
     expect(wrapper.find('button.cancel').text()).toBe('Cancel profile refresh')
   })
 })
 
 describe('Runs tab: watching a run', () => {
-  it('polls while running and shows log lines as they arrive', async () => {
+  it('polls while running and says a run is in progress', async () => {
     const wrapper = await mountRuns()
     await start(wrapper)
-    expect(wrapper.find('.job-status').attributes('data-state')).toBe('running')
+    expect(wrapper.find('.run-busy').text()).toContain('A run in progress')
     const before = polls()
-
-    api.log('run 13: 10 companies due')
     await tick()
     expect(polls()).toBe(before + 1)
-    expect(wrapper.find('.log').text()).toContain('run 13: 10 companies due')
-
-    api.log('  -> OKX: 12 postings, 3 new')
-    await tick()
-    expect(wrapper.find('.log').text().split('\n')).toEqual(['run 13: 10 companies due', '  -> OKX: 12 postings, 3 new'])
   })
 
   it('stops polling when the run ends and asks the shell to reload', async () => {
@@ -112,8 +107,7 @@ describe('Runs tab: watching a run', () => {
     await start(wrapper)
     api.finishJob()
     await tick()
-    expect(wrapper.find('.job-status').attributes('data-state')).toBe('succeeded')
-    expect(wrapper.find('.summary').text()).toMatch(/^Run finished/)
+    expect(wrapper.find('.run-busy').exists()).toBe(false)
     expect(wrapper.emitted('changed')).toEqual([[{ runs: true }]])
 
     const after = polls()
@@ -123,7 +117,7 @@ describe('Runs tab: watching a run', () => {
 
   it('does not poll while nothing is running', async () => {
     const wrapper = await mountRuns()
-    expect(wrapper.find('.summary').text()).toContain('Nothing has run')
+    expect(wrapper.find('.run-busy').exists()).toBe(false)
     await tick(5)
     expect(polls()).toBe(1)
   })
@@ -157,8 +151,7 @@ describe('Runs tab: watching a run', () => {
     await flushPromises()
 
     expect(posts('api/jobs/cancel')).toHaveLength(1)
-    expect(wrapper.find('.job-status').attributes('data-state')).toBe('failed')
-    expect(wrapper.find('.summary').text()).toContain('exit -15')
+    expect(wrapper.find('.run-busy').exists()).toBe(false)
     expect(wrapper.find('button.cancel').exists()).toBe(false)
     const at = polls()
     await tick(3)
@@ -177,7 +170,7 @@ describe('Runs tab: jobs it cannot control', () => {
     const alert = wrapper.find('[role="alert"]').text()
     expect(alert).toContain('cannot be cancelled from here')
     expect(alert).toContain('restarted')
-    expect(wrapper.find('.job-status').attributes('data-state')).toBe('running')
+    expect(wrapper.find('.run-busy').exists()).toBe(true)
   })
 
   it('a 409 on cancel after the job ended just says nothing is running', async () => {
@@ -205,10 +198,13 @@ describe('Runs tab: history', () => {
     ]
     const wrapper = await mountRuns({ runs })
     const cells = r => wrapper.findAll(`tr[data-run="${r}"] td`).map(td => td.text())
-    expect(cells(12)).toEqual(['', '12', '23 Sep', '10', '412', '3 matches', 'ok'])
+    expect(cells(12)).toEqual(['', '12', '23 Sep', '10', '412', '3 matches', 'success'])
     expect(cells(11)).toEqual(['', '11', '21 Sep', '—', '—', '0 matches', 'failed'])
-    // Nothing to show for a run with 0 matches: it cannot be ticked.
+    // Nothing to show for a run with 0 matches: it cannot be ticked, but its
+    // row looks like every other (M16) - no muted "empty" style.
     expect(wrapper.find('tr[data-run="11"] input').attributes('disabled')).toBeDefined()
+    expect(wrapper.find('tr[data-run="11"] input').attributes('title')).toContain('0 matches')
+    expect(wrapper.find('tr[data-run="11"]').classes()).toEqual(wrapper.find('tr[data-run="12"]').classes())
     expect(wrapper.find('tr[data-run="12"] input').attributes('disabled')).toBeUndefined()
   })
 

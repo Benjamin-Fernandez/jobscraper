@@ -70,6 +70,12 @@ export function setApplicationStatus(jobId, status, { notes, ...details } = {}) 
     { status, notes: notes ?? null, ...details })
 }
 
+// One posting's full description, for the Inbox's detail pane (M16).
+// {job_id, title, company, location, posted_at, url, description}
+export function getPosting(jobId) {
+  return request(`postings/${encodeURIComponent(jobId)}`)
+}
+
 // Undo tracking (M13): the application and its history are removed and the role
 // is back in the Inbox with no status. 404 when there was nothing to remove.
 export function untrackApplication(jobId) {
@@ -157,4 +163,35 @@ export function uploadResume(file) {
   const ext = (/\.([a-z0-9]+)$/i.exec(file.name || '')?.[1] || '').toLowerCase()
   const type = file.type || RESUME_TYPES[ext] || 'application/octet-stream'
   return request('resume', { method: 'PUT', headers: { 'Content-Type': type }, body: file })
+}
+
+// ---- M16: the user's own list of companies ----
+
+// {items: [{position, name, status, careers_url, provider, postings, detail,
+//  searched_at}], counts, searched, max_companies, plan}
+// status: pending | searching | found | watched | failed | over_limit
+export function getCompanyList() {
+  return request('companies/list')
+}
+
+export const LIST_TYPES = {
+  txt: 'text/plain',
+  docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+}
+
+// One company per line, in the user's order of preference. Sent raw like the
+// resume. The answer is the list plus `upload: {read, kept, new, dropped, capped}`.
+export function uploadCompanyList(file) {
+  const ext = (/\.([a-z0-9]+)$/i.exec(file.name || '')?.[1] || '').toLowerCase()
+  const type = LIST_TYPES[ext] || file.type || 'application/octet-stream'
+  return request('companies/list', { method: 'PUT', headers: { 'Content-Type': type }, body: file })
+}
+
+export function clearCompanyList() {
+  return request('companies/list', { method: 'DELETE' })
+}
+
+// Search the list's unsearched companies: a background job. 202, or 409 when busy.
+export function startCompanySearch() {
+  return sendJson('jobs/companies', 'POST')
 }

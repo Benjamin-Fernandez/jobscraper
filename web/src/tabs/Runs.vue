@@ -11,9 +11,8 @@ import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { ApiError, cancelJob, describeError, getSettings, startRun } from '../api.js'
 import { useJob } from '../composables/useJob.js'
 import { plural, shortDate } from '../format.js'
-import { asList, matchLabel, takePickerRequest } from '../runs.js'
+import { asList, matchLabel, runStatusLabel, takePickerRequest } from '../runs.js'
 import { tabEmits, tabProps } from '../shell.js'
-import JobStatus from '../components/JobStatus.vue'
 import TabLoading from '../components/TabLoading.vue'
 
 const props = defineProps(tabProps)
@@ -26,7 +25,6 @@ const dryRun = ref(false)
 const starting = ref(false)
 const cancelling = ref(false)
 const actionError = ref('')
-const ready = ref(false)
 
 const { job, error: jobError, running, refresh, track } = useJob({
   kind: 'run',
@@ -50,6 +48,8 @@ const batchError = computed(() => {
 })
 
 const busyKind = computed(() => (running.value ? job.value.kind : null))
+const BUSY = { run: 'A run', profile: 'A profile refresh', titles: 'A title recommendation', companies: 'A company search' }
+const busyLabel = computed(() => BUSY[busyKind.value] ?? 'A job')
 const canStart = computed(() => !running.value && !starting.value && !batchError.value)
 
 async function loadSettings() {
@@ -150,7 +150,6 @@ onMounted(async () => {
     pickerEl.value?.focus?.({ preventScroll: true })
   }
   await Promise.all([loadSettings(), refresh()])
-  ready.value = true
 })
 </script>
 
@@ -198,7 +197,7 @@ onMounted(async () => {
           :disabled="cancelling"
           @click="cancel"
         >
-          {{ cancelling ? 'Cancelling…' : busyKind === 'profile' ? 'Cancel profile refresh' : 'Cancel run' }}
+          {{ cancelling ? 'Cancelling…' : busyKind === 'run' ? 'Cancel run' : `Cancel ${busyLabel.toLowerCase().replace(/^an? /, '')}` }}
         </button>
       </div>
     </form>
@@ -206,12 +205,11 @@ onMounted(async () => {
     <p v-if="settingsError" class="notice error" role="alert">Could not read the saved setting: {{ settingsError }}</p>
     <p v-if="actionError" class="notice error" role="alert">{{ actionError }}</p>
 
-    <h2 class="section-title">Current job</h2>
-    <div class="current">
-      <TabLoading v-if="!ready" :rows="1" />
-      <p v-else-if="jobError && !job" class="notice error" role="alert">Could not read the current job: {{ jobError }}</p>
-      <JobStatus v-else :job="job" title="Run log" />
-    </div>
+    <!-- The job's log lives on the Developer tab (M16); here, one line. -->
+    <p v-if="running" class="notice warn run-busy" role="status">
+      {{ busyLabel }} in progress. <a href="#/developer">Follow its log on the Developer tab</a>.
+    </p>
+    <p v-else-if="jobError && !job" class="notice error" role="alert">Could not read the current job: {{ jobError }}</p>
 
     <h2 class="section-title">Run history</h2>
     <TabLoading v-if="loading && !runs.length" :rows="2" />
@@ -257,13 +255,14 @@ onMounted(async () => {
               v-for="r in runs"
               :key="r.run_no"
               :data-run="r.run_no"
-              :class="{ picked: picked.has(r.run_no), empty: !r.accepted }"
+              :class="{ picked: picked.has(r.run_no) }"
             >
               <td class="pick">
                 <input
                   type="checkbox"
                   :checked="picked.has(r.run_no)"
                   :disabled="!r.accepted"
+                  :title="r.accepted ? undefined : 'Nothing to show - this run found 0 matches'"
                   :aria-label="`Show run ${r.run_no} in the Inbox`"
                   @change="toggle(r)"
                 >
@@ -273,7 +272,7 @@ onMounted(async () => {
               <td class="num">{{ count(r, 'companies', 'companies_due') }}</td>
               <td class="num">{{ count(r, 'postings', 'postings_seen') }}</td>
               <td class="matches">{{ matchLabel(r.accepted) }}</td>
-              <td><span class="pill" :data-status="r.status">{{ r.status ?? '—' }}</span></td>
+              <td><span class="pill" :data-status="r.status">{{ runStatusLabel(r.status) }}</span></td>
             </tr>
           </tbody>
         </table>
@@ -308,8 +307,9 @@ onMounted(async () => {
 .history td:first-child, .history td.num { font-family: var(--mono); font-variant-numeric: tabular-nums; }
 .history .num { text-align: right; }
 .history .pick { width: 2.5rem; text-align: center; }
+/* A 0-match run looks like every other row; its box just cannot be ticked. */
+.history .pick input:disabled { opacity: 1; cursor: not-allowed; }
 .history tr.picked td { background: var(--accent-soft); }
-.history tr.empty .matches { color: var(--muted); }
 .picker {
   position: sticky; top: calc(var(--header-h) + var(--space-2)); z-index: 2;
   display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between;

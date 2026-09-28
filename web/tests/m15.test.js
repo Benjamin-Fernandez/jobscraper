@@ -83,7 +83,8 @@ describe('Profile: job titles', () => {
   it('shows the titles in use, where they came from, and the plan\'s limit', async () => {
     const wrapper = await mountEditor()
     expect(chips(wrapper)).toEqual(['software engineer', 'site reliability engineer'])
-    expect(wrapper.find('.te-count').text()).toBe('2 / 20')
+    // The owner's local plan has no cap (M16): a count, not "2 / 20".
+    expect(wrapper.find('.te-count').text()).toBe('2 titles')
     expect(wrapper.text()).toContain('These came from your resume.')
     expect(wrapper.find('.te-reset').exists()).toBe(false)
   })

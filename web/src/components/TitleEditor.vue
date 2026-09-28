@@ -34,10 +34,14 @@ const { job, running, refresh, track } = useJob({
 })
 
 const titles = computed(() => data.value?.titles ?? [])
-const max = computed(() => data.value?.max_titles ?? 20)
-const full = computed(() => titles.value.length >= max.value)
+// The plan's cap on titles; null is no cap (the owner's local plan, M16).
+const limit = computed(() => (data.value ? data.value.max_titles ?? null : 20))
+const full = computed(() => limit.value !== null && titles.value.length >= limit.value)
 const suggestions = computed(() => data.value?.suggestions ?? null)
-const room = computed(() => Math.max(0, max.value - titles.value.length))
+const room = computed(() => (limit.value === null ? Infinity : Math.max(0, limit.value - titles.value.length)))
+const countLabel = computed(() => (limit.value === null
+  ? `${titles.value.length} ${titles.value.length === 1 ? 'title' : 'titles'}`
+  : `${titles.value.length} / ${limit.value}`))
 const showLog = computed(() => job.value?.kind === 'titles' && (running.value || job.value.state === 'failed'))
 const basedOn = computed(() => {
   const s = suggestions.value
@@ -87,7 +91,7 @@ function add(title) {
     return
   }
   if (full.value) {
-    error.value = `Your plan allows ${max.value} job titles - remove one to add another.`
+    error.value = `Your plan allows ${limit.value} job titles - remove one to add another.`
     return
   }
   return save([...titles.value, t], `Added “${t}”. The next run searches for it.`)
@@ -163,7 +167,7 @@ onMounted(() => {
             {{ data.source === 'custom' ? 'You have edited this list.' : 'These came from your resume.' }}
           </p>
         </div>
-        <span class="te-count" :class="{ full }">{{ titles.length }} / {{ max }}</span>
+        <span class="te-count" :class="{ full }">{{ countLabel }}</span>
       </header>
 
       <ul class="te-chips" aria-label="Job titles searched for">
@@ -189,7 +193,7 @@ onMounted(() => {
         <button type="submit" :disabled="!draft.trim() || full || saving"><Icon name="plus" /> Add</button>
       </form>
       <p v-if="full" class="muted small te-full">
-        {{ max }} of {{ max }} - the most your plan ({{ data.plan }}) allows. Remove one to add another.
+        {{ limit }} of {{ limit }} - the most your plan ({{ data.plan }}) allows. Remove one to add another.
       </p>
       <p v-if="data.source === 'custom'" class="small">
         <button type="button" class="link te-reset" :disabled="saving" @click="reset">Reset to the titles from your resume</button>

@@ -444,3 +444,30 @@ def _scalar(v: Any) -> str:
     if needs_quotes:
         return '"' + s.replace("\\", "\\\\").replace('"', '\\"') + '"'
     return s
+
+
+# ---------------- the user's uploaded list (M16) ----------------
+
+def uploaded_entries(rows: Iterable[dict], taken: set) -> list[WatchlistEntry]:
+    """Companies found from the user's uploaded list, as watchlist entries, in
+    the user's order. One already in watchlist.yaml (its key in `taken`) is not
+    added twice; `taken` grows as entries are added."""
+    out: list[WatchlistEntry] = []
+    for r in rows:
+        key = r.get("company_key")
+        if r.get("status") != "found" or not key or key in taken:
+            continue
+        taken.add(key)
+        out.append(WatchlistEntry(
+            key=key, name=r["name"], careers_url=r.get("careers_url") or "",
+            provider=r.get("provider"), slug=r.get("slug"), feed_url=r.get("feed_url"),
+            notes=f"your list, #{r['position']}"))
+    return out
+
+
+def all_entries(path: Optional[Path], store) -> list[WatchlistEntry]:
+    """Everything to watch: watchlist.yaml, then the companies found from the
+    user's uploaded list. Syncing this - rather than the YAML alone - is what
+    keeps an uploaded company enabled, and drops it when it leaves the list."""
+    entries = load(path)
+    return entries + uploaded_entries(store.company_list(), {e.key for e in entries})

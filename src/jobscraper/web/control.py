@@ -144,3 +144,27 @@ def titles_view(cfg: Config, store: Any) -> dict[str, Any]:
             "resume_titles": resume, "max_titles": plan.max_target_titles,
             "max_suggestions": plan.max_title_suggestions, "plan": plan.name,
             "suggestions": suggestions}
+
+
+# ---------------------------------------------------------------- the user's company list (M16)
+
+COMPANY_STATUSES = ("pending", "searching", "found", "watched", "failed", "over_limit")
+
+
+def companies_view(cfg: Config, store: Any) -> dict[str, Any]:
+    """The `/api/companies/list` answer: the list in the user's order, each
+    company's search result, the counts, and the plan's cap on companies.
+
+    `searched` is what the cap counts - companies found or already watched;
+    a failed search does not count (M16)."""
+    rows = store.company_list()
+    counts = {s: 0 for s in COMPANY_STATUSES}
+    for r in rows:
+        counts[r["status"]] = counts.get(r["status"], 0) + 1
+    fields = ("position", "name", "status", "careers_url", "provider", "postings",
+              "detail", "searched_at")
+    return {"items": [{f: r.get(f) for f in fields} for r in rows],
+            "counts": counts,
+            "searched": counts["found"] + counts["watched"],
+            "max_companies": cfg.plan.max_companies,
+            "plan": cfg.plan.name}

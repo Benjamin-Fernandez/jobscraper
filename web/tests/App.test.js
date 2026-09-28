@@ -64,8 +64,9 @@ describe('App shell', () => {
     const wrapper = await mountApp()
     const labels = wrapper.findAll('[role="tab"] .tab-label').map(b => b.text())
     expect(labels).toEqual(TABS.map(t => t.label))
-    // M12's five, first and in this order; a later tab (M7-T4 probe) goes after them.
-    expect(labels.slice(0, 5)).toEqual(['Inbox', 'Applications', 'Runs', 'Profile', 'Settings'])
+    // In this order (M16: Companies after Runs, Developer last); a later tab
+    // (the M7-T4 probe) goes after them.
+    expect(labels.slice(0, 7)).toEqual(['Inbox', 'Applications', 'Runs', 'Companies', 'Profile', 'Settings', 'Developer'])
     expect(wrapper.find('header [role="tablist"]').exists()).toBe(true)
   })
 
@@ -128,7 +129,8 @@ describe('App shell', () => {
       await flushPromises()
       expect(wrapper.find('.inbox .card').exists()).toBe(true)
     })
-    expect(api.calls.at(-1).url).toBe('api/shortlist?run=11')
+    // The last dataset fetch (the detail pane then fetches its description).
+    expect(api.calls.filter(c => !c.url.startsWith('api/postings/')).at(-1).url).toBe('api/shortlist?run=11')
     expect(wrapper.find('.inbox .run-selector select').element.value).toBe('chosen')
     expect(wrapper.find('.inbox .run-selector option[value="chosen"]').text()).toBe('Run 11')
     expect(wrapper.findAll('.inbox .card').map(c => c.find('.company').text()).sort()).toEqual(['Grab', 'Stripe'])

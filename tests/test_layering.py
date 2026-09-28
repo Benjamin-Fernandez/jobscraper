@@ -34,7 +34,9 @@ sys.path.insert(0, str(ROOT / "src"))
 
 # The orchestrator. The one module allowed to import every stage - composing them
 # is its whole job. Nothing may import it back.
-ORCHESTRATOR = {"pipeline"}
+ORCHESTRATOR = {"pipeline", "company_search"}
+# company_search.py (M16) composes discovery, the adapters and the model to find
+# careers sites for the user's own list - an orchestrator for the same reason.
 
 # Stage modules: each does one step of the pipeline and knows nothing of the others.
 STAGES = {"scheduler", "filter", "decide", "scrape", "profile"}

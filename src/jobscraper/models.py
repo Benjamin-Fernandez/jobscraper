@@ -128,3 +128,37 @@ def parse_titles_json(raw: Optional[str]) -> Optional[list[str]]:
     if not isinstance(items, list):
         return None
     return dedupe_titles(items) or None
+
+
+# ---------------- the user's company list (M16) ----------------
+#
+# The web app parses an uploaded list (TXT or DOCX, one company per line) and
+# the engine reads it back, so the rule lives here, in the module both import.
+
+MAX_COMPANY_NAME = 120
+MAX_COMPANY_LINES = 2000
+
+# A list bullet or number at the start of a line: "- ", "* ", "\u2022 ", "1. ",
+# "2) ", "(3) ", "4 - ". A name that starts with a digit ("2C2P", "3M",
+# "7-Eleven", "99 Group") is left alone.
+_LIST_MARK = re.compile(
+    r"^\s*(?:[-*\u2022\u00b7\u25aa\u25e6\u2013\u2014]+\s+"
+    r"|\(?\d{1,4}[.)\]]\s*|\d{1,4}\s+[-\u2013\u2014]\s+)")
+
+
+def parse_company_lines(text: str) -> list[str]:
+    """Company names from a list, one per line, in the order written. Bullets
+    and numbering are dropped, blank lines skipped, a repeat (ignoring case)
+    kept once - its first place is its rank."""
+    names: list[str] = []
+    seen: set[str] = set()
+    for line in (text or "").splitlines():
+        name = _LIST_MARK.sub("", line)
+        name = re.sub(r"\s+", " ", name).strip().strip(",;|").strip()
+        if not name or len(name) > MAX_COMPANY_NAME or name.lower() in seen:
+            continue
+        seen.add(name.lower())
+        names.append(name)
+        if len(names) >= MAX_COMPANY_LINES:
+            break
+    return names

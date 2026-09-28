@@ -21,6 +21,9 @@ export const TABS = [
     badge: ({ stats }) => (stats ? activeApplicationCount(stats.by_status) : null), badgeLabel: 'active',
   },
   { id: 'runs', label: 'Runs', component: () => import('./tabs/Runs.vue') },
+  { id: 'companies', label: 'Companies', component: () => import('./tabs/Companies.vue') },
   { id: 'profile', label: 'Profile', component: () => import('./tabs/Profile.vue') },
   { id: 'settings', label: 'Settings', component: () => import('./tabs/Settings.vue') },
+  // The background job and its log (M16) - for the owner of this install.
+  { id: 'developer', label: 'Developer', component: () => import('./tabs/Developer.vue') },
 ]

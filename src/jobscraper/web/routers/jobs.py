@@ -74,6 +74,13 @@ def start_titles(jobs: JobManager = Depends(get_jobs)) -> dict[str, Any]:
     return _start(jobs, "titles", {})
 
 
+@router.post("/jobs/companies", status_code=202)
+def start_companies(jobs: JobManager = Depends(get_jobs)) -> dict[str, Any]:
+    """Search the user's uploaded list for careers sites (M16); `409` if busy.
+    Progress is written per company and served by `GET /api/companies/list`."""
+    return _start(jobs, "companies", {})
+
+
 @router.get("/jobs/current")
 def current_job(tail: int = TAIL,
                 jobs: JobManager = Depends(get_jobs)) -> dict[str, Any]:

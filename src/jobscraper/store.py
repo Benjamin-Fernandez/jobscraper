@@ -123,6 +123,20 @@ CREATE TABLE IF NOT EXISTS settings (
     value TEXT,
     updated_at TEXT NOT NULL
 );
+
+-- The user's own list of companies (M16), in their order of preference.
+-- A found company also becomes a watched company: it is synced into
+-- `companies` beside watchlist.yaml's entries (watchlist.all_entries).
+CREATE TABLE IF NOT EXISTS company_list (
+    position INTEGER PRIMARY KEY,      -- 1 = most wanted
+    name TEXT NOT NULL,
+    status TEXT NOT NULL,              -- pending | searching | found | watched | failed | over_limit
+    company_key TEXT,                  -- the companies.key it is watched as
+    careers_url TEXT, provider TEXT, slug TEXT, feed_url TEXT,
+    postings INTEGER,                  -- open roles on the board when searched
+    detail TEXT,                       -- what was found, or why the search failed
+    searched_at TEXT
+);
 """
 
 # The one status that does not mean "an application went out". Moving to any
@@ -777,6 +791,66 @@ class Store:
                SET value = excluded.value, updated_at = excluded.updated_at""",
             (key, None if value is None else str(value), utcnow()))
         self.conn.commit()
+
+    # ---------------- the user's company list (M16) ----------------
+
+    COMPANY_LIST_FIELDS = ("status", "company_key", "careers_url", "provider", "slug",
+                           "feed_url", "postings", "detail", "searched_at")
+
+    def company_list(self) -> list[dict[str, Any]]:
+        """The uploaded list, in the user's order of preference."""
+        return [dict(r) for r in self.conn.execute(
+            "SELECT * FROM company_list ORDER BY position")]
+
+    def replace_company_list(self, names: list[str]) -> dict[str, int]:
+        """Store a new list, in the order given. A name searched before keeps
+        its result (matched ignoring case), so re-uploading an edited list only
+        searches what is new; one left mid-search or over the plan's limit is
+        searched again. Returns how many results were kept, how many names are
+        new, and how many of the old list were dropped."""
+        old = {r["name"].lower(): r for r in self.company_list()}
+        rows, kept = [], 0
+        for i, name in enumerate(names, 1):
+            prev = old.get(name.lower())
+            if prev and prev["status"] in ("found", "watched", "failed"):
+                rows.append(dict(prev, position=i, name=name))
+                kept += 1
+            else:
+                rows.append({"position": i, "name": name, "status": "pending"})
+        self.conn.execute("DELETE FROM company_list")
+        cols = ("position", "name") + self.COMPANY_LIST_FIELDS
+        for row in rows:
+            self.conn.execute(
+                f"INSERT INTO company_list ({', '.join(cols)}) "
+                f"VALUES ({', '.join('?' for _ in cols)})",
+                tuple(row.get(c) for c in cols))
+        self.conn.commit()
+        dropped = len({n for n in old} - {n.lower() for n in names})
+        return {"kept": kept, "new": len(rows) - kept, "dropped": dropped}
+
+    def update_company_list_entry(self, position: int, **fields: Any) -> None:
+        cols = [c for c in fields if c in self.COMPANY_LIST_FIELDS]
+        if not cols:
+            return
+        self.conn.execute(
+            f"UPDATE company_list SET {', '.join(f'{c} = ?' for c in cols)} "
+            "WHERE position = ?", tuple(fields[c] for c in cols) + (position,))
+        self.conn.commit()
+
+    def company_list_ranks(self) -> dict[str, int]:
+        """Company name (lowercase) -> the user's rank, for every company of the
+        uploaded list that is watched. Both the name the user typed and the
+        name it is watched under count, so a job from "OKX" ranks whether the
+        user wrote "OKX" or "okx.com"."""
+        out: dict[str, int] = {}
+        for r in self.conn.execute(
+                """SELECT l.position, l.name, c.name AS company FROM company_list l
+                   LEFT JOIN companies c ON c.key = l.company_key
+                   WHERE l.status IN ('found', 'watched') ORDER BY l.position"""):
+            for n in (r["name"], r["company"]):
+                if n:
+                    out.setdefault(n.lower(), r["position"])
+        return out
 
     # ---------------- reporting ----------------
 

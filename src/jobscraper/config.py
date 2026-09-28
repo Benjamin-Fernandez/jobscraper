@@ -15,7 +15,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 import yaml
 
@@ -32,23 +32,29 @@ def _abs(p: str | os.PathLike) -> Path:
 #
 # Every limit a paid tier could change lives on a Plan, and nowhere else: the
 # server validates against it and the web app draws its choices from it, so a
-# tier is a row in PLANS, not a code change. The single-user install runs
-# `local`, which has the most generous limits (the same as `pro`). The tier
-# names and numbers follow the multi-user PRD (mullti_user_prd.md section 11).
+# tier is a row in PLANS, not a code change. The tier names and numbers follow
+# the multi-user PRD (mullti_user_prd.md section 11).
+#
+# `local` is the owner's own install - the only user today - and always has the
+# highest privileges: every cycle option, and no cap (None) on job titles or on
+# the companies searched from an uploaded list. A cap of None means unlimited
+# everywhere it is checked.
 
 @dataclass(frozen=True)
 class Plan:
     name: str
     cycle_day_options: tuple[int, ...]     # how often the company cycle may restart
-    max_target_titles: int                  # job titles the title filter searches for
+    max_target_titles: Optional[int]        # job titles the filter searches for; None = no cap
     max_title_suggestions: int              # titles one recommendation returns
+    max_companies: Optional[int]            # companies found from an uploaded list (M16);
+                                            # failed searches do not count; None = no cap
 
 
 PLANS: dict[str, Plan] = {
-    "free": Plan("free", (7, 14, 30), 5, 5),
-    "plus": Plan("plus", (3, 7, 14, 30), 10, 10),
-    "pro": Plan("pro", (1, 3, 7, 14, 30), 20, 20),
-    "local": Plan("local", (1, 3, 7, 14, 30), 20, 20),
+    "free": Plan("free", (7, 14, 30), 5, 5, 20),
+    "plus": Plan("plus", (3, 7, 14, 30), 10, 10, 60),
+    "pro": Plan("pro", (1, 3, 7, 14, 30), 20, 20, 200),
+    "local": Plan("local", (1, 3, 7, 14, 30), None, 20, None),
 }
 
 CYCLE_DAYS_KEY = "cycle_days"               # the settings-table key (M15)

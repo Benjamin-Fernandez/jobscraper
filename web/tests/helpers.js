@@ -36,7 +36,7 @@ export function defaultTitles() {
   return {
     titles: ['software engineer', 'site reliability engineer'], source: 'resume',
     resume_titles: ['software engineer', 'site reliability engineer'],
-    max_titles: 20, max_suggestions: 20, plan: 'local', suggestions: null,
+    max_titles: null, max_suggestions: 20, plan: 'local', suggestions: null,   // M16: local has no cap
   }
 }
 
@@ -90,12 +90,34 @@ async function magic(body) {
   })
 }
 
+async function readText(body) {
+  if (typeof body === 'string') return body
+  if (typeof body?.text === 'function') return body.text()
+  return new Promise(resolve => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(String(reader.result))
+    reader.readAsText(body)
+  })
+}
+
+// M16: the description GET /api/postings/<id> serves - the JD as the board wrote it.
+export function descriptionOf(job) {
+  return `About the role\n${job.title} at ${job.company}.\n\nWhat you will do\n- Build and run ${job.company}'s systems\n- Work with the team`
+}
+
+// M16: a row of the user's company list. Pass `companies` to fakeApi as rows
+// ({name, status, ...}) or plain names (pending).
+export function company(position, name, fields = {}) {
+  return { position, name, status: 'pending', careers_url: null, provider: null, postings: null, detail: null, searched_at: null, ...fields }
+}
+
 // statuses: { job_id: status } - seeded as if each was set once.
 // vocabulary: the ordered status list config serves via /api/stats (M8-T2).
+// postings: { job_id: description } overrides (M16); '' for a posting with none.
 export function fakeApi({
   fixture = shortlist, statuses = {}, vocabulary = STATUSES,
   m11 = true, settings = defaultSettings(), profile = defaultProfile(), job = null,
-  titles = defaultTitles(),
+  titles = defaultTitles(), companies = [], maxCompanies = null, postings = {},
 } = {}) {
   const calls = []
   const apps = {}
@@ -103,6 +125,16 @@ export function fakeApi({
   const server = {
     settings: { ...settings }, profile: { ...profile }, job: job ? { ...IDLE, ...job } : { ...IDLE }, resume: null,
     titles: JSON.parse(JSON.stringify(titles)),
+    companies: companies.map((c, i) => (typeof c === 'string' ? company(i + 1, c) : company(i + 1, c.name, c))),
+  }
+
+  function companiesView() {
+    const counts = {}
+    for (const c of server.companies) counts[c.status] = (counts[c.status] ?? 0) + 1
+    return {
+      items: server.companies, counts, plan: 'local', max_companies: maxCompanies,
+      searched: (counts.found ?? 0) + (counts.watched ?? 0),
+    }
   }
   let eventId = 0
   let jobId = 0
@@ -163,7 +195,7 @@ export function fakeApi({
     if (url === 'api/titles' && method === 'PUT') {
       const list = JSON.parse(init.body).titles.map(t => t.trim()).filter(Boolean)
       if (!list.length) return respond({ detail: 'keep at least one job title' }, 422)
-      if (list.length > server.titles.max_titles) {
+      if (server.titles.max_titles !== null && list.length > server.titles.max_titles) {
         return respond({ detail: `the local plan allows ${server.titles.max_titles} job titles; got ${list.length}` }, 422)
       }
       server.titles = { ...server.titles, titles: list, source: 'custom' }
@@ -173,6 +205,34 @@ export function fakeApi({
       server.titles = { ...server.titles, titles: [...server.titles.resume_titles], source: 'resume' }
       return respond(titlesView())
     }
+    if (url === 'api/companies/list' && method === 'GET') return respond(companiesView())
+    if (url === 'api/companies/list' && method === 'PUT') {
+      const type = init.headers?.['Content-Type'] ?? ''
+      if (!['text/plain', DOCX].includes(type)) return respond({ detail: `unsupported type ${type}` }, 415)
+      if (init.body.size > MB) return respond({ detail: 'the list is over 1 MB' }, 413)
+      const names = []
+      for (const line of (await readText(init.body)).split(/\r?\n/)) {
+        const name = line.replace(/^\s*(?:[-*•]\s+|\d{1,4}[.)]\s*)/, '').trim()
+        if (name && !names.some(n => n.toLowerCase() === name.toLowerCase())) names.push(name)
+      }
+      if (!names.length) return respond({ detail: 'no company names found' }, 422)
+      const old = new Map(server.companies.map(c => [c.name.toLowerCase(), c]))
+      let kept = 0
+      server.companies = names.map((name, i) => {
+        const prev = old.get(name.toLowerCase())
+        if (prev && ['found', 'watched', 'failed'].includes(prev.status)) {
+          kept++
+          return { ...prev, position: i + 1, name }
+        }
+        return company(i + 1, name)
+      })
+      return respond({ ...companiesView(), upload: { read: names.length, kept, new: names.length - kept, dropped: 0, capped: false } })
+    }
+    if (url === 'api/companies/list' && method === 'DELETE') {
+      server.companies = []
+      return respond(companiesView())
+    }
+    if (url === 'api/jobs/companies' && method === 'POST') return startJob('companies')
     if (url === 'api/jobs/titles' && method === 'POST') return startJob('titles')
     if (url === 'api/jobs/run' && method === 'POST') return startJob('run')
     if (url === 'api/jobs/profile' && method === 'POST') return startJob('profile')
@@ -232,6 +292,13 @@ export function fakeApi({
         .map(j => ({ ...j, closed: false, status: apps[j.id]?.status ?? null, notes: null }))
       return respond(jobs)
     }
+    const posting = /^api\/postings\/([\w.:-]+)$/.exec(url)
+    if (posting) {
+      const j = fixture.jobs.find(x => x.id === posting[1])
+      if (!j) return respond({ detail: `no posting '${posting[1]}'` }, 404)
+      const description = posting[1] in postings ? postings[posting[1]] : descriptionOf(j)
+      return respond({ job_id: j.id, title: j.title, company: j.company, location: j.location, posted_at: null, url: j.url, description })
+    }
     const post = /^api\/applications\/(\w+)$/.exec(url)
     if (post && init.method === 'POST') {
       const { status, notes } = JSON.parse(init.body)
@@ -261,6 +328,18 @@ export function fakeApi({
     if (server.job.kind === 'run') {
       const n = Math.max(0, ...runs.map(r => r.run_no)) + 1
       runs.unshift({ run_no: n, finished_at: '2026-09-25T09:30:00', status: ok ? 'ok' : 'failed', accepted: 0 })
+    }
+    // A company search: a name with "ghost" in it has no careers site; the rest are found.
+    if (server.job.kind === 'companies' && ok) {
+      let n = server.companies.filter(c => c.status === 'found' || c.status === 'watched').length
+      server.companies = server.companies.map(c => {
+        if (!['pending', 'searching', 'over_limit'].includes(c.status)) return c
+        if (maxCompanies !== null && n >= maxCompanies) return { ...c, status: 'over_limit', detail: `the local plan adds up to ${maxCompanies} companies - not searched` }
+        if (/ghost/i.test(c.name)) return { ...c, status: 'failed', detail: 'no careers site found (Qwen did not know one either)', searched_at: stamp() }
+        n++
+        const slug = c.name.toLowerCase().replace(/[^a-z0-9]+/g, '')
+        return { ...c, status: 'found', provider: 'greenhouse', postings: 4, careers_url: `https://job-boards.greenhouse.io/${slug}`, detail: 'a greenhouse board, 4 open roles', searched_at: stamp() }
+      })
     }
     if (server.job.kind === 'titles' && ok) {
       server.titles = { ...server.titles, suggestions: JSON.parse(JSON.stringify(SUGGESTED)) }

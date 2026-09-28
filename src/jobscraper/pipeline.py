@@ -114,7 +114,8 @@ def run(cfg: Config, store: Store, *, dry_run: bool = False,
         reaped = store.reap_stale_runs(float(rc.get("per_run_timeout", 3600)), now=now)
         if reaped:
             say(f"marked {reaped} crashed run(s) failed")
-    store.sync_watchlist(watchlist.load(cfg.watchlist_path))
+    # watchlist.yaml plus the companies found from the user's list (M16).
+    store.sync_watchlist(watchlist.all_entries(cfg.watchlist_path, store))
 
     # The cycle the user chose in the web app, when the plan allows it (M15).
     cycle_days = cfg.effective_cycle_days(store.get_setting(CYCLE_DAYS_KEY))

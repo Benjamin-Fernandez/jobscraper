@@ -118,6 +118,7 @@ watchlist.yaml -> who is due? -> scrape -> free prefilter -> ~800-char extract
 | `filter test --title … --location … [--desc …]` | Dry-run the rules on a made-up posting. |
 | `filter explain JOB_ID_OR_URL` | Every rule's verdict for a stored posting. |
 | `titles [show]` / `titles suggest` | The job titles the title filter searches for; ask Qwen for up to 20 more (the web app's Profile tab does both). |
+| `companies [show]` / `companies search` | Your own list of companies (uploaded on the web app's Companies tab, one per line, most wanted first); find each one's careers site with Qwen and watch the ones found. |
 | `reresolve KEY` | Forget a company's cached job-board provider so the next run rediscovers it. |
 | `sync` | Reconcile `watchlist.yaml` into the database (every run does this anyway). |
 

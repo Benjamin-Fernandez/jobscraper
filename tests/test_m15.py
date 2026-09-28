@@ -37,8 +37,11 @@ def test_plans_carry_every_tier_limit_and_local_is_the_most_generous():
     assert free.cycle_day_options == (7, 14, 30)
     assert set(free.cycle_day_options) < set(plus.cycle_day_options) < set(pro.cycle_day_options)
     assert free.max_target_titles < plus.max_target_titles < pro.max_target_titles == 20
-    assert (local.cycle_day_options, local.max_target_titles, local.max_title_suggestions) == \
-        (pro.cycle_day_options, 20, 20)
+    assert free.max_companies < plus.max_companies < pro.max_companies
+    # The owner's install: every cycle, and no cap on titles or companies (M16).
+    assert local.cycle_day_options == pro.cycle_day_options
+    assert (local.max_target_titles, local.max_companies) == (None, None)
+    assert local.max_title_suggestions == 20
 
 
 def test_effective_cycle_is_the_stored_choice_only_when_the_plan_offers_it():
@@ -111,7 +114,7 @@ def test_web_titles_default_to_the_resume_with_the_plan_limits():
         body = c.get("/api/titles").json()
     assert body == {"titles": ["software engineer", "backend engineer"], "source": "resume",
                     "resume_titles": ["software engineer", "backend engineer"],
-                    "max_titles": 20, "max_suggestions": 20, "plan": "local",
+                    "max_titles": None, "max_suggestions": 20, "plan": "local",
                     "suggestions": None}
 
 
@@ -135,12 +138,15 @@ def test_web_titles_refuse_empty_too_long_and_over_the_plan():
         assert c.put("/api/titles", json={"titles": []}).status_code == 422
         assert c.put("/api/titles", json={"titles": ["  ", "-"]}).status_code == 422
         assert c.put("/api/titles", json={"titles": ["x" * 81]}).status_code == 422
-        twenty_one = [f"title {i}" for i in range(21)]
-        r = c.put("/api/titles", json={"titles": twenty_one})
+        many = [f"title {i}" for i in range(60)]
+        assert c.put("/api/titles", json={"titles": many}).status_code == 200, \
+            "the owner's plan has no cap on titles"
+        cfg.raw["plan"] = "pro"
+        r = c.put("/api/titles", json={"titles": many[:21]})
         assert r.status_code == 422 and "allows 20" in r.json()["detail"]
-        assert c.put("/api/titles", json={"titles": twenty_one[:20]}).status_code == 200
+        assert c.put("/api/titles", json={"titles": many[:20]}).status_code == 200
         cfg.raw["plan"] = "free"
-        r = c.put("/api/titles", json={"titles": twenty_one[:6]})
+        r = c.put("/api/titles", json={"titles": many[:6]})
         assert r.status_code == 422 and "free plan allows 5" in r.json()["detail"]
 
 

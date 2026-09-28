@@ -63,6 +63,13 @@ export function matchLabel(n) {
   return `${count} ${count === 1 ? 'match' : 'matches'}`
 }
 
+// A run's status in words (M16): the store says `ok`, people read "success".
+const RUN_STATUS = { ok: 'success', failed: 'failed', aborted_unhealthy: 'aborted', dry_run: 'dry run', running: 'running' }
+export function runStatusLabel(status) {
+  if (!status) return '—'
+  return RUN_STATUS[status] ?? String(status).replace(/_/g, ' ')
+}
+
 // How often the cycle restarts, in words (M15, Settings).
 const CYCLE_WORDS = { 1: 'Daily', 7: 'Weekly', 14: 'Fortnightly', 30: 'Monthly' }
 export function cycleLabel(days) {

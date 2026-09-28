@@ -2658,6 +2658,94 @@ system in the future, so design things with that in mind."
 pass on the live database (Settings, Runs picker, Profile titles) with no console
 errors.
 
+### M16 — Your own companies, the job scope, and the owner's plan
+
+**Outcome:** the user uploads their own list of companies (TXT or DOCX, one per
+line, most wanted first); Qwen suggests each careers site and discovery proves
+the job board behind it, and every company found is watched and scraped in the
+user's order. The Companies tab shows, per company, found / already watched /
+failed (with why) / waiting, and downloads the found and the failed as TXT. The
+Inbox shows the posting's own description. The background job's log moves to a
+Developer tab, and the owner's plan has no cap on titles or companies.
+
+**Why (user, 2026-09-28):** "(1) Set the limit of job titles to unlimited for me
+… in the future tiering system, there will be different caps for different tiers
+… (2) … runs with 0 matches … make the formatting the same as the rest, but make
+the checkbox unclickable … status should say 'success' instead of ok (3) Users
+should be able to input their own list of companies in txt/docx form … qwen will
+find their career sites … which companies has been searched and which the search
+failed … download a list of success and failures … Follow the order … They will
+be tiered on number of companies searched (we have to exclude those that have
+failed from the count) (4) 'current job' section should have its own tab, it is
+only for the developer (me) (5) In inbox … include the jobscope (copy and paste)
+from the JD itself."
+
+| # | Decision | Why |
+|---|---|---|
+| M16-D1 | `Plan.max_target_titles` and the new `Plan.max_companies` are `Optional[int]`; `None` = no cap. `local` (the owner) has neither cap; free 20, plus 60, pro 200 companies. | Tiers change numbers, not code; the owner always has the most. |
+| M16-D2 | A new `company_list` table holds the uploaded list by position (1 = most wanted) with each search result. Re-uploading keeps results for names already searched (case-insensitive). | Editing the list re-searches only what is new. |
+| M16-D3 | `company_search.py` is an orchestrator (like `pipeline.py`): already watched? → Qwen's lead (batches of 10, told to say null rather than guess) → `discovery.resolve` → one adapter fetch. Only a board that answers is `found`. | Qwen cannot browse; its URL is a lead that discovery must prove. |
+| M16-D4 | The cap counts `found` + `watched`; `failed` costs nothing; past the cap the rest are `over_limit`, kept and searched again if the cap allows. | The user's rule: failures are excluded from the count. |
+| M16-D5 | Found companies are synced into `companies` beside watchlist.yaml (`watchlist.all_entries`) - at the end of a search, at every run, and at once when a found company leaves the list. New companies sort by list order, so the never-scraped-first scheduler takes them in the user's order. | One path into `companies`; no second scheduler. |
+| M16-D6 | Upload = raw body (`text/plain` or DOCX), ≤ 1 MB, ≤ 2,000 names; bullets and numbering are dropped but "2C2P", "7-Eleven", "99 Group" survive. Downloads are built in the browser from the list. | Same CSRF stance as the resume upload (M11); nothing to serve. |
+| M16-D7 | `GET /api/postings/{id}` serves one stored description when a role is opened; the Inbox shows it with its own line breaks, cut at 1,400 characters with Show more. | The shortlist stays small; the JD is already in `jobs.jd_text`. |
+| M16-D8 | Runs: one row style for every run; a 0-match run's box is disabled with a tooltip; `ok` reads **success**. The log and Cancel live on the Developer tab; Runs says what is busy and links there. | The user's formatting rule; the log is for the owner. |
+
+#### M16-T1 · Unlimited titles for the owner
+- **STATUS:** `DONE`
+- **Completed:** 2026-09-28
+- **Do:** `max_target_titles=None` on `local`; `PUT /api/titles` checks the cap
+  only when there is one; the editor shows "N titles" (no "/ 20", never full).
+- **Verify:** `test_m15` plans + over-plan (60 on local, 21 refused on pro);
+  Vitest "adds past 20 titles on the local plan".
+
+#### M16-T2 · Runs formatting and "success"
+- **STATUS:** `DONE`
+- **Completed:** 2026-09-28
+- **Do:** `runStatusLabel` in `runs.js`; the `empty` row style removed; the
+  disabled box keeps full opacity with a not-allowed cursor.
+- **Verify:** Vitest Runs history (identical row classes, 'success').
+- **Notes:** live: runs 3-5 (0 matches) look like every other row.
+
+#### M16-T3 · Your own list of companies
+- **STATUS:** `DONE`
+- **Completed:** 2026-09-28
+- **Do:** `models.parse_company_lines`; `store.company_list*`;
+  `company_search.py`; `jobscraper companies show|search`; `/api/companies/list`
+  (GET/PUT/DELETE), `POST /api/jobs/companies` (job kind `companies`);
+  `company_rank` on shortlist jobs and an Inbox sort "Your company order".
+  Companies tab: drop zone (auto-starts the search), counts, the plan line,
+  filters (All / Found / Failed / Waiting), rows in the user's order with the
+  careers link and the reason, "Download found (.txt)", "Download failed (.txt)",
+  "Full report (.csv)" (formula-safe), Search now, Clear list.
+- **Verify:** `tests/test_m16.py` (16 tests: parsing, store, upload/refusals,
+  search order/failures/cap/sync, Qwen leads, ranks, dropping unwatches);
+  Vitest Companies (10).
+- **Notes:** live with qwen3:14b, 2026-09-28, 5 names in 15 s: Chime (Greenhouse,
+  66 roles) and Brex (Greenhouse, 259) found; Wise and Vercel already watched; a
+  made-up name failed "no careers site found (Qwen did not know one either)".
+  Clearing the list took enabled companies from 297 back to 295 at once.
+
+#### M16-T4 · The Developer tab
+- **STATUS:** `DONE`
+- **Completed:** 2026-09-28
+- **Do:** `tabs/Developer.vue` - the current job of any kind, its live log and
+  Cancel; last in the tab bar. With accounts it becomes admin-only.
+- **Verify:** Vitest Developer (4), Runs job tests rewritten for the busy notice.
+
+#### M16-T5 · The job scope in the Inbox
+- **STATUS:** `DONE`
+- **Completed:** 2026-09-28
+- **Do:** `routers/postings.py`; Inbox "About the job" section (loading, error,
+  "no description" states; Show more/less); U+FFFD from mis-decoded boards shown
+  as a dash.
+- **Verify:** `test_web_posting_serves_the_full_description`; Vitest Inbox JD (5).
+- **Notes:** 291 of 292 accepted jobs carry a description over 200 characters.
+
+**Results:** Python 312/312 (+16), Vitest 152/152 (+21), bundle rebuilt; browser
+pass on the live database (Companies upload and live search, Inbox JD, Runs,
+Developer).
+
 ---
 
 ## 11. Open Questions

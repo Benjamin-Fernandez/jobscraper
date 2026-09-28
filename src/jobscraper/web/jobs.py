@@ -36,7 +36,7 @@ from jobscraper.store import utcnow
 # (kind, options) -> argv. `kind` is "run" or "profile".
 CommandBuilder = Callable[[str, dict[str, Any]], list[str]]
 
-KINDS = ("run", "profile", "titles")
+KINDS = ("run", "profile", "titles", "companies")
 RECORD = "current.json"
 # src/jobscraper/web/jobs.py -> src
 SRC_DIR = Path(__file__).resolve().parents[2]
@@ -75,6 +75,8 @@ def cli_command(config_path: Optional[str | os.PathLike] = None) -> CommandBuild
             argv += ["profile", "--refresh"]
         elif kind == "titles":
             argv += ["titles", "suggest"]
+        elif kind == "companies":
+            argv += ["companies", "search"]
         else:
             raise ValueError(f"unknown job kind {kind!r}")
         return argv

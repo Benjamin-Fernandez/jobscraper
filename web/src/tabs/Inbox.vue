@@ -9,8 +9,8 @@
 // this session only (open question Q2, left as is by the user). Opening the
 // posting on the company's site asks afterwards whether you applied, the way
 // LinkedIn does, so the record is one click away.
-import { computed, nextTick, ref } from 'vue'
-import { describeError, setApplicationStatus, untrackApplication } from '../api.js'
+import { computed, nextTick, ref, watch } from 'vue'
+import { describeError, getPosting, setApplicationStatus, untrackApplication } from '../api.js'
 import { dismiss, isDismissed, restoreAll } from '../dismissed.js'
 import { cleanLocation, plural, safeUrl, shortDate } from '../format.js'
 import { tabEmits, tabProps } from '../shell.js'
@@ -52,7 +52,11 @@ function matches(job, q) {
 const SORTS = {
   newest: (a, b) => String(b.decided_at || '').localeCompare(String(a.decided_at || '')),
   company: (a, b) => String(a.company || '').localeCompare(String(b.company || ''), undefined, { sensitivity: 'base' }),
+  // Your own list's order (M16): its companies first, most wanted first, the
+  // rest after them, newest first within each.
+  yours: (a, b) => (a.company_rank ?? Infinity) - (b.company_rank ?? Infinity) || SORTS.newest(a, b),
 }
+const ranked = computed(() => untracked.value.some(j => j.company_rank !== null && j.company_rank !== undefined))
 
 const visible = computed(() => {
   const q = query.value.trim().toLowerCase()
@@ -77,6 +81,34 @@ function shortYears(job) {
 function cardMeta(job) {
   return [cleanLocation(job.location), shortYears(job)].filter(Boolean).join(' · ')
 }
+
+// ---- the job description (M16): fetched when a role is opened, kept per role ----
+
+const PREVIEW_CHARS = 1400
+const descriptions = ref({})       // job id -> { state: 'loading' | 'ok' | 'error', text, error }
+const expanded = ref(false)
+
+async function loadDescription(id) {
+  descriptions.value = { ...descriptions.value, [id]: { state: 'loading', text: '' } }
+  try {
+    const posting = await getPosting(id)
+    descriptions.value = { ...descriptions.value, [id]: { state: 'ok', text: posting.description || '' } }
+  } catch (e) {
+    descriptions.value = { ...descriptions.value, [id]: { state: 'error', text: '', error: describeError(e) } }
+  }
+}
+
+const description = computed(() => (selected.value ? descriptions.value[selected.value.id] ?? null : null))
+const descriptionShown = computed(() => {
+  const text = description.value?.text || ''
+  if (expanded.value || text.length <= PREVIEW_CHARS) return text
+  return `${text.slice(0, PREVIEW_CHARS).replace(/\s+\S*$/, '')}…`
+})
+
+watch(() => selected.value?.id, id => {
+  expanded.value = false
+  if (id && !descriptions.value[id]) loadDescription(id)
+}, { immediate: true })
 
 // ---- selection and the keyboard ----
 
@@ -200,6 +232,7 @@ function markOpened(job) {
           <select v-model="sort">
             <option value="newest">Newest first</option>
             <option value="company">Company A–Z</option>
+            <option v-if="ranked" value="yours">Your company order</option>
           </select>
         </label>
         <RunSelector
@@ -327,6 +360,26 @@ function markOpened(job) {
             <li v-for="skill in selected.matched_skills" :key="skill" class="chip">{{ skill }}</li>
           </ul>
         </section>
+
+        <section class="why jd" aria-live="polite">
+          <h4><Icon name="briefcase" /> About the job</h4>
+          <p v-if="!description || description.state === 'loading'" class="muted jd-status">Loading the description…</p>
+          <p v-else-if="description.state === 'error'" class="muted jd-status">
+            Could not load the description ({{ description.error }}). It is on the company site.
+          </p>
+          <p v-else-if="!description.text" class="muted jd-status">
+            The job board gave no description for this role - read it on the company site.
+          </p>
+          <template v-else>
+            <div class="jd-text">{{ descriptionShown }}</div>
+            <button
+              v-if="description.text.length > PREVIEW_CHARS"
+              type="button"
+              class="link jd-more"
+              @click="expanded = !expanded"
+            >{{ expanded ? 'Show less' : 'Show more' }}</button>
+          </template>
+        </section>
       </article>
     </div>
   </section>
@@ -445,6 +498,14 @@ function markOpened(job) {
 }
 .reason { margin: 0; max-width: 68ch; color: var(--text); }
 .skills { list-style: none; padding: 0; margin: 0; display: flex; flex-wrap: wrap; gap: var(--space-1); }
+/* The description as the employer wrote it: its own line breaks, readable width. */
+.jd { padding-top: var(--space-4); border-top: 1px solid var(--border); }
+.jd-text {
+  white-space: pre-line; overflow-wrap: anywhere; max-width: 72ch;
+  font-size: var(--text-sm); line-height: 1.65; color: var(--text);
+}
+.jd-status { margin: 0; font-size: var(--text-sm); }
+.jd-more { margin-top: var(--space-2); font-size: var(--text-sm); }
 
 .empty .icon { display: block; margin: 0 auto var(--space-2); }
 

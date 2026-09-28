@@ -224,7 +224,8 @@ describe('Inbox actions', () => {
 
     expect(card(wrapper, 'GovTech')).toBeUndefined()
     expect(wrapper.find('.count').text()).toContain('1 hidden this session')
-    expect(api.calls).toHaveLength(0)
+    // Nothing written: the only requests are the detail pane reading descriptions.
+    expect(api.calls.filter(c => c.method !== 'GET' || !c.url.startsWith('api/postings/'))).toHaveLength(0)
     expect(JSON.parse(window.sessionStorage.getItem('jobscraper.dismissed'))).toEqual(['d4e5f6'])
 
     await toast.current.action.run()
