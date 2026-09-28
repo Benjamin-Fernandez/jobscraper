@@ -2394,7 +2394,7 @@ where you were, and each tab says what it holds before you open it.
   server's 422 text. Without M11: a readable 404 and a retry button.
 
 #### M12-T5 · Look and feel pass
-- **STATUS:** `IN_PROGRESS`
+- **STATUS:** `DONE` *(superseded by M13, 2026-09-28: the user judged the result "cheaply built"; M13 redesigns it)*
 - **Completed:** — (merge gate 2026-09-25: `/ecc:vue-review` found no critical or
   high issue - one medium, `loadRuns` lacking the stale-response guard, fixed in
   `1ab4d84`; Vitest 88/88, Python 285/285, bundle rebuilt on merged master and
@@ -2433,6 +2433,146 @@ where you were, and each tab says what it holds before you open it.
   says the job survived a web restart and cannot be cancelled here. With 0 enabled
   companies the forms defer to the server's 422 text. Log lines are text only (no
   `v-html` anywhere). No new dependency: bundle 78 kB JS (31 kB gzip) + 8 kB CSS.
+
+### M13 — Web app redesign: a job tracker, not a list
+
+**Outcome:** the web app works like the job sites people already know. New roles
+are triaged in a list-and-detail view; saving or applying moves a role out of the
+Inbox into Applications at once, with Undo; Applications is grouped by company,
+with a stage strip that counts and filters. It looks deliberate, not assembled.
+
+**Why (user, 2026-09-28):** "The web app still looks very cheaply built", and:
+(1) a role marked applied should move to another tab; (2) applications should be
+grouped by company name; (3) learn from other job-application sites.
+
+**Research (2026-09-28)** — what the established products do, and what we took:
+
+| Product | Pattern | Taken as |
+|---|---|---|
+| LinkedIn Jobs + Job tracker | List on the left, the selected job in full on the right; tracker stages *Saved · In progress · Applied · Interview · Archived*, each its own view; after applying on an external site it asks "Did you apply?" | Inbox split view (T2); `to_apply` shown as **Saved**; the "Did you apply?" prompt after opening a posting |
+| Indeed *My jobs* | *Saved · Applied · Interviews · Archived* tabs; a role moves between them as its status changes; archiving keeps the dashboard to active roles | Tracked roles leave the Inbox; Applications is the one place for them (T2, T3) |
+| Huntr / Teal trackers | A pipeline of stages with a count on each; every application a card with company, role, dates, history | The stage strip with counts, which filters (T3); per-row history |
+| Job-board UX guidance | Title, company, location up front on every card; prominent search; filters and sort | Card anatomy (T2); search + sort on both tabs |
+| Gmail / LinkedIn | Confirm a move with a toast carrying *Undo*, instead of an "are you sure?" dialog | Toasts with Undo and a *View* link (T2); `DELETE /api/applications/{id}` for Undo |
+
+Sources: [LinkedIn job tracker stages](https://github.com/stickerdaniel/linkedin-mcp-server/issues/1056),
+[LinkedIn saved jobs](https://story.cv/blog/articles/how-to-find-saved-jobs-on-linkedin),
+[Indeed: What is My Jobs](https://www.indeed.com/help/job-seekers/articles/205332490-what-is-my-jobs),
+[Indeed: managing applied jobs](https://www.indeed.com/help/job-seekers/articles/4412589551757-my-jobs-managing-applied-jobs?hl=en&co=US),
+[Huntr job tracker](https://huntr.co/product/job-tracker),
+[Teal vs Huntr](https://cloudcolleague.com/blogs/job-hunting/teal-vs-huntr/),
+[Built In job tracker](https://builtin.com/articles/built-in-job-tracker-kanban-list),
+[Job portal design examples](https://www.subframe.com/tips/job-portal-website-design-examples),
+[List/details pattern (Microsoft)](https://learn.microsoft.com/en-us/windows/apps/design/controls/list-details).
+
+**Design direction** (ECC `frontend-design-direction`): a calm triage desk for
+short daily sessions - dense and scannable, white work surfaces on a soft neutral
+page, one ink-blue for actions, and one colour per application stage (saved
+violet, applied blue, interviewing amber, offer green, rejected red, withdrawn
+grey). **Signature detail:** every company has a monogram tile in a colour derived
+from its name, the same everywhere it appears, standing in for the logos we do not
+have. No new dependency: icons are drawn in `Icon.vue`, fonts are the system's.
+
+#### M13-T1 · Research and direction
+- **STATUS:** `DONE`
+- **Completed:** 2026-09-28
+- **Notes:** the table and direction above.
+
+#### M13-T2 · Inbox: list and detail, and tracked roles move out
+- **STATUS:** `DONE`
+- **Completed:** 2026-09-28
+- **Do:** the Inbox shows only roles with no application status. A list (monogram,
+  title, company, location · experience, date found; closed postings flagged)
+  beside a sticky detail pane (title, company, location / experience / date found,
+  *Apply on company site*, **Mark applied**, **Save**, *Not interested*, why it
+  matches, matched skills). Search (title, company, location) and sort (newest,
+  company A-Z). Arrow keys (and j/k) move through the list. Mark applied and Save
+  remove the role at once (optimistic), select its neighbour, and raise a toast:
+  "Marked applied: ... - Undo · View in Applications". Undo calls the new
+  `DELETE /api/applications/{job_id}` (store: `delete_application`; 404 when there
+  is nothing to delete; the cross-site write guard covers it). Opening the posting
+  asks "Did you apply at ...? - Yes, mark applied". *Not interested* stays
+  session-only (Q2, left as is), now with Undo. Below 900 px the detail replaces
+  the list, with a Back button. A place a feed repeats ("Singapore, Singapore") is
+  shown once.
+- **Verify:** `npm test`; Python `test_web_untrack_*`; browser pass.
+- **Notes:** 21 Inbox tests (list, search, sort, selection, keyboard, link safety,
+  "did you apply", Mark applied / Save / Undo / failed write / Not interested).
+
+#### M13-T3 · Applications grouped by company, with a stage strip
+- **STATUS:** `DONE`
+- **Completed:** 2026-09-28
+- **Do:** every tracked role grouped under its company (A-Z; "Unknown company" for
+  a row with none), each group a surface with the company's monogram and a role
+  count; inside a group, roles in stage order. A stage strip - *All, Saved,
+  Applied, Interviewing, Offer, Rejected, Withdrawn* in config order, each with its
+  count - filters the list (counts respect the run filter and search). The status
+  select wears its stage colour and shows labels (`to_apply` -> *Saved*; a status
+  config adds later, e.g. `on_hold` -> *On hold*, works with no code change,
+  M8-T2). "Last change" per row; the full history folds away and is offered only
+  when there is more than one change.
+- **Verify:** `npm test`; browser pass on the real data (56 applications at 33
+  companies on 2026-09-28).
+- **Notes:** 13 Applications tests, incl. the end-to-end "mark applied in the
+  Inbox -> the role is on this tab, under its company".
+
+#### M13-T4 · Visual system v2
+- **STATUS:** `DONE`
+- **Completed:** 2026-09-28
+- **Do:** new tokens in `web/src/style.css` (surfaces, shadows, stage palette,
+  monogram lightness, `.page-head`, `.surface`, `.chip`, soft-filled `.pill`,
+  secondary / primary / ghost buttons, a search field with an icon);
+  `CompanyMark.vue` + `marks.js` (initials, FNV-1a hue); `Icon.vue` (15 line
+  icons, rendered from data - no `v-html`); `ToastHost.vue` + `toast.js`; a logo
+  in the header. Runs, Profile and Settings inherit the system; Profile shows which
+  model read the resume (`parsed_by`, M14).
+- **Verify:** `npm test`; `npm run build`; Chrome at 1366 px and 390 px, light and
+  dark; no console errors.
+- **Notes:** Vitest 110/110 (was 88), Python 277/277. Bundle 89 kB JS (36 kB gzip).
+  Browser pass 2026-09-28 against the live database: no console errors, no
+  horizontal overflow at 390 px, stage colours and monograms readable in both
+  schemes.
+
+### M14 — Qwen only, and a clean repo
+
+**Outcome:** one model, Qwen3 via Ollama, does both model jobs - reading the
+resume and judging postings. Nothing in the application reaches Claude; code,
+config and files nothing uses are gone.
+
+#### M14-T1 · Resume parsing by Qwen; Haiku and the Claude transports removed
+- **STATUS:** `DONE`
+- **Completed:** 2026-09-28
+- **Do:** `backends.py` keeps only `ollama` and `off`; the backend interface is
+  `complete(system, user, max_tokens)` with the model fixed by the backend
+  (`model_id`, the Ollama tag). Resume ingest calls the same backend and records
+  `parsed_by` in `profile.derived.yaml` (served by `/api/profile`). Removed: the
+  `cli` (`claude -p`) and `api` (anthropic SDK) transports, `review.py` and the
+  `review` command (the Claude Code in-session handoff), and the config keys
+  `model` (claude-haiku-4-5), `max_tokens_per_run`, `cli_bin`, `cli_timeout`,
+  `cli_extra_args`. `doctor` reports the one model for both jobs.
+- **Verify:** the Python suite; `test_no_claude_transport_is_left` fails if
+  `claude -p`, `import anthropic` or `claude-haiku` reappears under
+  `src/jobscraper/`.
+- **Notes:** the live profile was derived before M14 (no `parsed_by`); the next
+  *Re-derive profile* (Profile tab) runs through Qwen. It is not re-run
+  automatically, because a new profile version re-checks every stored posting.
+
+#### M14-T2 · Remove what nothing uses
+- **STATUS:** `DONE`
+- **Completed:** 2026-09-28
+- **Do:** removed v1 leftovers and dead code, found by searching for references:
+  `models.py` v1 `Company`, `JobFacts`, `Verdict`, `ScoreBreakdown`, `Candidate`,
+  `CycleState`, `TokenLedger`; `Store.defer_probation`, `coverage_for_run`,
+  `jobs_seen_in_run`; `Config.output_dir` (and its config key); an unused import
+  in `discovery.py`; the one-off `scripts/seed_watchlist.py` and
+  `scripts/migrate_v1_applications.py` (done in M1/M3); `openpyxl` from the
+  requirements. Untracked but kept on disk: `archive/v1-src/` (already
+  git-ignored) and `data/job_tracker_04_2026.xlsx` - v1's personal tracker, which
+  should never have been in a public repo (`data/*.xlsx` is now ignored; it stays
+  in git history until the history is rewritten, which is the owner's call).
+  `data/jobs/` (web-app run logs) is ignored. README, `run.ps1`,
+  `docker-compose.yml` and `docs/DESIGN.md` no longer describe Claude.
+- **Verify:** Python 277/277 and Vitest 110/110 after the removals.
 
 ---
 

@@ -231,6 +231,34 @@ def test_web_applications_lists_every_status_with_its_timeline():
     assert rows["gone1"]["run_no"] is None
 
 
+def test_web_untrack_returns_the_role_to_the_inbox():
+    """M13: Undo after "Mark applied" deletes the application and its history,
+    so the shortlist shows the role with no status again."""
+    with _world() as (client, open_store):
+        store = open_store()
+        store.set_application_status("a1b2c3", "applied")
+        store.close()
+        r = client.delete("/api/applications/a1b2c3")
+        assert r.status_code == 200 and r.json() == {"job_id": "a1b2c3", "deleted": True}
+        assert client.get("/api/applications").json() == []
+        jobs = {j["id"]: j for j in client.get("/api/shortlist?run=all").json()}
+        assert jobs["a1b2c3"]["status"] is None
+        again = client.delete("/api/applications/a1b2c3")
+        assert again.status_code == 404, "a second Undo is a clean 404"
+        assert client.delete("/api/applications/bad id!").status_code == 422
+
+
+def test_web_untrack_is_refused_cross_site():
+    with _world() as (client, open_store):
+        store = open_store()
+        store.set_application_status("a1b2c3", "applied")
+        store.close()
+        r = client.delete("/api/applications/a1b2c3",
+                          headers={"Origin": "https://evil.example"})
+        assert r.status_code == 403
+        assert len(client.get("/api/applications").json()) == 1
+
+
 def test_web_stats_counts_per_status_and_run_in_config_order():
     with _world() as (client, open_store):
         store = open_store()

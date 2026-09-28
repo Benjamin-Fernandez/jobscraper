@@ -19,7 +19,6 @@ paths:
   resume_dir: data                            # where resume.pdf / resume.docx lives
   db: data/jobscraper.db
   shortlist: data/shortlist.json              # the accepted queue the web app reads
-  output_dir: output                          # legacy, for review.py; retired in M9-T1
 
 run:
   # Companies per run. PRD R-7: at 295 companies this needs ~4.2 runs/day to
@@ -50,39 +49,27 @@ run:
 
 budget:
   enable_llm: true
-  # How the judge reaches a model. See src/jobscraper/backends.py.
-  #   cli  - runs `claude -p`, the Claude Code CLI. Uses the subscription you
-  #          are already signed into; no API key, no per-token bill.
-  #   api  - the anthropic SDK. Needs ANTHROPIC_API_KEY.
-  #   ollama - a local open model (Qwen3) served by Ollama on this machine's
-  #          GPU. No key, no login. `ollama pull qwen3:14b` first. The Docker
-  #          setup uses this (env JOBSCRAPER_BACKEND / JOBSCRAPER_OLLAMA_URL).
-  #   off  - no model; the prefilter alone decides.
-  # 2026-09-24: the local Qwen model replaces Haiku as the judge.
+  # How JobScraper reaches a model - for judging postings AND for parsing the
+  # resume. See src/jobscraper/backends.py.
+  #   ollama - Qwen3, an open model served by Ollama on this machine's GPU.
+  #            No key, no login. `ollama pull qwen3:14b` first. Docker points
+  #            at its Ollama service (env JOBSCRAPER_BACKEND / JOBSCRAPER_OLLAMA_URL).
+  #   off    - no model; the prefilter alone decides, survivors wait.
+  # Qwen replaced Claude Haiku as the judge on 2026-09-24 and as the resume
+  # parser on 2026-09-28; the Claude transports are gone (PRD M14).
   backend: ollama
   ollama_url: http://127.0.0.1:11434
   # 9.3 GB; fits a 16 GB GPU with room for the context below. qwen3:8b (5.2 GB)
-  # is the step down if memory is tight.
+  # is the step down if memory is tight. Changing it re-judges every posting.
   ollama_model: qwen3:14b
   # Tokens of context per call. A 20-posting decide batch is ~6-7k tokens;
   # Ollama's own default is far smaller and would silently truncate the prompt.
   ollama_num_ctx: 16384
   ollama_timeout: 600
-  cli_bin: ""                                 # empty = find `claude` on PATH
-  cli_timeout: 300
-  # Measured 2026-09-24: with only --restricted, every call carried ~21,000
-  # tokens of Claude Code's own tool definitions; with no tools, 536. The
-  # judge only reads text and answers JSON, so it gets no tools, no MCP
-  # servers and no skills.
-  cli_extra_args: ["--restricted", "--strict-mcp-config", "--disable-slash-commands",
-                   "--tools", ""]
   # Consecutive transport failures before the judge stands down for this run.
   max_consecutive_failures: 3
-  # One model, the cheapest (D-6). Tier routing went with the tiering.
-  model: claude-haiku-4-5-20251001
-  max_tokens_per_run: 2000000
-  # Postings per decide call. Per-call overhead dominates the cost, so larger is
-  # cheaper - until a call starts hitting cli_timeout.
+  # Postings per decide call. Per-call overhead dominates, so larger is faster -
+  # until a call starts hitting ollama_timeout or overflows ollama_num_ctx.
   decide_batch: 20
   # Hard ceiling on the vital extract sent per posting (PRD section 8.3[4]).
   # This is the single number that decides what a run costs.

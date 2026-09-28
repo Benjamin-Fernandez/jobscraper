@@ -1,9 +1,9 @@
 // What the tab badges count (M12-T1), kept apart from the components so the
 // numbers are easy to test and cannot drift between the badge and the tab.
 import { isDismissed } from './dismissed.js'
+import { CLOSED_STATUSES } from './stages.js'
 
-// Statuses that end an application. Everything else is still in play.
-export const CLOSED_STATUSES = ['rejected', 'withdrawn']
+export { CLOSED_STATUSES }
 
 // New roles: in the shown shortlist, with no application status, not dismissed.
 export function newRoleCount(jobs = []) {

@@ -7,7 +7,6 @@
     python -m jobscraper watchlist   list | add | disable watched companies
     python -m jobscraper profile     build or show the resume-derived profile
     python -m jobscraper filter      test | explain the prefilter rules
-    python -m jobscraper review      judge postings inside a Claude Code session
     python -m jobscraper reresolve   forget a company's cached ATS
     python -m jobscraper sync        reconcile watchlist.yaml into the database
 """
@@ -19,7 +18,6 @@ from pathlib import Path
 
 from . import backends
 from . import pipeline
-from . import review as review_mod
 from . import scheduler
 from .config import load_config
 from . import watchlist
@@ -72,21 +70,15 @@ def cmd_doctor(args) -> int:
           f"{s['applications']} applications")
 
     backend = backends.build(cfg.budget)
-    print(f"judge          backend={backend.name}")
+    print(f"model          backend={backend.name} (judge and resume parser)")
     if backend.available:
         print(f"               OK - {backend.describe()}")
-        if backend.name == "cli":
-            print("               judging runs through Claude Code; "
-                  "no API key needed")
     else:
         print(f"               UNAVAILABLE - {backend.unavailable_reason}")
-        print("               (runs still work; they fall back to rules only)")
-        print("               or judge in-session: "
-              "`python -m jobscraper review --export`")
+        print("               (runs still work; survivors wait for the model)")
 
-    print(f"budget         model={cfg.budget.get('model', '(unset)')}, "
-          f"llm={'on' if cfg.budget.get('enable_llm') else 'off'}, "
-          f"ceiling={int(cfg.budget.get('max_tokens_per_run', 0)):,} tokens/run")
+    print(f"budget         llm={'on' if cfg.budget.get('enable_llm') else 'off'}, "
+          f"{int(cfg.budget.get('decide_batch', 20))} postings per decide call")
     print(f"batch          {cfg.run['batch_size']} companies per run, "
           f"{cfg.run['cycle_days']}-day cycle")
     print(BAR)
@@ -170,57 +162,6 @@ def cmd_run(args) -> int:
         print(f"  {rep.message}")
     print(BAR)
     return 0 if rep.status in ("ok", "dry_run") else 1
-
-
-def _profile_and_rules(cfg):
-    """The merged profile and the loaded rules, or a printed reason why not."""
-    from . import filter as prefilter
-    from .profile import resume_ingest
-    try:
-        profile = resume_ingest.load_derived_profile(cfg)
-    except RuntimeError as exc:                 # ProfileError
-        print(str(exc), file=sys.stderr)
-        return None, None
-    return profile, prefilter.load_rules(cfg.rules_path)
-
-
-def cmd_review(args) -> int:
-    """Hand the decide step to the Claude Code session you are talking to."""
-    cfg, store = _boot_v2(args)
-    try:
-        profile, rules = _profile_and_rules(cfg)
-        if profile is None:
-            return 1
-        if args.apply:
-            try:
-                st = review_mod.apply_verdicts(
-                    cfg, store, profile, rules,
-                    path=Path(args.file) if args.file else None)
-            except FileNotFoundError as exc:
-                print(str(exc), file=sys.stderr)
-                return 1
-            print(f"applied {st['applied']} decisions ({st['accepted']} accepted, "
-                  f"{st['rejected_by_postcondition']} downgraded by the guard); "
-                  f"{st['not_pending']} skipped as not pending")
-            print(f"shortlist  {st['shortlisted']} roles -> {cfg.shortlist_path}")
-            return 0
-        path, n = review_mod.export_queue(cfg, store, profile, rules,
-                                          limit=args.limit or 200)
-    finally:
-        store.close()
-    if n == 0:
-        print("nothing to review - every prefilter survivor already has a decision.")
-        print("Run `python -m jobscraper run` to bring in new postings first.")
-        return 0
-    print(BAR)
-    print(f"{n} postings need a decision -> {path}")
-    print(BAR)
-    print("Ask Claude Code, in this directory:")
-    print(f'  "judge {path.name} and write the answer to {review_mod.VERDICTS_NAME}"')
-    print("Then fold it back in:")
-    print("  python -m jobscraper review --apply")
-    print(BAR)
-    return 0
 
 
 def cmd_reresolve(args) -> int:
@@ -474,25 +415,13 @@ def cmd_watchlist(args) -> int:
 
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="jobscraper",
-                                description="Fortnightly careers-site monitor")
+                                description="Weekly careers-site monitor")
     p.add_argument("--config", help="path to config.yaml")
     sub = p.add_subparsers(dest="cmd", required=True)
 
     sub.add_parser("doctor", help="check setup").set_defaults(fn=cmd_doctor)
     sub.add_parser("sync", help="load the watchlist into the db").set_defaults(fn=cmd_sync)
     sub.add_parser("status", help="who is due, cadence, quarantine").set_defaults(fn=cmd_status)
-    rev = sub.add_parser("review",
-                         help="judge postings inside a Claude Code session")
-    rev.add_argument("--export", action="store_true",
-                     help="write the queue of postings needing a decision "
-                          "(the default)")
-    rev.add_argument("--apply", action="store_true",
-                     help="read review_verdicts.json back in")
-    rev.add_argument("--file", help="path to the verdicts JSON, with --apply")
-    rev.add_argument("--limit", type=int, default=0,
-                     help="queue at most this many postings (default 200)")
-    rev.set_defaults(fn=cmd_review)
-
     rr = sub.add_parser("reresolve", help="forget a company's cached ATS")
     rr.add_argument("key", help="the company's watchlist key, or its exact name")
     rr.set_defaults(fn=cmd_reresolve)

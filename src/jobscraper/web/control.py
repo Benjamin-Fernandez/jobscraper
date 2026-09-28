@@ -21,8 +21,8 @@ from jobscraper.config import Config
 
 BATCH_SIZE_KEY = "batch_size"
 
-PROFILE_FIELDS = ("profile_version", "source_file", "parsed_at", "summary",
-                  "skills", "target_titles")
+PROFILE_FIELDS = ("profile_version", "source_file", "parsed_at", "parsed_by",
+                  "summary", "skills", "target_titles")
 
 
 def stored_batch_size(store: Any) -> Optional[int]:
@@ -81,7 +81,9 @@ def profile_view(cfg: Config) -> dict[str, Any]:
     if not isinstance(doc, dict):
         return out
     out["present"] = True
-    for key in ("source_file", "parsed_at", "summary"):
+    # parsed_by: the model that read the resume (Qwen since M14); absent on a
+    # profile derived before then.
+    for key in ("source_file", "parsed_at", "parsed_by", "summary"):
         out[key] = None if doc.get(key) is None else str(doc[key])
     try:
         out["profile_version"] = int(doc.get("profile_version"))

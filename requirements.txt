@@ -3,7 +3,6 @@
 
 PyYAML>=6.0          # config, watchlist, rules
 httpx>=0.27          # net.py - every scrape request
-openpyxl>=3.1        # v1 legacy (ingest.py, output.py); goes in M9-T1
 
 # D-1: resume ingest (M2)
 pypdf>=4.0
@@ -13,6 +12,4 @@ python-docx>=1.1
 fastapi>=0.110
 uvicorn>=0.29
 
-# Optional: only for budget.backend: api, which needs ANTHROPIC_API_KEY.
-# The default backend (cli) uses the Claude Code CLI and needs no package.
-# anthropic>=0.40
+# The model (Qwen3) is reached over HTTP through Ollama - httpx above; no SDK.

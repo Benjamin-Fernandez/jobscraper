@@ -382,10 +382,10 @@ def _funnel(cfg: Config, store: Store, rep: RunReport, client: HttpClient,
         def save(d: decide.Decision) -> None:
             store.save_decision(d.job_id, pv, d.vital_hash, d.decision,
                                 d.is_singapore, d.yoe_min, d.reason, d.model)
-        # The model that actually answers (Qwen under Ollama, not budget.model).
-        # A cached decision is reused only if that same model made it, so
-        # switching models - Haiku to Qwen - re-judges and replaces old answers.
-        model = backend.model_name(str(budget.get("model", "")))
+        # The model that actually answers (the Ollama tag). A cached decision is
+        # reused only if that same model made it, so switching models (Haiku to
+        # Qwen in 2026-09, or one Qwen tag to another) re-judges old answers.
+        model = backend.model_id
 
         def lookup(job_id: str, h: str):
             row = store.get_decision(job_id, pv, h)

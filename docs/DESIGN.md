@@ -29,12 +29,12 @@ v1's design document is kept at `archive/v1-src/docs/DESIGN.md`.
 ║   │ [0] SCHEDULER  — who is due?                           FREE        │     ║
 ║   │                                                                    │     ║
 ║   │     SELECT … WHERE last_scraped_at IS NULL                         │     ║
-║   │                 OR last_scraped_at <= now - 14 days                │     ║
+║   │                 OR last_scraped_at <= now - cycle_days (7)         │     ║
 ║   │     ORDER BY never-scraped first, then oldest      LIMIT 10        │     ║
 ║   │                                                                    │     ║
 ║   │     ↳ nobody due  ▸ print when the next one is, exit 0             │     ║
 ║   │     ↳ "loop back to company 1" happens by itself: it becomes       │     ║
-║   │       the oldest row 14 days after its own last scrape             │     ║
+║   │       the oldest row a cycle after its own last scrape             │     ║
 ║   └────────────────────────────────────────────────────────────────────┘     ║
 ║                                      │  ≤10 due companies                    ║
 ║                                      ▼                                       ║
@@ -64,8 +64,8 @@ v1's design document is kept at `archive/v1-src/docs/DESIGN.md`.
 ║                                      │                                       ║
 ║                                      ▼                                       ║
 ║   ┌────────────────────────────────────────────────────────────────────┐     ║
-║   │ [5] DECIDE                                    CHEAP MODEL          │     ║
-║   │     cheapest model via `claude -p`, batched ~20 postings/call      │     ║
+║   │ [5] DECIDE                                    LOCAL MODEL          │     ║
+║   │     Qwen3 via Ollama (local GPU), batched ~20 postings/call        │     ║
 ║   │     ──▶ { accept | reject , is_singapore , yoe_min , reason }      │     ║
 ║   │     cached by hash(job_id + vital_text + profile_version)          │     ║
 ║   └────────────────────────────────────────────────────────────────────┘     ║
@@ -152,12 +152,12 @@ Decisions that shape the build. An agent must not silently reverse these.
 | **D-3** | Web = **FastAPI + Vue 3 + Vite** | User chose FastAPI + a JS framework. Vue picked over React: single-file components read more like HTML for a human reviewer, and no extra state library is needed at this size. | Adds a node build step to a Python repo. React is a drop-in swap if preferred — only §8.5 changes. |
 | **D-4** | **Seed the watchlist with all 229 v1 companies**, carrying their resolved `provider`/`slug`/`feed_url`. Job/decision data still starts clean. | *Revised 2026-09-23 — supersedes the earlier "clean slate" choice.* All 229 have a resolved provider and careers URL; discarding that means re-paying for a full discovery crawl. | M1-T2 generates `watchlist.yaml` from the v1 DB. The user prunes rather than builds from nothing. Old jobs/verdicts are **not** carried over. |
 | **D-5** | `shortlist.json` is **engine-owned and disposable**; application status lives **only in SQLite** | Avoids two writers on one file. The engine regenerates the shortlist freely; user state is never in a regenerated file. | Web app joins the two at read time. |
-| **D-6** | **One** model tier (cheapest), reached via the existing Claude Code CLI backend | No API key exists. Tier routing was tied to the tiering being deleted. | `backends.py` carries over unchanged. `model_high`/`model_low` collapse to `model`. |
+| **D-6** | *(Superseded by D-16 and M14: the model is Qwen3 via Ollama; the Claude transports are removed.)* **One** model tier (cheapest), reached via the existing Claude Code CLI backend | No API key exists. Tier routing was tied to the tiering being deleted. | `backends.py` carries over unchanged. `model_high`/`model_low` collapse to `model`. |
 | **D-7** | Singapore means **explicitly Singapore**. Remote — including "Remote (APAC)" and "Remote, Global" — is rejected. | User: "singapore only, not even remote". | A location allow-list of exactly `singapore`/`sg`. The v1 `ambiguous_hints` escape hatch is deleted. |
 | **D-8** | Prefilter is **hard and free**; the model is the last step, never the first | Cost control. A posting the rules can reject must never reach the model. | Order in §8.3 is normative, not advisory. |
 | **D-9** | Scheduling is **per-company staleness**, not a global cursor. A company is due when `last_scraped_at` is null or older than `cycle_days`. | User: decide whether to loop back to company 1 "based on whether it has been scraped within the past 2 weeks". A cursor cannot express that; a timestamp can. | `cursor.py` retires. Self-healing: failures, additions and removals all resolve naturally. See §8.3[0]. |
 | **D-10** | The resume parser emits **`target_titles`**, used as a positive title filter alongside the deny-list. | User request. A generated allow-list catches "Site Reliability Engineer" without hand-maintaining every variant. | New `title_allow` prefilter rule. Generated list is merged with a user `extra:` list that is never overwritten (§8.4). |
-| **D-11** | **Docker packages the app**; the model transport is the one thing Docker cannot carry. | User wants easy spin-up and eventual cloud. But `claude -p` authenticates against the host's Claude Code login, which does not exist inside a container. | Local: mount `~/.claude` read-only. Cloud (later): needs an API key or a hosted transport. **Called out as Risk R-8 — do not discover this at deploy time.** |
+| **D-11** | *(Resolved: Docker runs Qwen in an `ollama` service - no credentials needed.)* **Docker packages the app**; the model transport is the one thing Docker cannot carry. | User wants easy spin-up and eventual cloud. But `claude -p` authenticates against the host's Claude Code login, which does not exist inside a container. | Local: mount `~/.claude` read-only. Cloud (later): needs an API key or a hosted transport. **Called out as Risk R-8 — do not discover this at deploy time.** |
 | **D-12** | Experience hard cap: **reject anything requiring > 3 years**. | User instruction. | `ceiling_years: 3` in `config/rules.yaml`. Applies in the free prefilter *and* as a post-condition on the model's `yoe_min`. |
 | **D-13** | Batch size **10 companies per run** to start. | User instruction. v1 used 30. | See R-7: at 229 companies this needs ~1.6 runs/day to complete a 14-day cycle, where 30 needed ~0.5. The staleness queue degrades gracefully if that is not met, and the value is one config line. |
 | **D-14** | **Migrate v1 `applications` history.** Jobs and decisions still start clean. | The user's own application record is the one thing in the v1 DB that cannot be regenerated by re-scraping. "Migrating v1 job data is out of scope" (§6) was never meant to cover it. | M3-T3 ports the `applications` rows, matching on job URL. Rows whose job is not re-scraped are kept as orphans with their URL, so nothing the user recorded is lost. |

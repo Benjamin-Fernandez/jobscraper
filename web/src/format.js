@@ -25,6 +25,18 @@ export function plural(n, word, many = `${word}s`) {
   return `${n} ${n === 1 ? word : many}`
 }
 
+// ATS feeds often repeat a place: "Singapore, Singapore" -> "Singapore".
+// Parts are kept in order; a repeat (ignoring case) is dropped.
+export function cleanLocation(loc) {
+  const seen = new Set()
+  return String(loc || '').split(/\s*[,;|]\s*/).map(p => p.trim()).filter(p => {
+    const key = p.toLowerCase()
+    if (!p || seen.has(key)) return false
+    seen.add(key)
+    return true
+  }).join(', ')
+}
+
 // Posting URLs are scraped from third-party boards. Only http(s) becomes a
 // link, so a `javascript:` URL in a feed can never run in this page.
 export function safeUrl(url) {

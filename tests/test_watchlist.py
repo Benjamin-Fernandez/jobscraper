@@ -188,7 +188,7 @@ def test_load_reads_a_real_file_and_reports_a_missing_one():
         load(missing)
         raise AssertionError("a missing watchlist must be an error, not an empty list")
     except WatchlistError as exc:
-        assert "seed_watchlist" in str(exc), "the error should say how to fix it"
+        assert "write it by hand" in str(exc), "the error should say how to fix it"
 
 
 def test_rendered_entries_parse_back_to_the_same_values():

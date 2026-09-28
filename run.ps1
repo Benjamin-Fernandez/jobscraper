@@ -1,15 +1,12 @@
 # JobScraper launcher (v2).
-#   .\run.ps1              run one batch (the 10 most-overdue companies), then open the web app
+#   .\run.ps1              run one batch (the most-overdue companies), then open the web app
 #   .\run.ps1 -NoWeb       run the batch without opening the web app
 #   .\run.ps1 web          just the web app: Inbox + Applications at http://127.0.0.1:8765
 #   .\run.ps1 status       who is due, run cadence, quarantine
-#   .\run.ps1 doctor       check setup, incl. which judge transport is live
+#   .\run.ps1 doctor       check setup, incl. whether Qwen (Ollama) is reachable
 #   .\run.ps1 watchlist list | add "Name" https://careers.url | disable <key>
 #
-# Judging goes through Claude Code (`claude -p`) by default - no API key.
-# To judge inside a Claude Code session instead:
-#   .\run.ps1 review --export     then ask Claude Code to judge data\review_queue.json
-#   .\run.ps1 review --apply
+# Judging and resume parsing use Qwen3 served by Ollama - no API key, no login.
 [CmdletBinding()]
 param(
     [switch]$NoWeb,

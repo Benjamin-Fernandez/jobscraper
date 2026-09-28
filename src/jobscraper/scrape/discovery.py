@@ -12,7 +12,7 @@ from urllib.parse import urlparse
 
 from .adapters import parse_workday
 from ..models import WatchedCompany
-from .net import FetchError, HttpClient
+from .net import HttpClient
 
 # Host markers that identify a provider straight from the careers URL.
 FINGERPRINTS: list[tuple[str, re.Pattern]] = [

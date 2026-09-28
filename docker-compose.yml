@@ -33,7 +33,7 @@ services:
       JOBSCRAPER_HOST: "0.0.0.0"
       JOBSCRAPER_PORT: "8765"
       # The judge in Docker is a local Qwen model served by the `ollama`
-      # service below - no API key, no Claude login in the container. Start it
+      # service below - no API key, no login in the container. Start it
       # with `--profile llm`. Without it, runs still scrape and filter, and
       # survivors wait (as "awaiting model") until a model is reachable.
       JOBSCRAPER_BACKEND: "ollama"
@@ -45,26 +45,14 @@ services:
       # Hand-edited inputs (watchlist, rules, overrides). Read-only: nothing the
       # pipeline or the web app does should write here.
       - ./config:/app/config:ro
-      # --- Model transport (D-11, R-8) - OFF by default --------------------
-      # `claude -p` authenticates with the host's Claude Code login. The plan
-      # is to mount ~/.claude read-only. It is commented out because the image
-      # does not contain the `claude` binary yet, so the mount would put your
-      # credentials inside the container for no benefit. Without it, `doctor`
-      # reports the judge as UNAVAILABLE and runs fall back to rules only.
-      # When the image gains the CLI, uncomment ONE of:
-      #   Linux / macOS / Git Bash:
-      # - ${HOME}/.claude:/home/app/.claude:ro
-      #   Windows PowerShell (Docker Desktop):
-      # - ${USERPROFILE}/.claude:/home/app/.claude:ro
-    # Hardening: nothing is writable except the data volume and /tmp (which the
-    # `claude -p` backend uses as its working directory).
+    # Hardening: nothing is writable except the data volume and /tmp.
     read_only: true
     tmpfs:
       - /tmp
     cap_drop: [ALL]
     security_opt:
       - "no-new-privileges:true"
-    # Reaps `claude -p` child processes; PID 1 would otherwise be Python.
+    # Reaps the background run's child process; PID 1 would otherwise be Python.
     init: true
     restart: unless-stopped
 

@@ -34,9 +34,7 @@ sys.path.insert(0, str(ROOT / "src"))
 
 # The orchestrator. The one module allowed to import every stage - composing them
 # is its whole job. Nothing may import it back.
-ORCHESTRATOR = {"pipeline", "review"}
-# review.py is the in-session transport for the decide step: like pipeline.py it
-# composes stages (filter, decide) with the publisher, so it sits at the top.
+ORCHESTRATOR = {"pipeline"}
 
 # Stage modules: each does one step of the pipeline and knows nothing of the others.
 STAGES = {"scheduler", "filter", "decide", "scrape", "profile"}
@@ -147,7 +145,7 @@ def test_only_backends_talks_to_a_model():
         if path.name == "backends.py":
             continue
         text = path.read_text(encoding="utf-8")
-        for marker in ("import anthropic", "messages.create("):
+        for marker in ("/api/chat", "/api/tags", "import anthropic"):
             if marker in text:
                 offenders.append(f"{path.relative_to(SRC)} contains {marker!r}")
     assert not offenders, (

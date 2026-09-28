@@ -440,7 +440,7 @@ def decide(postings: list[Posting], *, summary: str, backend: Backend, model: st
             stats.undecided += len(chunk)
             continue
         try:
-            comp = backend.complete(model, system_prompt(ceiling_years, interests),
+            comp = backend.complete(system_prompt(ceiling_years, interests),
                                     _user_prompt(summary, [p for p, _ in chunk]))
         except BackendError as exc:
             failures += 1

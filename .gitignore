@@ -20,9 +20,11 @@ archive/
 # --- generated output ------------------------------------------------------
 output/
 data/shortlist.json
-data/review_queue.json
-data/review_verdicts.json
 data/profile.derived.yaml
+# Logs of runs started from the web app (M11).
+data/jobs/
+# v1's spreadsheet tracker: personal job-search data, never in a public repo.
+data/*.xlsx
 
 # --- python ----------------------------------------------------------------
 __pycache__/

@@ -5,8 +5,10 @@ new-graduate software roles **based in Singapore** that fit your resume, and put
 them on one web page where you open them, apply, and track what happened next.
 
 It is cheap by construction: free local rules throw away ~99% of postings before
-a model ever sees one, and the survivors go to the cheapest Claude model in
-batches, as ~300-token extracts rather than whole job descriptions.
+a model ever sees one, and the survivors go to **Qwen3, an open model running on
+your own GPU through [Ollama](https://ollama.com)**, in batches, as short extracts
+rather than whole job descriptions. The same model reads your resume. No API key,
+no login, no per-token bill.
 
 Design and decisions: [`docs/DESIGN.md`](docs/DESIGN.md). Full specification and
 build ledger: [`.claude/prds/jobscraper-v2.prd.md`](.claude/prds/jobscraper-v2.prd.md).
@@ -15,8 +17,9 @@ build ledger: [`.claude/prds/jobscraper-v2.prd.md`](.claude/prds/jobscraper-v2.p
 
 ## Quick start (Windows, no Docker)
 
-Needs Python 3.12 and, for the model step, [Claude Code](https://claude.com/claude-code)
-signed in on this machine. No API key. (v1 is kept at the `v1-final` tag.)
+Needs Python 3.12 and, for the model steps, [Ollama](https://ollama.com) with
+`ollama pull qwen3:14b` (9.3 GB; `qwen3:8b` on a smaller GPU). No API key.
+(v1 is kept at the `v1-final` tag.)
 
 ```powershell
 git clone https://github.com/Benjamin-Fernandez/jobscraper.git
@@ -38,7 +41,7 @@ Node is **not** needed to run it: the built web app is committed under
 
 1. Put your resume at **`data/resume.pdf`** (or `data/resume.docx`). It never
    leaves your machine and is git-ignored.
-2. Build your profile from it — one cheap model call:
+2. Build your profile from it — one Qwen call:
    ```powershell
    python -m jobscraper profile --refresh
    python -m jobscraper profile --show     # skills, target job titles, version
@@ -47,7 +50,7 @@ Node is **not** needed to run it: the built web app is committed under
    never regenerated.
 3. Run a batch:
    ```powershell
-   python -m jobscraper run            # the 10 most-overdue companies
+   python -m jobscraper run            # the most-overdue companies
    ```
    or `.\run.ps1`, which runs a batch and then opens the web app.
 
@@ -60,7 +63,7 @@ docker compose down                   # stop; the jobscraper_data volume keeps t
 ```
 
 In Docker the judge is a **local Qwen3 model served by Ollama** on your NVIDIA
-GPU — no API key and no Claude login inside the container:
+GPU — no API key and no login inside the container:
 
 ```bash
 docker compose --profile llm up -d --build            # app + the ollama service
@@ -69,11 +72,9 @@ docker compose run --rm app doctor                    # judge: ollama (qwen3:14b
 ```
 
 Without `--profile llm` the app still runs; the model step is skipped and
-survivors wait until a model is reachable (or judge them with the in-session
-review below). Details and the security notes are in `docker-compose.yml`.
+survivors wait until a model is reachable. Details and the security notes are in `docker-compose.yml`.
 
-The same local model works outside Docker: install [Ollama](https://ollama.com),
-`ollama pull qwen3:14b`, and set `budget.backend: ollama` in `config/config.yaml`.
+Outside Docker the app talks to Ollama on `127.0.0.1:11434` (`budget.ollama_url`).
 
 ---
 
@@ -81,13 +82,14 @@ The same local model works outside Docker: install [Ollama](https://ollama.com),
 
 ```
 watchlist.yaml -> who is due? -> scrape -> free prefilter -> ~800-char extract
-               -> cheap model (accept/reject) -> data/shortlist.json -> web app
+               -> Qwen (fit, location, years) -> code decides -> data/shortlist.json -> web app
 ```
 
-- **Scheduling.** Every company is re-checked once per 14 days. Each run takes the
-  10 companies that have gone longest without a check (never-checked first), so
-  "loop back to the first company" is automatic. At 229 companies a full sweep
-  needs about 1.6 runs a day; `python -m jobscraper status` shows whether you
+- **Scheduling.** Every company is re-checked once a week (`run.cycle_days: 7`).
+  Each run takes the companies that have gone longest without a check
+  (never-checked first), so "loop back to the first company" is automatic. At
+  295 companies and 10 per run a full sweep needs about 4.2 runs a day (set the
+  batch size in the web app's Settings tab); `python -m jobscraper status` shows whether you
   are keeping up and when the queue drains.
 - **Prefilter (free).** Rules in `config/rules.yaml`: drop senior/staff/lead/
   intern/non-engineering titles, keep only titles matching your resume's target
@@ -95,7 +97,8 @@ watchlist.yaml -> who is due? -> scrape -> free prefilter -> ~800-char extract
   included), drop anything asking for more than 3 years, drop postings with too
   little skill overlap. A blank or vague location ("APAC", "Hybrid") is not
   guessed at — it goes to the model, which reads the description.
-- **Decide (the only paid step).** The model answers accept/reject per posting.
+- **Decide (the only model step).** Qwen reports facts per posting — does it fit
+  your interests, is it in Singapore, how many years it asks for — and code decides.
   Two things are enforced in code whatever it says: a role is accepted only if
   it is confirmed Singapore, and never if it asks for more than 3 years.
   A posting is never judged twice unless its description changes.
@@ -108,13 +111,12 @@ watchlist.yaml -> who is due? -> scrape -> free prefilter -> ~800-char extract
 |---|---|
 | `run [--dry-run] [--batch-size N]` | One batch. `--dry-run` fetches and reports but writes nothing and consumes nothing. |
 | `status` | Due now, due this week, never checked, quarantined, run rate vs the rate a sweep needs. |
-| `web` | The web app: **Inbox** (open, mark applied, dismiss) and **Applications** (status and history). |
-| `doctor` | Checks the whole setup, including which model transport is live. |
+| `web` | The web app: **Inbox** (triage new roles), **Applications** (by company, by stage), Runs, Profile, Settings. |
+| `doctor` | Checks the whole setup, including whether Qwen (Ollama) is reachable. |
 | `watchlist list` / `add "Name" URL` / `disable KEY` | Manage companies; edits keep your comments. |
 | `profile [--show \| --refresh \| --bump]` | Build or inspect the resume-derived profile. |
 | `filter test --title … --location … [--desc …]` | Dry-run the rules on a made-up posting. |
 | `filter explain JOB_ID_OR_URL` | Every rule's verdict for a stored posting. |
-| `review --export` / `review --apply` | Judge postings in a Claude Code session instead of `claude -p` (below). |
 | `reresolve KEY` | Forget a company's cached job-board provider so the next run rediscovers it. |
 | `sync` | Reconcile `watchlist.yaml` into the database (every run does this anyway). |
 
@@ -152,26 +154,13 @@ python -m jobscraper filter test --title "Trade Support Engineer" --location "Si
 
 Editing the rules re-checks every stored posting on the next run, for free.
 
-## Judging inside a Claude Code session
-
-If `claude -p` is unavailable (Docker, or you would rather watch it think):
-
-```powershell
-python -m jobscraper review --export     # writes data/review_queue.json
-# ask Claude Code: "judge data/review_queue.json and write data/review_verdicts.json"
-python -m jobscraper review --apply
-```
-
-It asks exactly what the automatic path asks, and its answers go through the same
-Singapore / 3-year checks into the same cache — the two paths are interchangeable.
-
 ## Files you own vs files the engine owns
 
 | Yours — edit freely | Engine's — regenerated, safe to delete |
 |---|---|
 | `config/watchlist.yaml` | `data/shortlist.json` |
 | `config/rules.yaml` (the `extra:` lists, `enabled:`) | `data/profile.derived.yaml` |
-| `config/profile.overrides.yaml` | `data/review_*.json` |
+| `config/profile.overrides.yaml` | `data/jobs/` (web-app run logs) |
 | `config/config.yaml` | |
 | `data/resume.pdf` | |
 

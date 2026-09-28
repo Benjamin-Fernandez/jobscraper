@@ -1,48 +1,80 @@
-/* The JobScraper design system (M12-T5): one set of tokens, used everywhere.
+/* The JobScraper design system, v2 (M13-T4): one set of tokens, used everywhere.
  *
- * Direction - a quiet "ledger desk". This is a tool used in short daily
- * sessions to triage roles, and fortnightly to run the engine, so it is dense,
- * calm and scannable rather than decorative: warm paper neutrals (graphite at
- * night), one ink-blue for actions, and green / amber / red kept for state.
- * The one signature: every number - counts, badges, run numbers, the log - is
- * set in tabular monospace, so columns of figures line up like a ledger.
+ * Direction - a calm triage desk. This is a tool used in short daily sessions
+ * to go through new roles and keep track of applications, so it is dense and
+ * scannable rather than decorative, the way LinkedIn's and Indeed's job
+ * trackers are: white work surfaces on a soft neutral page, one ink-blue for
+ * actions, and a small palette that gives each application stage its own
+ * colour (saved violet, applied blue, interviewing amber, offer green, closed
+ * grey/red) so a list of statuses reads at a glance.
  *
- * System fonts only: nothing to download, nothing to swap in late, no layout
- * shift. Components use these tokens in their scoped styles; no component
- * defines a colour of its own.
+ * The one signature: every company gets a monogram tile (CompanyMark.vue) in
+ * a colour derived from its name - the same colour wherever that company
+ * appears - standing in for the logos we do not have.
+ *
+ * System fonts only: nothing to download, no layout shift. Components use these
+ * tokens in their scoped styles; no component defines a colour of its own
+ * (CompanyMark's hue comes from the name, its lightness from here).
  */
 :root {
   color-scheme: light dark;
 
   /* colour - light */
-  --bg: #f6f5f1;
+  --bg: #f5f5f2;
   --surface: #ffffff;
-  --surface-2: #efede7;
-  --text: #1c1b19;
-  --muted: #65625b;
-  --border: #dedbd2;
-  --border-strong: #c9c5ba;
-  --accent: #2c55c7;
-  --accent-hover: #2447aa;
+  --surface-2: #f3f2ee;
+  --surface-3: #e9e7e1;
+  --text: #17171a;
+  --text-2: #3b3b41;
+  --muted: #5d5c64;
+  --border: #e3e1db;
+  --border-strong: #cdcac1;
+  --accent: #2f5bd3;
+  --accent-hover: #2449b0;
   --accent-text: #ffffff;
-  --accent-soft: #e5ebfa;
-  --ok: #1d7244;
-  --ok-soft: #e2f2e8;
-  --warn: #8f5200;
-  --warn-soft: #fbeedb;
-  --danger: #b3261e;
-  --danger-soft: #fbe5e3;
-  --focus: #2c55c7;
-  --shadow: 0 1px 0 rgba(28, 27, 25, 0.04), 0 1px 3px rgba(28, 27, 25, 0.06);
+  --accent-soft: #e9eefc;
+  --ok: #17703f;
+  --ok-soft: #e3f3e9;
+  --warn: #935400;
+  --warn-soft: #fcf0dc;
+  --danger: #b42318;
+  --danger-soft: #fce7e5;
+  --focus: #2f5bd3;
+
+  /* application stages (M13) */
+  --stage-saved: #6645c2;
+  --stage-saved-soft: #efeafb;
+  --stage-applied: var(--accent);
+  --stage-applied-soft: var(--accent-soft);
+  --stage-interview: var(--warn);
+  --stage-interview-soft: var(--warn-soft);
+  --stage-offer: var(--ok);
+  --stage-offer-soft: var(--ok-soft);
+  --stage-closed: #6b6a72;
+  --stage-closed-soft: #efeff1;
+  --stage-rejected: var(--danger);
+  --stage-rejected-soft: var(--danger-soft);
+
+  /* company monograms: lightness and chroma; the hue comes from the name */
+  --mark-bg-l: 93%;
+  --mark-bg-c: 60%;
+  --mark-fg-l: 30%;
+  --mark-fg-c: 55%;
+
+  --shadow-sm: 0 1px 2px rgba(23, 23, 26, 0.05);
+  --shadow: 0 1px 2px rgba(23, 23, 26, 0.05), 0 2px 8px rgba(23, 23, 26, 0.06);
+  --shadow-lg: 0 8px 28px rgba(23, 23, 26, 0.16), 0 2px 6px rgba(23, 23, 26, 0.08);
 
   /* type */
-  --font: system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif;
+  --font: 'Segoe UI Variable Text', system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif;
+  --font-display: 'Segoe UI Variable Display', system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif;
   --mono: ui-monospace, 'Cascadia Mono', 'SF Mono', Menlo, Consolas, monospace;
   --text-xs: 0.75rem;
   --text-sm: 0.875rem;
   --text-md: 1rem;
   --text-lg: 1.125rem;
   --text-xl: 1.375rem;
+  --text-2xl: 1.625rem;
   --leading: 1.5;
 
   /* space - a 4px grid */
@@ -55,13 +87,13 @@
   --space-7: 3rem;
 
   /* shape and size */
-  --radius-sm: 4px;
-  --radius: 6px;
-  --radius-lg: 10px;
+  --radius-sm: 6px;
+  --radius: 8px;
+  --radius-lg: 12px;
   --control-h: 2.25rem;
-  --page-w: 60rem;
+  --page-w: 76rem;
   --gutter: 16px;
-  --header-h: 3.25rem;
+  --header-h: 3.5rem;
 
   font-family: var(--font);
   font-size: var(--text-md);
@@ -69,29 +101,45 @@
   color: var(--text);
   background: var(--bg);
   -webkit-text-size-adjust: 100%;
+  -webkit-font-smoothing: antialiased;
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --bg: #151514;
-    --surface: #1e1e1c;
-    --surface-2: #262624;
-    --text: #ecebe7;
-    --muted: #a3a097;
-    --border: #34332f;
-    --border-strong: #46443f;
-    --accent: #86a6ff;
-    --accent-hover: #a3bcff;
-    --accent-text: #0d1330;
-    --accent-soft: #1f2a4d;
-    --ok: #6fcf97;
-    --ok-soft: #173325;
-    --warn: #eab160;
-    --warn-soft: #3a2a12;
-    --danger: #ff8a80;
-    --danger-soft: #3d1a17;
-    --focus: #a3bcff;
-    --shadow: 0 1px 0 rgba(0, 0, 0, 0.3);
+    --bg: #111113;
+    --surface: #19191c;
+    --surface-2: #212125;
+    --surface-3: #2a2a2f;
+    --text: #ececef;
+    --text-2: #cfcfd4;
+    --muted: #a1a0a9;
+    --border: #2d2d33;
+    --border-strong: #42424a;
+    --accent: #8aa6ff;
+    --accent-hover: #a8bdff;
+    --accent-text: #0c1330;
+    --accent-soft: #1d2745;
+    --ok: #6fd097;
+    --ok-soft: #15301f;
+    --warn: #ebb461;
+    --warn-soft: #362611;
+    --danger: #ff8d82;
+    --danger-soft: #3b1815;
+    --focus: #a8bdff;
+
+    --stage-saved: #b69cff;
+    --stage-saved-soft: #2a2144;
+    --stage-closed: #a1a0a9;
+    --stage-closed-soft: #26262b;
+
+    --mark-bg-l: 24%;
+    --mark-bg-c: 35%;
+    --mark-fg-l: 80%;
+    --mark-fg-c: 70%;
+
+    --shadow-sm: 0 1px 0 rgba(0, 0, 0, 0.35);
+    --shadow: 0 1px 0 rgba(0, 0, 0, 0.35), 0 2px 8px rgba(0, 0, 0, 0.25);
+    --shadow-lg: 0 10px 30px rgba(0, 0, 0, 0.55);
   }
 }
 
@@ -107,7 +155,7 @@
 html { scrollbar-gutter: stable; }
 body { margin: 0; background: var(--bg); min-height: 100vh; }
 
-h1, h2, h3 { line-height: 1.25; }
+h1, h2, h3 { line-height: 1.25; font-family: var(--font-display); }
 
 a { color: var(--accent); text-underline-offset: 2px; }
 a:hover { color: var(--accent-hover); }
@@ -127,6 +175,8 @@ button, select, input, a.button {
   color: var(--text);
 }
 
+/* Default button: a quiet secondary. `.primary` is the one action that matters
+   on a surface; `.ghost` is for tertiary actions that should not compete. */
 button, a.button {
   display: inline-flex;
   align-items: center;
@@ -137,39 +187,60 @@ button, a.button {
   background: var(--surface);
   border: 1px solid var(--border-strong);
   border-radius: var(--radius);
+  box-shadow: var(--shadow-sm);
   cursor: pointer;
+  font-weight: 500;
   text-decoration: none;
   white-space: nowrap;
-  transition: background-color 0.12s, border-color 0.12s;
+  transition: background-color 0.12s, border-color 0.12s, color 0.12s;
 }
 button:hover:not(:disabled), a.button:hover { background: var(--surface-2); color: var(--text); }
 button:disabled { opacity: 0.5; cursor: not-allowed; }
 
-button.primary {
+button.primary, a.button.primary {
   background: var(--accent);
   border-color: var(--accent);
   color: var(--accent-text);
   font-weight: 600;
 }
-button.primary:hover:not(:disabled) { background: var(--accent-hover); border-color: var(--accent-hover); color: var(--accent-text); }
+button.primary:hover:not(:disabled), a.button.primary:hover {
+  background: var(--accent-hover); border-color: var(--accent-hover); color: var(--accent-text);
+}
+
+button.ghost, a.button.ghost {
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
+  color: var(--muted);
+}
+button.ghost:hover:not(:disabled), a.button.ghost:hover { background: var(--surface-2); color: var(--text); }
 
 button.link {
   min-height: 0;
   padding: 0;
   border: none;
+  box-shadow: none;
   background: none;
   color: var(--accent);
+  font-weight: 500;
   text-decoration: underline;
   text-underline-offset: 2px;
 }
 button.link:hover:not(:disabled) { background: none; color: var(--accent-hover); }
 
-select, input[type='number'], input[type='text'] {
+select, input[type='number'], input[type='text'], input[type='search'] {
   min-height: var(--control-h);
   padding: 0 var(--space-3);
   background: var(--surface);
   border: 1px solid var(--border-strong);
   border-radius: var(--radius);
+  transition: border-color 0.12s, box-shadow 0.12s;
+}
+select:hover, input[type='search']:hover, input[type='text']:hover, input[type='number']:hover { border-color: var(--muted); }
+select:focus-visible, input:focus-visible {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent);
 }
 select { padding-right: var(--space-2); max-width: 100%; }
 input[type='number'] { font-family: var(--mono); font-variant-numeric: tabular-nums; }
@@ -177,20 +248,61 @@ input[aria-invalid='true'] { border-color: var(--danger); }
 input[type='checkbox'] { width: 1.1rem; height: 1.1rem; margin: 0; accent-color: var(--accent); }
 input:disabled, select:disabled { opacity: 0.6; }
 
+/* A search field with a leading icon: <label class="search"><Icon/><input></label>. */
+.search {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+}
+.search .icon {
+  position: absolute;
+  left: var(--space-3);
+  color: var(--muted);
+  pointer-events: none;
+}
+.search input { padding-left: calc(var(--space-3) + 1.5rem); width: 100%; }
+
 /* ---- shared page parts ---- */
 
 .num, .mono { font-family: var(--mono); font-variant-numeric: tabular-nums; }
 .muted { color: var(--muted); }
 
+/* A tab's own heading row: title and a one-line summary, controls opposite. */
+.page-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--space-3) var(--space-4);
+  margin-bottom: var(--space-4);
+}
+.page-title {
+  margin: 0;
+  font-size: var(--text-2xl);
+  font-weight: 650;
+  letter-spacing: -0.015em;
+}
+.page-sub { margin: var(--space-1) 0 0; color: var(--muted); font-size: var(--text-sm); }
+.page-controls { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
+
 .section-title {
   font-size: var(--text-xs);
-  font-weight: 600;
+  font-weight: 650;
   letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--muted);
   margin: var(--space-6) 0 var(--space-3);
 }
 .section-title:first-child { margin-top: 0; }
+
+/* A white work surface. Never nested inside another. */
+.surface {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow);
+}
 
 /* Messages: errors and confirmations share one shape, told apart by colour
    and by their role (alert / status), never by colour alone. */
@@ -205,33 +317,56 @@ input:disabled, select:disabled { opacity: 0.6; }
 .notice p + button, .notice p + p { margin-top: var(--space-2); }
 .notice.error { color: var(--danger); background: var(--danger-soft); border-color: color-mix(in srgb, var(--danger) 30%, transparent); }
 .notice.ok { color: var(--ok); background: var(--ok-soft); border-color: color-mix(in srgb, var(--ok) 30%, transparent); }
+.notice.warn { color: var(--warn); background: var(--warn-soft); border-color: color-mix(in srgb, var(--warn) 30%, transparent); }
 
 .empty {
-  padding: var(--space-6) var(--space-4);
+  padding: var(--space-7) var(--space-4);
   text-align: center;
+  background: var(--surface);
   border: 1px dashed var(--border-strong);
   border-radius: var(--radius-lg);
 }
 .empty p { margin: 0; }
 .empty p + p { margin-top: var(--space-1); }
-.empty-title { font-weight: 600; }
+.empty-title { font-weight: 650; font-size: var(--text-md); }
+.empty .icon { color: var(--muted); margin-bottom: var(--space-2); }
 
-/* A status as a small outlined pill; the data-status picks the colour. */
+/* A status as a small soft-filled pill; data-status picks the stage colour. */
 .pill {
-  display: inline-block;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
   font-size: var(--text-xs);
-  font-weight: 500;
-  line-height: 1.6;
+  font-weight: 600;
+  line-height: 1.7;
   padding: 0 var(--space-2);
   border-radius: 999px;
-  border: 1px solid currentColor;
-  color: var(--muted);
+  color: var(--stage-closed);
+  background: var(--stage-closed-soft);
   white-space: nowrap;
 }
-.pill[data-status='applied'], .pill[data-status='to_apply'] { color: var(--accent); }
-.pill[data-status='interviewing'], .pill[data-status='offer'], .pill[data-status='ok'], .pill[data-status='succeeded'] { color: var(--ok); }
-.pill[data-status='failed'], .pill[data-status='aborted_unhealthy'] { color: var(--danger); }
-.pill[data-status='dry_run'], .pill[data-status='running'] { color: var(--warn); }
+.pill[data-status='to_apply'] { color: var(--stage-saved); background: var(--stage-saved-soft); }
+.pill[data-status='applied'] { color: var(--stage-applied); background: var(--stage-applied-soft); }
+.pill[data-status='interviewing'] { color: var(--stage-interview); background: var(--stage-interview-soft); }
+.pill[data-status='offer'], .pill[data-status='ok'], .pill[data-status='succeeded'] { color: var(--stage-offer); background: var(--stage-offer-soft); }
+.pill[data-status='rejected'], .pill[data-status='failed'], .pill[data-status='aborted_unhealthy'] { color: var(--stage-rejected); background: var(--stage-rejected-soft); }
+.pill[data-status='dry_run'], .pill[data-status='running'], .pill[data-status='closed'] { color: var(--warn); background: var(--warn-soft); }
+
+/* Small neutral tags: skills, interests. */
+.chip {
+  display: inline-flex;
+  align-items: center;
+  font-size: var(--text-xs);
+  font-weight: 500;
+  line-height: 1.8;
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  color: var(--text-2);
+}
+
+.icon { flex: none; display: inline-block; vertical-align: middle; }
 
 /* Read by screen readers, not shown. */
 .visually-hidden {

@@ -520,21 +520,20 @@ def load_derived_profile(cfg: Config) -> dict[str, Any]:
 # ---------------------------------------------------------------- the stage
 
 
-def derive_profile(text: str, backend: Any, model: str) -> dict[str, Any]:
-    """The one model call. Returns the validated derived keys."""
+def derive_profile(text: str, backend: Any) -> dict[str, Any]:
+    """The one model call - Qwen, through backends.py. Returns the validated keys."""
     if not getattr(backend, "available", False):
         reason = getattr(backend, "unavailable_reason", "") or "no backend"
         raise ProfileError(f"cannot derive the profile - model unavailable: {reason}")
     # The resume goes in fenced, with the output contract restated after it. Sent
     # bare, a small model reads the resume as the task and writes a Markdown
-    # write-up instead of JSON (observed live with haiku via `claude -p`).
+    # write-up instead of JSON (observed live with a small model).
     user = ("<resume>\n" + text[:_MAX_PROMPT_CHARS] + "\n</resume>\n\n"
             "Respond with ONLY the JSON object described in the system prompt - "
             "keys summary, skills, target_titles, title_aliases, "
             "years_experience, graduation. Start your reply with `{`.")
     try:
-        comp = backend.complete(model=model, system=SYSTEM_PROMPT,
-                                user=user, max_tokens=2000)
+        comp = backend.complete(system=SYSTEM_PROMPT, user=user, max_tokens=2000)
     except backends.BackendError as exc:
         raise ProfileError(f"model call failed: {exc}") from exc
     return _validate(_parse_json(comp.text))
@@ -568,13 +567,11 @@ def ingest(cfg: Config, *, backend: Any = None, force: bool = False,
         log(msg)
         return IngestResult("overrides-changed", old_version + 1, msg)
 
-    model = str(cfg.budget.get("model") or "")
-    if not model:
-        raise ProfileError("budget.model is not set in config.yaml")
     if backend is None:
         backend = backends.build(cfg.budget)
+    model = getattr(backend, "model_id", "") or getattr(backend, "name", "model")
     log(f"deriving profile from {resume.path.name} with {model} ...")
-    fields = derive_profile(resume.text, backend, model)
+    fields = derive_profile(resume.text, backend)
 
     same = bool(old) and all(old.get(k) == fields[k] for k in _DERIVED_KEYS)
     if not old_version:
@@ -589,6 +586,7 @@ def ingest(cfg: Config, *, backend: Any = None, force: bool = False,
         "source_hash": resume.source_hash,
         "parsed_at": _dt.date.today().isoformat(),
         "profile_version": version,
+        "parsed_by": model,
         **fields,
         "overrides_hash": ov_hash,
     }

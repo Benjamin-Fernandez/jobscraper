@@ -78,3 +78,17 @@ def set_status(body: StatusChange, request: Request, job_id: str = JOB_ID,
         application = store.application(job_id)
     return {"job_id": job_id, "status": body.status,
             "event_appended": bool(appended), "application": application}
+
+
+@router.delete("/applications/{job_id}")
+def untrack(request: Request, job_id: str = JOB_ID) -> dict[str, Any]:
+    """Undo tracking: the role returns to the Inbox with no status (M13).
+
+    Deleting what is not there is a 404, never a 500, so a double click on Undo
+    is harmless.
+    """
+    with open_store(request) as store:
+        deleted = store.delete_application(job_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail=f"no application for {job_id!r}")
+    return {"job_id": job_id, "deleted": True}

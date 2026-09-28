@@ -185,6 +185,7 @@ onMounted(() => Promise.all([loadProfile(), refresh()]))
         <div><dt>Version</dt><dd class="version">{{ profile.profile_version }}</dd></div>
         <div><dt>Source</dt><dd class="source">{{ profile.source_file || '—' }}</dd></div>
         <div><dt>Derived</dt><dd class="parsed">{{ when(profile.parsed_at) || '—' }}</dd></div>
+        <div v-if="profile.parsed_by"><dt>Read by</dt><dd class="parsed-by">{{ profile.parsed_by }}</dd></div>
       </dl>
       <p v-if="profile.summary" class="summary">{{ profile.summary }}</p>
 

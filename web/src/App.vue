@@ -14,6 +14,7 @@ import { TABS } from './tabs.js'
 import { hashFor, tabFromHash } from './route.js'
 import TabLoading from './components/TabLoading.vue'
 import TabFailed from './components/TabFailed.vue'
+import ToastHost from './components/ToastHost.vue'
 
 const runs = ref([])
 const run = ref(null)
@@ -164,7 +165,13 @@ onBeforeUnmount(() => window.removeEventListener('hashchange', onHashChange))
   <div class="app">
     <header class="masthead">
       <div class="masthead-inner">
-        <h1 class="brand"><a :href="`#/${tabs[0]?.id}`" @click.prevent="open(tabs[0]?.id)">JobScraper</a></h1>
+        <h1 class="brand">
+          <a :href="`#/${tabs[0]?.id}`" @click.prevent="open(tabs[0]?.id)">
+            <svg class="logo" viewBox="0 0 32 32" aria-hidden="true" focusable="false">
+              <rect width="32" height="32" rx="8" />
+              <path d="M9 11h14M9 16h14M9 21h9" />
+            </svg>JobScraper</a>
+        </h1>
         <div class="tabbar">
           <div class="tablist" role="tablist" aria-label="Sections">
             <button
@@ -217,6 +224,7 @@ onBeforeUnmount(() => window.removeEventListener('hashchange', onHashChange))
         @select-run="selectRun"
       />
     </main>
+    <ToastHost />
   </div>
 </template>
 
@@ -225,9 +233,10 @@ onBeforeUnmount(() => window.removeEventListener('hashchange', onHashChange))
   position: sticky;
   top: 0;
   z-index: 10;
-  background: color-mix(in srgb, var(--bg) 92%, transparent);
-  backdrop-filter: blur(6px);
+  background: color-mix(in srgb, var(--surface) 90%, transparent);
+  backdrop-filter: blur(8px);
   border-bottom: 1px solid var(--border);
+  box-shadow: var(--shadow-sm);
 }
 .masthead-inner {
   max-width: var(--page-w);
@@ -247,7 +256,10 @@ onBeforeUnmount(() => window.removeEventListener('hashchange', onHashChange))
   letter-spacing: -0.01em;
   white-space: nowrap;
 }
-.brand a { color: var(--text); text-decoration: none; }
+.brand a { display: inline-flex; align-items: center; gap: var(--space-2); color: var(--text); text-decoration: none; }
+.logo { width: 1.6rem; height: 1.6rem; flex: none; }
+.logo rect { fill: var(--accent); }
+.logo path { fill: none; stroke: var(--accent-text); stroke-width: 3; stroke-linecap: round; }
 .brand a:hover { color: var(--text); }
 .tabbar { min-width: 0; flex: 1; display: flex; }
 .tablist {
@@ -266,6 +278,7 @@ onBeforeUnmount(() => window.removeEventListener('hashchange', onHashChange))
   border: none;
   border-radius: 0;
   background: none;
+  box-shadow: none;
   color: var(--muted);
   font-size: var(--text-sm);
   font-weight: 500;
@@ -282,7 +295,7 @@ onBeforeUnmount(() => window.removeEventListener('hashchange', onHashChange))
   border-radius: 2px 2px 0 0;
   background: transparent;
 }
-.tab.current { color: var(--text); }
+.tab.current { color: var(--text); font-weight: 650; }
 .tab.current::after { background: var(--accent); }
 .tab:focus-visible { outline-offset: -4px; }
 .badge-slot { display: inline-flex; min-width: 2.4em; }
@@ -300,7 +313,7 @@ onBeforeUnmount(() => window.removeEventListener('hashchange', onHashChange))
 .panel {
   max-width: var(--page-w);
   margin: 0 auto;
-  padding: var(--space-5) var(--gutter) var(--space-7);
+  padding: var(--space-5) var(--gutter) calc(var(--space-7) + var(--space-6));
 }
 .panel:focus-visible { outline-offset: -2px; }
 @media (max-width: 640px) {

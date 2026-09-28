@@ -164,20 +164,21 @@ MODEL_ANSWER = {
 
 
 class StubBackend:
-    """Stands in for `claude -p`. Records every call; answers like a model would,
-    fenced JSON included, so the parser is exercised too."""
+    """Stands in for Qwen under Ollama. Records every call; answers like a model
+    would, fenced JSON included, so the parser is exercised too."""
 
     name = "stub"
+    model_id = "qwen-stub"
     available = True
     unavailable_reason = ""
 
     def __init__(self, answer=None, raw: str | None = None):
         self.answer = MODEL_ANSWER if answer is None else answer
         self.raw = raw
-        self.calls: list[tuple[str, str, str]] = []
+        self.calls: list[tuple[str, str]] = []
 
-    def complete(self, model, system, user, max_tokens=4096):
-        self.calls.append((model, system, user))
+    def complete(self, system, user, max_tokens=4096):
+        self.calls.append((system, user))
         text = self.raw if self.raw is not None else (
             "```json\n" + json.dumps(self.answer) + "\n```")
         return Completion(text=text, input_tokens=10, output_tokens=10)
@@ -192,8 +193,7 @@ def _profile_dir() -> tuple[Path, Config]:
     fixture.make_pdf(d / "resume.pdf")
     cfg = Config({"paths": {"profile": str(d / "profile.derived.yaml"),
                             "profile_overrides": str(d / "overrides.yaml"),
-                            "resume_dir": str(d)},
-                  "budget": {"model": "stub-model"}})
+                            "resume_dir": str(d)}})
     return d, cfg
 
 
@@ -207,10 +207,9 @@ def test_profile_derive_writes_the_spec_yaml():
     res = ri.ingest(cfg, backend=stub, log=_quiet)
     assert res.status == "derived"
     assert len(stub.calls) == 1, "exactly one model call"
-    model, system, user = stub.calls[0]
-    assert model == "stub-model"
+    system, user = stub.calls[0]
     assert "Alex Tan" in user, "the resume text is what the model reads"
-    # Sent bare, haiku wrote a Markdown write-up of the resume instead of JSON.
+    # Sent bare, a small model wrote a Markdown write-up of the resume instead of JSON.
     assert "<resume>" in user and "JSON" in user.split("</resume>")[-1], \
         "the output contract must be restated after the resume"
     assert "plausibly" in system and "lowercase" in system and "singular" in system
@@ -228,10 +227,11 @@ def test_profile_derive_writes_the_spec_yaml():
         "an alias pointing at a title we do not target is dropped"
     assert y["years_experience"] == 0 and str(y["graduation"]) == "2026-08"
     assert y["parsed_at"]
+    assert y["parsed_by"] == "qwen-stub", "the profile records which model read it"
 
 
 def test_profile_model_quirks_are_normalised():
-    """Seen live from haiku: graduation as an object, and skills bundled as
+    """Seen live from a model: graduation as an object, and skills bundled as
     'a/b' or 'x (y, z)' - forms a keyword matcher can never hit."""
     _d, cfg = _profile_dir()
     answer = dict(MODEL_ANSWER,

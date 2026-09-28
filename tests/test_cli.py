@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import contextlib
 import io
-import json
 import sys
 import tempfile
 from pathlib import Path
@@ -107,22 +106,6 @@ def test_cli_profile_show_reads_without_a_model():
     tmp, cfg = _world()
     code, out = run(cfg, "profile", "--show")
     assert code == 0 and "backend engineer" in out and "profile_version: 1" in out, out
-
-
-def test_cli_review_needs_a_profile_then_exports_and_applies():
-    tmp, cfg = _world(with_profile=False)
-    code, out = run(cfg, "review", "--export")
-    assert code == 1 and "no derived profile" in out, out
-
-    tmp, cfg = _world()
-    code, out = run(cfg, "review", "--export")
-    assert code == 0 and "nothing to review" in out, out
-    code, out = run(cfg, "review", "--apply")
-    assert code == 1 and "no verdicts" in out, out
-    (tmp / "review_verdicts.json").write_text(json.dumps({"decisions": []}),
-                                              encoding="utf-8")
-    code, out = run(cfg, "review", "--apply")
-    assert code == 0 and "applied 0 decisions" in out, out
 
 
 def test_cli_reresolve_clears_a_cached_provider():

@@ -117,14 +117,14 @@ def test_web_profile_without_a_derived_profile_is_not_an_error():
     assert body["present"] is False
     assert body["interests"] == INTERESTS                  # config, still shown
     assert set(body) == {"present", "profile_version", "source_file", "parsed_at",
-                         "summary", "skills", "target_titles", "interests"}
+                         "parsed_by", "summary", "skills", "target_titles", "interests"}
 
 
 def test_web_profile_serves_the_derived_profile():
     with _world() as (c, cfg, _):
         cfg.profile_path.write_text(yaml.safe_dump({
             "source_file": "resume.pdf", "source_hash": "sha256:ab",
-            "parsed_at": "2026-09-24", "profile_version": 3,
+            "parsed_at": "2026-09-24", "parsed_by": "qwen3:14b", "profile_version": 3,
             "summary": "Backend engineer.", "skills": ["python", "sql"],
             "target_titles": ["backend engineer"], "title_aliases": {},
             "years_experience": 1}), encoding="utf-8")
@@ -132,7 +132,7 @@ def test_web_profile_serves_the_derived_profile():
     assert r.status_code == 200
     assert r.json() == {"present": True, "profile_version": 3,
                         "source_file": "resume.pdf", "parsed_at": "2026-09-24",
-                        "summary": "Backend engineer.", "skills": ["python", "sql"],
+                        "parsed_by": "qwen3:14b", "summary": "Backend engineer.", "skills": ["python", "sql"],
                         "target_titles": ["backend engineer"],
                         "interests": INTERESTS}
 

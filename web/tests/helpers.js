@@ -34,6 +34,7 @@ export function defaultProfile() {
     profile_version: 2,
     source_file: 'resume.pdf',
     parsed_at: '2026-09-24T10:05:00',
+    parsed_by: 'qwen3:14b',
     summary: 'Computer science graduate with cloud and backend internships.',
     skills: ['python', 'kubernetes', 'terraform'],
     target_titles: ['software engineer', 'site reliability engineer'],
@@ -171,6 +172,11 @@ export function fakeApi({
       const { status, notes } = JSON.parse(init.body)
       const appended = write(post[1], status, notes ?? null)
       return respond({ job_id: post[1], status, event_appended: appended })
+    }
+    if (post && init.method === 'DELETE') {
+      if (!apps[post[1]]) return respond({ detail: `no application for '${post[1]}'` }, 404)
+      delete apps[post[1]]
+      return respond({ job_id: post[1], deleted: true })
     }
     if (m11) {
       const answer = await m11Route(url, init)

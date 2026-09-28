@@ -224,8 +224,8 @@ def load(path: Optional[Path] = None) -> list[WatchlistEntry]:
     p = Path(path) if path else DEFAULT_PATH
     if not p.exists():
         raise WatchlistError(
-            f"{p} not found. Generate it with `python scripts/seed_watchlist.py`, "
-            "or write it by hand - a minimal entry is a name and a careers_url.")
+            f"{p} not found. Restore config/watchlist.yaml from the repo, or write "
+            "it by hand - a minimal entry is a name and a careers_url.")
     return parse(p.read_text(encoding="utf-8"), source=p.name)
 
 

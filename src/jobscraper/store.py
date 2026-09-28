@@ -326,11 +326,6 @@ class Store:
                AND probation_due_run <= ? ORDER BY id""", (run_no,))
         return [self._company(r) for r in rows]
 
-    def defer_probation(self, cid: int, next_run: int) -> None:
-        self.conn.execute(
-            "UPDATE companies SET probation_due_run = ? WHERE id = ?", (next_run, cid))
-        self.conn.commit()
-
     def due_companies(self, cutoff: str, limit: int) -> list[WatchedCompany]:
         """The due query (PRD 8.3[0]): never-scraped first, then longest-neglected.
 
@@ -463,12 +458,6 @@ class Store:
              error_class, (error or "")[:500], utcnow()))
         self.conn.commit()
 
-    def coverage_for_run(self, run_no: int) -> list[dict[str, Any]]:
-        return [dict(r) for r in self.conn.execute(
-            """SELECT c.*, co.name, co.provider FROM coverage c
-               JOIN companies co ON co.id = c.company_id
-               WHERE c.run_no = ? ORDER BY co.name""", (run_no,))]
-
     # ---------------- jobs ----------------
 
     def known_job_ids(self, company_id: int) -> set[str]:
@@ -521,13 +510,6 @@ class Store:
                JOIN companies co ON co.id = j.company_id WHERE j.job_id = ?""",
             (job_id,)).fetchone()
         return dict(r) if r else None
-
-    def jobs_seen_in_run(self, run_no: int, new_only: bool = False) -> list[dict[str, Any]]:
-        col = "first_seen_run" if new_only else "last_seen_run"
-        return [dict(r) for r in self.conn.execute(
-            f"""SELECT j.*, co.name AS company FROM jobs j
-                JOIN companies co ON co.id = j.company_id
-                WHERE j.{col} = ? ORDER BY j.job_id""", (run_no,))]
 
     _JOB_WITH_COMPANY = """SELECT j.*, co.name AS company, co.key AS company_key,
                                   co.provider, co.slug, co.feed_url, co.careers_url
@@ -708,6 +690,18 @@ class Store:
                    VALUES (?,?,?,?)""", (job_id, prev_status, status, now))
         self.conn.commit()
         return changed
+
+    def delete_application(self, job_id: str) -> bool:
+        """Forget an application and its history: the role is untracked again.
+
+        This is the web app's Undo for "Mark applied" / "Save" (M13) - the role
+        goes back to the Inbox as if it had never been touched. Returns whether
+        there was anything to delete.
+        """
+        cur = self.conn.execute("DELETE FROM applications WHERE job_id = ?", (job_id,))
+        self.conn.execute("DELETE FROM app_events WHERE job_id = ?", (job_id,))
+        self.conn.commit()
+        return cur.rowcount > 0
 
     def relink_orphan_applications(self) -> int:
         """Point applications at their posting once it has been scraped.

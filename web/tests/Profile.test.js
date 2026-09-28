@@ -65,6 +65,7 @@ describe('Profile tab: the current profile', () => {
     expect(wrapper.find('.version').text()).toBe('2')
     expect(wrapper.find('.source').text()).toBe('resume.pdf')
     expect(wrapper.find('.parsed').text()).toBe('24 Sep 10:05 UTC')
+    expect(wrapper.find('.parsed-by').text()).toBe('qwen3:14b')   // M14: Qwen reads the resume
     expect(wrapper.find('.profile .summary').text()).toContain('cloud and backend internships')
     expect(wrapper.findAll('.skills li').map(l => l.text())).toEqual(['python', 'kubernetes', 'terraform'])
     expect(wrapper.findAll('.titles li').map(l => l.text())).toEqual(['software engineer', 'site reliability engineer'])

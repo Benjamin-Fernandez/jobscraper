@@ -73,11 +73,6 @@ class Config:
             return _abs(override)
         return self._path("db", "data/jobscraper.db")
 
-    @property
-    def output_dir(self) -> Path:
-        """v1 artefact directory. Only review.py writes here; retired in M9-T1."""
-        return self._path("output_dir", "output")
-
     # ---------------- blocks ----------------
 
     @property

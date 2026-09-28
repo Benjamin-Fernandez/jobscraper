@@ -201,7 +201,7 @@ class _AcceptSingapore(Backend):
     def available(self):
         return True
 
-    def complete(self, model, system, user, max_tokens=4096):
+    def complete(self, system, user, max_tokens=4096):
         import json
         self.calls += 1
         out, cur = [], None
@@ -267,11 +267,11 @@ def test_pipeline_switching_models_rejudges_once_then_caches():
     it is re-judged and replaced - and the new model's answer is then cached,
     recorded under the model that actually answered."""
     class _Qwen(_AcceptSingapore):
-        def model_name(self, requested):
-            return "qwen3:14b"
+        model_id = "qwen3:14b"
 
     cfg, st = _world(1)
     haiku = _AcceptSingapore()
+    haiku.model_id = "claude-haiku-4-5"
     _run(cfg, st, fetcher=mixed_fetcher, backend=haiku)
     assert haiku.calls == 1
     qwen = _Qwen()

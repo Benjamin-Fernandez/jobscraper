@@ -70,6 +70,12 @@ export function setApplicationStatus(jobId, status, { notes, ...details } = {}) 
     { status, notes: notes ?? null, ...details })
 }
 
+// Undo tracking (M13): the application and its history are removed and the role
+// is back in the Inbox with no status. 404 when there was nothing to remove.
+export function untrackApplication(jobId) {
+  return request(`applications/${encodeURIComponent(jobId)}`, { method: 'DELETE' })
+}
+
 // ---- M11: control from the web app (PRD section 10, M11 API contract) ----
 
 // {batch_size, batch_size_default, enabled_companies, cycle_days, runs_per_day_needed}

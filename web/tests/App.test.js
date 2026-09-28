@@ -74,14 +74,14 @@ describe('App shell', () => {
     const dataset = api.calls.map(c => c.url).filter(u => /^api\/(runs|shortlist)/.test(u))
     expect(dataset).toEqual(['api/runs', 'api/shortlist?run=12'])
     expect(api.calls.filter(c => c.url === 'api/stats')).toHaveLength(1)
-    expect(wrapper.find('.inbox select').element.value).toBe('12')
+    expect(wrapper.find('.inbox .run-selector select').element.value).toBe('12')
     expect(wrapper.text()).toContain('OKX')
     expect(wrapper.text()).not.toContain('Grab')
   })
 
   it('the run selector belongs to the Inbox, not the global header', async () => {
     const wrapper = await mountApp()
-    expect(wrapper.find('header select').exists()).toBe(false)
+    expect(wrapper.find('.masthead select').exists()).toBe(false)
     expect(wrapper.find('.inbox .run-selector select').exists()).toBe(true)
   })
 
@@ -90,7 +90,7 @@ describe('App shell', () => {
     const before = window.location.href
     const callsBefore = api.calls.length
 
-    await wrapper.find('.inbox select').setValue('11')
+    await wrapper.find('.inbox .run-selector select').setValue('11')
     await flushPromises()
 
     const made = api.calls.slice(callsBefore).map(c => c.url)
@@ -102,7 +102,7 @@ describe('App shell', () => {
 
   it('the "all runs" option asks for run=all', async () => {
     const wrapper = await mountApp()
-    await wrapper.find('.inbox select').setValue('all')
+    await wrapper.find('.inbox .run-selector select').setValue('all')
     await flushPromises()
     expect(api.calls.at(-1).url).toBe('api/shortlist?run=all')
     expect(wrapper.text()).toContain('OKX')
@@ -277,7 +277,7 @@ describe('Badges', () => {
     expect(badge(wrapper, 'inbox')).toBe(3)
     expect(badge(wrapper, 'applications')).toBeNull()
 
-    await wrapper.findAll('.inbox .card button.apply')[0].trigger('click')
+    await wrapper.find('.inbox .detail button.apply').trigger('click')
     await vi.waitFor(async () => {
       await flushPromises()
       expect(badge(wrapper, 'inbox')).toBe(2)
@@ -288,7 +288,7 @@ describe('Badges', () => {
   it('a dismissed role leaves the Inbox badge', async () => {
     const wrapper = await mountApp()
     await flushPromises()
-    await wrapper.findAll('.inbox .card button.dismiss')[0].trigger('click')
+    await wrapper.find('.inbox .detail button.dismiss').trigger('click')
     expect(badge(wrapper, 'inbox')).toBe(2)
   })
 
