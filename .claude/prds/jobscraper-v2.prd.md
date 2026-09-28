@@ -2580,7 +2580,7 @@ config and files nothing uses are gone.
 checked again, which runs the Inbox shows (all, the past week or month, or any
 runs they pick), and which job titles the title filter searches for - with up to
 20 recommendations from Qwen. Every limit comes from a **plan**, so the future
-tiers of the multi-user service (`mullti_user_prd.md` §11) change numbers, not code.
+tiers of the multi-user service (`mullti_user_prd.md` §11, in the jobscraper-cloud repo) change numbers, not code.
 
 **Why (user, 2026-09-28):** (1) choose how often the cycle restarts; (2) the runs
 selector always has "All runs" at the top, then "Past week", "Past month" and

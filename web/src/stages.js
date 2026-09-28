@@ -23,7 +23,3 @@ export function statusLabel(status) {
   const words = String(status).replace(/_/g, ' ')
   return words.charAt(0).toUpperCase() + words.slice(1)
 }
-
-export function isClosed(status) {
-  return CLOSED_STATUSES.includes(status)
-}

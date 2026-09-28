@@ -417,18 +417,6 @@ class Store:
                WHERE status = 'ok' AND started_at >= ?""", (since,)).fetchone()
         return int(r[0]), r[1]
 
-    def mark_due(self, cids: Iterable[int]) -> None:
-        """Forget when these companies were last scraped: due on the next run.
-
-        For a board that has changed under a company (a fixed careers URL, a
-        re-resolved ATS): the old stamp describes an attempt on a board that no
-        longer applies. Failure counts and quarantine are not touched here.
-        """
-        for cid in cids:
-            self.conn.execute(
-                "UPDATE companies SET last_scraped_at = NULL WHERE id = ?", (cid,))
-        self.conn.commit()
-
     def stamp_scraped(self, cids: Iterable[int], at: Optional[str] = None) -> None:
         """Record an ATTEMPT (D-9). Called last in a run, so a crash stamps nothing."""
         stamp = at or utcnow()
@@ -640,13 +628,6 @@ class Store:
             """SELECT * FROM prefilter WHERE job_id = ? AND profile_version = ?
                AND rules_hash = ?""", (job_id, profile_version, rules_hash)).fetchone()
         return dict(r) if r else None
-
-    def prefilter_rejections_by_rule(self, profile_version: int,
-                                     rules_hash: str) -> dict[str, int]:
-        return {r[0]: int(r[1]) for r in self.conn.execute(
-            """SELECT reject_rule, COUNT(*) FROM prefilter
-               WHERE passed = 0 AND profile_version = ? AND rules_hash = ?
-               GROUP BY reject_rule""", (profile_version, rules_hash))}
 
     # ---------------- decisions ----------------
 

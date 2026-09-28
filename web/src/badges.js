@@ -3,8 +3,6 @@
 import { isDismissed } from './dismissed.js'
 import { CLOSED_STATUSES } from './stages.js'
 
-export { CLOSED_STATUSES }
-
 // New roles: in the shown shortlist, with no application status, not marked
 // Not interested, and not a second listing of a role already tracked (M17).
 export function newRoleCount(jobs = []) {

@@ -87,7 +87,7 @@ def test_scheduler_all_fresh_reports_next_due_date():
     for d in range(23):                               # 23 runs sweep 229 companies
         _run(st, shift(T0, seconds=d * 60))
     p = S.plan(st, 10, 14, now=shift(T0, days=1))
-    assert p.empty
+    assert not p.due
     assert p.next_due_at == shift(T0, days=14)        # the oldest stamp + 14 days
 
 

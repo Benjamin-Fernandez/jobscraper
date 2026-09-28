@@ -30,7 +30,7 @@ BAR = "-" * 66
 
 
 def _boot_v2(args):
-    """Config plus the v2 store. `_boot` above serves only the legacy commands."""
+    """Config plus the v2 store."""
     cfg = load_config(getattr(args, "config", None))
     return cfg, StoreV2(cfg.db_path)
 

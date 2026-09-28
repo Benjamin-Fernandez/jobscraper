@@ -111,16 +111,17 @@ watchlist.yaml -> who is due? -> scrape -> free prefilter -> ~800-char extract
 |---|---|
 | `run [--dry-run] [--batch-size N]` | One batch. `--dry-run` fetches and reports but writes nothing and consumes nothing. |
 | `status` | Due now, due this week, never checked, quarantined, run rate vs the rate a sweep needs. |
-| `web` | The web app: **Inbox** (triage new roles), **Applications** (by company, by stage), Runs, Profile, Settings. |
+| `web` | The web app: **Inbox** (triage new roles; Not interested kept in its own section), **Applications** (by company, by stage), Runs, Companies, Profile, Settings, Developer (the background job's log). |
 | `doctor` | Checks the whole setup, including whether Qwen (Ollama) is reachable. |
 | `watchlist list` / `add "Name" URL` / `disable KEY` | Manage companies; edits keep your comments. |
 | `profile [--show \| --refresh \| --bump]` | Build or inspect the resume-derived profile. |
 | `filter test --title … --location … [--desc …]` | Dry-run the rules on a made-up posting. |
 | `filter explain JOB_ID_OR_URL` | Every rule's verdict for a stored posting. |
-| `titles [show]` / `titles suggest` | The job titles the title filter searches for; ask Qwen for up to 20 more (the web app's Profile tab does both). |
+| `titles [show]` / `titles suggest` | The job titles the title filter searches for; ask Qwen for 5 new ones, never one suggested before (the web app's Profile tab does both). |
 | `companies [show]` / `companies search` | Your own list of companies (uploaded on the web app's Companies tab, one per line, most wanted first); find each one's careers site with Qwen and watch the ones found. |
 | `reresolve KEY` | Forget a company's cached job-board provider so the next run rediscovers it. |
 | `sync` | Reconcile `watchlist.yaml` into the database (every run does this anyway). |
+| `purge [--days N] [--compact]` | Delete stored job descriptions older than `retention.description_days` (7) and compact the database; every run does this at its end. Roles in the Inbox or Applications keep theirs. |
 
 Run each as `python -m jobscraper <command>` (with `PYTHONPATH=src`), or through
 `.\run.ps1 <command>`.
@@ -170,8 +171,10 @@ Editing the rules re-checks every stored posting on the next run, for free.
 
 ## Configuration
 
-`config/config.yaml` — batch size, 14-day cycle, model, the model transport
-(`budget.backend: cli | api | off`), web host/port. Environment overrides:
+`config/config.yaml` — batch size, the cycle (7 days by default; the web app's
+Settings tab changes it), the model (`budget.backend: ollama | off`, Qwen3 via
+Ollama), how long job descriptions are kept (`retention.description_days`), web
+host/port. Environment overrides:
 `JOBSCRAPER_CONFIG`, `JOBSCRAPER_DB`, `JOBSCRAPER_HOST`, `JOBSCRAPER_PORT`.
 Keep the host at `127.0.0.1`: the app has no login.
 

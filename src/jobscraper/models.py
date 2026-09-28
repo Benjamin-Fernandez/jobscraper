@@ -6,7 +6,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Optional
 
-# Error classes drive the retry policy. See DESIGN.md 3.9.
+# Error classes drive the retry and quarantine policy (pipeline.py, store.py).
 TRANSIENT = "transient"
 BLOCKED = "blocked"
 GONE = "gone"
