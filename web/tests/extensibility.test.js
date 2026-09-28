@@ -36,7 +36,7 @@ describe('a tab added only in the registry', () => {
     const wrapper = mount(App, { attachTo: document.body })
     await vi.waitFor(async () => {
       await flushPromises()
-      expect(wrapper.find('.probe').text()).toBe('probe tab · 3 jobs')
+      expect(wrapper.find('.probe').text()).toBe('probe tab · 5 jobs')   // All runs (M15)
     })
     const labels = wrapper.findAll('[role="tab"] .tab-label').map(t => t.text())
     expect(labels.at(-1)).toBe('Probe')

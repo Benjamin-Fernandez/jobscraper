@@ -67,6 +67,13 @@ def start_profile(jobs: JobManager = Depends(get_jobs)) -> dict[str, Any]:
     return _start(jobs, "profile", {})
 
 
+@router.post("/jobs/titles", status_code=202)
+def start_titles(jobs: JobManager = Depends(get_jobs)) -> dict[str, Any]:
+    """Ask Qwen for job-title recommendations (M15); `409` if busy. The result
+    is stored and served by `GET /api/titles`."""
+    return _start(jobs, "titles", {})
+
+
 @router.get("/jobs/current")
 def current_job(tail: int = TAIL,
                 jobs: JobManager = Depends(get_jobs)) -> dict[str, Any]:

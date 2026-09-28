@@ -70,6 +70,8 @@ def test_web_settings_default_to_config_with_the_cadence():
     assert r.status_code == 200
     assert r.json() == {"batch_size": 10, "batch_size_default": 10,
                         "enabled_companies": ENABLED, "cycle_days": 14,
+                        "cycle_days_default": 14,
+                        "cycle_day_options": [1, 3, 7, 14, 30], "plan": "local",
                         "runs_per_day_needed": 0.2}        # 30 / 10 / 14
 
 

@@ -25,8 +25,33 @@ export function runsFrom(fixture = shortlist) {
 }
 
 export function defaultSettings() {
-  return { batch_size: 10, batch_size_default: 10, enabled_companies: 224, cycle_days: 14, runs_per_day_needed: 1.6 }
+  return {
+    batch_size: 10, batch_size_default: 10, enabled_companies: 224, cycle_days: 14,
+    cycle_days_default: 14, cycle_day_options: [1, 3, 7, 14, 30], plan: 'local', runs_per_day_needed: 1.6,
+  }
 }
+
+// M15: what GET /api/titles answers before the user has edited anything.
+export function defaultTitles() {
+  return {
+    titles: ['software engineer', 'site reliability engineer'], source: 'resume',
+    resume_titles: ['software engineer', 'site reliability engineer'],
+    max_titles: 20, max_suggestions: 20, plan: 'local', suggestions: null,
+  }
+}
+
+// M15: the recommendations a finished `titles` job leaves behind.
+export const SUGGESTED = {
+  generated_at: '2026-09-28T04:00:00', model: 'qwen3:14b',
+  field_of_study: 'BEng Computer Engineering',
+  experience: ['Cloud intern at GovTech (internship)'],
+  items: [{ title: 'platform engineer', why: 'cloud internship' },
+    { title: 'data engineer', why: 'python and sql' }],
+}
+
+// The fake's clock for `?run=week|month`: run 12 (23 Sep) is within the past
+// week, run 11 (21 Sep) only within the past month.
+export const FAKE_NOW = Date.parse('2026-09-29T12:00:00Z')
 
 export function defaultProfile() {
   return {
@@ -70,11 +95,15 @@ async function magic(body) {
 export function fakeApi({
   fixture = shortlist, statuses = {}, vocabulary = STATUSES,
   m11 = true, settings = defaultSettings(), profile = defaultProfile(), job = null,
+  titles = defaultTitles(),
 } = {}) {
   const calls = []
   const apps = {}
   const runs = runsFrom(fixture)
-  const server = { settings: { ...settings }, profile: { ...profile }, job: job ? { ...IDLE, ...job } : { ...IDLE }, resume: null }
+  const server = {
+    settings: { ...settings }, profile: { ...profile }, job: job ? { ...IDLE, ...job } : { ...IDLE }, resume: null,
+    titles: JSON.parse(JSON.stringify(titles)),
+  }
   let eventId = 0
   let jobId = 0
   let clock = 0
@@ -100,6 +129,14 @@ export function fakeApi({
     return respond(server.job, 202)
   }
 
+  // GET /api/titles leaves out recommendations already chosen, as the server does.
+  function titlesView() {
+    const t = server.titles
+    if (!t.suggestions) return t
+    const taken = new Set(t.titles.map(x => x.toLowerCase()))
+    return { ...t, suggestions: { ...t.suggestions, items: t.suggestions.items.filter(i => !taken.has(i.title.toLowerCase())) } }
+  }
+
   function runsPerDay(batch) {
     const { enabled_companies: n, cycle_days: days } = server.settings
     return Math.round((Math.ceil(n / batch) / days) * 10) / 10
@@ -109,13 +146,34 @@ export function fakeApi({
     const method = init.method || 'GET'
     if (url === 'api/settings' && method === 'GET') return respond(server.settings)
     if (url === 'api/settings' && method === 'PUT') {
-      const { batch_size: n } = JSON.parse(init.body)
-      if (!Number.isInteger(n) || n < 1 || n > server.settings.enabled_companies) {
+      const { batch_size: n, cycle_days: days } = JSON.parse(init.body)
+      if (n === undefined && days === undefined) return respond({ detail: 'send batch_size, cycle_days, or both' }, 422)
+      if (days !== undefined && !server.settings.cycle_day_options.includes(days)) {
+        return respond({ detail: `cycle_days must be one of [${server.settings.cycle_day_options.join(', ')}]` }, 422)
+      }
+      if (n !== undefined && (!Number.isInteger(n) || n < 1 || n > server.settings.enabled_companies)) {
         return respond({ detail: `batch_size must be between 1 and ${server.settings.enabled_companies}` }, 422)
       }
-      server.settings = { ...server.settings, batch_size: n, runs_per_day_needed: runsPerDay(n) }
+      if (n !== undefined) server.settings = { ...server.settings, batch_size: n }
+      if (days !== undefined) server.settings = { ...server.settings, cycle_days: days }
+      server.settings = { ...server.settings, runs_per_day_needed: runsPerDay(server.settings.batch_size) }
       return respond(server.settings)
     }
+    if (url === 'api/titles' && method === 'GET') return respond(titlesView())
+    if (url === 'api/titles' && method === 'PUT') {
+      const list = JSON.parse(init.body).titles.map(t => t.trim()).filter(Boolean)
+      if (!list.length) return respond({ detail: 'keep at least one job title' }, 422)
+      if (list.length > server.titles.max_titles) {
+        return respond({ detail: `the local plan allows ${server.titles.max_titles} job titles; got ${list.length}` }, 422)
+      }
+      server.titles = { ...server.titles, titles: list, source: 'custom' }
+      return respond(titlesView())
+    }
+    if (url === 'api/titles' && method === 'DELETE') {
+      server.titles = { ...server.titles, titles: [...server.titles.resume_titles], source: 'resume' }
+      return respond(titlesView())
+    }
+    if (url === 'api/jobs/titles' && method === 'POST') return startJob('titles')
     if (url === 'api/jobs/run' && method === 'POST') return startJob('run')
     if (url === 'api/jobs/profile' && method === 'POST') return startJob('profile')
     if (/^api\/jobs\/current(\?|$)/.test(url)) return respond(server.job)
@@ -158,12 +216,19 @@ export function fakeApi({
         }
       }))
     }
-    const m = /^api\/shortlist\?run=(\w+)$/.exec(url)
+    const m = /^api\/shortlist\?run=([\w,]+)$/.exec(url)
     if (m) {
       const nums = fixture.runs.map(r => r.run_no)
-      const run = m[1] === 'latest' ? Math.max(...nums) : m[1] === 'all' ? 'all' : Number(m[1])
+      const days = { week: 7, month: 30 }[m[1]]
+      let wanted
+      if (m[1] === 'all') wanted = null
+      else if (m[1] === 'latest') wanted = new Set([Math.max(...nums)])
+      else if (days) {
+        wanted = new Set(fixture.runs
+          .filter(r => Date.parse(`${r.finished_at}Z`) > FAKE_NOW - days * 86400000).map(r => r.run_no))
+      } else wanted = new Set(m[1].split(',').map(Number))
       const jobs = fixture.jobs
-        .filter(j => run === 'all' || j.run_no === run)
+        .filter(j => !wanted || wanted.has(j.run_no))
         .map(j => ({ ...j, closed: false, status: apps[j.id]?.status ?? null, notes: null }))
       return respond(jobs)
     }
@@ -196,6 +261,9 @@ export function fakeApi({
     if (server.job.kind === 'run') {
       const n = Math.max(0, ...runs.map(r => r.run_no)) + 1
       runs.unshift({ run_no: n, finished_at: '2026-09-25T09:30:00', status: ok ? 'ok' : 'failed', accepted: 0 })
+    }
+    if (server.job.kind === 'titles' && ok) {
+      server.titles = { ...server.titles, suggestions: JSON.parse(JSON.stringify(SUGGESTED)) }
     }
     if (server.job.kind === 'profile' && ok) {
       server.profile = { ...server.profile, present: true, profile_version: (server.profile.profile_version ?? 0) + 1, source_file: server.resume?.saved ?? server.profile.source_file }

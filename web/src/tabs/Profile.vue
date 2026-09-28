@@ -15,6 +15,7 @@ import { useJob } from '../composables/useJob.js'
 import { when } from '../format.js'
 import { tabEmits, tabProps } from '../shell.js'
 import JobStatus from '../components/JobStatus.vue'
+import TitleEditor from '../components/TitleEditor.vue'
 import TabLoading from '../components/TabLoading.vue'
 
 defineProps(tabProps)
@@ -170,6 +171,9 @@ onMounted(() => Promise.all([loadProfile(), refresh()]))
     </div>
     <p v-else-if="jobError" class="notice error" role="alert">Could not read the current job: {{ jobError }}</p>
 
+    <h2 class="section-title">Job titles</h2>
+    <TitleEditor />
+
     <h2 class="section-title">Current profile</h2>
     <TabLoading v-if="loadingProfile" :rows="2" />
     <div v-else-if="profileError" class="notice error" role="alert">
@@ -195,7 +199,7 @@ onMounted(() => Promise.all([loadProfile(), refresh()]))
       </ul>
       <p v-else class="muted">None found.</p>
 
-      <h3>Target titles</h3>
+      <h3>Titles found in your resume</h3>
       <ul v-if="profile.target_titles?.length" class="titles">
         <li v-for="t in profile.target_titles" :key="t">{{ t }}</li>
       </ul>

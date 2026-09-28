@@ -22,8 +22,9 @@ router = APIRouter(tags=["shortlist"])
 @router.get("/shortlist")
 def get_shortlist(
         request: Request,
-        run: str = Query("latest", pattern=r"^(latest|all|\d+)$",
-                         description="a run number, `latest` or `all`"),
+        run: str = Query("latest", pattern=r"^(latest|all|week|month|\d+(,\d+){0,99})$",
+                         description="`all`, `week`, `month`, `latest`, a run "
+                                     "number, or several joined by commas"),
         cfg: Config = Depends(get_config)) -> list[dict[str, Any]]:
     """Jobs for the run, with status. An unknown run is an empty list."""
     shortlist = load_shortlist(cfg.shortlist_path)

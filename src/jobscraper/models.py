@@ -82,3 +82,49 @@ class FetchOutcome:
     http_status: Optional[int] = None
     provider: Optional[str] = None
     duration_s: float = 0.0
+
+
+# ---------------- job titles (M15) ----------------
+#
+# The user's job titles and Qwen's recommendations are stored in the settings
+# table as JSON. The engine (profile/titles.py) and the web app both read and
+# write them, and the web app may not import a stage (PRD 8.2), so the shared
+# rules live here, in the one module both may import.
+
+USER_TITLES_KEY = "target_titles"
+SUGGESTIONS_KEY = "title_suggestions"
+MAX_TITLE_CHARS = 80
+
+
+def normalise_title(title: object) -> str:
+    """One title as the filter should see it: single spaces, no stray
+    punctuation at the ends. '' when there is nothing usable."""
+    t = re.sub(r"\s+", " ", str(title or "")).strip(" \t,.;:-/|")
+    return t if 0 < len(t) <= MAX_TITLE_CHARS else ""
+
+
+def dedupe_titles(titles) -> list[str]:
+    """Normalised, first spelling kept, repeats dropped ignoring case."""
+    seen: set[str] = set()
+    out: list[str] = []
+    for raw in titles:
+        t = normalise_title(raw)
+        if t and t.lower() not in seen:
+            seen.add(t.lower())
+            out.append(t)
+    return out
+
+
+def parse_titles_json(raw: Optional[str]) -> Optional[list[str]]:
+    """The stored titles, or None when unset, unreadable or empty - which all
+    mean "use the resume's titles"."""
+    import json
+    if not raw:
+        return None
+    try:
+        items = json.loads(raw)
+    except (TypeError, ValueError):
+        return None
+    if not isinstance(items, list):
+        return None
+    return dedupe_titles(items) or None

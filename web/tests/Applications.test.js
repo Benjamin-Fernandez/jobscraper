@@ -137,15 +137,25 @@ describe('Applications tab', () => {
     expect(wrapper.text()).not.toContain('Nothing tracked yet')
   })
 
-  it('shows every run by default and can be narrowed to one run', async () => {
-    const wrapper = await mountTab({ a1b2c3: 'applied', j1k2l3: 'interviewing' })
-    // The Inbox is on run 12, but applications outlive their run.
+  it('shows every run by default and can be narrowed to the past week or month', async () => {
+    api = fakeApi({ statuses: { a1b2c3: 'applied', j1k2l3: 'interviewing' } })
+    vi.stubGlobal('fetch', api.fetch)
+    // Run 12 finished two days ago, run 11 twenty days ago (relative to now:
+    // this tab filters on the client, by the runs' finish times).
+    const ago = days => new Date(Date.now() - days * 86400000).toISOString().slice(0, 19)
+    const runs = [{ run_no: 12, finished_at: ago(2), accepted: 3 }, { run_no: 11, finished_at: ago(20), accepted: 2 }]
+    const wrapper = mount(Applications, { props: { run: 'all', runs, jobs: [] } })
+    await flushPromises()
+    // Applications outlive their run: all of them by default, and no picker.
     expect(wrapper.find('.run-selector select').element.value).toBe('all')
+    expect(wrapper.find('.run-selector option[value="choose"]').exists()).toBe(false)
     expect(row(wrapper, 'a1b2c3').exists()).toBe(true)
     expect(row(wrapper, 'j1k2l3').exists()).toBe(true)
 
-    await wrapper.find('.run-selector select').setValue('11')
-    expect(row(wrapper, 'a1b2c3').exists()).toBe(false)
+    await wrapper.find('.run-selector select').setValue('week')
+    expect(row(wrapper, 'a1b2c3').exists()).toBe(true)
+    expect(row(wrapper, 'j1k2l3').exists()).toBe(false)
+    await wrapper.find('.run-selector select').setValue('month')
     expect(row(wrapper, 'j1k2l3').exists()).toBe(true)
     expect(wrapper.emitted('select-run')).toBeUndefined()
   })
@@ -168,13 +178,13 @@ describe('Applications tab', () => {
     const wrapper = mount(App)
     await vi.waitFor(async () => {
       await flushPromises()
-      expect(wrapper.findAll('.inbox .card').length).toBe(3)
+      expect(wrapper.findAll('.inbox .card').length).toBe(5)
     })
     await wrapper.find('.inbox .card[data-job="a1b2c3"] .card-hit').trigger('click')
     await wrapper.find('.inbox .detail button.apply').trigger('click')
     await vi.waitFor(async () => {
       await flushPromises()
-      expect(wrapper.findAll('.inbox .card').length).toBe(2)
+      expect(wrapper.findAll('.inbox .card').length).toBe(4)
     })
     expect(wrapper.find('.toast').text()).toContain('Marked applied')
 

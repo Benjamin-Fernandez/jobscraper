@@ -28,6 +28,32 @@ def _abs(p: str | os.PathLike) -> Path:
     return p if p.is_absolute() else ROOT / p
 
 
+# ---------------- plans (M15) ----------------
+#
+# Every limit a paid tier could change lives on a Plan, and nowhere else: the
+# server validates against it and the web app draws its choices from it, so a
+# tier is a row in PLANS, not a code change. The single-user install runs
+# `local`, which has the most generous limits (the same as `pro`). The tier
+# names and numbers follow the multi-user PRD (mullti_user_prd.md section 11).
+
+@dataclass(frozen=True)
+class Plan:
+    name: str
+    cycle_day_options: tuple[int, ...]     # how often the company cycle may restart
+    max_target_titles: int                  # job titles the title filter searches for
+    max_title_suggestions: int              # titles one recommendation returns
+
+
+PLANS: dict[str, Plan] = {
+    "free": Plan("free", (7, 14, 30), 5, 5),
+    "plus": Plan("plus", (3, 7, 14, 30), 10, 10),
+    "pro": Plan("pro", (1, 3, 7, 14, 30), 20, 20),
+    "local": Plan("local", (1, 3, 7, 14, 30), 20, 20),
+}
+
+CYCLE_DAYS_KEY = "cycle_days"               # the settings-table key (M15)
+
+
 @dataclass
 class Config:
     raw: dict[str, Any]
@@ -84,18 +110,35 @@ class Config:
         return self.raw.get("budget", {})
 
     @property
-    def output(self) -> dict[str, Any]:
-        return self.raw.get("output", {})
-
-    @property
     def batch_size(self) -> int:
         """Companies per run (D-13)."""
         return int(self.run.get("batch_size", 10))
 
     @property
     def cycle_days(self) -> int:
-        """Days before a company is due again. The whole weekly cycle (D-9)."""
+        """Days before a company is due again, as config says (D-9).
+
+        The cycle actually used is `effective_cycle_days`: the user's choice
+        from the web app when the plan allows it, else this."""
         return int(self.run.get("cycle_days", 7))
+
+    @property
+    def plan(self) -> Plan:
+        """The limits in force (M15). `plan:` in config.yaml; unknown -> local."""
+        return PLANS.get(str(self.raw.get("plan", "local")).strip().lower(), PLANS["local"])
+
+    def effective_cycle_days(self, stored: str | None) -> int:
+        """The cycle the engine keeps: the stored setting (`cycle_days`, written
+        by the web app) when it is one the plan offers, else `run.cycle_days`.
+
+        Pure - the caller passes `store.get_setting(CYCLE_DAYS_KEY)` - so the
+        pipeline, the CLI and the web app resolve it the same way without the
+        web layer importing an engine module (PRD 8.2)."""
+        if stored is not None and str(stored).strip().isdigit():
+            n = int(str(stored).strip())
+            if n in self.plan.cycle_day_options:
+                return n
+        return self.cycle_days
 
     @property
     def web(self) -> dict[str, Any]:

@@ -15,6 +15,7 @@ import { dismiss, isDismissed, restoreAll } from '../dismissed.js'
 import { cleanLocation, plural, safeUrl, shortDate } from '../format.js'
 import { tabEmits, tabProps } from '../shell.js'
 import { showToast } from '../toast.js'
+import { requestPicker, runLabel } from '../runs.js'
 import CompanyMark from '../components/CompanyMark.vue'
 import Icon from '../components/Icon.vue'
 import RunSelector from '../components/RunSelector.vue'
@@ -33,6 +34,10 @@ const busy = ref(false)
 const writeError = ref('')
 
 const firstLoad = computed(() => props.loading && !props.jobs.length)
+// For the empty state: 'any run yet', 'the past week', 'run 12'.
+const scope = computed(() => (props.run === 'all' ? 'any run yet'
+  : props.run === 'week' || props.run === 'month' ? `the ${runLabel(props.run).toLowerCase()}`
+    : runLabel(props.run).toLowerCase()))
 
 // Untracked roles: no application status yet. Tracked ones live in Applications.
 const untracked = computed(() => props.jobs.filter(j => !j.status && !pending.value.has(j.id)))
@@ -157,6 +162,12 @@ function notInterested(job) {
   })
 }
 
+// "Choose runs…": the picker is the Runs tab's run history (M15).
+function chooseRuns() {
+  requestPicker()
+  window.location.hash = '#/runs'
+}
+
 function markOpened(job) {
   opened.value = new Set(opened.value).add(job.id)
 }
@@ -191,7 +202,12 @@ function markOpened(job) {
             <option value="company">Company A–Z</option>
           </select>
         </label>
-        <RunSelector :runs="runs" :model-value="run" @update:model-value="v => emit('select-run', v)" />
+        <RunSelector
+          :runs="runs"
+          :model-value="run"
+          @update:model-value="v => emit('select-run', v)"
+          @choose="chooseRuns"
+        />
       </div>
     </header>
 
@@ -204,13 +220,13 @@ function markOpened(job) {
     <TabLoading v-else-if="firstLoad" :rows="3" />
     <div v-else-if="!jobs.length" class="empty">
       <Icon name="inbox" :size="28" />
-      <p class="empty-title">No roles in this run.</p>
-      <p class="muted">Pick another run above, or start a new one from the Runs tab.</p>
+      <p class="empty-title">No roles in {{ scope }}.</p>
+      <p class="muted">Show other runs above, or start a new one from the Runs tab.</p>
     </div>
     <div v-else-if="!untracked.length" class="empty caught-up">
       <Icon name="check" :size="28" />
       <p class="empty-title">You're all caught up.</p>
-      <p class="muted">Every role in this run is in <a href="#/applications">Applications</a>.</p>
+      <p class="muted">Every role here is in <a href="#/applications">Applications</a>.</p>
     </div>
     <div v-else-if="!visible.length && query.trim()" class="empty">
       <Icon name="search" :size="28" />

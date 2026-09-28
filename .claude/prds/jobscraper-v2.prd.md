@@ -2574,6 +2574,90 @@ config and files nothing uses are gone.
   `docker-compose.yml` and `docs/DESIGN.md` no longer describe Claude.
 - **Verify:** Python 277/277 and Vitest 110/110 after the removals.
 
+### M15 — The user controls the cycle, the runs shown and the titles searched
+
+**Outcome:** from the web app alone the user decides how often every company is
+checked again, which runs the Inbox shows (all, the past week or month, or any
+runs they pick), and which job titles the title filter searches for - with up to
+20 recommendations from Qwen. Every limit comes from a **plan**, so the future
+tiers of the multi-user service (`mullti_user_prd.md` §11) change numbers, not code.
+
+**Why (user, 2026-09-28):** (1) choose how often the cycle restarts; (2) the runs
+selector always has "All runs" at the top, then "Past week", "Past month" and
+"Choose runs", which opens a tab to pick specific runs, where a run with nothing
+says "0 matches"; (3) type job titles in, and get up to 20 recommended from the
+resume, field of study, past internships and the titles already chosen; (4) plan
+it with the ECC skill, add it to the PRD, implement it. "There will be a tiering
+system in the future, so design things with that in mind."
+
+**Plan:** `.claude/plans/m15-cycle-runs-titles.plan.md` (ECC `plan` skill,
+2026-09-28) - requirements, decisions M15-D1..D8, patterns mirrored, files, risks.
+
+| # | Decision | Why |
+|---|---|---|
+| M15-D1 | `Plan` + `PLANS` in `config.py`; `plan: local` in config.yaml. free: cycles 7/14/30, 5 titles, 5 recommendations; plus: 3/7/14/30, 10, 10; pro and local: 1/3/7/14/30, 20, 20. | One object carries every limit; the server validates against it, the UI renders from it. |
+| M15-D2 | The cycle is a stored setting (`cycle_days`), used when the plan offers it, else `run.cycle_days`; resolved by one pure function (`Config.effective_cycle_days`) that the pipeline, the CLI and the web app all call. | M11's batch-size pattern, without two copies that "must agree". |
+| M15-D3 | `?run=` takes `all`, `week`, `month`, `latest`, `n` or `n,n,…`; week/month = runs that finished in the last 7/30 days. | One value covers every choice; the server owns the clock. |
+| M15-D4 | The Inbox opens on **All runs**. | Since M13 the Inbox is a queue of untouched roles - older ones must not hide behind "newest run". |
+| M15-D5 | The user's titles are a stored setting (`target_titles`) that replaces the resume's for the title filter. | User state in the DB, never in a regenerated file (D-5). |
+| M15-D6 | The prefilter's cache key folds the user's titles in; decisions are untouched. | Editing titles re-runs only the free prefilter - nothing is re-judged. |
+| M15-D7 | Recommendations run as a background job (`jobscraper titles suggest`, job kind `titles`), stored as `title_suggestions`. | The web layer never reaches a model (PRD 8.2). |
+| M15-D8 | Recommendations exclude titles already chosen (in the prompt and again at read time). | A list that repeats your own titles is noise. |
+
+#### M15-T1 · Plans and the user's cycle
+- **STATUS:** `DONE`
+- **Completed:** 2026-09-28
+- **Do:** `Plan`/`PLANS`/`Config.plan`/`Config.effective_cycle_days`;
+  `pipeline.run`, `status` and `doctor` use the effective cycle; `/api/settings`
+  answers `cycle_days`, `cycle_days_default`, `cycle_day_options`, `plan`, and
+  `PUT` takes `cycle_days` and/or `batch_size` (a cycle the plan does not offer is
+  `422`, and nothing is half-written). Settings tab: a segmented choice - Daily,
+  Every 3 days, Weekly, Fortnightly, Monthly - built from `cycle_day_options`,
+  saved on click, with the runs-a-day it implies.
+- **Verify:** `tests/test_m15.py` (plans, cycle round trip, off-plan refusal, a
+  smaller plan), `test_pipeline_uses_the_cycle_the_user_chose`; Vitest Settings.
+
+#### M15-T2 · All runs, Past week, Past month, Choose runs
+- **STATUS:** `DONE`
+- **Completed:** 2026-09-28
+- **Do:** `web/data.resolve_run` + `/api/shortlist` accept the new values; one
+  client module (`web/src/runs.js`) owns the value shapes (label, query, range,
+  "N matches"). The selector: All runs, Past week, Past month, the chosen runs
+  (when there are some), Choose runs…. Choose runs… opens the Runs tab and scrolls
+  to the picker: the run history with a tick box per run, a **Matches** column
+  ("0 matches" for an empty run, whose box is disabled), and "Show in Inbox".
+  Applications filters by All runs / Past week / Past month (no picker: an
+  application outlives its run). The shell opens on All runs.
+- **Verify:** `test_run_ranges_*`, `test_web_shortlist_accepts_the_new_selectors_*`;
+  Vitest RunSelector, Runs picker, the Choose runs… round trip, Applications range.
+- **Notes:** live, 2026-09-28: runs 3-5 read "0 matches" and cannot be ticked;
+  the Inbox badge counts every untouched role across runs (111).
+
+#### M15-T3 · Job titles and Qwen's recommendations
+- **STATUS:** `DONE`
+- **Completed:** 2026-09-28
+- **Do:** `profile/titles.py` (apply the user's titles, the prefilter key,
+  `suggest`); the pure title rules and storage keys live in `models.py` so the web
+  layer can share them; `jobscraper titles show|suggest`; `/api/titles`
+  (GET / PUT / DELETE) and `POST /api/jobs/titles`; `filter test/explain` use the
+  user's titles too. Profile tab: a title editor - chips with ×, an input, the
+  plan's limit ("12 / 20"), Reset to the resume's - and **Recommended titles**:
+  "Recommend titles" runs the job with its log, then shows "Based on: <field of
+  study> · <internships and projects>" and one-click adds (and "Add all").
+- **Verify:** `test_user_titles_*`, `test_suggest_*`, `test_web_titles_*`,
+  `test_pipeline_user_titles_recheck_the_prefilter_not_the_model`; Vitest Profile.
+- **Notes:** live with qwen3:14b, 2026-09-28: it read the degree (BEng Computer
+  Engineering), three internships (Tencent, Crypto.com, AMD) and three projects.
+  The first prompt gave 20 titles, mostly engineering and partly invented ("observability
+  automation engineer"); the prompt now forbids stacked, made-up titles and passes
+  `judge.interests` as `<open_to>`, which gave 8 real titles across support,
+  operations, fintech, product and trade operations. Fewer than 20 is allowed:
+  the cap is a maximum, not a quota.
+
+**Results:** Python 296/296 (+19), Vitest 131/131 (+16), bundle rebuilt; browser
+pass on the live database (Settings, Runs picker, Profile titles) with no console
+errors.
+
 ---
 
 ## 11. Open Questions

@@ -30,9 +30,9 @@ from typing import Any, Callable, Optional
 
 from . import backends, decide, scheduler, shortlist, watchlist
 from . import filter as prefilter
-from .config import Config
+from .config import CYCLE_DAYS_KEY, Config
 from .models import FetchOutcome, RawJob, WatchedCompany
-from .profile import keywords, resume_ingest
+from .profile import keywords, resume_ingest, titles
 from .scrape import discovery
 from .scrape.adapters import get_adapter
 from .scrape.net import FetchError, HttpClient
@@ -116,7 +116,9 @@ def run(cfg: Config, store: Store, *, dry_run: bool = False,
             say(f"marked {reaped} crashed run(s) failed")
     store.sync_watchlist(watchlist.load(cfg.watchlist_path))
 
-    plan = scheduler.plan(store, batch_size or cfg.batch_size, cfg.cycle_days, now=now)
+    # The cycle the user chose in the web app, when the plan allows it (M15).
+    cycle_days = cfg.effective_cycle_days(store.get_setting(CYCLE_DAYS_KEY))
+    plan = scheduler.plan(store, batch_size or cfg.batch_size, cycle_days, now=now)
     next_run = store.last_run_no() + 1
     in_batch = {c.id for c in plan.due}
     probation = [c for c in store.due_probation(next_run) if c.id not in in_batch]
@@ -329,9 +331,15 @@ def _funnel(cfg: Config, store: Store, rep: RunReport, client: HttpClient,
             return
     ruleset = prefilter.load_rules(cfg.rules_path)
     pv = int(profile.get("profile_version", 1))
+    # The job titles the user chose in the web app replace the resume's for the
+    # title filter (M15). They are part of the prefilter's cache key, so editing
+    # them re-checks the free prefilter - and only that: decisions are kept.
+    user_titles = titles.parse_user_titles(store.get_setting(titles.USER_TITLES_KEY))
+    profile = titles.apply(profile, user_titles)
+    rules_key = titles.prefilter_key(ruleset.hash, user_titles)
 
     # ---- [3] prefilter: free. Descriptions are fetched only for survivors ----
-    pending = store.jobs_pending_prefilter(pv, ruleset.hash)
+    pending = store.jobs_pending_prefilter(pv, rules_key)
     rejected: dict[str, int] = {}
     passed = hydrated = 0
     for job in pending:
@@ -344,7 +352,7 @@ def _funnel(cfg: Config, store: Store, rep: RunReport, client: HttpClient,
                 hydrated += 1
                 posting["description"] = text
                 res = prefilter.evaluate(posting, ruleset, profile, keywords.overlap)
-        store.save_prefilter(job["job_id"], pv, ruleset.hash, res.passed,
+        store.save_prefilter(job["job_id"], pv, rules_key, res.passed,
                              res.reject_rule, res.reject_detail, res.overlap_score)
         if res.passed:
             passed += 1
@@ -359,7 +367,7 @@ def _funnel(cfg: Config, store: Store, rep: RunReport, client: HttpClient,
     # ---- [4] vital extract ----
     limit = int(cfg.budget.get("vital_chars", 800))
     postings = []
-    for job in store.jobs_passed_prefilter(pv, ruleset.hash):
+    for job in store.jobs_passed_prefilter(pv, rules_key):
         vital = decide.vital_extract(job["title"] or "", job["location"] or "",
                                      job["jd_text"] or "", limit=limit)
         if vital != job["vital_text"]:
@@ -409,7 +417,7 @@ def _funnel(cfg: Config, store: Store, rep: RunReport, client: HttpClient,
             say(f"  !! model: {err}")
 
     # ---- [6] shortlist ----
-    doc = shortlist.write(store, cfg.shortlist_path, pv, rules_hash=ruleset.hash)
+    doc = shortlist.write(store, cfg.shortlist_path, pv, rules_hash=rules_key)
     rep.stats["shortlisted"] = len(doc["jobs"])
     say(f"  shortlist: {len(doc['jobs'])} roles -> {cfg.shortlist_path}")
 

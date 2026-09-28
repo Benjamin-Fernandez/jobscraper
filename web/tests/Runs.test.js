@@ -198,15 +198,38 @@ describe('Runs tab: jobs it cannot control', () => {
 })
 
 describe('Runs tab: history', () => {
-  it('lists date, companies, postings, accepted and status per run', async () => {
+  it('lists date, companies, postings, matches and status per run; 0 matches says so', async () => {
     const runs = [
       { run_no: 12, finished_at: '2026-09-23T14:30:00', status: 'ok', accepted: 3, stats: { companies_due: 10, postings_seen: 412 } },
       { run_no: 11, finished_at: null, started_at: '2026-09-21T09:00:00', status: 'failed', accepted: 0 },
     ]
     const wrapper = await mountRuns({ runs })
     const cells = r => wrapper.findAll(`tr[data-run="${r}"] td`).map(td => td.text())
-    expect(cells(12)).toEqual(['12', '23 Sep', '10', '412', '3', 'ok'])
-    expect(cells(11)).toEqual(['11', '21 Sep', '—', '—', '0', 'failed'])
+    expect(cells(12)).toEqual(['', '12', '23 Sep', '10', '412', '3 matches', 'ok'])
+    expect(cells(11)).toEqual(['', '11', '21 Sep', '—', '—', '0 matches', 'failed'])
+    // Nothing to show for a run with 0 matches: it cannot be ticked.
+    expect(wrapper.find('tr[data-run="11"] input').attributes('disabled')).toBeDefined()
+    expect(wrapper.find('tr[data-run="12"] input').attributes('disabled')).toBeUndefined()
+  })
+
+  it('the picker: tick runs, see the matches, show them in the Inbox', async () => {
+    const wrapper = await mountRuns()
+    expect(wrapper.find('.picker-count').text()).toBe('Nothing ticked.')
+    expect(wrapper.find('button.show-picked').attributes('disabled')).toBeDefined()
+    await wrapper.find('tr[data-run="11"] input').setValue(true)
+    await wrapper.find('tr[data-run="12"] input').setValue(true)
+    expect(wrapper.find('.picker-count').text()).toBe('2 runs ticked · 5 matches')
+    await wrapper.find('button.show-picked').trigger('click')
+    expect(wrapper.emitted('select-run')).toEqual([[[12, 11]]])   // newest first
+    expect(window.location.hash).toBe('#/inbox')
+  })
+
+  it('the picker starts from the runs already shown, and Clear empties it', async () => {
+    const wrapper = await mountRuns({ run: [11] })
+    expect(wrapper.find('tr[data-run="11"] input').element.checked).toBe(true)
+    expect(wrapper.find('tr[data-run="12"] input').element.checked).toBe(false)
+    await wrapper.find('button.clear-picked').trigger('click')
+    expect(wrapper.find('tr[data-run="11"] input').element.checked).toBe(false)
   })
 
   it('says so when there are no runs yet', async () => {
@@ -226,7 +249,7 @@ describe('Runs tab: history', () => {
 })
 
 describe('Runs tab inside the app', () => {
-  it('a finished run refreshes the run list, and the Inbox moves to the new run', async () => {
+  it('a finished run refreshes the run list and the Inbox (All runs takes it in)', async () => {
     setHash('#/runs')
     const wrapper = mount(App)
     await flushPromises()
@@ -241,6 +264,6 @@ describe('Runs tab inside the app', () => {
 
     expect(api.count(/^api\/runs$/)).toBe(2)
     expect(wrapper.findAll('tr[data-run]').map(r => r.attributes('data-run'))).toEqual(['13', '12', '11'])
-    expect(api.calls.some(c => c.url === 'api/shortlist?run=13')).toBe(true)
+    expect(api.count(/^api\/shortlist\?run=all$/)).toBe(2)
   })
 })

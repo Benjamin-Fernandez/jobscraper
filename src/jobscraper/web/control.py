@@ -13,11 +13,14 @@ resolved here to the CLI as `--batch-size`.
 """
 from __future__ import annotations
 
+import json
 from typing import Any, Optional
 
 import yaml
 
-from jobscraper.config import Config
+from jobscraper.config import CYCLE_DAYS_KEY, Config
+from jobscraper.models import (SUGGESTIONS_KEY, USER_TITLES_KEY, dedupe_titles,
+                               parse_titles_json)
 
 BATCH_SIZE_KEY = "batch_size"
 
@@ -45,14 +48,26 @@ def runs_per_day_needed(enabled: int, batch_size: int, cycle_days: int) -> float
     return round(enabled / batch_size / cycle_days, 1)
 
 
+def effective_cycle_days(cfg: Config, store: Any) -> int:
+    """Days before a company is due again (M15): the stored choice when the plan
+    offers it, else `run.cycle_days` - the same resolution the pipeline uses."""
+    return cfg.effective_cycle_days(store.get_setting(CYCLE_DAYS_KEY))
+
+
 def settings_view(cfg: Config, store: Any) -> dict[str, Any]:
-    """The `/api/settings` answer (PRD M11 contract)."""
+    """The `/api/settings` answer (PRD M11 contract, M15 cycle fields).
+
+    `cycle_day_options` and `plan` come from the plan in force, so the Settings
+    tab only ever offers what the server will accept (tier-ready, M15-D1)."""
     enabled = int(store.stats()["enabled"])
     batch = effective_batch_size(cfg, store)
+    cycle = effective_cycle_days(cfg, store)
     return {"batch_size": batch, "batch_size_default": cfg.batch_size,
-            "enabled_companies": enabled, "cycle_days": cfg.cycle_days,
-            "runs_per_day_needed": runs_per_day_needed(enabled, batch,
-                                                       cfg.cycle_days)}
+            "enabled_companies": enabled, "cycle_days": cycle,
+            "cycle_days_default": cfg.cycle_days,
+            "cycle_day_options": list(cfg.plan.cycle_day_options),
+            "plan": cfg.plan.name,
+            "runs_per_day_needed": runs_per_day_needed(enabled, batch, cycle)}
 
 
 def interests(cfg: Config) -> list[str]:
@@ -93,3 +108,39 @@ def profile_view(cfg: Config) -> dict[str, Any]:
         items = doc.get(key)
         out[key] = [str(i) for i in items] if isinstance(items, list) else []
     return out
+
+
+def titles_view(cfg: Config, store: Any) -> dict[str, Any]:
+    """The `/api/titles` answer (M15): the titles the title filter searches for,
+    where they come from, the plan's limits, and Qwen's last recommendations.
+
+    `resume_titles` are the derived profile's (the corrections file is merged
+    at run time and not reflected here, as with `/api/profile`). A
+    recommendation the user has since chosen is left out.
+    """
+    plan = cfg.plan
+    resume = dedupe_titles(profile_view(cfg)["target_titles"])
+    user = parse_titles_json(store.get_setting(USER_TITLES_KEY))
+    titles = user or resume
+    suggestions = None
+    raw = store.get_setting(SUGGESTIONS_KEY)
+    if raw:
+        try:
+            doc = json.loads(raw)
+        except (TypeError, ValueError):
+            doc = None
+        if isinstance(doc, dict):
+            taken = {t.lower() for t in titles}
+            items = [i for i in (doc.get("suggestions") or [])
+                     if isinstance(i, dict) and str(i.get("title", "")).lower() not in taken]
+            suggestions = {
+                "generated_at": doc.get("generated_at"),
+                "model": doc.get("model"),
+                "field_of_study": doc.get("field_of_study") or "",
+                "experience": [str(e) for e in (doc.get("experience") or [])],
+                "items": items[:plan.max_title_suggestions],
+            }
+    return {"titles": titles, "source": "custom" if user else "resume",
+            "resume_titles": resume, "max_titles": plan.max_target_titles,
+            "max_suggestions": plan.max_title_suggestions, "plan": plan.name,
+            "suggestions": suggestions}

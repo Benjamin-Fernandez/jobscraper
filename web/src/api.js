@@ -78,13 +78,19 @@ export function untrackApplication(jobId) {
 
 // ---- M11: control from the web app (PRD section 10, M11 API contract) ----
 
-// {batch_size, batch_size_default, enabled_companies, cycle_days, runs_per_day_needed}
+// {batch_size, batch_size_default, enabled_companies, cycle_days,
+//  cycle_days_default, cycle_day_options, plan, runs_per_day_needed}
 export function getSettings() {
   return request('settings')
 }
 
-export function saveSettings({ batch_size }) {
-  return sendJson('settings', 'PUT', { batch_size })
+// Either or both: { batch_size }, { cycle_days } (M15). The server validates
+// cycle_days against the plan's options.
+export function saveSettings({ batch_size, cycle_days } = {}) {
+  const body = {}
+  if (batch_size !== undefined) body.batch_size = batch_size
+  if (cycle_days !== undefined) body.cycle_days = cycle_days
+  return sendJson('settings', 'PUT', body)
 }
 
 // 202 + job, or 409 when a job is already running.
@@ -107,6 +113,30 @@ export function getCurrentJob(tail = 200) {
 
 export function cancelJob() {
   return sendJson('jobs/cancel', 'POST')
+}
+
+// ---- M15: the job titles the title filter searches for ----
+
+// {titles, source: 'custom'|'resume', resume_titles, max_titles,
+//  max_suggestions, plan, suggestions: null | {generated_at, model,
+//  field_of_study, experience, items: [{title, why}]}}
+export function getTitles() {
+  return request('titles')
+}
+
+// The full list, in order. 422 past the plan's limit, or for an empty list.
+export function saveTitles(titles) {
+  return sendJson('titles', 'PUT', { titles })
+}
+
+// Back to the resume's titles.
+export function resetTitles() {
+  return request('titles', { method: 'DELETE' })
+}
+
+// Ask Qwen for recommendations: a background job like a run. 202, or 409 when busy.
+export function startTitleSuggestions() {
+  return sendJson('jobs/titles', 'POST')
 }
 
 // {present, profile_version, source_file, parsed_at, summary, skills, target_titles, interests}

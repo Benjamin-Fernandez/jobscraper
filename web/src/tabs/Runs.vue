@@ -3,10 +3,15 @@
 // itself is the CLI in a child process on the server (M11-T3); this tab only
 // asks for it and reads its log. When a run ends, the shell reloads the run list
 // and the shortlist, so the Inbox shows what the run found.
-import { computed, onMounted, ref, watch } from 'vue'
+//
+// The run history is also the "Choose runs…" picker (M15): tick any runs and
+// show their roles together in the Inbox. A run that accepted nothing says
+// "0 matches" and has nothing to tick.
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { ApiError, cancelJob, describeError, getSettings, startRun } from '../api.js'
 import { useJob } from '../composables/useJob.js'
-import { shortDate } from '../format.js'
+import { plural, shortDate } from '../format.js'
+import { asList, matchLabel, takePickerRequest } from '../runs.js'
 import { tabEmits, tabProps } from '../shell.js'
 import JobStatus from '../components/JobStatus.vue'
 import TabLoading from '../components/TabLoading.vue'
@@ -112,7 +117,38 @@ function runDate(run) {
   return shortDate(run.finished_at || run.started_at) || '—'
 }
 
+// ---- the picker (M15) ----
+const picked = ref(new Set(asList(props.run)))
+watch(() => props.run, v => { picked.value = new Set(asList(v)) })
+
+const pickedMatches = computed(() => props.runs
+  .filter(r => picked.value.has(r.run_no))
+  .reduce((n, r) => n + (Number(r.accepted) || 0), 0))
+
+function toggle(run) {
+  const next = new Set(picked.value)
+  if (next.has(run.run_no)) next.delete(run.run_no)
+  else next.add(run.run_no)
+  picked.value = next
+}
+
+// Newest first, whatever order they were ticked in.
+function showPicked() {
+  const list = props.runs.map(r => r.run_no).filter(n => picked.value.has(n))
+  if (!list.length) return
+  emit('select-run', list)
+  window.location.hash = '#/inbox'
+}
+
+const pickerEl = ref(null)
+
 onMounted(async () => {
+  // Sent here by "Choose runs…": go straight to the picker.
+  if (takePickerRequest()) {
+    await nextTick()
+    pickerEl.value?.scrollIntoView?.({ block: 'start' })
+    pickerEl.value?.focus?.({ preventScroll: true })
+  }
   await Promise.all([loadSettings(), refresh()])
   ready.value = true
 })
@@ -183,30 +219,66 @@ onMounted(async () => {
       <p class="empty-title">No runs yet.</p>
       <p class="muted">Start one above; it appears here when it finishes.</p>
     </div>
-    <div v-else class="table-wrap">
-      <table class="history">
-        <thead>
-          <tr>
-            <th scope="col">Run</th>
-            <th scope="col">Date</th>
-            <th scope="col" class="num">Companies</th>
-            <th scope="col" class="num">Postings</th>
-            <th scope="col" class="num">Accepted</th>
-            <th scope="col">Status</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-for="r in runs" :key="r.run_no" :data-run="r.run_no">
-            <td>{{ r.run_no }}</td>
-            <td>{{ runDate(r) }}</td>
-            <td class="num">{{ count(r, 'companies', 'companies_due') }}</td>
-            <td class="num">{{ count(r, 'postings', 'postings_seen') }}</td>
-            <td class="num">{{ r.accepted ?? '—' }}</td>
-            <td><span class="pill" :data-status="r.status">{{ r.status ?? '—' }}</span></td>
-          </tr>
-        </tbody>
-      </table>
-    </div>
+    <template v-else>
+      <div
+        id="choose-runs"
+        ref="pickerEl"
+        class="picker surface"
+        role="group"
+        aria-label="Choose runs to show in the Inbox"
+        tabindex="-1"
+      >
+        <p class="picker-text">
+          <strong>Choose runs</strong> - tick any runs to see their roles together in the Inbox.
+          <span class="picker-count">
+            {{ picked.size ? `${plural(picked.size, 'run')} ticked · ${matchLabel(pickedMatches)}` : 'Nothing ticked.' }}
+          </span>
+        </p>
+        <div class="picker-actions">
+          <button v-if="picked.size" type="button" class="ghost clear-picked" @click="picked = new Set()">Clear</button>
+          <button type="button" class="primary show-picked" :disabled="!picked.size" @click="showPicked">Show in Inbox</button>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table class="history">
+          <thead>
+            <tr>
+              <th scope="col" class="pick"><span class="visually-hidden">Show in the Inbox</span></th>
+              <th scope="col">Run</th>
+              <th scope="col">Date</th>
+              <th scope="col" class="num">Companies</th>
+              <th scope="col" class="num">Postings</th>
+              <th scope="col">Matches</th>
+              <th scope="col">Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr
+              v-for="r in runs"
+              :key="r.run_no"
+              :data-run="r.run_no"
+              :class="{ picked: picked.has(r.run_no), empty: !r.accepted }"
+            >
+              <td class="pick">
+                <input
+                  type="checkbox"
+                  :checked="picked.has(r.run_no)"
+                  :disabled="!r.accepted"
+                  :aria-label="`Show run ${r.run_no} in the Inbox`"
+                  @change="toggle(r)"
+                >
+              </td>
+              <td>{{ r.run_no }}</td>
+              <td>{{ runDate(r) }}</td>
+              <td class="num">{{ count(r, 'companies', 'companies_due') }}</td>
+              <td class="num">{{ count(r, 'postings', 'postings_seen') }}</td>
+              <td class="matches">{{ matchLabel(r.accepted) }}</td>
+              <td><span class="pill" :data-status="r.status">{{ r.status ?? '—' }}</span></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </template>
   </section>
 </template>
 
@@ -235,4 +307,15 @@ onMounted(async () => {
 .history th { font-family: var(--font); }
 .history td:first-child, .history td.num { font-family: var(--mono); font-variant-numeric: tabular-nums; }
 .history .num { text-align: right; }
+.history .pick { width: 2.5rem; text-align: center; }
+.history tr.picked td { background: var(--accent-soft); }
+.history tr.empty .matches { color: var(--muted); }
+.picker {
+  position: sticky; top: calc(var(--header-h) + var(--space-2)); z-index: 2;
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between;
+  gap: var(--space-2) var(--space-4); padding: var(--space-3) var(--space-4); margin-bottom: var(--space-3);
+}
+.picker-text { margin: 0; font-size: var(--text-sm); }
+.picker-count { display: block; color: var(--muted); }
+.picker-actions { display: flex; gap: var(--space-2); }
 </style>

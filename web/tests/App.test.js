@@ -69,14 +69,14 @@ describe('App shell', () => {
     expect(wrapper.find('header [role="tablist"]').exists()).toBe(true)
   })
 
-  it('opens on the newest run', async () => {
+  it('opens on All runs (M15)', async () => {
     const wrapper = await mountApp()
     const dataset = api.calls.map(c => c.url).filter(u => /^api\/(runs|shortlist)/.test(u))
-    expect(dataset).toEqual(['api/runs', 'api/shortlist?run=12'])
+    expect(dataset).toEqual(['api/runs', 'api/shortlist?run=all'])
     expect(api.calls.filter(c => c.url === 'api/stats')).toHaveLength(1)
-    expect(wrapper.find('.inbox .run-selector select').element.value).toBe('12')
+    expect(wrapper.find('.inbox .run-selector select').element.value).toBe('all')
     expect(wrapper.text()).toContain('OKX')
-    expect(wrapper.text()).not.toContain('Grab')
+    expect(wrapper.text()).toContain('Grab')
   })
 
   it('the run selector belongs to the Inbox, not the global header', async () => {
@@ -90,23 +90,48 @@ describe('App shell', () => {
     const before = window.location.href
     const callsBefore = api.calls.length
 
-    await wrapper.find('.inbox .run-selector select').setValue('11')
+    await wrapper.find('.inbox .run-selector select').setValue('week')
     await flushPromises()
 
     const made = api.calls.slice(callsBefore).map(c => c.url)
-    expect(made).toEqual(['api/shortlist?run=11'])
+    expect(made).toEqual(['api/shortlist?run=week'])
     expect(window.location.href).toBe(before)
-    expect(wrapper.text()).toContain('Grab')
-    expect(wrapper.text()).not.toContain('OKX')
+    expect(wrapper.text()).toContain('OKX')         // run 12, finished 23 Sep
+    expect(wrapper.text()).not.toContain('Grab')    // run 11, finished 21 Sep
   })
 
-  it('the "all runs" option asks for run=all', async () => {
+  it('Past month asks for run=month, and All runs goes back', async () => {
     const wrapper = await mountApp()
+    await wrapper.find('.inbox .run-selector select').setValue('month')
+    await flushPromises()
+    expect(api.calls.at(-1).url).toBe('api/shortlist?run=month')
     await wrapper.find('.inbox .run-selector select').setValue('all')
     await flushPromises()
     expect(api.calls.at(-1).url).toBe('api/shortlist?run=all')
-    expect(wrapper.text()).toContain('OKX')
-    expect(wrapper.text()).toContain('Grab')
+  })
+
+  it('Choose runs… opens the picker on the Runs tab, and its choice comes back to the Inbox', async () => {
+    const wrapper = await mountApp({ attachTo: document.body })
+    const select = wrapper.find('.inbox .run-selector select')
+    await select.setValue('choose')
+    expect(window.location.hash).toBe('#/runs')
+    expect(select.element.value).toBe('all')   // the selector still says what is shown
+    window.dispatchEvent(new HashChangeEvent('hashchange'))
+    await vi.waitFor(async () => {
+      await flushPromises()
+      expect(wrapper.find('tr[data-run="11"] input[type="checkbox"]').exists()).toBe(true)
+    })
+    await wrapper.find('tr[data-run="11"] input[type="checkbox"]').setValue(true)
+    await wrapper.find('button.show-picked').trigger('click')
+    window.dispatchEvent(new HashChangeEvent('hashchange'))
+    await vi.waitFor(async () => {
+      await flushPromises()
+      expect(wrapper.find('.inbox .card').exists()).toBe(true)
+    })
+    expect(api.calls.at(-1).url).toBe('api/shortlist?run=11')
+    expect(wrapper.find('.inbox .run-selector select').element.value).toBe('chosen')
+    expect(wrapper.find('.inbox .run-selector option[value="chosen"]').text()).toBe('Run 11')
+    expect(wrapper.findAll('.inbox .card').map(c => c.find('.company').text()).sort()).toEqual(['Grab', 'Stripe'])
   })
 
   it('shows an error instead of a blank page when the API fails', async () => {
@@ -134,21 +159,21 @@ describe('App shell', () => {
       await flushPromises()
       expect(wrapper.find('.inbox [aria-busy="true"][role="status"]').exists()).toBe(true)
     })
-    expect(wrapper.text()).not.toContain('No roles in this run')
+    expect(wrapper.text()).not.toContain('No roles in')
     release()
     await vi.waitFor(async () => {
       await flushPromises()
-      expect(wrapper.findAll('.inbox .card')).toHaveLength(3)
+      expect(wrapper.findAll('.inbox .card')).toHaveLength(5)
     })
   })
 
-  it('says so when the run has no roles', async () => {
+  it('says so when no run has any roles', async () => {
     api = fakeApi({ fixture: { runs: [{ run_no: 3, finished_at: '2026-09-25T10:00:00', accepted: 0 }], jobs: [] } })
     vi.stubGlobal('fetch', api.fetch)
     const wrapper = mount(App)
     await vi.waitFor(async () => {
       await flushPromises()
-      expect(wrapper.text()).toContain('No roles in this run')
+      expect(wrapper.text()).toContain('No roles in any run yet')
     })
   })
 })
@@ -263,7 +288,7 @@ describe('Badges', () => {
     vi.stubGlobal('fetch', api.fetch)
     const wrapper = await mountApp()
     await flushPromises()
-    // Run 12 holds OKX (applied), GovTech and Shopee (untouched).
+    // All runs: five roles, three of them tracked (OKX, Grab, Stripe).
     expect(badge(wrapper, 'inbox')).toBe(2)
     // applied + interviewing; rejected is not active.
     expect(badge(wrapper, 'applications')).toBe(2)
@@ -274,13 +299,13 @@ describe('Badges', () => {
   it('follow the data: marking a role applied moves it from one badge to the other', async () => {
     const wrapper = await mountApp()
     await flushPromises()
-    expect(badge(wrapper, 'inbox')).toBe(3)
+    expect(badge(wrapper, 'inbox')).toBe(5)
     expect(badge(wrapper, 'applications')).toBeNull()
 
     await wrapper.find('.inbox .detail button.apply').trigger('click')
     await vi.waitFor(async () => {
       await flushPromises()
-      expect(badge(wrapper, 'inbox')).toBe(2)
+      expect(badge(wrapper, 'inbox')).toBe(4)
     })
     expect(badge(wrapper, 'applications')).toBe(1)
   })
@@ -289,7 +314,7 @@ describe('Badges', () => {
     const wrapper = await mountApp()
     await flushPromises()
     await wrapper.find('.inbox .detail button.dismiss').trigger('click')
-    expect(badge(wrapper, 'inbox')).toBe(2)
+    expect(badge(wrapper, 'inbox')).toBe(4)
   })
 
   it('count helpers', () => {
@@ -300,23 +325,38 @@ describe('Badges', () => {
 })
 
 describe('RunSelector', () => {
-  it('labels each run with its number, date and role count', () => {
-    const wrapper = mount(RunSelector, { props: { runs: runsFrom(), modelValue: 12 } })
-    const options = wrapper.findAll('option').map(o => o.text())
-    expect(options).toEqual(['run 12 · 23 Sep · 3 roles', 'run 11 · 21 Sep · 2 roles', 'all runs'])
+  it('All runs always comes first, then Past week, Past month and Choose runs…', () => {
+    const wrapper = mount(RunSelector, { props: { runs: runsFrom(), modelValue: 'all' } })
+    expect(wrapper.findAll('option').map(o => o.text()))
+      .toEqual(['All runs', 'Past week', 'Past month', 'Choose runs…'])
+    expect(wrapper.find('select').element.value).toBe('all')
   })
 
-  it('emits a number for a run and the string "all" for every run', async () => {
-    const wrapper = mount(RunSelector, { props: { runs: runsFrom(), modelValue: 12 } })
-    await wrapper.find('select').setValue('11')
-    await wrapper.find('select').setValue('all')
-    expect(wrapper.emitted('update:modelValue')).toEqual([[11], ['all']])
+  it('runs chosen on the Runs tab show as their own option, after the ranges', () => {
+    const one = mount(RunSelector, { props: { runs: runsFrom(), modelValue: [12] } })
+    expect(one.findAll('option').map(o => o.text()))
+      .toEqual(['All runs', 'Past week', 'Past month', 'Run 12', 'Choose runs…'])
+    expect(one.find('select').element.value).toBe('chosen')
+    const two = mount(RunSelector, { props: { runs: runsFrom(), modelValue: [12, 11] } })
+    expect(two.find('option[value="chosen"]').text()).toBe('Runs 12, 11')
   })
 
-  it('is disabled with a message when there are no runs', () => {
-    const wrapper = mount(RunSelector, { props: { runs: [], modelValue: null } })
+  it('emits a range, and asks for the picker instead of emitting a value', async () => {
+    const wrapper = mount(RunSelector, { props: { runs: runsFrom(), modelValue: 'all' } })
+    await wrapper.find('select').setValue('week')
+    await wrapper.find('select').setValue('choose')
+    expect(wrapper.emitted('update:modelValue')).toEqual([['week']])
+    expect(wrapper.emitted('choose')).toHaveLength(1)
+  })
+
+  it('Applications has no picker: ranges only', () => {
+    const wrapper = mount(RunSelector, { props: { runs: runsFrom(), modelValue: 'all', choosable: false } })
+    expect(wrapper.findAll('option').map(o => o.text())).toEqual(['All runs', 'Past week', 'Past month'])
+  })
+
+  it('is disabled when there are no runs', () => {
+    const wrapper = mount(RunSelector, { props: { runs: [], modelValue: 'all' } })
     expect(wrapper.find('select').attributes('disabled')).toBeDefined()
-    expect(wrapper.text()).toContain('no runs yet')
   })
 
   it('has a visible label', () => {

@@ -7,6 +7,7 @@
     python -m jobscraper watchlist   list | add | disable watched companies
     python -m jobscraper profile     build or show the resume-derived profile
     python -m jobscraper filter      test | explain the prefilter rules
+    python -m jobscraper titles      show | suggest the job titles searched for
     python -m jobscraper reresolve   forget a company's cached ATS
     python -m jobscraper sync        reconcile watchlist.yaml into the database
 """
@@ -19,7 +20,7 @@ from pathlib import Path
 from . import backends
 from . import pipeline
 from . import scheduler
-from .config import load_config
+from .config import CYCLE_DAYS_KEY, load_config
 from . import watchlist
 from .store import Store as StoreV2
 
@@ -79,8 +80,8 @@ def cmd_doctor(args) -> int:
 
     print(f"budget         llm={'on' if cfg.budget.get('enable_llm') else 'off'}, "
           f"{int(cfg.budget.get('decide_batch', 20))} postings per decide call")
-    print(f"batch          {cfg.run['batch_size']} companies per run, "
-          f"{cfg.run['cycle_days']}-day cycle")
+    print(f"batch          {_batch_size(cfg, store)} companies per run, "
+          f"{_cycle_days(cfg, store)}-day cycle (plan: {cfg.plan.name})")
     print(BAR)
     store.close()
     return 0
@@ -120,11 +121,17 @@ def _batch_size(cfg, store, flag=None) -> int:
     return cfg.batch_size
 
 
+def _cycle_days(cfg, store) -> int:
+    """Days before a company is due again (M15): the cycle the user chose in the
+    web app when the plan allows it, else `run.cycle_days`."""
+    return cfg.effective_cycle_days(store.get_setting(CYCLE_DAYS_KEY))
+
+
 def cmd_status(args) -> int:
     """Queue depth and cadence from the staleness scheduler (PRD 8.3[0])."""
     cfg, store = _boot_v2(args)
     _sync_watchlist(cfg, store)
-    st = scheduler.status(store, _batch_size(cfg, store), cfg.cycle_days)
+    st = scheduler.status(store, _batch_size(cfg, store), _cycle_days(cfg, store))
     print(BAR)
     print(scheduler.describe(st))
     print(BAR)
@@ -277,6 +284,25 @@ def cmd_filter(args) -> int:
               "         Build it with the resume ingest (M2) for a faithful result.",
               file=sys.stderr)
 
+    # The job titles the user chose in the web app replace the resume's (M15),
+    # and the stored verdict is keyed with them - as a run would do.
+    if profile and cfg.db_path.exists():
+        from .profile import titles as titles_mod
+        try:
+            tstore = V2Store(cfg.db_path)
+        except SchemaMismatch:
+            tstore = None
+        if tstore is not None:
+            try:
+                user_titles = titles_mod.parse_user_titles(
+                    tstore.get_setting(titles_mod.USER_TITLES_KEY))
+            finally:
+                tstore.close()
+            if user_titles:
+                profile = titles_mod.apply(profile, user_titles)
+                rules_hash = titles_mod.prefilter_key(rules_hash, user_titles)
+                profile_note += f" (+ your {len(user_titles)} job titles)"
+
     try:
         from .profile.keywords import overlap as scorer
     except ImportError:                       # Lane D's matcher not merged yet
@@ -376,6 +402,75 @@ def cmd_profile(args) -> int:
     return 0
 
 
+def cmd_titles(args) -> int:
+    """M15: the job titles the title filter searches for, and Qwen's
+    recommendations. `show` prints them; `suggest` asks Qwen for more (up to the
+    plan's limit) and stores them for the web app's Profile tab, which starts
+    this command as a background job."""
+    import json
+    from . import filter as filter_mod
+    from .profile import resume_ingest as ri
+    from .profile import titles as t
+
+    cfg, store = _boot_v2(args)
+    try:
+        plan = cfg.plan
+        user = t.parse_user_titles(store.get_setting(t.USER_TITLES_KEY))
+        try:
+            profile = ri.load_derived_profile(cfg)
+        except ri.ProfileError as exc:
+            print(f"titles: {exc}", file=sys.stderr)
+            return 1
+        current = user or t.dedupe(profile.get("target_titles") or [])
+
+        if args.titles_cmd == "suggest":
+            limit = min(args.limit or plan.max_title_suggestions, plan.max_title_suggestions)
+            try:
+                resume = ri.load_resume(cfg.resume_dir, force=True)
+            except RuntimeError as exc:                 # ResumeError
+                print(f"titles: {exc}", file=sys.stderr)
+                return 1
+            backend = backends.build(cfg.budget)
+            ceiling = filter_mod.load_rules(cfg.rules_path).ceiling_years or 3
+            print(f"recommending up to {limit} titles with "
+                  f"{backend.model_id or backend.name} ...", flush=True)
+            try:
+                judge = cfg.raw.get("judge") or {}
+                result = t.suggest(backend, resume.text, profile, current, limit,
+                                   ceiling_years=int(ceiling),
+                                   interests=list(judge.get("interests") or []))
+            except ri.ProfileError as exc:
+                print(f"titles: {exc}", file=sys.stderr)
+                return 1
+            store.set_setting(t.SUGGESTIONS_KEY, json.dumps(result))
+            print(BAR)
+            print(f"field of study: {result['field_of_study'] or '-'}")
+            for e in result["experience"]:
+                print(f"experience:     {e}")
+            print(f"{len(result['suggestions'])} recommended titles:")
+            for item in result["suggestions"]:
+                print(f"  + {item['title']:<42} {item['why']}")
+            print(BAR)
+            return 0
+
+        print(BAR)
+        source = "yours (set in the web app)" if user else "from your resume"
+        print(f"titles {source}: {len(current)} of {plan.max_target_titles} "
+              f"(plan: {plan.name})")
+        for title in current:
+            print(f"  - {title}")
+        raw = store.get_setting(t.SUGGESTIONS_KEY)
+        if raw:
+            last = json.loads(raw)
+            print(f"last recommendations ({last.get('generated_at', '?')}):")
+            for item in last.get("suggestions", []):
+                print(f"  + {item.get('title')}")
+        print(BAR)
+        return 0
+    finally:
+        store.close()
+
+
 def cmd_watchlist(args) -> int:
     """Lane E's verb (PRD 0.6, M1-T5): list, add or disable watched companies.
 
@@ -459,6 +554,14 @@ def build_parser() -> argparse.ArgumentParser:
     prof.add_argument("--bump", action="store_true",
                       help="bump profile_version: every cached decision goes stale")
     prof.set_defaults(fn=cmd_profile)
+
+    tl = sub.add_parser("titles", help="job titles to search for, and Qwen's recommendations")
+    tl_sub = tl.add_subparsers(dest="titles_cmd")
+    tl_sub.add_parser("show", help="the titles in use and the last recommendations")
+    ts = tl_sub.add_parser("suggest", help="ask Qwen for more titles (stored for the web app)")
+    ts.add_argument("--limit", type=_positive_int, default=0,
+                    help="at most this many (capped by the plan)")
+    tl.set_defaults(fn=cmd_titles, titles_cmd="show")
 
     wl = sub.add_parser("watchlist", help="list, add or disable watched companies")
     wl_file = argparse.ArgumentParser(add_help=False)

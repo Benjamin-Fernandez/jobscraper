@@ -11,13 +11,16 @@
 import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { describeError, getRuns, getShortlist, getStats } from './api.js'
 import { TABS } from './tabs.js'
+import { runQuery, sameRun } from './runs.js'
 import { hashFor, tabFromHash } from './route.js'
 import TabLoading from './components/TabLoading.vue'
 import TabFailed from './components/TabFailed.vue'
 import ToastHost from './components/ToastHost.vue'
 
 const runs = ref([])
-const run = ref(null)
+// What the Inbox shows (M15): 'all' (the default), 'week', 'month', or the
+// runs chosen on the Runs tab. See runs.js.
+const run = ref('all')
 const jobs = ref([])
 const stats = ref(null)
 const loading = ref(true)
@@ -88,7 +91,7 @@ async function loadJobs() {
   loading.value = true
   error.value = ''
   try {
-    const data = await getShortlist(run.value ?? 'latest')
+    const data = await getShortlist(runQuery(run.value))
     if (seq === requestSeq) jobs.value = data
   } catch (e) {
     if (seq === requestSeq) error.value = describeError(e)
@@ -107,24 +110,20 @@ async function loadStats() {
   }
 }
 
-// `follow`: a run just finished - if the newest run was on screen, move to the
-// new newest one, so the Inbox shows what the run found.
+// A finished run needs no following any more (M15): All runs, Past week and
+// Past month all take it in on the reload that comes with the new run list.
 // Same guard as loadJobs (Vue review, M12): only the newest call may write.
 let runsSeq = 0
 
-async function loadRuns({ follow = false } = {}) {
+async function loadRuns() {
   const seq = ++runsSeq
-  const newest = runs.value[0]?.run_no ?? null
   const data = await getRuns()
   if (seq !== runsSeq) return
   runs.value = data
-  if (run.value === null || (follow && run.value === newest)) {
-    run.value = runs.value[0]?.run_no ?? null
-  }
 }
 
 function selectRun(value) {
-  if (value === run.value) return
+  if (sameRun(value, run.value)) return
   run.value = value
   loadJobs()
 }
@@ -132,7 +131,7 @@ function selectRun(value) {
 async function onChanged(options = {}) {
   if (options?.runs) {
     try {
-      await loadRuns({ follow: true })
+      await loadRuns()
     } catch (e) {
       error.value = describeError(e)
     }

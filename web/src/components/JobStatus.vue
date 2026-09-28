@@ -11,7 +11,7 @@ const props = defineProps({
   title: { type: String, default: 'Log' },
 })
 
-const KIND = { run: 'Run', profile: 'Profile refresh' }
+const KIND = { run: 'Run', profile: 'Profile refresh', titles: 'Title recommendations' }
 
 const state = computed(() => props.job?.state ?? 'idle')
 const lines = computed(() => props.job?.log ?? [])

@@ -7,6 +7,7 @@ charges nobody.
 """
 from __future__ import annotations
 
+import json
 import sys
 import tempfile
 from pathlib import Path
@@ -295,3 +296,35 @@ def test_pipeline_nothing_due_still_finishes_pending_work():
     assert _count(st, "runs") == 1
     dry = _run(cfg, st, fetcher=mixed_fetcher, dry_run=True, now=shift(T0, days=1))
     assert dry.status == "nothing_due" and "judged" not in dry.stats
+
+
+def test_pipeline_uses_the_cycle_the_user_chose():
+    """M15: the cycle stored from the web app decides who is due - when the plan
+    offers it. The config's 7 days apply otherwise."""
+    cfg, st = _world(1)
+    _run(cfg, st)
+    assert _run(cfg, st, now=shift(T0, days=2)).status == "nothing_due"
+    st.set_setting("cycle_days", 1)
+    assert _run(cfg, st, now=shift(T0, days=2)).status == "ok"
+    st.set_setting("cycle_days", 2)             # not a plan option: config's cycle
+    assert _run(cfg, st, now=shift(T0, days=3)).status == "nothing_due"
+
+
+def test_pipeline_user_titles_recheck_the_prefilter_not_the_model():
+    """M15-D6: titles set in the web app replace the resume's for the title
+    filter. Changing them re-checks the free prefilter; nothing already judged
+    goes back to the model."""
+    cfg, st = _world(1)
+    judge = _AcceptSingapore()
+    rep = _run(cfg, st, backend=judge)
+    assert rep.stats["shortlisted"] == 2 and judge.calls == 1
+
+    st.set_setting("target_titles", json.dumps(["data analyst"]))
+    rep = _run(cfg, st, backend=judge, now=shift(T0, days=1))
+    assert rep.stats["prefilter_evaluated"] == 2 and rep.stats["shortlisted"] == 0
+    assert judge.calls == 1
+
+    st.set_setting("target_titles", json.dumps(["Backend Engineer"]))
+    rep = _run(cfg, st, backend=judge, now=shift(T0, days=2))
+    assert rep.stats["prefilter_evaluated"] == 2 and rep.stats["shortlisted"] == 2
+    assert judge.calls == 1, "the earlier decisions are reused, not re-judged"

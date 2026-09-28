@@ -13,9 +13,11 @@ from __future__ import annotations
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request
+from typing import Optional
+
 from pydantic import BaseModel, StrictInt
 
-from jobscraper.config import Config
+from jobscraper.config import CYCLE_DAYS_KEY, Config
 from jobscraper.web.control import BATCH_SIZE_KEY, profile_view, settings_view
 from jobscraper.web.deps import get_config, open_store
 
@@ -23,8 +25,10 @@ router = APIRouter(tags=["settings"])
 
 
 class SettingsChange(BaseModel):
-    """Body of `PUT /api/settings`. Strict: `"12"`, `2.5` and `true` are refused."""
-    batch_size: StrictInt
+    """Body of `PUT /api/settings`: either field, or both. Strict: `"12"`, `2.5`
+    and `true` are refused."""
+    batch_size: Optional[StrictInt] = None
+    cycle_days: Optional[StrictInt] = None
 
 
 @router.get("/settings")
@@ -38,15 +42,29 @@ def get_settings(request: Request,
 @router.put("/settings")
 def put_settings(body: SettingsChange, request: Request,
                  cfg: Config = Depends(get_config)) -> dict[str, Any]:
-    """Store companies per run; 1 <= n <= enabled companies, else `422`."""
+    """Store companies per run (1 <= n <= enabled companies) and/or the cycle
+    length (one of the plan's options, M15); `422` for anything else. Both are
+    checked before either is written."""
+    if body.batch_size is None and body.cycle_days is None:
+        raise HTTPException(status_code=422,
+                            detail="send batch_size, cycle_days, or both")
+    options = cfg.plan.cycle_day_options
+    if body.cycle_days is not None and body.cycle_days not in options:
+        raise HTTPException(
+            status_code=422,
+            detail=f"cycle_days must be one of {list(options)} on the "
+                   f"{cfg.plan.name} plan; got {body.cycle_days}")
     with open_store(request) as store:
-        enabled = int(store.stats()["enabled"])
-        if not 1 <= body.batch_size <= enabled:
-            raise HTTPException(
-                status_code=422,
-                detail=f"batch_size must be between 1 and {enabled} "
-                       f"(the enabled companies); got {body.batch_size}")
-        store.set_setting(BATCH_SIZE_KEY, body.batch_size)
+        if body.batch_size is not None:
+            enabled = int(store.stats()["enabled"])
+            if not 1 <= body.batch_size <= enabled:
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"batch_size must be between 1 and {enabled} "
+                           f"(the enabled companies); got {body.batch_size}")
+            store.set_setting(BATCH_SIZE_KEY, body.batch_size)
+        if body.cycle_days is not None:
+            store.set_setting(CYCLE_DAYS_KEY, body.cycle_days)
         return settings_view(cfg, store)
 
 

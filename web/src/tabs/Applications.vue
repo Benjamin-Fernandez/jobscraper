@@ -14,12 +14,13 @@ import { describeError, getApplications, getStats, setApplicationStatus } from '
 import { plural, safeUrl, shortDate, when } from '../format.js'
 import { tabEmits, tabProps } from '../shell.js'
 import { statusLabel } from '../stages.js'
+import { runsInRange } from '../runs.js'
 import CompanyMark from '../components/CompanyMark.vue'
 import Icon from '../components/Icon.vue'
 import RunSelector from '../components/RunSelector.vue'
 import TabLoading from '../components/TabLoading.vue'
 
-defineProps(tabProps)
+const props = defineProps(tabProps)
 const emit = defineEmits(tabEmits)
 
 const rows = ref([])
@@ -38,8 +39,9 @@ const companyOf = row => row.company || UNKNOWN
 // counts always describe what the other filters leave.
 const inScope = computed(() => {
   const q = query.value.trim().toLowerCase()
+  const inRuns = runsInRange(props.runs, runFilter.value)   // null = every run
   return rows.value.filter(r =>
-    (runFilter.value === 'all' || r.run_no === runFilter.value)
+    (!inRuns || inRuns.has(r.run_no))
     && (!q || [r.company, r.role].some(v => (v || '').toLowerCase().includes(q))))
 })
 
@@ -140,7 +142,12 @@ onMounted(load)
           <span class="visually-hidden">Search applications</span>
           <input v-model="query" type="search" placeholder="Search company or role">
         </label>
-        <RunSelector :runs="runs" :model-value="runFilter" @update:model-value="v => { runFilter = v }" />
+        <RunSelector
+          :runs="runs"
+          :model-value="runFilter"
+          :choosable="false"
+          @update:model-value="v => { runFilter = v }"
+        />
       </div>
     </header>
 

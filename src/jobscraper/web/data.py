@@ -10,11 +10,15 @@ running server whenever a batch finishes, and a cache would serve a stale queue.
 """
 from __future__ import annotations
 
+import datetime as _dt
 import json
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Optional, Union
 
-RunSelector = Union[int, str]           # a run number, "latest" or "all"
+RunSelector = Union[int, str, frozenset]   # a run number, "all", or a set of runs
+
+# `?run=week` / `month`: runs that finished within this many days (M15).
+RANGES = {"week": 7, "month": 30}
 
 # Application fields merged onto a shortlisted job. A job with no application
 # row still appears, with these set to None (M6-T1).
@@ -45,14 +49,33 @@ def run_numbers(shortlist: Mapping[str, Any]) -> list[int]:
     return sorted(nums, reverse=True)
 
 
-def resolve_run(shortlist: Mapping[str, Any], run: str) -> Optional[RunSelector]:
-    """Turn the `?run=` value into a run number, "all", or None for no runs."""
+def _finished(stamp: Any) -> Optional[_dt.datetime]:
+    try:
+        return _dt.datetime.fromisoformat(str(stamp)[:19])
+    except (TypeError, ValueError):
+        return None
+
+
+def resolve_run(shortlist: Mapping[str, Any], run: str,
+                now: Optional[_dt.datetime] = None) -> Optional[RunSelector]:
+    """Turn the `?run=` value into what `jobs_for` filters by (M15):
+
+    `all`; `latest` (the newest run, kept for old links); `week` / `month` (the
+    runs that finished in the last 7 / 30 days, UTC); `12` or `12,14` (the runs
+    the user chose). None means no runs at all.
+    """
     if run == "all":
         return "all"
     if run == "latest":
         nums = run_numbers(shortlist)
         return nums[0] if nums else None
-    return int(run)
+    if run in RANGES:
+        now = now or _dt.datetime.now(_dt.timezone.utc).replace(tzinfo=None)
+        since = now - _dt.timedelta(days=RANGES[run])
+        return frozenset(int(r["run_no"]) for r in shortlist["runs"]
+                         if "run_no" in r and (_finished(r.get("finished_at")) or since) > since)
+    nums = [int(x) for x in run.split(",")]
+    return nums[0] if len(nums) == 1 else frozenset(nums)
 
 
 def jobs_for(shortlist: Mapping[str, Any],
@@ -60,6 +83,8 @@ def jobs_for(shortlist: Mapping[str, Any],
     """The shortlisted jobs for one run (or all), as fresh dicts."""
     if run is None:
         return []
+    if isinstance(run, frozenset):
+        return [dict(j) for j in shortlist["jobs"] if j.get("run_no") in run]
     return [dict(j) for j in shortlist["jobs"]
             if run == "all" or j.get("run_no") == run]
 

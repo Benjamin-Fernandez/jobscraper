@@ -6,7 +6,7 @@
 //   defineEmits(tabEmits)
 //
 // Props - the shared dataset the shell owns:
-//   run      the selected run: a number, or 'all'
+//   run      what is shown: 'all' | 'week' | 'month' | the chosen run numbers (runs.js)
 //   runs     the run list, newest first (GET /api/runs)
 //   jobs     that run's shortlist, each job carrying its application `status`
 //   loading  the shortlist is being fetched
@@ -14,9 +14,9 @@
 // Events:
 //   changed      reload the dataset; `{ runs: true }` reloads the run list too
 //                (a run just finished) and follows the newest run
-//   select-run   show another run (a number or 'all')
+//   select-run   show other runs (any value `run` can take)
 export const tabProps = {
-  run: { type: [Number, String], default: null },
+  run: { type: [Number, String, Array], default: 'all' },
   runs: { type: Array, default: () => [] },
   jobs: { type: Array, default: () => [] },
   loading: { type: Boolean, default: false },
