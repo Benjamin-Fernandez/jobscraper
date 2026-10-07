@@ -1,8 +1,12 @@
 # JobScraper
 
 Watches the careers pages of the companies you care about, keeps only the
-new-graduate software roles **based in Singapore** that fit your resume, and puts
-them on one web page where you open them, apply, and track what happened next.
+new-graduate and early-career roles **based in Singapore** that fit your resume,
+and puts them on one web page where you open them, apply, and track what happened
+next.
+
+**New here? Start with [`docs/OVERVIEW.md`](docs/OVERVIEW.md)** — what it does, a
+tour of the features, and how the pieces fit together, in plain language.
 
 It is cheap by construction: free local rules throw away ~99% of postings before
 a model ever sees one, and the survivors go to **Qwen3, an open model running on

@@ -1,6 +1,11 @@
 # JobScraper v2 — Product Requirements & Build Specification
 
-**Status:** ACTIVE — in implementation, parallel lanes (§0.6)
+> **Looking for how the app works today?** Read [`docs/OVERVIEW.md`](../../docs/OVERVIEW.md)
+> first — a short, current, plain-language overview. This PRD is the full
+> specification and the build record (§10, M0–M17); its earlier sections describe
+> the design as first planned, and later milestones changed parts of it.
+
+**Status:** COMPLETE (M0–M17) — in daily use as the personal version
 **Created:** 2026-09-23
 **Supersedes:** the v1 pipeline described in `docs/DESIGN.md`
 **Owner:** Benjamin (single user, personal job search)
