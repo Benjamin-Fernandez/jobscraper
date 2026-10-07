@@ -4,29 +4,6 @@
 The full specification and the record of every change live in the PRD
 (`.claude/prds/jobscraper-v2.prd.md`); this page is the short version.*
 
----
-
-## In one minute
-
-Looking for a job at specific companies means checking each company's careers
-site again and again, and reading every posting to find the few that fit.
-**JobScraper does that for you.**
-
-You give it your resume and the companies you care about. It checks their
-careers sites on a schedule, throws away everything that clearly doesn't fit,
-asks an AI model to read what's left, and shows you a short list of
-**new-graduate and early-career roles based in Singapore** that match you —
-with the full job description, a link to apply, and a place to track every
-application.
-
-It runs on your own computer. Your resume and your application history never
-leave it, and the AI model runs locally too — no account, no subscription,
-no API key.
-
-**Today:** about 300 companies watched, tens of thousands of postings read, and
-only the few hundred that fit ever reach you.
-
----
 
 ## A week with JobScraper
 
