@@ -208,7 +208,7 @@ onMounted(() => {
             <p id="te-suggest-title" class="te-question">Recommended titles</p>
             <p class="muted small">
               Qwen reads your resume - field of study, internships, skills - and the titles above,
-              and suggests up to {{ data.max_suggestions }} more.
+              and suggests {{ data.max_suggestions }} new ones each time: never a title it suggested before.
             </p>
           </div>
           <button type="button" class="primary te-suggest-btn" :disabled="running" @click="suggest">
@@ -220,6 +220,9 @@ onMounted(() => {
 
         <template v-if="suggestions">
           <p v-if="basedOn.length" class="small te-based"><span class="muted">Based on:</span> {{ basedOn.join(' · ') }}</p>
+          <p v-if="suggestions.repeated" class="notice warn small te-repeated" role="status">
+            Qwen found nothing new that fits you - these are earlier recommendations you have not added.
+          </p>
           <ul v-if="suggestions.items.length" class="te-suggestions" aria-label="Recommended titles">
             <li v-for="s in suggestions.items" :key="s.title">
               <button type="button" class="te-suggestion" :disabled="full || saving" @click="add(s.title)">
@@ -229,7 +232,7 @@ onMounted(() => {
               </button>
             </li>
           </ul>
-          <p v-else class="muted small">Every recommendation is already on your list.</p>
+          <p v-else class="muted small te-none">No new titles fit you right now - everything relevant is on your list or was suggested before.</p>
           <div class="te-foot">
             <span class="muted small">Recommended {{ when(suggestions.generated_at) }}<template v-if="suggestions.model"> by {{ suggestions.model }}</template>.</span>
             <button

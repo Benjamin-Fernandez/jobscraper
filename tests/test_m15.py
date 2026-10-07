@@ -114,7 +114,7 @@ def test_web_titles_default_to_the_resume_with_the_plan_limits():
         body = c.get("/api/titles").json()
     assert body == {"titles": ["software engineer", "backend engineer"], "source": "resume",
                     "resume_titles": ["software engineer", "backend engineer"],
-                    "max_titles": None, "max_suggestions": 20, "plan": "local",
+                    "max_titles": None, "max_suggestions": 5, "plan": "local",   # M17: 5 new a request
                     "suggestions": None}
 
 
@@ -274,7 +274,7 @@ def test_suggest_caps_excludes_chosen_and_reports_what_it_read():
     assert out["experience"] == ["Software intern at Grab (internship)"]
     assert out["model"] == "qwen-stub" and out["based_on"] == ["software engineer"]
     system, user = q.seen[0]
-    assert "at most 2" in system and "RESUME TEXT" in user
+    assert "exactly 2 new" in system and "RESUME TEXT" in user    # M17: aim for the full count
     assert "software engineer" in user.split("<chosen_titles>")[1], "it sees what is chosen"
     assert "<open_to>fintech; trade operations</open_to>" in user, "and the areas you are open to"
 

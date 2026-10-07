@@ -24,6 +24,7 @@ const detail = w => w.find('.detail')
 
 beforeEach(() => {
   resetDismissed()
+  window.localStorage.clear()          // the Not interested section's open/closed state
   dismissToast()
   api = fakeApi()
   vi.stubGlobal('fetch', api.fetch)
@@ -217,32 +218,78 @@ describe('Inbox actions', () => {
     expect(toast.current).toBeNull()
   })
 
-  it('Not interested hides the role locally, touches no server, and can be undone', async () => {
+  // M17: Not interested is stored and listed in its own section at the bottom.
+  const inSection = (w, id) => w.findAll(`.cards.${id} .card .company`).map(c => c.text())
+
+  it('Not interested moves the role to its own section at the bottom, stored, and Undo brings it back', async () => {
     const wrapper = mountInbox()
     await card(wrapper, 'GovTech').find('.card-hit').trigger('click')
     await detail(wrapper).find('button.dismiss').trigger('click')
+    await flushPromises()
 
-    expect(card(wrapper, 'GovTech')).toBeUndefined()
-    expect(wrapper.find('.count').text()).toContain('1 hidden this session')
-    // Nothing written: the only requests are the detail pane reading descriptions.
-    expect(api.calls.filter(c => c.method !== 'GET' || !c.url.startsWith('api/postings/'))).toHaveLength(0)
-    expect(JSON.parse(window.sessionStorage.getItem('jobscraper.dismissed'))).toEqual(['d4e5f6'])
+    expect(inSection(wrapper, 'new')).toEqual(['Shopee', 'OKX'])
+    expect(inSection(wrapper, 'ni')).toEqual(['GovTech'])
+    expect(wrapper.find('.ni-head').text()).toContain('Not interested')
+    expect(wrapper.find('.count').text()).toContain('2 new roles')
+    expect(wrapper.find('.count').text()).toContain('1 not interested')
+    expect(api.calls.filter(c => c.method === 'PUT').map(c => c.url)).toEqual(['api/dismissals/d4e5f6'])
+    expect(toast.current.message).toBe('Moved to Not interested: Platform Infrastructure Engineer, AISO at GovTech')
 
     await toast.current.action.run()
-    expect(companies(wrapper)).toHaveLength(3)
+    await flushPromises()
+    expect(api.calls.filter(c => c.method === 'DELETE').map(c => c.url)).toEqual(['api/dismissals/d4e5f6'])
+    expect(inSection(wrapper, 'new')).toHaveLength(3)
+    expect(wrapper.find('.cards.ni').exists()).toBe(false)
   })
 
-  it('the count\'s "show" brings hidden roles back', async () => {
+  it('a role dismissed before a restart starts in the section, and can be moved back', async () => {
+    const jobs = jobsFor(12).map(j => (j.id === 'd4e5f6' ? { ...j, dismissed_at: '2026-09-25T10:00:00' } : j))
+    const wrapper = mountInbox(jobs)
+    expect(inSection(wrapper, 'new')).toEqual(['Shopee', 'OKX'])
+    expect(inSection(wrapper, 'ni')).toEqual(['GovTech'])
+
+    await card(wrapper, 'GovTech').find('.card-hit').trigger('click')
+    expect(detail(wrapper).find('button.dismiss').exists()).toBe(false)
+    expect(detail(wrapper).find('.ni-note').text()).toContain('You marked this Not interested on 25 Sep')
+    await detail(wrapper).find('button.undismiss').trigger('click')
+    await flushPromises()
+    expect(api.calls.find(c => c.method === 'DELETE').url).toBe('api/dismissals/d4e5f6')
+    expect(inSection(wrapper, 'new')).toContain('GovTech')
+  })
+
+  it('the section folds away, and stays folded', async () => {
+    const jobs = jobsFor(12).map(j => (j.id === 'a1b2c3' ? { ...j, dismissed_at: '2026-09-25T10:00:00' } : j))
+    const wrapper = mountInbox(jobs)
+    await wrapper.find('.ni-head').trigger('click')
+    expect(wrapper.find('.ni-head').attributes('aria-expanded')).toBe('false')
+    expect(wrapper.find('.cards.ni').exists()).toBe(false)
+    wrapper.unmount()
+    const again = mountInbox(jobs)
+    expect(again.find('.cards.ni').exists()).toBe(false)
+    expect(again.find('.ni-head').text()).toContain('1')
+  })
+
+  it('when every role left is Not interested, the section still shows', async () => {
+    const jobs = jobsFor(12).map(j => ({ ...j, dismissed_at: '2026-09-25T10:00:00' }))
+    const wrapper = mountInbox(jobs)
+    expect(wrapper.find('.list-note').text()).toContain('everything left is marked Not interested')
+    expect(inSection(wrapper, 'ni')).toHaveLength(3)
+  })
+
+  it('roles dismissed before M17 (this tab only) are stored on first load', async () => {
+    window.sessionStorage.setItem('jobscraper.dismissed', JSON.stringify(['g7h8i9']))
     const wrapper = mountInbox()
-    await detail(wrapper).find('button.dismiss').trigger('click')
-    await wrapper.find('.count button.show-hidden').trigger('click')
-    expect(companies(wrapper)).toHaveLength(3)
+    await flushPromises()
+    expect(api.calls.filter(c => c.method === 'PUT').map(c => c.url)).toEqual(['api/dismissals/g7h8i9'])
+    expect(inSection(wrapper, 'ni')).toEqual(['Shopee'])
+    expect(window.sessionStorage.getItem('jobscraper.dismissed')).toBeNull()
+    expect(wrapper.emitted('changed')).toBeTruthy()
   })
 
-  it('a dismissal survives the tab being re-mounted within the session', async () => {
-    const first = mountInbox()
-    await detail(first).find('button.dismiss').trigger('click')
-    first.unmount()
-    expect(mountInbox().findAll('.card')).toHaveLength(2)
+  it('a posting already tracked under another id is not new', () => {
+    const jobs = jobsFor(12).map(j => (j.id === 'a1b2c3' ? { ...j, tracked_as: { job_id: 'x', status: 'applied' } } : j))
+    const wrapper = mountInbox(jobs)
+    expect(companies(wrapper)).toEqual(['Shopee', 'GovTech'])
+    expect(wrapper.find('.count .twins').text()).toBe('1 duplicate of tracked roles hidden')
   })
 })

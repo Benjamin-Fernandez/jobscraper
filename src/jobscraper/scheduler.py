@@ -37,10 +37,6 @@ class Plan:
     due: list[WatchedCompany]
     next_due_at: Optional[str]   # set only when nothing is due: when something will be
 
-    @property
-    def empty(self) -> bool:
-        return not self.due
-
 
 def plan(store: Store, batch_size: int, cycle_days: int,
          now: Optional[str] = None) -> Plan:

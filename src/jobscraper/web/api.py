@@ -28,6 +28,26 @@ from jobscraper.web.jobs import CommandBuilder, JobManager, cli_command
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 
+
+class SpaFiles(StaticFiles):
+    """The built UI, with caching that survives an update.
+
+    The entry page (`index.html`) names the bundle's files, which get new names
+    on every build. Served with no Cache-Control, a browser may keep reusing an
+    old copy of the page - and so the old app - long after an update: seen on
+    2026-09-28, when the app window kept showing M16 after M17 was installed.
+    So the page is `no-cache` (always revalidated: a cheap 304 when unchanged),
+    and the files under `assets/`, whose content never changes under one name,
+    may be kept for a year."""
+
+    async def get_response(self, path: str, scope: Any) -> Any:
+        response = await super().get_response(path, scope)
+        if path.replace("\\", "/").startswith("assets/"):
+            response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+        else:
+            response.headers["Cache-Control"] = "no-cache"
+        return response
+
 UNBUILT_HINT = ("The web UI has not been built.\n"
                 "  cd web\n  npm install\n  npm run build\n"
                 "See web/README.md.\n")
@@ -184,7 +204,7 @@ def create_app(cfg: Optional[Config] = None,
     _include_routers(app)
 
     if (static_dir / "index.html").is_file():
-        app.mount("/", StaticFiles(directory=static_dir, html=True), name="spa")
+        app.mount("/", SpaFiles(directory=static_dir, html=True), name="spa")
     else:
         @app.get("/", response_class=PlainTextResponse, include_in_schema=False)
         def unbuilt() -> str:

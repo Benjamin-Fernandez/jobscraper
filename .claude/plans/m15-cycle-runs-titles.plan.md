@@ -8,7 +8,7 @@ implementation in one request, which is the confirmation gate.
 
 ## Summary
 Three user controls, each built so a future tier (Free / Plus / Pro, see
-`mullti_user_prd.md` §11) only changes numbers, not code: (1) how often the
+`mullti_user_prd.md` §11, now in the jobscraper-cloud repo) only changes numbers, not code: (1) how often the
 company cycle restarts, chosen in Settings from the options the plan allows;
 (2) a run selector that opens on **All runs** and offers **Past week**, **Past
 month** and **Choose runs…**, which opens a picker on the Runs tab (0-match runs

@@ -19,8 +19,8 @@ from typing import Any, Optional
 import yaml
 
 from jobscraper.config import CYCLE_DAYS_KEY, Config
-from jobscraper.models import (SUGGESTIONS_KEY, USER_TITLES_KEY, dedupe_titles,
-                               parse_titles_json)
+from jobscraper.models import (SUGGEST_BATCH, SUGGESTIONS_KEY, USER_TITLES_KEY,
+                               dedupe_titles, parse_titles_json)
 
 BATCH_SIZE_KEY = "batch_size"
 
@@ -139,10 +139,12 @@ def titles_view(cfg: Config, store: Any) -> dict[str, Any]:
                 "field_of_study": doc.get("field_of_study") or "",
                 "experience": [str(e) for e in (doc.get("experience") or [])],
                 "items": items[:plan.max_title_suggestions],
+                # Nothing new was found, so these are earlier recommendations (M17).
+                "repeated": bool(doc.get("repeated")),
             }
     return {"titles": titles, "source": "custom" if user else "resume",
             "resume_titles": resume, "max_titles": plan.max_target_titles,
-            "max_suggestions": plan.max_title_suggestions, "plan": plan.name,
+            "max_suggestions": min(SUGGEST_BATCH, plan.max_title_suggestions), "plan": plan.name,
             "suggestions": suggestions}
 
 
@@ -168,3 +170,52 @@ def companies_view(cfg: Config, store: Any) -> dict[str, Any]:
             "searched": counts["found"] + counts["watched"],
             "max_companies": cfg.plan.max_companies,
             "plan": cfg.plan.name}
+
+
+# ---------------------------------------------------------------- company health (M17)
+
+# Why a company could not be scanned, in words (companies.last_error_class).
+SCAN_ERRORS = {
+    "blocked": "the site blocks automated access",
+    "gone": "the careers page no longer exists",
+    "schema": "no job listings could be read from the page",
+    "transient": "a temporary error (timeout or server error) - retried on the next scan",
+}
+
+
+def _stamp(v: Any) -> str:
+    return str(v or "").replace("T", " ")[:16]
+
+
+def company_health_view(store: Any) -> dict[str, Any]:
+    """Every watched company and whether it can be scanned (the Companies tab's
+    CSV): `ok` - the last scan worked; `failed` - it did not (with the reason);
+    `not_scanned` - never tried yet. Scannable first, then failed, by name."""
+    found = {r["company_key"] for r in store.company_list() if r.get("company_key")}
+    rows = []
+    for r in store.company_health():
+        failures = int(r.get("consecutive_failures") or 0)
+        if not r.get("last_scraped_at") and r.get("last_status") is None:
+            state = "not_scanned"
+        elif r.get("quarantined_at") or failures > 0:
+            state = "failed"
+        else:
+            state = "ok"
+        reason = ""
+        if state == "failed":
+            reason = SCAN_ERRORS.get(r.get("last_error_class") or "", "an unexpected error")
+            if r.get("quarantined_at"):
+                reason += "; paused after repeated failures, retried later"
+        rows.append({
+            "company": r["name"], "state": state, "reason": reason,
+            "open_roles": r.get("last_postings") if state == "ok" else None,
+            "job_board": r.get("provider") or "", "careers_url": r.get("careers_url") or "",
+            "last_scan": _stamp(r.get("last_scraped_at")),
+            "last_success": _stamp(r.get("last_success_at")),
+            "failures_in_a_row": failures, "error": (r.get("last_error") or "") if state == "failed" else "",
+            "source": "your list" if r["key"] in found else "watchlist",
+        })
+    order = {"ok": 0, "failed": 1, "not_scanned": 2}
+    rows.sort(key=lambda x: (order[x["state"]], x["company"].lower()))
+    counts = {s: sum(1 for x in rows if x["state"] == s) for s in order}
+    return {"total": len(rows), "counts": counts, "items": rows}

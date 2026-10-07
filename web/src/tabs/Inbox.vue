@@ -5,13 +5,15 @@
 //
 // The Inbox holds only roles you have not acted on. Save (status `to_apply`)
 // and Mark applied (`applied`) move a role to the Applications tab at once,
-// with a toast offering Undo and a link there. Not interested hides it for
-// this session only (open question Q2, left as is by the user). Opening the
+// with a toast offering Undo and a link there. Not interested (M17) moves it
+// to its own section at the bottom, kept on the server, so it does not come
+// back as new after a restart. A second listing of a role already tracked -
+// the same posting under another id - is left out (M17). Opening the
 // posting on the company's site asks afterwards whether you applied, the way
 // LinkedIn does, so the record is one click away.
 import { computed, nextTick, ref, watch } from 'vue'
 import { describeError, getPosting, setApplicationStatus, untrackApplication } from '../api.js'
-import { dismiss, isDismissed, restoreAll } from '../dismissed.js'
+import { dismiss, dismissedAt, isDismissed, migrateSessionDismissals, restore } from '../dismissed.js'
 import { cleanLocation, plural, safeUrl, shortDate } from '../format.js'
 import { tabEmits, tabProps } from '../shell.js'
 import { showToast } from '../toast.js'
@@ -40,9 +42,12 @@ const scope = computed(() => (props.run === 'all' ? 'any run yet'
     : runLabel(props.run).toLowerCase()))
 
 // Untracked roles: no application status yet. Tracked ones live in Applications.
-const untracked = computed(() => props.jobs.filter(j => !j.status && !pending.value.has(j.id)))
+// A job whose posting is already tracked under another id (`tracked_as`, the
+// same URL) is not new either (M17).
+const untracked = computed(() => props.jobs.filter(j => !j.status && !j.tracked_as && !pending.value.has(j.id)))
 const tracked = computed(() => props.jobs.filter(j => j.status).length)
-const dismissedHere = computed(() => untracked.value.filter(j => isDismissed(j.id)))
+const twins = computed(() => props.jobs.filter(j => !j.status && j.tracked_as).length)
+const notInterestedCount = computed(() => untracked.value.filter(isDismissed).length)
 
 function matches(job, q) {
   if (!q) return true
@@ -61,12 +66,40 @@ const ranked = computed(() => untracked.value.some(j => j.company_rank !== null 
 const visible = computed(() => {
   const q = query.value.trim().toLowerCase()
   return untracked.value
-    .filter(j => !isDismissed(j.id) && matches(j, q))
+    .filter(j => !isDismissed(j) && matches(j, q))
     .sort(SORTS[sort.value] ?? SORTS.newest)
 })
 
+// Not interested (M17): below the new roles, most recently dismissed first.
+const notInterested = computed(() => {
+  const q = query.value.trim().toLowerCase()
+  return untracked.value
+    .filter(j => isDismissed(j) && matches(j, q))
+    .sort((a, b) => String(dismissedAt(b)).localeCompare(String(dismissedAt(a))))
+})
+
+// The section's open/closed state is remembered on this device.
+const NI_KEY = 'jobscraper.inbox.notInterestedOpen'
+function readNiOpen() {
+  try { return window.localStorage.getItem(NI_KEY) !== '0' } catch { return true }
+}
+const niOpen = ref(readNiOpen())
+watch(niOpen, open => {
+  try { window.localStorage.setItem(NI_KEY, open ? '1' : '0') } catch { /* blocked */ }
+})
+
+const groups = computed(() => {
+  const out = [{ id: 'new', label: 'New roles', jobs: visible.value, open: true }]
+  if (notInterested.value.length) {
+    out.push({ id: 'ni', label: 'Not interested', jobs: notInterested.value, open: niOpen.value })
+  }
+  return out
+})
+// Every card on screen, in order: the keyboard and "the next role" walk this.
+const listed = computed(() => groups.value.filter(g => g.open).flatMap(g => g.jobs))
+
 const companies = computed(() => new Set(visible.value.map(j => j.company)).size)
-const selected = computed(() => visible.value.find(j => j.id === selectedId.value) ?? visible.value[0] ?? null)
+const selected = computed(() => listed.value.find(j => j.id === selectedId.value) ?? listed.value[0] ?? null)
 
 function years(job) {
   if (job.yoe_min === null || job.yoe_min === undefined) return null
@@ -121,16 +154,16 @@ function select(job, { open = true } = {}) {
 
 // The role to show once `job` leaves the list: the next one, else the previous.
 function neighbour(job) {
-  const list = visible.value
+  const list = listed.value
   const i = list.findIndex(j => j.id === job.id)
   return (list[i + 1] ?? list[i - 1] ?? null)?.id ?? null
 }
 
 async function onListKey(event) {
   const step = { ArrowDown: 1, j: 1, ArrowUp: -1, k: -1 }[event.key]
-  if (!step || !visible.value.length) return
+  if (!step || !listed.value.length) return
   event.preventDefault()
-  const list = visible.value
+  const list = listed.value
   const i = Math.max(0, list.findIndex(j => j.id === selected.value?.id))
   const next = list[Math.min(list.length - 1, Math.max(0, i + step))]
   select(next, { open: false })
@@ -185,14 +218,34 @@ async function undo(job) {
   emit('changed')
 }
 
-function notInterested(job) {
+async function markNotInterested(job) {
+  writeError.value = ''
   selectedId.value = neighbour(job)
-  dismiss(job.id)
+  try {
+    await dismiss(job)
+  } catch (e) {
+    selectedId.value = job.id
+    writeError.value = `Could not mark ${job.company} · ${job.title} as not interested: ${describeError(e)}`
+    return
+  }
   showToast({
-    message: `Hidden for this session: ${job.title} at ${job.company}`,
-    action: { label: 'Undo', run: () => { restoreAll([job.id]); selectedId.value = job.id } },
+    message: `Moved to Not interested: ${job.title} at ${job.company}`,
+    action: { label: 'Undo', run: () => moveBack(job) },
   })
 }
+
+async function moveBack(job) {
+  writeError.value = ''
+  try {
+    await restore(job)
+    selectedId.value = job.id
+  } catch (e) {
+    writeError.value = `Could not move ${job.company} · ${job.title} back: ${describeError(e)}`
+  }
+}
+
+// Roles dismissed before M17 were kept in this tab only; store them now.
+migrateSessionDismissals().then(n => { if (n) emit('changed') })
 
 // "Choose runs…": the picker is the Runs tab's run history (M15).
 function chooseRuns() {
@@ -212,12 +265,14 @@ function markOpened(job) {
         <h2 class="page-title">Inbox</h2>
         <p v-if="!firstLoad && !error" class="page-sub count">
           {{ plural(visible.length, 'new role') }} at {{ plural(companies, 'company', 'companies') }}
-          <template v-if="dismissedHere.length">
-            · {{ dismissedHere.length }} hidden this session
-            <button type="button" class="link show-hidden" @click="restoreAll(dismissedHere.map(j => j.id))">show</button>
+          <template v-if="notInterestedCount">
+            · <span class="ni-count">{{ notInterestedCount }} not interested</span>
           </template>
           <template v-if="tracked">
             · <a class="tracked" href="#/applications">{{ tracked }} in Applications</a>
+          </template>
+          <template v-if="twins">
+            · <span class="twins" title="The same posting is listed under another company or id, and you already track it in Applications">{{ plural(twins, 'duplicate') }} of tracked roles hidden</span>
           </template>
         </p>
       </div>
@@ -261,20 +316,30 @@ function markOpened(job) {
       <p class="empty-title">You're all caught up.</p>
       <p class="muted">Every role here is in <a href="#/applications">Applications</a>.</p>
     </div>
-    <div v-else-if="!visible.length && query.trim()" class="empty">
+    <div v-else-if="!visible.length && !notInterested.length && query.trim()" class="empty">
       <Icon name="search" :size="28" />
       <p class="empty-title">No roles match “{{ query.trim() }}”.</p>
       <p><button type="button" class="link" @click="query = ''">Clear the search</button></p>
     </div>
-    <div v-else-if="!visible.length" class="empty">
-      <Icon name="inbox" :size="28" />
-      <p class="empty-title">Everything here is hidden for this session.</p>
-    </div>
 
-    <div v-if="!error && visible.length" class="split" :class="{ 'show-detail': detailOpen, refreshing: loading }">
-      <ul class="job-list surface" aria-label="New roles" @keydown="onListKey">
+    <div v-if="!error && untracked.length && (visible.length || notInterested.length)" class="split" :class="{ 'show-detail': detailOpen, refreshing: loading }">
+      <div class="job-list surface" @keydown="onListKey">
+       <template v-for="group in groups" :key="group.id">
+        <button
+          v-if="group.id === 'ni'"
+          type="button"
+          class="ni-head"
+          :aria-expanded="niOpen ? 'true' : 'false'"
+          @click="niOpen = !niOpen"
+        >
+          <Icon name="chevron" /> Not interested <span class="ni-num">{{ group.jobs.length }}</span>
+        </button>
+        <ul v-if="group.open" class="cards" :class="group.id" :aria-label="group.label">
+        <li v-if="group.id === 'new' && !group.jobs.length" class="list-note muted">
+          No new roles{{ query.trim() ? ' match' : '' }} - everything left is marked Not interested.
+        </li>
         <li
-          v-for="job in visible"
+          v-for="job in group.jobs"
           :key="job.id"
           class="card"
           :class="{ selected: selected && job.id === selected.id, closed: job.closed }"
@@ -299,7 +364,9 @@ function markOpened(job) {
             </span>
           </button>
         </li>
-      </ul>
+        </ul>
+       </template>
+      </div>
 
       <article v-if="selected" :key="selected.id" class="detail surface" aria-labelledby="detail-title" :data-job="selected.id">
         <button type="button" class="ghost back" @click="detailOpen = false">
@@ -339,10 +406,16 @@ function markOpened(job) {
           <button type="button" class="save" :disabled="busy" @click="track(selected, 'to_apply')">
             <Icon name="bookmark" /> Save
           </button>
-          <button type="button" class="ghost dismiss" @click="notInterested(selected)">
+          <button v-if="isDismissed(selected)" type="button" class="ghost undismiss" @click="moveBack(selected)">
+            <Icon name="undo" /> Move back to new roles
+          </button>
+          <button v-else type="button" class="ghost dismiss" @click="markNotInterested(selected)">
             <Icon name="x" /> Not interested
           </button>
         </div>
+        <p v-if="isDismissed(selected)" class="muted small ni-note">
+          You marked this Not interested{{ dismissedAt(selected) ? ` on ${shortDate(dismissedAt(selected))}` : '' }}.
+        </p>
 
         <div v-if="opened.has(selected.id)" class="did-apply" role="status">
           <span>Did you apply at {{ selected.company }}?</span>
@@ -407,7 +480,26 @@ function markOpened(job) {
   overflow-y: auto;
   overscroll-behavior: contain;
 }
+.cards { list-style: none; margin: 0; padding: 0; }
 .card + .card { border-top: 1px solid var(--border); }
+.list-note { padding: var(--space-3); font-size: var(--text-sm); }
+
+/* Not interested (M17): its own section under the new roles, quieter. */
+.ni-head {
+  display: flex; align-items: center; gap: var(--space-2); width: 100%;
+  margin-top: var(--space-2); padding: var(--space-3) var(--space-3) var(--space-2);
+  background: transparent; border: 0; border-top: 1px solid var(--border-strong);
+  border-radius: 0; box-shadow: none; justify-content: flex-start;
+  font-size: var(--text-xs); font-weight: 650; letter-spacing: 0.06em;
+  text-transform: uppercase; color: var(--muted);
+}
+.ni-head:hover:not(:disabled) { background: transparent; color: var(--text-2); }
+.ni-head .icon { transition: transform 0.15s; }
+.ni-head[aria-expanded='false'] .icon { transform: rotate(-90deg); }
+.ni-num { font-family: var(--mono); font-weight: 500; }
+.cards.ni .card-body, .cards.ni .mark { opacity: 0.65; }
+.ni-note { margin: var(--space-2) 0 0; }
+.twins { color: var(--muted); }
 .card-hit {
   display: flex;
   align-items: flex-start;

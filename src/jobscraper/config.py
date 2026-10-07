@@ -8,7 +8,7 @@ is far cheaper to honour now than to retrofit.
 
 The candidate profile is not here: it is derived from the resume by
 `profile/resume_ingest.py` (PRD 8.3[1]). v1's `Profile` / `config/profile.yaml`
-retired at M9-T1 (archive/v1-src/).
+retired at M9-T1 (kept at the v1-final tag).
 """
 from __future__ import annotations
 
@@ -33,7 +33,7 @@ def _abs(p: str | os.PathLike) -> Path:
 # Every limit a paid tier could change lives on a Plan, and nowhere else: the
 # server validates against it and the web app draws its choices from it, so a
 # tier is a row in PLANS, not a code change. The tier names and numbers follow
-# the multi-user PRD (mullti_user_prd.md section 11).
+# the multi-user PRD (mullti_user_prd.md section 11, in the jobscraper-cloud repo).
 #
 # `local` is the owner's own install - the only user today - and always has the
 # highest privileges: every cycle option, and no cap (None) on job titles or on

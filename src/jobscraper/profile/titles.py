@@ -35,7 +35,8 @@ from .resume_ingest import _MAX_PROMPT_CHARS, ProfileError, _parse_json
 
 # The storage keys and the title rules are shared with the web app, which may
 # not import this stage (PRD 8.2); they live in models.py.
-from ..models import (MAX_TITLE_CHARS, SUGGESTIONS_KEY, USER_TITLES_KEY,  # noqa: F401
+from ..models import (MAX_TITLE_CHARS, SUGGEST_BATCH, SUGGESTIONS_KEY,  # noqa: F401
+                      USER_TITLES_KEY,
                       dedupe_titles as dedupe, normalise_title as normalise,
                       parse_titles_json as parse_user_titles)
 
@@ -81,19 +82,25 @@ recommend further titles that:
   areas they say they are open to - spread across those areas rather than
   listing many variants of one role;
 - are NOT already among their chosen titles, nor a trivial variant of one
-  (a plural, a reordering, an abbreviation).
+  (a plural, a reordering, an abbreviation);
+- are NOT among the titles already suggested to them - they saw those and chose
+  not to add them - nor a trivial variant of one.
 
 Reply with ONLY this JSON object:
 {{"field_of_study": "<degree and subject, or empty if the resume does not say>",
   "experience": ["<role> at <organisation> (internship | job | project)", ...],
   "suggestions": [{{"title": "<title>", "why": "<one short clause>"}}, ...]}}
 
-Give at most {limit} suggestions, the strongest first."""
+Give exactly {limit} new suggestions, the strongest first, when that many
+relevant titles remain. Give fewer only when no more relevant titles exist, and an
+empty list when nothing relevant is left - never fill the list by repeating a
+chosen or already-suggested title."""
 
 
 def suggest(backend: Any, resume_text: str, profile: dict[str, Any],
             current: list[str], limit: int, *, ceiling_years: int = 3,
             interests: Optional[list[str]] = None,
+            already_suggested: Optional[list[str]] = None,
             now: Optional[str] = None) -> dict[str, Any]:
     """One Qwen call. Returns what the settings table stores under
     SUGGESTIONS_KEY: `field_of_study`, `experience`, `suggestions` (at most
@@ -103,14 +110,16 @@ def suggest(backend: Any, resume_text: str, profile: dict[str, Any],
         raise ProfileError(f"cannot recommend titles - model unavailable: {reason}")
     limit = max(1, int(limit))
     chosen = dedupe(current)
+    seen = dedupe(already_suggested or [])
     skills = ", ".join(str(s) for s in (profile.get("skills") or [])[:40])
     user = ("<resume>\n" + (resume_text or "")[:_MAX_PROMPT_CHARS] + "\n</resume>\n\n"
             + "<skills>" + skills + "</skills>\n"
             + "<open_to>" + "; ".join(str(i) for i in (interests or [])) + "</open_to>\n"
-            + "<chosen_titles>\n" + "\n".join(chosen or ["(none yet)"]) + "\n</chosen_titles>\n\n"
+            + "<chosen_titles>\n" + "\n".join(chosen or ["(none yet)"]) + "\n</chosen_titles>\n"
+            + "<already_suggested>\n" + "\n".join(seen or ["(none yet)"]) + "\n</already_suggested>\n\n"
             + f"Respond with ONLY the JSON object described in the system prompt - "
-              f"keys field_of_study, experience, suggestions (at most {limit}). "
-              "Start your reply with `{`.")
+              f"keys field_of_study, experience, suggestions ({limit} new titles, "
+              "none chosen or already suggested). Start your reply with `{`.")
     system = SYSTEM_PROMPT.format(ceiling=int(ceiling_years), limit=limit)
     try:
         comp = backend.complete(system=system, user=user, max_tokens=1500)
@@ -120,7 +129,7 @@ def suggest(backend: Any, resume_text: str, profile: dict[str, Any],
     if not raw:
         raise ProfileError("the model did not return the JSON object asked for")
 
-    taken = {t.lower() for t in chosen}
+    taken = {t.lower() for t in chosen} | {t.lower() for t in seen}
     picked: list[dict[str, str]] = []
     for item in raw.get("suggestions") or []:
         title = normalise((item or {}).get("title") if isinstance(item, dict) else item)
@@ -142,3 +151,41 @@ def suggest(backend: Any, resume_text: str, profile: dict[str, Any],
         "experience": experience,
         "suggestions": picked,
     }
+
+
+def recommend(backend: Any, resume_text: str, profile: dict[str, Any],
+              current: list[str], previous: Optional[dict[str, Any]], *,
+              limit: int = SUGGEST_BATCH, attempts: int = 2, **kw: Any) -> dict[str, Any]:
+    """What "Recommend titles" stores (M17): `limit` titles that are neither
+    chosen nor suggested before. A second call tops up a short answer. Only
+    when nothing new at all is found do the earlier suggestions not yet chosen
+    come back, flagged `repeated`. `seen` remembers every title ever suggested,
+    so the next request asks for different ones."""
+    prev = previous if isinstance(previous, dict) else {}
+    earlier = [i for i in (prev.get("suggestions") or []) if isinstance(i, dict)]
+    seen = dedupe(list(prev.get("seen") or []) + [str(i.get("title") or "") for i in earlier])
+    picked: list[dict[str, str]] = []
+    result: Optional[dict[str, Any]] = None
+    for attempt in range(max(1, attempts)):
+        need = limit - len(picked)
+        if need <= 0:
+            break
+        try:
+            answer = suggest(backend, resume_text, profile, current, need,
+                             already_suggested=seen + [p["title"] for p in picked], **kw)
+        except ProfileError:
+            if result is None:
+                raise
+            break                       # keep what the first call found
+        result = answer
+        picked.extend(answer["suggestions"])
+    assert result is not None
+    chosen = {t.lower() for t in dedupe(current)}
+    out = dict(result, suggestions=picked[:limit], repeated=False)
+    out["seen"] = dedupe(seen + [p["title"] for p in picked])[-300:]
+    if not picked:
+        again = [i for i in earlier if str(i.get("title") or "").lower() not in chosen]
+        if again:
+            out["suggestions"] = again[:limit]
+            out["repeated"] = True
+    return out

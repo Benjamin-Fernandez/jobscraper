@@ -50,7 +50,7 @@ FOUNDATION = {"store", "config", "models", "net", "backends", "watchlist"}
 WEB_MAY_IMPORT = FOUNDATION | PUBLISHER
 
 # Not layered code: the CLI entry points. v1's modules retired at M9-T1
-# (archive/v1-src/), so the only exemptions left are these.
+# (kept at the v1-final tag), so the only exemptions left are these.
 LEGACY = {"cli", "__main__", "__init__"}
 
 SQL_TOKENS = ("SELECT ", "INSERT ", "UPDATE ", "DELETE FROM", "CREATE TABLE")

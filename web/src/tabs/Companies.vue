@@ -12,8 +12,8 @@
 // does not count toward it.
 import { computed, onMounted, ref, watch } from 'vue'
 import {
-  ApiError, LIST_TYPES, clearCompanyList, describeError, getCompanyList,
-  startCompanySearch, uploadCompanyList,
+  ApiError, COMPANY_EXPORT_URL, LIST_TYPES, clearCompanyList, describeError, getCompanyHealth,
+  getCompanyList, startCompanySearch, uploadCompanyList,
 } from '../api.js'
 import { useJob } from '../composables/useJob.js'
 import { tabEmits, tabProps } from '../shell.js'
@@ -58,6 +58,7 @@ const { job, running, refresh, track } = useJob({
   kind: 'companies',
   onFinish: finished => {
     loadList()
+    loadHealth()
     emit('changed', {})
     if (finished.state === 'succeeded') note.value = 'The search has finished.'
     else problem.value = 'The company search stopped early - its log is on the Developer tab.'
@@ -86,6 +87,19 @@ const capLine = computed(() => {
   if (cap === null) return `${n} ${n === 1 ? 'company' : 'companies'} counted · no limit on the ${plan} plan`
   return `${n} of ${cap} companies used on the ${plan} plan`
 })
+
+// Every watched company - watchlist and your list - and whether its careers
+// site could be scanned (M17). The CSV behind the link is the same list.
+const health = ref(null)
+const healthError = ref('')
+async function loadHealth() {
+  try {
+    health.value = await getCompanyHealth()
+    healthError.value = ''
+  } catch (e) {
+    healthError.value = describeError(e)
+  }
+}
 
 async function loadList() {
   try {
@@ -222,7 +236,7 @@ function downloadReport() {
   save('companies-report.csv', '﻿' + [head.join(','), ...rows].join('\r\n') + '\r\n', 'text/csv')
 }
 
-onMounted(() => Promise.all([loadList(), refresh()]))
+onMounted(() => Promise.all([loadList(), loadHealth(), refresh()]))
 </script>
 
 <template>
@@ -239,6 +253,23 @@ onMounted(() => Promise.all([loadList(), refresh()]))
         <button type="button" class="clear" :disabled="busy" @click="clear">Clear list</button>
       </div>
     </header>
+
+    <div class="health surface" aria-labelledby="health-title">
+      <div class="health-text">
+        <p id="health-title" class="health-title">Your watched companies</p>
+        <p v-if="health" class="health-counts">
+          <span class="num">{{ health.total }}</span> watched ·
+          <span class="num ok-n">{{ health.counts.ok }}</span> can be scanned ·
+          <span class="num failed-n">{{ health.counts.failed }}</span> failed the last fetch<template v-if="health.counts.not_scanned">
+            · <span class="num">{{ health.counts.not_scanned }}</span> not scanned yet</template>
+        </p>
+        <p v-else-if="healthError" class="muted small">Could not read the companies: {{ healthError }}</p>
+        <p v-else class="muted small">Loading…</p>
+      </div>
+      <a class="button health-csv" :href="COMPANY_EXPORT_URL" download>
+        Download all (.csv)
+      </a>
+    </div>
 
     <label
       class="drop"
@@ -341,6 +372,16 @@ onMounted(() => Promise.all([loadList(), refresh()]))
 </template>
 
 <style scoped>
+.health {
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between;
+  gap: var(--space-3); padding: var(--space-3) var(--space-4); margin-bottom: var(--space-4);
+}
+.health-title { margin: 0; font-weight: 600; }
+.health-counts { margin: var(--space-1) 0 0; font-size: var(--text-sm); color: var(--text-2); }
+.ok-n { color: var(--ok); font-weight: 600; }
+.health .failed-n { color: var(--danger); font-weight: 600; }
+.health-csv { white-space: nowrap; }
+
 .drop {
   display: grid; gap: var(--space-1); justify-items: center; text-align: center;
   padding: var(--space-6) var(--space-4);

@@ -1,5 +1,4 @@
 # JobScraper runtime dependencies. Install with:  pip install -r requirements.txt
-# Lanes append what they introduce (PRD section 0.6); never edit others' lines.
 
 PyYAML>=6.0          # config, watchlist, rules
 httpx>=0.27          # net.py - every scrape request

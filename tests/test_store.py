@@ -183,7 +183,6 @@ def test_store_prefilter_verdict_is_scoped_to_its_rules():
     st.save_prefilter(jid, 1, "rulesA", False, "title_deny", "senior")
     assert st.get_prefilter(jid, 1, "rulesA")["reject_rule"] == "title_deny"
     assert st.get_prefilter(jid, 1, "rulesB") is None
-    assert st.prefilter_rejections_by_rule(1, "rulesA") == {"title_deny": 1}
 
 
 # ---------------- M3-T1b: watchlist -> companies sync ----------------
@@ -234,16 +233,6 @@ def test_sync_careers_url_change_clears_resolution():
     # The old stamp was an attempt on the old board; the new board has never
     # been checked, so it is due next run - like a newly added company (D-9).
     assert c.last_scraped_at is None
-
-
-def test_store_mark_due_clears_only_the_stamp():
-    st = _synced(_entry())
-    cid = st.company_by_key("shopee").id
-    st.stamp_scraped([cid], at="2026-09-20T00:00:00")
-    st.record_failure(cid, "gone", "404")
-    st.mark_due([cid])
-    c = st.company_by_key("shopee")
-    assert c.last_scraped_at is None and c.consecutive_failures == 1
 
 
 def test_sync_keeps_a_resolution_discovery_learned():

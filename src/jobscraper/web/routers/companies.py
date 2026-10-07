@@ -14,16 +14,19 @@ layer does not reach a model or the network (PRD 8.2).
 """
 from __future__ import annotations
 
+import csv
+import datetime as _dt
 import io
 import zipfile
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.responses import Response
 
 from jobscraper import watchlist
 from jobscraper.config import Config
 from jobscraper.models import MAX_COMPANY_LINES, parse_company_lines
-from jobscraper.web.control import companies_view
+from jobscraper.web.control import companies_view, company_health_view
 from jobscraper.web.deps import get_config, open_store
 
 router = APIRouter(tags=["companies"])
@@ -66,6 +69,45 @@ async def put_list(request: Request, cfg: Config = Depends(get_config)) -> dict[
         view = companies_view(cfg, store)
     view["upload"] = dict(change, read=len(names), capped=len(names) >= MAX_COMPANY_LINES)
     return view
+
+
+@router.get("/companies/health")
+def get_health(request: Request) -> dict[str, Any]:
+    """Every watched company and whether it can be scanned (M17)."""
+    with open_store(request) as store:
+        return company_health_view(store)
+
+
+CSV_COLUMNS = [("company", "Company"), ("state", "Can be scanned"), ("reason", "Why not"),
+               ("open_roles", "Open roles at last scan"), ("job_board", "Job board"),
+               ("careers_url", "Careers URL"), ("last_scan", "Last scanned (UTC)"),
+               ("last_success", "Last successful scan (UTC)"),
+               ("failures_in_a_row", "Failures in a row"), ("error", "Error detail"),
+               ("source", "Source")]
+STATE_WORDS = {"ok": "yes", "failed": "no - failed", "not_scanned": "not scanned yet"}
+
+
+def _cell(v: Any) -> str:
+    s = "" if v is None else str(v)
+    # A cell starting with = + - @ would run as a formula in Excel.
+    return "'" + s if s[:1] in ("=", "+", "-", "@") else s
+
+
+@router.get("/companies/export.csv")
+def export_csv(request: Request) -> Response:
+    """The same list as a CSV file to download: scannable companies first,
+    then the ones whose fetch failed, with the reason (M17)."""
+    with open_store(request) as store:
+        view = company_health_view(store)
+    buf = io.StringIO()
+    out = csv.writer(buf)
+    out.writerow([title for _, title in CSV_COLUMNS])
+    for row in view["items"]:
+        row = dict(row, state=STATE_WORDS[row["state"]])
+        out.writerow([_cell(row[key]) for key, _ in CSV_COLUMNS])
+    name = f"jobscraper-companies-{_dt.date.today().isoformat()}.csv"
+    return Response(content="\ufeff" + buf.getvalue(), media_type="text/csv; charset=utf-8",
+                    headers={"Content-Disposition": f'attachment; filename="{name}"'})
 
 
 @router.delete("/companies/list")

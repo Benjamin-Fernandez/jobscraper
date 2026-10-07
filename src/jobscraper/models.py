@@ -6,7 +6,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Optional
 
-# Error classes drive the retry policy. See DESIGN.md 3.9.
+# Error classes drive the retry and quarantine policy (pipeline.py, store.py).
 TRANSIENT = "transient"
 BLOCKED = "blocked"
 GONE = "gone"
@@ -93,6 +93,9 @@ class FetchOutcome:
 
 USER_TITLES_KEY = "target_titles"
 SUGGESTIONS_KEY = "title_suggestions"
+# New titles asked for per "Recommend" (M17): always aim for this many that
+# are neither chosen nor suggested before.
+SUGGEST_BATCH = 5
 MAX_TITLE_CHARS = 80
 
 

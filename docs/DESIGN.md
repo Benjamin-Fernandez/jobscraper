@@ -1,12 +1,12 @@
 # JobScraper v2 - Design
 
-The shape of the system and the decisions behind it. This file is generated from
-the specification (`.claude/prds/jobscraper-v2.prd.md`, sections 7, 8.1 and 8.2)
-so the two cannot drift; the PRD remains the source of truth, including the
-stage-by-stage detail (8.3), the data contracts (8.4), the web app (8.5),
-deployment (8.6) and the risks (12).
+The shape of the system and the decisions behind it, taken from the
+specification (`.claude/prds/jobscraper-v2.prd.md`, sections 7, 8.1 and 8.2). The
+PRD remains the source of truth, including the stage-by-stage detail (8.3), the
+data contracts (8.4), the web app (8.5), deployment (8.6), the risks (12) and
+the build ledger of every milestone since (10, M0-M17).
 
-v1's design document is kept at `archive/v1-src/docs/DESIGN.md`.
+v1's design document is in git history at the `v1-final` tag (`docs/DESIGN.md`).
 
 ### 8.1 High-level flow
 
@@ -99,13 +99,15 @@ Arrows are "depends on". Nothing below a layer may import from above it.
 
 ```
         ┌──────────────────────────────────────────────────┐
-  CLI   │  cli.py        run · doctor · web · watchlist     │
+  CLI   │  cli.py   run · web · status · doctor · titles ·  │
+        │           companies · profile · watchlist · purge│
         └───────┬──────────────────────────┬───────────────┘
                 │                          │
         ┌───────▼──────────┐       ┌───────▼───────────────┐
  ORCH   │  pipeline.py     │       │  web/api.py  (FastAPI)│
-        │  orchestrates    │       │  + web/ui  (Vue SPA)  │
-        │  stages 0→6      │       └───────┬───────────────┘
+        │  stages 0→6      │       │  + static/ (Vue SPA,  │
+        │  company_search  │       │    built from web/)   │
+        │  .py (M16)       │       └───────┬───────────────┘
         └───────┬──────────┘               │
                 │                          │
   ┌─────────┬───┴────────┬─────────────┬───┼──────────┬─────────────┐
@@ -129,14 +131,17 @@ Arrows are "depends on". Nothing below a layer may import from above it.
 - `store.py` must not import any stage module.
 - Stage modules (`scheduler`, `scrape/`, `filter`, `decide`, `profile/`) must not
   import each other; `pipeline.py` wires them.
-- `pipeline.py` is the **orchestrator**: the one module allowed to import every
-  stage, and one that nothing may import back. An import of it from below is a
-  cycle waiting to happen.
+- `pipeline.py` and `company_search.py` (M16: finds careers sites for the user's
+  own list) are the **orchestrators**: the modules allowed to import every stage,
+  and ones nothing may import back. An import of one from below is a cycle
+  waiting to happen.
 - `shortlist.py` is a **publisher**, not a stage: it only turns stored decisions
   into a file, and is the one module both `pipeline.py` and `web/` may import.
-- `web/` may import `store.py`, `shortlist.py`, `config.py` and `models.py` —
-  and no stage module. (M0-T4 encodes exactly this list; the earlier wording
-  called `shortlist.py` a stage and a web dependency at once, which is unencodable.)
+- `web/` may import the foundation (`store.py`, `config.py`, `models.py`,
+  `net.py`, `backends.py`, `watchlist.py`) and `shortlist.py` — and no stage or
+  orchestrator. It never calls a model or the network itself: work that needs
+  them (a run, a profile refresh, title recommendations, a company search) runs
+  as a background CLI job. `tests/test_layering.py` encodes exactly this.
 - `backends.py` stays the single place that talks to a model.
 - **`store.py` is the only module containing SQL.** Every other module asks it for
   data. This is what makes the Postgres path in §8.4 one module's work.

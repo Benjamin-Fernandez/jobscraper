@@ -195,3 +195,24 @@ export function clearCompanyList() {
 export function startCompanySearch() {
   return sendJson('jobs/companies', 'POST')
 }
+
+// ---- M17 ----
+
+// "Not interested", kept on the server: the role moves to the Inbox's
+// Not interested section and stays there after a restart. DELETE moves it back.
+export function dismissRole(jobId) {
+  return request(`dismissals/${encodeURIComponent(jobId)}`, { method: 'PUT' })
+}
+
+export function undismissRole(jobId) {
+  return request(`dismissals/${encodeURIComponent(jobId)}`, { method: 'DELETE' })
+}
+
+// Every watched company and whether it can be scanned:
+// {total, counts: {ok, failed, not_scanned}, items: [...]}
+export function getCompanyHealth() {
+  return request('companies/health')
+}
+
+// The same list as a CSV file (the browser downloads it).
+export const COMPANY_EXPORT_URL = 'api/companies/export.csv'
