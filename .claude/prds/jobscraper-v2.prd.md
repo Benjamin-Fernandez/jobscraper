@@ -53,28 +53,12 @@
 - Every new module gets a module docstring explaining *why it exists*, matching
   the house style already in `src/jobscraper/`.
 
-### 0.4 Use the ECC toolkit
+### 0.4 Reviews and tooling
 
-This repo has the ECC skill/agent bundle installed. **Use it — it measurably
-improves the build.** Invoke a skill with the `Skill` tool, an agent with the
-`Agent` tool. Do not hand-roll what a listed tool already does.
+Review what you wrote before marking a task `DONE`: a code review of the diff,
+plus a security review when a change writes user data or opens a port.
 
-| When you are… | Use | Why |
-|---|---|---|
-| Starting any milestone | `/ecc:plan` | Restates requirements and risks, then waits for confirmation before touching code |
-| Writing a new module | `/ecc:tdd-workflow` or `ecc:tdd-guide` | This PRD is test-anchored; every task has a `Verify:` |
-| Finishing a Python task | `/ecc:python-review` | Catches type-hint, security and idiom problems before they compound |
-| Finishing a web task | `/ecc:vue-review`, `/ecc:fastapi-review` | Covers reactivity pitfalls, async correctness, DI, OpenAPI quality |
-| A build or type error blocks you | `/ecc:build-fix` | Minimal-diff resolution instead of architectural drift |
-| Touching the SQLite schema (§8.4) | `ecc:database-reviewer` | Migration safety and query correctness |
-| Anything writes user data or opens a port | `/ecc:security-review` | The web app binds a socket; the pipeline writes files |
-| Reviewing a finished milestone | `/ecc:code-review` | Diff-scoped correctness pass |
-| Adding coverage after a milestone | `/ecc:test-coverage` | Finds the gaps the `Verify:` command misses |
-| Unsure how a v1 module works | `ecc:code-explorer` | Traces execution paths before you change them |
-| The API/docs feel stale after a change | `/ecc:update-docs`, `/ecc:update-codemaps` | Keeps §8 and the README true |
-
-**Rules for tool use:** run the reviewer *for the language you just wrote*, not all
-of them. Treat reviewer findings as advice, not orders — if a finding contradicts
+**Rules for tool use:** Treat reviewer findings as advice, not orders — if a finding contradicts
 this PRD, the PRD wins and you note the disagreement in the task's `Notes:`.
 Within a task, do not spawn subagents for work you can do inline; a task sized
 for one sitting rarely needs one. Parallelism happens **between lanes** (§0.6),
@@ -166,11 +150,6 @@ Work now proceeds in **parallel lanes** — see §0.6 for who does what.
 
 #### Environment facts that will cost you time otherwise
 
-- **A `GateGuard` hook intercepts every `Write`, `Edit` and first `Bash` call.**
-  It refuses the call and demands you first state importers/callers, affected API,
-  data schemas, and the user's verbatim instruction. Present those in the message
-  *before* retrying. This is normal here, not a malfunction. It also blocks
-  `git commit --amend` outright — write a follow-up commit instead.
 - **Windows / PowerShell.** Every `Verify:` in the ledger is a Python or `git`
   one-liner for this reason. POSIX shell (`2>/dev/null`, `| wc -l`) does not run.
   Beware `$?` after a pipe: it reports the *last* command's status, not Python's.
@@ -208,7 +187,7 @@ Parallelism beyond that buys merge conflicts, not speed.
 
 **Never more than 4 agents running at the same moment, reviewers included** —
 one Lead plus up to three lane agents. A lane agent **never spawns agents of its
-own**: it uses skills inline (`ecc:tdd-workflow`, `ecc:verification-loop`) and
+own**: it tests and verifies inline and
 leaves reviewer agents to the Lead, who runs them only when a slot is free. If
 all four slots are busy, review waits; it does not squeeze in a fifth.
 
@@ -325,27 +304,6 @@ without the Lead.
   (§0.3), or it is waiting on a contract above that has not merged yet. In all
   three cases: push, open or update the PR, say which, and stop. Never work
   around a missing dependency by writing into another lane's files.
-
-#### ECC skills for orchestrating this
-
-| When | Skill | Who |
-|---|---|---|
-| Re-cutting lanes, deciding what may run in parallel | `ecc:parallel-execution-optimizer` | Lead |
-| Lane contracts, ownership, board state, merge gates | `ecc:team-agent-orchestration` | Lead |
-| Branch, worktree and commit conventions | `ecc:git-workflow` | All |
-| PRs, `gh`, reviewing and merging | `ecc:github-ops` | All |
-| Proving a chunk before opening its PR | `ecc:verification-loop` | Lanes |
-| Building each task test-first | `ecc:tdd-workflow` | Lanes |
-| The merge-gate review of a PR diff | `/code-review` or `/ecc:code-review` | Lead |
-| Stack reviews at merge (spawn agents → count toward the cap) | `/ecc:python-review` (A, B, D), `/ecc:fastapi-review` + `/ecc:vue-review` (C), `ecc:database-reviewer` (M3) | Lead |
-| Snapshot before a risky merge | `/ecc:checkpoint` | Lead |
-| Handing a lane to a fresh session | `/ecc:save-session`, `/ecc:resume-session` | All |
-
-**Not recommended here:** `ecc:dmux-workflows` (needs tmux, i.e. WSL on this
-Windows machine), `ecc:claude-devfleet` (needs its own server running), the
-`ecc:epic-*` family (GitHub-issue coordination: more ceremony than four lanes
-need; worth it only if the lane count grows), and the `multi-*`/`gan-*` families
-(multi-model loops; this project uses one cheap model by design).
 
 ---
 
@@ -1608,7 +1566,7 @@ Legend: `STATUS` · `Completed` (date) · `Verify` (command that proves it) · `
   `store.due_probation`, which M3-T4 merges into the batch. The three v1 cursor
   tests are ported as staleness equivalents; v1's `--force` test is retired (a
   staleness queue has no cycle boundary to force past). `status` CLI now reads
-  the scheduler. **Pending:** the `ecc:database-reviewer` pass on the due query
+  the scheduler. **Pending:** a database review of the due query
   is deferred until an agent slot frees up (4-agent cap, §0.6).
 - **Do:** `scheduler.py` per §8.3[0] — the due query, `batch_size: 10` (D-13),
   `cycle_days: 14`, stamping `last_scraped_at` on **attempt**. Port the meaningful
@@ -1618,8 +1576,8 @@ Legend: `STATUS` · `Completed` (date) · `Verify` (command that proves it) · `
   a company scraped 13 days ago is not due; at 15 days it is; never-scraped sorts
   ahead of both; a failed fetch still stamps `last_scraped_at`; and with all 229
   fresh, the runner exits 0 reporting the next due date rather than scraping.
-- **Notes:** This is the task that makes "loop back to company 1" work. Use
-  `ecc:database-reviewer` on the due query and its index.
+- **Notes:** This is the task that makes "loop back to company 1" work. Review
+  the due query and its index for correctness.
 
 #### M3-T3b · Migrate v1 application history
 - **STATUS:** `DONE`
@@ -2093,7 +2051,7 @@ Legend: `STATUS` · `Completed` (date) · `Verify` (command that proves it) · `
   **Apply → persists:** on a *copy* of the live DB (the user's application
   record untouched), `POST /api/applications/{id}` `applied`, web server
   restarted, `GET /api/applications` still `applied` with its one
-  `None → applied` event. `/ecc:code-review`-equivalent review of the M9 diff run
+  `None → applied` event. A code review of the M9 diff run
   before closing (one MEDIUM: watchlist names containing ` #` - fixed, tested).
   **Coverage finding:** 59 of 224 companies failed this cycle (24 blocked 403,
   17 transient - 8 of them hostnames that no longer exist, including
@@ -2103,7 +2061,7 @@ Legend: `STATUS` · `Completed` (date) · `Verify` (command that proves it) · `
   filter → decide → shortlist → apply in the web app → status persists.
 - **Verify:** Every §5 metric **except** "spin-up from clone" measured and recorded
   in this file (that one belongs to M10-T2, which runs after this milestone).
-- **Notes:** Run `/ecc:code-review` over the full diff before closing M9.
+- **Notes:** Run a code review over the full diff before closing M9.
 
 ---
 
@@ -2135,7 +2093,7 @@ Legend: `STATUS` · `Completed` (date) · `Verify` (command that proves it) · `
   Document `docker compose run --rm app run` for a batch.
 - **Verify:** `docker compose up` serves the app; stopping and restarting preserves
   application statuses (proves the volume works).
-- **Notes:** Run `/ecc:security-review` on the compose file. Do **not** bind `0.0.0.0`.
+- **Notes:** Run a security review on the compose file. Do **not** bind `0.0.0.0`.
   Verified in job `compose` of
   https://github.com/Benjamin-Fernandez/jobscraper/actions/runs/35942757573:
   `up --wait` serves `/` and `/api/runs`; host publish is `127.0.0.1:8765` only
@@ -2275,7 +2233,7 @@ value)`. `cli.cmd_run` reads the stored `batch_size`.
 - **Verify:** `-k resume_upload` — a PDF saves and hashes; 6 MB answers `413`;
   a text file labelled `application/pdf` answers `415`; a `multipart/form-data`
   post is refused (the CSRF guard); `data/` never holds a partial file.
-- **Notes:** run `/ecc:security-review` on this task before `DONE`.
+- **Notes:** run a security review on this task before `DONE`.
   Verify 10/10 (`-k resume_upload`); `-k web` 61/61; full suite 284/284. Router
   `web/routers/resume.py`. Accepts only `application/pdf` and the DOCX type
   (media-type parameters and case ignored); forms, `text/plain`, octet-stream
@@ -2286,7 +2244,7 @@ value)`. `cli.cmd_run` reads the stored `batch_size`.
   `os.replace`d under a lock, then the other format is deleted. A failed rename
   leaves the old resume and no temp file, which is tested. Live check on :8799:
   PDF saved with a matching sha256; `curl -F` gave `415`; 6 MB gave `413`.
-  **Security review** (`ecc:security-review`, inline) found and fixed:
+  **Security review** (inline) found and fixed:
   (1) clickjacking - the UI now starts runs and uploads, and a framed page's
   clicks would be same-origin, so every response now carries
   `X-Frame-Options: DENY`, `CSP: frame-ancestors 'none'` and `nosniff`;
@@ -2400,7 +2358,7 @@ where you were, and each tab says what it holds before you open it.
 
 #### M12-T5 · Look and feel pass
 - **STATUS:** `DONE` *(superseded by M13, 2026-09-28: the user judged the result "cheaply built"; M13 redesigns it)*
-- **Completed:** — (merge gate 2026-09-25: `/ecc:vue-review` found no critical or
+- **Completed:** — (merge gate 2026-09-25: the Vue review found no critical or
   high issue - one medium, `loadRuns` lacking the stale-response guard, fixed in
   `1ab4d84`; Vitest 88/88, Python 285/285, bundle rebuilt on merged master and
   served. Lane H's own browser pass: Chrome at 1280 px and 375 px, light and
@@ -2411,11 +2369,11 @@ where you were, and each tab says what it holds before you open it.
   light/dark), responsive down to a phone width, focus rings, no layout shift
   when data loads. Rebuild `src/jobscraper/web/static/` and commit it.
 - **Verify:** `npm test` green; `npm run build`; the Lead opens every tab in a
-  browser at desktop and phone widths; `/ecc:vue-review` has no unresolved
+  browser at desktop and phone widths; the Vue review has no unresolved
   high-severity finding.
 - **Notes:** 2026-09-25 (Lane H). Lane H's part is done: `npm test` 88/88, `npm run build`,
   and the rebuilt `static/` is committed after merging M11 from master. What is left
-  for the Lead is the Verify's own browser pass and `/ecc:vue-review`, which runs as an
+  for the Lead is the Verify's own browser pass and the Vue review, which runs as an
   agent, so lanes may not run it. Direction: a quiet "ledger desk". Warm paper
   neutrals, graphite in dark mode, one ink-blue for actions, and green/amber/red only
   for state. Every number (counts, badges, run numbers, the log) is set in tabular
@@ -2470,7 +2428,7 @@ Sources: [LinkedIn job tracker stages](https://github.com/stickerdaniel/linkedin
 [Job portal design examples](https://www.subframe.com/tips/job-portal-website-design-examples),
 [List/details pattern (Microsoft)](https://learn.microsoft.com/en-us/windows/apps/design/controls/list-details).
 
-**Design direction** (ECC `frontend-design-direction`): a calm triage desk for
+**Design direction**: a calm triage desk for
 short daily sessions - dense and scannable, white work surfaces on a soft neutral
 page, one ink-blue for actions, and one colour per application stage (saved
 violet, applied blue, interviewing amber, offer green, rejected red, withdrawn
@@ -2592,11 +2550,10 @@ selector always has "All runs" at the top, then "Past week", "Past month" and
 "Choose runs", which opens a tab to pick specific runs, where a run with nothing
 says "0 matches"; (3) type job titles in, and get up to 20 recommended from the
 resume, field of study, past internships and the titles already chosen; (4) plan
-it with the ECC skill, add it to the PRD, implement it. "There will be a tiering
+it, add it to the PRD, implement it. "There will be a tiering
 system in the future, so design things with that in mind."
 
-**Plan:** `.claude/plans/m15-cycle-runs-titles.plan.md` (ECC `plan` skill,
-2026-09-28) - requirements, decisions M15-D1..D8, patterns mirrored, files, risks.
+**Plan:** `.claude/plans/m15-cycle-runs-titles.plan.md` (2026-09-28) - requirements, decisions M15-D1..D8, patterns mirrored, files, risks.
 
 | # | Decision | Why |
 |---|---|---|

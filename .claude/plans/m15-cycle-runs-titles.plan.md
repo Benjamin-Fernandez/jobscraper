@@ -3,7 +3,7 @@
 **Source PRD**: `.claude/prds/jobscraper-v2.prd.md` (M15, added with this plan)
 **Selected Milestone**: M15 — the user controls cycle, runs shown and titles searched
 **Complexity**: Large (backend, CLI, web API, three tabs; ~25 files)
-**Planned**: 2026-09-28 with the ECC `plan` skill. The user asked for plan → PRD →
+**Planned**: 2026-09-28. The user asked for plan → PRD →
 implementation in one request, which is the confirmation gate.
 
 ## Summary
