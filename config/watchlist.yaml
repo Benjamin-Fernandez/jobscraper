@@ -1747,3 +1747,192 @@ companies:
     slug: dataiku
     notes: "Enterprise AI platform unicorn; SG office. 3 SG roles."
 
+
+  # --- 2026-10-23: Singapore finance / fintech additions. Their names in the
+  # uploaded company list found no board; these boards were checked by hand
+  # (research) and read by the app's own adapters the same day.
+
+  - name: "AlphaGrep"
+    careers_url: https://job-boards.greenhouse.io/alphagrepsecurities
+    provider: greenhouse
+    slug: "alphagrepsecurities"
+    notes: "11 roles, 0 in Singapore at 2026-10-23"
+
+  - name: "Kronos Research"
+    careers_url: https://job-boards.greenhouse.io/kronosresearch
+    provider: greenhouse
+    slug: "kronosresearch"
+    notes: "0 roles, 0 in Singapore at 2026-10-23"
+
+  - name: "Verition Fund Management"
+    careers_url: https://www.verition.com/open-positions
+    provider: greenhouse
+    slug: "veritiongroupllc"
+    notes: "14 roles, 3 in Singapore at 2026-10-23"
+
+  - name: "Dymon Asia Capital"
+    careers_url: https://www.dymonasia.com/join-us/
+    provider: greenhouse
+    slug: "dymonasiacapitalsingaporepteltd"
+    notes: "12 roles, 10 in Singapore at 2026-10-23"
+
+  - name: "Jain Global"
+    careers_url: https://jainglobal.wd5.myworkdayjobs.com/LinkedInCareerSite
+    provider: workday
+    slug: "jainglobal"
+    feed_url: https://jainglobal.wd5.myworkdayjobs.com/LinkedInCareerSite
+    notes: "39 roles, 2 in Singapore at 2026-10-23"
+
+  - name: "Fidelity International"
+    careers_url: https://fil.wd3.myworkdayjobs.com/001
+    provider: workday
+    slug: "fil"
+    feed_url: https://fil.wd3.myworkdayjobs.com/001
+    notes: "89 roles, 0 in Singapore at 2026-10-23"
+
+  - name: "TD Securities"
+    careers_url: https://td.wd3.myworkdayjobs.com/TD_Bank_Careers
+    provider: workday
+    slug: "td"
+    feed_url: https://td.wd3.myworkdayjobs.com/TD_Bank_Careers
+    notes: "600 roles, 1 in Singapore at 2026-10-23"
+
+  - name: "Gunvor"
+    careers_url: https://gunvor.wd3.myworkdayjobs.com/Gunvor_Careers
+    provider: workday
+    slug: "gunvor"
+    feed_url: https://gunvor.wd3.myworkdayjobs.com/Gunvor_Careers
+    notes: "36 roles, 12 in Singapore at 2026-10-23"
+
+  - name: "Auros"
+    careers_url: https://job-boards.greenhouse.io/aurosglobal
+    provider: greenhouse
+    slug: "aurosglobal"
+    notes: "3 roles, 1 in Singapore at 2026-10-23"
+
+  - name: "Bain Capital"
+    careers_url: https://baincapital.wd1.myworkdayjobs.com/External_Public
+    provider: workday
+    slug: "baincapital"
+    feed_url: https://baincapital.wd1.myworkdayjobs.com/External_Public
+    notes: "31 roles, 1 in Singapore at 2026-10-23"
+
+  - name: "Ares Management"
+    careers_url: https://aresmgmt.wd1.myworkdayjobs.com/External
+    provider: workday
+    slug: "aresmgmt"
+    feed_url: https://aresmgmt.wd1.myworkdayjobs.com/External
+    notes: "245 roles, 1 in Singapore at 2026-10-23"
+
+  - name: "AllianceBernstein"
+    careers_url: https://abglobal.wd1.myworkdayjobs.com/alliancebernsteincareers
+    provider: workday
+    slug: "abglobal"
+    feed_url: https://abglobal.wd1.myworkdayjobs.com/alliancebernsteincareers
+    notes: "91 roles, 0 in Singapore at 2026-10-23"
+
+  - name: "Invesco"
+    careers_url: https://invesco.wd1.myworkdayjobs.com/IVZ
+    provider: workday
+    slug: "invesco"
+    feed_url: https://invesco.wd1.myworkdayjobs.com/IVZ
+    notes: "235 roles, 0 in Singapore at 2026-10-23"
+
+  - name: "M&G Investments"
+    careers_url: https://mgpru.wd3.myworkdayjobs.com/mandgprudential
+    provider: workday
+    slug: "mgpru"
+    feed_url: https://mgpru.wd3.myworkdayjobs.com/mandgprudential
+    notes: "600 roles, 2 in Singapore at 2026-10-23"
+
+  - name: "Carlyle"
+    careers_url: https://carlyle.wd1.myworkdayjobs.com/Carlyle
+    provider: workday
+    slug: "carlyle"
+    feed_url: https://carlyle.wd1.myworkdayjobs.com/Carlyle
+    notes: "72 roles, 0 in Singapore at 2026-10-23"
+
+  - name: "Apollo Global Management"
+    careers_url: https://athene.wd5.myworkdayjobs.com/Apollo_Careers
+    provider: workday
+    slug: "athene"
+    feed_url: https://athene.wd5.myworkdayjobs.com/Apollo_Careers
+    notes: "54 roles, 0 in Singapore at 2026-10-23"
+
+  - name: "Oaktree Capital"
+    careers_url: https://oaktree.wd1.myworkdayjobs.com/Oaktree
+    provider: workday
+    slug: "oaktree"
+    feed_url: https://oaktree.wd1.myworkdayjobs.com/Oaktree
+    notes: "54 roles, 0 in Singapore at 2026-10-23"
+
+  - name: "Lombard Odier"
+    careers_url: https://lombardodier.wd3.myworkdayjobs.com/Lombard_Odier_Careers
+    provider: workday
+    slug: "lombardodier"
+    feed_url: https://lombardodier.wd3.myworkdayjobs.com/Lombard_Odier_Careers
+    notes: "63 roles, 0 in Singapore at 2026-10-23"
+
+  - name: "Acadian Asset Management"
+    careers_url: https://job-boards.greenhouse.io/acadianassetmanagementllc
+    provider: greenhouse
+    slug: "acadianassetmanagementllc"
+    notes: "16 roles, 0 in Singapore at 2026-10-23"
+
+  - name: "Ontario Teachers' Pension Plan"
+    careers_url: https://otppb.wd3.myworkdayjobs.com/OntarioTeachers_Careers
+    provider: workday
+    slug: "otppb"
+    feed_url: https://otppb.wd3.myworkdayjobs.com/OntarioTeachers_Careers
+    notes: "600 roles, 29 in Singapore at 2026-10-23"
+
+  - name: "CMC Markets"
+    careers_url: https://cmcmarkets.wd3.myworkdayjobs.com/CMC_Markets_Careers
+    provider: workday
+    slug: "cmcmarkets"
+    feed_url: https://cmcmarkets.wd3.myworkdayjobs.com/CMC_Markets_Careers
+    notes: "65 roles, 6 in Singapore at 2026-10-23"
+
+  - name: "FIS"
+    careers_url: https://fis.wd5.myworkdayjobs.com/SearchJobs
+    provider: workday
+    slug: "fis"
+    feed_url: https://fis.wd5.myworkdayjobs.com/SearchJobs
+    notes: "519 roles, 0 in Singapore at 2026-10-23"
+
+  - name: "GXS Bank"
+    careers_url: https://gxs.wd3.myworkdayjobs.com/GXS
+    provider: workday
+    slug: "gxs"
+    feed_url: https://gxs.wd3.myworkdayjobs.com/GXS
+    notes: "3 roles, 3 in Singapore at 2026-10-23"
+
+  - name: "MoneyHero"
+    careers_url: https://job-boards.greenhouse.io/moneyherogroup
+    provider: greenhouse
+    slug: "moneyherogroup"
+    notes: "16 roles, 4 in Singapore at 2026-10-23"
+
+  - name: "QCP Capital"
+    careers_url: https://apply.workable.com/qcp-group
+    provider: workable
+    slug: "qcp-group"
+    notes: "board verified by research 2026-10-23 (rate-limited on re-check)"
+
+  - name: "ESR Group"
+    careers_url: https://apply.workable.com/esr-group
+    provider: workable
+    slug: "esr-group"
+    notes: "board verified by research 2026-10-23 (rate-limited on re-check)"
+
+  - name: "Zodia Custody"
+    careers_url: https://apply.workable.com/zodia-custody
+    provider: workable
+    slug: "zodia-custody"
+    notes: "board verified by research 2026-10-23 (rate-limited on re-check)"
+
+  - name: "TerraPay"
+    careers_url: https://apply.workable.com/terrapay
+    provider: workable
+    slug: "terrapay"
+    notes: "board verified by research 2026-10-23 (rate-limited on re-check)"
