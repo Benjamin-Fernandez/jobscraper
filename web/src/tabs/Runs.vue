@@ -7,12 +7,14 @@
 // The run history is also the "Choose runs…" picker (M15): tick any runs and
 // show their roles together in the Inbox. A run that accepted nothing says
 // "0 matches" and has nothing to tick.
-import { computed, nextTick, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { ApiError, cancelJob, describeError, getSettings, startRun } from '../api.js'
 import { useJob } from '../composables/useJob.js'
-import { plural, shortDate } from '../format.js'
+import { requestCompanyFilter } from '../companyFilter.js'
+import { ago, duration, plural, shortDate, utcMs, when } from '../format.js'
 import { asList, matchLabel, runStatusLabel, takePickerRequest } from '../runs.js'
 import { tabEmits, tabProps } from '../shell.js'
+import CountPicker from '../components/CountPicker.vue'
 import TabLoading from '../components/TabLoading.vue'
 
 const props = defineProps(tabProps)
@@ -117,6 +119,56 @@ function runDate(run) {
   return shortDate(run.finished_at || run.started_at) || '—'
 }
 
+function seconds(run) {
+  const a = utcMs(run.started_at); const b = utcMs(run.finished_at)
+  return a === null || b === null || b < a ? null : (b - a) / 1000
+}
+const runTook = run => duration(seconds(run)) || '—'
+
+// ---- how long a run takes: the pace of the last few real runs ----
+// Seconds per company over up to five recent successful runs that fetched
+// something. Runs differ (the AI reads more on some), so it is "about".
+const pace = computed(() => {
+  let secs = 0; let companies = 0; let used = 0
+  for (const r of props.runs) {
+    const due = Number(r.stats?.companies_due) || 0
+    const took = seconds(r)
+    if (r.status !== 'ok' || !due || took === null) continue
+    secs += took; companies += due
+    if (++used === 5) break
+  }
+  return companies ? secs / companies : null
+})
+const estimate = computed(() => {
+  const n = batch.value
+  if (!pace.value || batchError.value || !Number.isInteger(n)) return ''
+  return duration(Math.max(60, n * pace.value))
+})
+
+// While a job runs: how long it has been going, ticking once a second.
+const now = ref(Date.now())
+let clock = null
+watch(running, on => {
+  clearInterval(clock)
+  if (on) {
+    now.value = Date.now()
+    clock = setInterval(() => { now.value = Date.now() }, 1000)
+  }
+}, { immediate: true })
+onBeforeUnmount(() => clearInterval(clock))
+const elapsed = computed(() => {
+  const t = utcMs(job.value?.started_at)
+  return running.value && t !== null ? duration(Math.max(0, (now.value - t) / 1000)) : ''
+})
+
+const lastRun = computed(() => props.runs.find(r => r.finished_at) ?? null)
+
+// "N failed" in the history: the Companies tab's Failed list says which and why.
+function showFailed() {
+  requestCompanyFilter('failed')
+  window.location.hash = '#/companies'
+}
+
 // ---- the picker (M15) ----
 const picked = ref(new Set(asList(props.run)))
 watch(() => props.run, v => { picked.value = new Set(asList(v)) })
@@ -159,18 +211,16 @@ onMounted(async () => {
     <form class="start" novalidate @submit.prevent="start">
       <div class="field">
         <label for="run-batch">Companies this run</label>
-        <input
-          id="run-batch"
-          v-model.number="batch"
-          type="number"
-          inputmode="numeric"
-          min="1"
-          :max="max ?? undefined"
+        <CountPicker
+          v-model="batch"
+          input-id="run-batch"
+          label="Companies this run"
+          :max="max"
           :placeholder="settings ? String(settings.batch_size) : 'default'"
-          :aria-invalid="batchError ? 'true' : 'false'"
-          aria-describedby="run-batch-hint"
+          :invalid="Boolean(batchError)"
+          describedby="run-batch-hint"
           :disabled="running"
-        >
+        />
         <p id="run-batch-hint" class="hint" :class="{ invalid: batchError }">
           <template v-if="batchError">{{ batchError }}</template>
           <template v-else-if="settings && !settings.enabled_companies">
@@ -178,6 +228,8 @@ onMounted(async () => {
           </template>
           <template v-else-if="settings">
             Saved setting: {{ settings.batch_size }} of {{ settings.enabled_companies }} enabled companies.
+            Only companies that are due are checked.
+            <span v-if="estimate" class="estimate">About {{ estimate }} at the pace of your recent runs.</span>
           </template>
           <template v-else>Leave empty to use the saved setting.</template>
         </p>
@@ -207,7 +259,13 @@ onMounted(async () => {
 
     <!-- The job's log lives on the Developer tab (M16); here, one line. -->
     <p v-if="running" class="notice warn run-busy" role="status">
-      {{ busyLabel }} in progress. <a href="#/developer">Follow its log on the Developer tab</a>.
+      <span class="spinner" aria-hidden="true" />
+      {{ busyLabel }} in progress<template v-if="elapsed"> · {{ elapsed }} so far</template>.
+      <a href="#/developer">Follow its log on the Developer tab</a>.
+    </p>
+    <p v-else-if="lastRun" class="last-run muted">
+      Last run {{ ago(lastRun.finished_at, now) }} ({{ when(lastRun.finished_at) }})<template v-if="lastRun.status && lastRun.status !== 'ok'">, {{ runStatusLabel(lastRun.status) }}</template>:
+      {{ matchLabel(lastRun.accepted) }}<template v-if="lastRun.accepted"> - <a href="#/inbox">see them in the Inbox</a></template>.
     </p>
     <p v-else-if="jobError && !job" class="notice error" role="alert">Could not read the current job: {{ jobError }}</p>
 
@@ -247,6 +305,8 @@ onMounted(async () => {
               <th scope="col" class="num">Companies</th>
               <th scope="col" class="num">Postings</th>
               <th scope="col">Matches</th>
+              <th scope="col" class="num">Took</th>
+              <th scope="col" class="num">Failed</th>
               <th scope="col">Status</th>
             </tr>
           </thead>
@@ -268,10 +328,21 @@ onMounted(async () => {
                 >
               </td>
               <td>{{ r.run_no }}</td>
-              <td>{{ runDate(r) }}</td>
+              <td :title="when(r.finished_at || r.started_at)">{{ runDate(r) }}</td>
               <td class="num">{{ count(r, 'companies', 'companies_due') }}</td>
               <td class="num">{{ count(r, 'postings', 'postings_seen') }}</td>
               <td class="matches">{{ matchLabel(r.accepted) }}</td>
+              <td class="num took">{{ runTook(r) }}</td>
+              <td class="num failed">
+                <button
+                  v-if="Number(r.stats?.companies_failed) > 0"
+                  type="button"
+                  class="link failed-link"
+                  :title="`Companies that could not be fetched in run ${r.run_no} - see why on the Companies tab`"
+                  @click="showFailed"
+                >{{ r.stats.companies_failed }}</button>
+                <template v-else>{{ r.stats?.companies_failed ?? '—' }}</template>
+              </td>
               <td><span class="pill" :data-status="r.status">{{ runStatusLabel(r.status) }}</span></td>
             </tr>
           </tbody>
@@ -288,13 +359,24 @@ onMounted(async () => {
   border: 1px solid var(--border); border-radius: var(--radius-lg); box-shadow: var(--shadow);
 }
 .field label { display: block; font-weight: 600; font-size: var(--text-sm); margin-bottom: var(--space-1); }
-.field input { width: 8rem; }
 .hint { margin: var(--space-1) 0 0; font-size: var(--text-sm); color: var(--muted); }
 .hint.invalid { color: var(--danger); }
 .check { display: flex; align-items: center; gap: var(--space-2); font-size: var(--text-sm); cursor: pointer; }
 .buttons { display: flex; flex-wrap: wrap; gap: var(--space-2); }
 .cancel { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 45%, var(--border-strong)); }
-.notice { margin-top: var(--space-4); max-width: 34rem; }
+.start { max-width: 40rem; }
+.notice { margin-top: var(--space-4); max-width: 40rem; }
+.estimate { display: block; }
+.last-run { margin: var(--space-4) 0 0; font-size: var(--text-sm); }
+.run-busy { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-1) var(--space-2); }
+.spinner {
+  width: 0.9rem; height: 0.9rem; flex: none; border-radius: 50%;
+  border: 2px solid currentColor; border-right-color: transparent;
+  animation: spin 0.8s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+.failed-link { color: var(--danger); font-family: var(--mono); }
+.failed-link:hover:not(:disabled) { color: var(--danger); }
 .table-wrap { overflow-x: auto; border-top: 1px solid var(--border); }
 .history { width: 100%; border-collapse: collapse; font-size: var(--text-sm); }
 .history th {

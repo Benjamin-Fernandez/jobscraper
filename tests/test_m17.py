@@ -264,6 +264,8 @@ def test_web_every_watched_company_with_whether_it_can_be_scanned():
             ("Company 3", "not_scanned")]
         assert body["items"][0]["open_roles"] == 12
         assert body["items"][1]["reason"] == "the site blocks automated access"
+        assert body["items"][1]["kind"] == "blocked" and body["items"][1]["paused"] is False
+        assert body["items"][0]["kind"] == "" and body["items"][0]["paused"] is False
 
         r = c.get("/api/companies/export.csv")
         assert r.status_code == 200 and r.headers["content-type"].startswith("text/csv")

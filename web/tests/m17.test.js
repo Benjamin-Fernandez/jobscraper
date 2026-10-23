@@ -60,8 +60,8 @@ describe('Companies: every watched company as a CSV', () => {
   it('shows how many can be scanned and links the download', async () => {
     const wrapper = mount(Companies, { props: { run: 'all', jobs: [] } })
     await flushPromises()
-    expect(wrapper.find('.health-counts').text().replace(/\s+/g, ' '))
-      .toBe('3 watched · 2 can be scanned · 1 failed the last fetch')
+    const tiles = wrapper.findAll('.tile').map(t => t.findAll('span').map(s => s.text()).join(' '))
+    expect(tiles).toEqual(['3 Watched', '2 Can be scanned', '1 Failed'])
     const link = wrapper.find('a.health-csv')
     expect(link.attributes('href')).toBe('api/companies/export.csv')
     expect(link.attributes('download')).toBeDefined()

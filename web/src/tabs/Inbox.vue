@@ -280,7 +280,8 @@ function markOpened(job) {
         <label class="search">
           <Icon name="search" />
           <span class="visually-hidden">Search roles</span>
-          <input v-model="query" type="search" placeholder="Search title, company, location">
+          <input v-model="query" type="search" placeholder="Search title, company, location" aria-keyshortcuts="/">
+          <kbd class="key-hint" aria-hidden="true">/</kbd>
         </label>
         <label class="sort">
           <span class="visually-hidden">Sort</span>

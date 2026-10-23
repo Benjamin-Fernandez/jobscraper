@@ -42,3 +42,32 @@ export function cleanLocation(loc) {
 export function safeUrl(url) {
   return /^https?:\/\//i.test(url || '') ? url : null
 }
+
+// Stamps are UTC without a zone ('2026-09-23T14:30:00'); null when unreadable.
+export function utcMs(iso) {
+  const t = Date.parse(`${String(iso || '').slice(0, 19)}Z`)
+  return Number.isNaN(t) ? null : t
+}
+
+// 45 -> "45 s", 960 -> "16 min", 3900 -> "1 h 5 min"; '' for no time.
+export function duration(seconds) {
+  if (!Number.isFinite(seconds) || seconds < 0) return ''
+  const s = Math.round(seconds)
+  if (s < 60) return `${s} s`
+  const min = Math.round(s / 60)
+  if (min < 60) return `${min} min`
+  const h = Math.floor(min / 60)
+  return min % 60 ? `${h} h ${min % 60} min` : `${h} h`
+}
+
+// How long ago, in words: "just now", "5 min ago", "3 h ago", "2 days ago".
+export function ago(iso, now = Date.now()) {
+  const t = utcMs(iso)
+  if (t === null) return ''
+  const s = Math.max(0, (now - t) / 1000)
+  if (s < 60) return 'just now'
+  if (s < 3600) return `${Math.floor(s / 60)} min ago`
+  if (s < 86400) return `${Math.floor(s / 3600)} h ago`
+  const d = Math.floor(s / 86400)
+  return d === 1 ? 'yesterday' : `${d} days ago`
+}

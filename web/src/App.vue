@@ -148,8 +148,22 @@ watch(activeId, async id => {
   tabEls[id]?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' })
 })
 
+// "/" jumps to the open tab's search box, as on GitHub or Gmail - unless the
+// user is already typing somewhere.
+function onSlash(event) {
+  if (event.key !== '/' || event.ctrlKey || event.metaKey || event.altKey) return
+  const t = event.target
+  if (t?.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t?.tagName || '')) return
+  const box = document.querySelector('.panel input[type="search"]')
+  if (!box) return
+  event.preventDefault()
+  box.focus()
+  box.select?.()
+}
+
 onMounted(async () => {
   window.addEventListener('hashchange', onHashChange)
+  window.addEventListener('keydown', onSlash)
   try {
     await loadRuns()
   } catch (e) {
@@ -157,7 +171,10 @@ onMounted(async () => {
   }
   await Promise.all([loadJobs(), loadStats()])
 })
-onBeforeUnmount(() => window.removeEventListener('hashchange', onHashChange))
+onBeforeUnmount(() => {
+  window.removeEventListener('hashchange', onHashChange)
+  window.removeEventListener('keydown', onSlash)
+})
 </script>
 
 <template>

@@ -10,16 +10,22 @@
 // Found and failed names download as TXT - the failed list is ready to fix and
 // upload again. The plan caps how many companies a list adds; a failed search
 // does not count toward it.
+//
+// The tab has two views: Watched companies - every company a run checks, A-Z
+// and searchable, with why any of them failed (WatchedCompanies.vue) - and
+// Your list. The view last used is remembered in this browser.
 import { computed, onMounted, ref, watch } from 'vue'
 import {
-  ApiError, COMPANY_EXPORT_URL, LIST_TYPES, clearCompanyList, describeError, getCompanyHealth,
+  ApiError, LIST_TYPES, clearCompanyList, describeError, getCompanyHealth,
   getCompanyList, startCompanySearch, uploadCompanyList,
 } from '../api.js'
 import { useJob } from '../composables/useJob.js'
+import { takeCompanyFilter } from '../companyFilter.js'
 import { tabEmits, tabProps } from '../shell.js'
 import CompanyMark from '../components/CompanyMark.vue'
 import Icon from '../components/Icon.vue'
 import TabLoading from '../components/TabLoading.vue'
+import WatchedCompanies from '../components/WatchedCompanies.vue'
 
 defineProps(tabProps)
 const emit = defineEmits(tabEmits)
@@ -53,6 +59,23 @@ const clearing = ref(false)
 const problem = ref('')
 const note = ref('')
 const filter = ref('all')
+const listQuery = ref('')
+const listSort = ref('order')          // 'order' (yours) | 'az'
+
+// ---- which view: Watched companies or Your list ----
+const VIEW_KEY = 'jobscraper.companies.view'
+const wantedState = takeCompanyFilter()   // "N failed" on the Runs tab
+function rememberedView() {
+  try {
+    return window.localStorage.getItem(VIEW_KEY) === 'list' ? 'list' : 'watched'
+  } catch {
+    return 'watched'
+  }
+}
+const view = ref(wantedState ? 'watched' : rememberedView())
+watch(view, v => {
+  try { window.localStorage.setItem(VIEW_KEY, v) } catch { /* private window */ }
+})
 
 const { job, running, refresh, track } = useJob({
   kind: 'companies',
@@ -77,7 +100,13 @@ const waiting = computed(() => items.value.filter(i => WAITING.has(i.status)))
 const filterCount = f => items.value.filter(i => f.has(i.status)).length
 const filtered = computed(() => {
   const f = FILTERS.find(x => x.id === filter.value) ?? FILTERS[0]
-  return items.value.filter(i => f.has(i.status))
+  const q = listQuery.value.trim().toLowerCase()
+  const rows = items.value.filter(i => f.has(i.status)
+    && (!q || [i.name, i.detail, i.careers_url].some(v => String(v || '').toLowerCase().includes(q))))
+  if (listSort.value === 'az') {
+    return [...rows].sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }))
+  }
+  return rows
 })
 
 const capLine = computed(() => {
@@ -92,6 +121,7 @@ const capLine = computed(() => {
 // site could be scanned (M17). The CSV behind the link is the same list.
 const health = ref(null)
 const healthError = ref('')
+const failedWatched = computed(() => health.value?.counts?.failed ?? 0)
 async function loadHealth() {
   try {
     health.value = await getCompanyHealth()
@@ -244,143 +274,199 @@ onMounted(() => Promise.all([loadList(), loadHealth(), refresh()]))
     <header class="page-head">
       <div>
         <h2 class="page-title">Companies</h2>
-        <p class="page-sub">Your own list, most wanted first. Every company found is watched from the next run, in your order.</p>
+        <p v-if="view === 'watched'" class="page-sub">Every company a run checks, A–Z, and whether its careers site could be read.</p>
+        <p v-else class="page-sub">Your own list, most wanted first. Every company found is watched from the next run, in your order.</p>
       </div>
-      <div v-if="items.length" class="page-controls">
+      <div class="views" role="group" aria-label="Companies view">
+        <button
+          type="button"
+          class="view-tab view-watched"
+          :class="{ active: view === 'watched' }"
+          :aria-pressed="view === 'watched' ? 'true' : 'false'"
+          @click="view = 'watched'"
+        >
+          Watched companies
+          <span v-if="health" class="num view-n">{{ health.total }}</span>
+          <span v-if="failedWatched" class="num view-failed" :title="`${failedWatched} failed the last fetch`">{{ failedWatched }} failed</span>
+        </button>
+        <button
+          type="button"
+          class="view-tab view-list"
+          :class="{ active: view === 'list' }"
+          :aria-pressed="view === 'list' ? 'true' : 'false'"
+          @click="view = 'list'"
+        >
+          Your list
+          <span v-if="data" class="num view-n">{{ items.length }}</span>
+        </button>
+      </div>
+    </header>
+
+    <WatchedCompanies
+      v-if="view === 'watched'"
+      :health="health"
+      :error="healthError"
+      :initial-state="wantedState || 'all'"
+      @retry="loadHealth"
+    />
+
+    <template v-else>
+      <div v-if="items.length" class="list-controls">
         <button v-if="waiting.length && !searching" type="button" class="primary search-now" :disabled="busy" @click="search">
           <Icon name="search" /> Search now
         </button>
         <button type="button" class="clear" :disabled="busy" @click="clear">Clear list</button>
       </div>
-    </header>
 
-    <div class="health surface" aria-labelledby="health-title">
-      <div class="health-text">
-        <p id="health-title" class="health-title">Your watched companies</p>
-        <p v-if="health" class="health-counts">
-          <span class="num">{{ health.total }}</span> watched ·
-          <span class="num ok-n">{{ health.counts.ok }}</span> can be scanned ·
-          <span class="num failed-n">{{ health.counts.failed }}</span> failed the last fetch<template v-if="health.counts.not_scanned">
-            · <span class="num">{{ health.counts.not_scanned }}</span> not scanned yet</template>
-        </p>
-        <p v-else-if="healthError" class="muted small">Could not read the companies: {{ healthError }}</p>
-        <p v-else class="muted small">Loading…</p>
-      </div>
-      <a class="button health-csv" :href="COMPANY_EXPORT_URL" download>
-        Download all (.csv)
-      </a>
-    </div>
-
-    <label
-      class="drop"
-      :class="{ dragging, disabled: busy, compact: items.length }"
-      @dragenter.prevent="dragging = !busy"
-      @dragover.prevent="dragging = !busy"
-      @dragleave.prevent="dragging = false"
-      @drop.prevent="onDrop"
-    >
-      <input
-        class="visually-hidden file"
-        type="file"
-        :accept="ACCEPT"
-        :disabled="busy"
-        aria-describedby="list-hint"
-        @change="onPick"
+      <label
+        class="drop"
+        :class="{ dragging, disabled: busy, compact: items.length }"
+        @dragenter.prevent="dragging = !busy"
+        @dragover.prevent="dragging = !busy"
+        @dragleave.prevent="dragging = false"
+        @drop.prevent="onDrop"
       >
-      <span class="drop-title">
-        {{ uploading ? 'Uploading…' : items.length ? 'Drop a new list to replace this one' : 'Drop your list of companies here, or choose a file' }}
-      </span>
-      <span id="list-hint" class="muted">
-        TXT or DOCX, one company per line, in your order of preference. Companies searched before keep their result.
-      </span>
-    </label>
-
-    <p v-if="problem" class="notice error" role="alert">{{ problem }}</p>
-    <p v-if="note" class="notice ok" role="status">{{ note }}</p>
-    <p v-if="searching" class="notice warn searching" role="status">
-      Searching {{ waiting.length }} {{ waiting.length === 1 ? 'company' : 'companies' }}… Qwen suggests each careers site and each one is checked for a job board.
-      <a href="#/developer">Follow the log</a>
-    </p>
-    <p v-else-if="otherJob && waiting.length" class="notice warn" role="status">
-      Another job is running; search the list when it has finished.
-    </p>
-
-    <TabLoading v-if="loading" :rows="3" />
-    <div v-else-if="loadError" class="notice error" role="alert">
-      <p>Could not load your list: {{ loadError }}</p>
-      <button type="button" @click="loadList">Try again</button>
-    </div>
-    <div v-else-if="!items.length" class="empty">
-      <Icon name="layers" :size="28" />
-      <p class="empty-title">No list yet.</p>
-      <p class="muted">Write the companies you want to work for, one per line, and drop the file above.</p>
-    </div>
-
-    <template v-else>
-      <div class="summary surface">
-        <dl class="stats">
-          <div><dt>Found</dt><dd class="num found-n">{{ count('found') }}</dd></div>
-          <div><dt>Already watched</dt><dd class="num watched-n">{{ count('watched') }}</dd></div>
-          <div><dt>Failed</dt><dd class="num failed-n">{{ failed.length }}</dd></div>
-          <div><dt>Waiting</dt><dd class="num waiting-n">{{ waiting.length }}</dd></div>
-        </dl>
-        <p class="cap muted">{{ capLine }}. Failed searches do not count.</p>
-        <div class="downloads">
-          <button type="button" class="dl-found" :disabled="!found.length" @click="downloadFound">Download found (.txt)</button>
-          <button type="button" class="dl-failed" :disabled="!failed.length" @click="downloadFailed">Download failed (.txt)</button>
-          <button type="button" class="dl-report" @click="downloadReport">Full report (.csv)</button>
-        </div>
-      </div>
-
-      <div class="filters" role="group" aria-label="Show">
-        <button
-          v-for="f in FILTERS"
-          :key="f.id"
-          type="button"
-          class="filter"
-          :class="{ active: filter === f.id }"
-          :aria-pressed="filter === f.id ? 'true' : 'false'"
-          @click="filter = f.id"
+        <input
+          class="visually-hidden file"
+          type="file"
+          :accept="ACCEPT"
+          :disabled="busy"
+          aria-describedby="list-hint"
+          @change="onPick"
         >
-          {{ f.label }} <span class="num">{{ filterCount(f) }}</span>
-        </button>
+        <span class="drop-title">
+          {{ uploading ? 'Uploading…' : items.length ? 'Drop a new list to replace this one' : 'Drop your list of companies here, or choose a file' }}
+        </span>
+        <span id="list-hint" class="muted">
+          TXT or DOCX, one company per line, in your order of preference. Companies searched before keep their result.
+        </span>
+      </label>
+
+      <p v-if="problem" class="notice error" role="alert">{{ problem }}</p>
+      <p v-if="note" class="notice ok" role="status">{{ note }}</p>
+      <p v-if="searching" class="notice warn searching" role="status">
+        Searching {{ waiting.length }} {{ waiting.length === 1 ? 'company' : 'companies' }}… Qwen suggests each careers site and each one is checked for a job board.
+        <a href="#/developer">Follow the log</a>
+      </p>
+      <p v-else-if="otherJob && waiting.length" class="notice warn" role="status">
+        Another job is running; search the list when it has finished.
+      </p>
+
+      <TabLoading v-if="loading" :rows="3" />
+      <div v-else-if="loadError" class="notice error" role="alert">
+        <p>Could not load your list: {{ loadError }}</p>
+        <button type="button" @click="loadList">Try again</button>
+      </div>
+      <div v-else-if="!items.length" class="empty">
+        <Icon name="layers" :size="28" />
+        <p class="empty-title">No list yet.</p>
+        <p class="muted">Write the companies you want to work for, one per line, and drop the file above.</p>
       </div>
 
-      <ol class="list surface">
-        <li v-for="c in filtered" :key="c.position" class="row" :data-status="c.status">
-          <span class="rank num" :title="`Your #${c.position}`">{{ c.position }}</span>
-          <CompanyMark :name="c.name" size="sm" />
-          <div class="what">
-            <span class="name">{{ c.name }}</span>
-            <span v-if="c.detail" class="detail muted">{{ c.detail }}</span>
+      <template v-else>
+        <div class="summary surface">
+          <dl class="stats">
+            <div><dt>Found</dt><dd class="num found-n">{{ count('found') }}</dd></div>
+            <div><dt>Already watched</dt><dd class="num watched-n">{{ count('watched') }}</dd></div>
+            <div><dt>Failed</dt><dd class="num failed-n">{{ failed.length }}</dd></div>
+            <div><dt>Waiting</dt><dd class="num waiting-n">{{ waiting.length }}</dd></div>
+          </dl>
+          <p class="cap muted">{{ capLine }}. Failed searches do not count.</p>
+          <div class="downloads">
+            <button type="button" class="dl-found" :disabled="!found.length" @click="downloadFound">Download found (.txt)</button>
+            <button type="button" class="dl-failed" :disabled="!failed.length" @click="downloadFailed">Download failed (.txt)</button>
+            <button type="button" class="dl-report" @click="downloadReport">Full report (.csv)</button>
           </div>
-          <a
-            v-if="c.careers_url"
-            class="site"
-            :href="c.careers_url"
-            target="_blank"
-            rel="noopener noreferrer"
-            :aria-label="`${c.name} careers site`"
-          ><Icon name="external" /> Careers</a>
-          <span v-else />
-          <span class="pill status" :data-status="STATUS[c.status]?.pill ?? c.status">{{ STATUS[c.status]?.label ?? c.status }}</span>
-        </li>
-        <li v-if="!filtered.length" class="row none muted">Nothing here.</li>
-      </ol>
+        </div>
+
+        <div class="list-toolbar">
+          <label class="search grow">
+            <Icon name="search" />
+            <span class="visually-hidden">Search your list</span>
+            <input
+              v-model="listQuery"
+              type="search"
+              class="list-search"
+              placeholder="Search your list…"
+              autocomplete="off"
+              aria-keyshortcuts="/"
+              @keydown.esc="listQuery = ''"
+            >
+            <kbd class="key-hint" aria-hidden="true">/</kbd>
+          </label>
+          <label>
+            <span class="visually-hidden">Order</span>
+            <select v-model="listSort" class="list-sort">
+              <option value="order">Your order</option>
+              <option value="az">Name A–Z</option>
+            </select>
+          </label>
+        </div>
+
+        <div class="filters" role="group" aria-label="Show">
+          <button
+            v-for="f in FILTERS"
+            :key="f.id"
+            type="button"
+            class="filter"
+            :class="{ active: filter === f.id }"
+            :aria-pressed="filter === f.id ? 'true' : 'false'"
+            @click="filter = f.id"
+          >
+            {{ f.label }} <span class="num">{{ filterCount(f) }}</span>
+          </button>
+        </div>
+
+        <ol class="list surface">
+          <li v-for="c in filtered" :key="c.position" class="row" :data-status="c.status">
+            <span class="rank num" :title="`Your #${c.position}`">{{ c.position }}</span>
+            <CompanyMark :name="c.name" size="sm" />
+            <div class="what">
+              <span class="name">{{ c.name }}</span>
+              <span v-if="c.detail" class="detail muted">{{ c.detail }}</span>
+            </div>
+            <a
+              v-if="c.careers_url"
+              class="site"
+              :href="c.careers_url"
+              target="_blank"
+              rel="noopener noreferrer"
+              :aria-label="`${c.name} careers site`"
+            ><Icon name="external" /> Careers</a>
+            <span v-else />
+            <span class="pill status" :data-status="STATUS[c.status]?.pill ?? c.status">{{ STATUS[c.status]?.label ?? c.status }}</span>
+          </li>
+          <li v-if="!filtered.length" class="row none muted">
+            {{ listQuery.trim() ? `No company in your list matches “${listQuery.trim()}”.` : 'Nothing here.' }}
+          </li>
+        </ol>
+      </template>
     </template>
   </section>
 </template>
 
 <style scoped>
-.health {
-  display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between;
-  gap: var(--space-3); padding: var(--space-3) var(--space-4); margin-bottom: var(--space-4);
+.views {
+  display: inline-flex; gap: 2px; padding: 2px;
+  background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius);
 }
-.health-title { margin: 0; font-weight: 600; }
-.health-counts { margin: var(--space-1) 0 0; font-size: var(--text-sm); color: var(--text-2); }
-.ok-n { color: var(--ok); font-weight: 600; }
-.health .failed-n { color: var(--danger); font-weight: 600; }
-.health-csv { white-space: nowrap; }
+.view-tab {
+  border: 1px solid transparent; background: transparent; box-shadow: none; color: var(--text-2);
+  border-radius: calc(var(--radius) - 2px);
+}
+.view-tab:hover:not(:disabled) { background: var(--surface); color: var(--text); }
+.view-tab.active, .view-tab.active:hover:not(:disabled) {
+  background: var(--surface); border-color: var(--border-strong); box-shadow: var(--shadow-sm);
+  color: var(--text); font-weight: 650;
+}
+.view-n { color: var(--muted); font-size: var(--text-xs); }
+.view-failed {
+  font-size: var(--text-xs); font-weight: 600; color: var(--danger); background: var(--danger-soft);
+  padding: 0 var(--space-2); border-radius: 999px;
+}
+.list-controls { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: var(--space-2); margin-bottom: var(--space-3); }
+.list-toolbar { display: flex; flex-wrap: wrap; gap: var(--space-2); margin-bottom: var(--space-2); }
+.grow { flex: 1 1 16rem; }
 
 .drop {
   display: grid; gap: var(--space-1); justify-items: center; text-align: center;
@@ -398,6 +484,7 @@ onMounted(() => Promise.all([loadList(), loadHealth(), refresh()]))
 .drop-title { font-weight: 600; }
 .drop .muted { font-size: var(--text-sm); }
 .notice { margin-top: var(--space-3); }
+.drop + .empty, .drop ~ .skeleton { margin-top: var(--space-4); }
 .clear { color: var(--danger); }
 .search-now { display: inline-flex; align-items: center; gap: var(--space-1); }
 

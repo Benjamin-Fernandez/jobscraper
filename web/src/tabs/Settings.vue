@@ -14,6 +14,7 @@ import { ApiError, describeError, getSettings, saveSettings } from '../api.js'
 import { plural } from '../format.js'
 import { cycleLabel } from '../runs.js'
 import { tabEmits, tabProps } from '../shell.js'
+import CountPicker from '../components/CountPicker.vue'
 import TabLoading from '../components/TabLoading.vue'
 
 defineProps(tabProps)
@@ -177,17 +178,15 @@ onMounted(load)
     <form v-else class="batch" novalidate @submit.prevent="save">
       <label for="batch-size">How many watchlist companies one run fetches</label>
       <div class="row">
-        <input
-          id="batch-size"
-          v-model.number="draft"
-          type="number"
-          inputmode="numeric"
-          min="1"
-          :max="noneEnabled ? undefined : max"
-          :aria-invalid="invalid ? 'true' : 'false'"
-          aria-describedby="batch-size-hint"
-          @input="saved = ''"
-        >
+        <CountPicker
+          v-model="draft"
+          input-id="batch-size"
+          label="Companies per run"
+          :max="noneEnabled ? null : max"
+          :invalid="Boolean(invalid)"
+          describedby="batch-size-hint"
+          @update:model-value="saved = ''"
+        />
         <button type="submit" class="primary save" :disabled="Boolean(invalid) || unchanged || saving">
           {{ saving ? 'Saving…' : 'Save' }}
         </button>
@@ -213,8 +212,7 @@ onMounted(load)
   border: 1px solid var(--border); border-radius: var(--radius-lg); box-shadow: var(--shadow);
 }
 .batch label { font-weight: 600; font-size: var(--text-sm); }
-.row { display: flex; gap: var(--space-2); align-items: center; }
-.row input { width: 8rem; }
+.row { display: flex; flex-wrap: wrap; gap: var(--space-2) var(--space-3); align-items: center; }
 .hint { margin: 0; color: var(--text); font-size: var(--text-sm); }
 .hint.invalid { color: var(--danger); }
 .small { font-size: var(--text-sm); margin: 0; }

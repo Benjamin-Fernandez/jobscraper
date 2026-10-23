@@ -201,13 +201,19 @@ def company_health_view(store: Any) -> dict[str, Any]:
             state = "failed"
         else:
             state = "ok"
-        reason = ""
+        reason, kind = "", ""
+        paused = state == "failed" and bool(r.get("quarantined_at"))
         if state == "failed":
-            reason = SCAN_ERRORS.get(r.get("last_error_class") or "", "an unexpected error")
-            if r.get("quarantined_at"):
+            kind = r.get("last_error_class") or ""
+            kind = kind if kind in SCAN_ERRORS else "other"
+            reason = SCAN_ERRORS.get(kind, "an unexpected error")
+            if paused:
                 reason += "; paused after repeated failures, retried later"
         rows.append({
             "company": r["name"], "state": state, "reason": reason,
+            # For grouping failures in the Companies tab: the error class
+            # (a SCAN_ERRORS key, or "other") and whether it is quarantined.
+            "kind": kind, "paused": paused,
             "open_roles": r.get("last_postings") if state == "ok" else None,
             "job_board": r.get("provider") or "", "careers_url": r.get("careers_url") or "",
             "last_scan": _stamp(r.get("last_scraped_at")),

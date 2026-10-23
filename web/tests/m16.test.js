@@ -50,6 +50,7 @@ describe('Companies tab', () => {
     if (options) useApi(options)
     const wrapper = mount(Companies, { props: { run: 'all', jobs: [] } })
     await flushPromises()
+    await wrapper.find('.view-list').trigger('click')   // the list is the second view
     return wrapper
   }
 

@@ -140,7 +140,8 @@ onMounted(load)
         <label class="search">
           <Icon name="search" />
           <span class="visually-hidden">Search applications</span>
-          <input v-model="query" type="search" placeholder="Search company or role">
+          <input v-model="query" type="search" placeholder="Search company or role" aria-keyshortcuts="/">
+          <kbd class="key-hint" aria-hidden="true">/</kbd>
         </label>
         <RunSelector
           :runs="runs"

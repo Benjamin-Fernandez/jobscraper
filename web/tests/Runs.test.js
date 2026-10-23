@@ -4,6 +4,7 @@ import Runs from '../src/tabs/Runs.vue'
 import App from '../src/App.vue'
 import { POLL_MS, resetSeenJobs } from '../src/composables/useJob.js'
 import { fakeApi, runsFrom, setHash } from './helpers.js'
+import { takeCompanyFilter } from '../src/companyFilter.js'
 
 let api
 
@@ -193,13 +194,17 @@ describe('Runs tab: jobs it cannot control', () => {
 describe('Runs tab: history', () => {
   it('lists date, companies, postings, matches and status per run; 0 matches says so', async () => {
     const runs = [
-      { run_no: 12, finished_at: '2026-09-23T14:30:00', status: 'ok', accepted: 3, stats: { companies_due: 10, postings_seen: 412 } },
+      { run_no: 12, started_at: '2026-09-23T14:14:00', finished_at: '2026-09-23T14:30:00', status: 'ok', accepted: 3, stats: { companies_due: 10, postings_seen: 412, companies_failed: 2 } },
       { run_no: 11, finished_at: null, started_at: '2026-09-21T09:00:00', status: 'failed', accepted: 0 },
     ]
     const wrapper = await mountRuns({ runs })
     const cells = r => wrapper.findAll(`tr[data-run="${r}"] td`).map(td => td.text())
-    expect(cells(12)).toEqual(['', '12', '23 Sep', '10', '412', '3 matches', 'success'])
-    expect(cells(11)).toEqual(['', '11', '21 Sep', '—', '—', '0 matches', 'failed'])
+    expect(cells(12)).toEqual(['', '12', '23 Sep', '10', '412', '3 matches', '16 min', '2', 'success'])
+    expect(cells(11)).toEqual(['', '11', '21 Sep', '—', '—', '0 matches', '—', '—', 'failed'])
+    // The failed count opens the Companies tab on its Failed list.
+    await wrapper.find('tr[data-run="12"] .failed-link').trigger('click')
+    expect(window.location.hash).toBe('#/companies')
+    expect(takeCompanyFilter()).toBe('failed')
     // Nothing to show for a run with 0 matches: it cannot be ticked, but its
     // row looks like every other (M16) - no muted "empty" style.
     expect(wrapper.find('tr[data-run="11"] input').attributes('disabled')).toBeDefined()

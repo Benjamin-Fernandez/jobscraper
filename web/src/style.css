@@ -262,6 +262,24 @@ input:disabled, select:disabled { opacity: 0.6; }
   pointer-events: none;
 }
 .search input { padding-left: calc(var(--space-3) + 1.5rem); width: 100%; }
+/* "/" focuses the search (App.vue); the hint hides once the box has focus or text. */
+.search .key-hint {
+  position: absolute;
+  right: var(--space-2);
+  min-width: 1.3rem;
+  padding: 0 var(--space-1);
+  font-family: var(--mono);
+  font-size: var(--text-xs);
+  line-height: 1.5;
+  text-align: center;
+  color: var(--muted);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  pointer-events: none;
+}
+.search:focus-within .key-hint, .search input:not(:placeholder-shown) + .key-hint { display: none; }
+@media (pointer: coarse) { .search .key-hint { display: none; } }
 
 /* ---- shared page parts ---- */
 
