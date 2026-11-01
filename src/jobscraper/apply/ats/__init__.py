@@ -8,5 +8,8 @@ tries them in this order. Adding an ATS is one line here plus its module
 from __future__ import annotations
 
 from ..contracts import AtsAdapter
+from .greenhouse import ADAPTER as _GREENHOUSE
 
-REGISTRY: dict[str, AtsAdapter] = {}
+REGISTRY: dict[str, AtsAdapter] = {
+    "greenhouse": _GREENHOUSE,
+}
