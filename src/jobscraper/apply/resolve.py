@@ -756,8 +756,12 @@ def _tier3(f: FormField, label_norm: str, ctx: ResolveContext,
 # ---------------------------------------------------------------- tiers 4, 5 (WP-P5, WP-P6)
 
 def _tier4(f: FormField, label_norm: str, ctx: ResolveContext):
-    """Declarations (WP-P5). Returns (Answer | _Stop | None, is_attestation)."""
-    return None, False
+    """Declarations (§7.5). Returns (Answer or None, is_attestation). A
+    classified field always gets its final Answer here (never tier 5)."""
+    label = declarations.classify(label_norm, norm_label(f.description))
+    if label is None:
+        return None, False
+    return declarations.answer(label, f, ctx), True
 
 
 def _tier5(f: FormField, ctx: ResolveContext, backend: Any) -> Optional[Answer]:
@@ -799,10 +803,8 @@ def resolve_field(f: FormField, ctx: ResolveContext, *, backend: Any, rules: Que
         return t3
 
     t4, attestation = _tier4(f, label_norm, ctx)
-    if isinstance(t4, Answer):
+    if t4 is not None:
         return t4
-    if isinstance(t4, _Stop):
-        return _final(f, note=t4.note, sensitive=True)
 
     notes = [n for n in (t2.note,) if n]
     if not t2.sensitive and not attestation:
