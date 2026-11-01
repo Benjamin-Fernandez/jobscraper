@@ -25,10 +25,12 @@ The handover note lives in `handover.md`. This file holds only the queue and sho
 | Q-18 | Pins for D-66 and TD-01 (un-park `_skip_td01_…`) | tester | Q-17 | P1 | BACKLOG | 0 | tests pass |
 | Q-19 | Tailor design patch: bullet lines never headings; D-67 scope moves | architect | Q-06 | P0 | DONE | 0 | golden cases A–C still reproduce |
 | Q-20 | Seed `config/questions.yaml` + `config/aliases.yaml` | researcher | Q-09 | P0 | DONE | 0 | WP Verify per build plans |
-| Q-21 | Update the 4 D-69 oracles; restore the 3 guard tests dropped in the layering merge (`test_apply_and_tailor_meet_only_through_their_flows`, `test_foundation_modules_import_no_stage_or_orchestrator`, `test_the_layering_guard_catches_what_it_claims_to`) | tester | — | P0 | BACKLOG | 0 | full suite green |
-| Q-22 | D-70 design delta: Workday-first M20, MyGreenhouse autofill then fill-the-gaps, tailored resume replaces autofilled, backup email on "already registered", enum yes/no labels (researcher gap), Greenhouse label match rule (tester item 4) | architect | — | P0 | IN PROGRESS | 0 | design + plan updated; lane V WPs ready |
+| Q-21 | Update the 4 D-69 oracles; restore the 3 guard tests dropped in the layering merge (`test_apply_and_tailor_meet_only_through_their_flows`, `test_foundation_modules_import_no_stage_or_orchestrator`, `test_the_layering_guard_catches_what_it_claims_to`) | tester | — | P0 | IN PROGRESS | 0 | full suite green |
+| Q-22 | D-70 design delta: Workday-first M20, MyGreenhouse autofill then fill-the-gaps, tailored resume replaces autofilled, backup email on "already registered", enum yes/no labels (researcher gap), Greenhouse label match rule (tester item 4) | architect | — | P0 | DONE | 0 | design + plan updated; lane V WPs ready |
 | Q-23 | Spike S-5: real Workday flow at 2 employers (sign-up, IMAP verify, every step recorded as fixtures), stop at Review; the real submissions there go through the built product at the M20 gate (owner-allowed, D-70) | software-engineer (spike) | Q-22; owner email + app password | P0 | BLOCKED | 0 | recorded pages + selector map |
 | Q-24 | Owner: MyGreenhouse sign-in in the JobScraper Edge profile | owner | — | P0 | BACKLOG | 0 | autofill button works in S-6 |
+| Q-25 | Lane V part 1: WP-V1 vault, V2 mail half, V3 IMAP watcher (`eng/M20-V-vault-mail`) | software-engineer (top) | Q-22 | P0 | IN PROGRESS | 0 | WP Verify |
+| Q-26 | WP-A03 `yes_if` rows in `config/questions.yaml`; WP-F4 fake IMAP fixtures; new D-70 oracles (architect outbox) | researcher; tester | Q-22 | P0 | BACKLOG | 0 | WP Verify |
 | Q-16 | Owner (optional): Edge sync test with `owner_sync_test.py` (spike report S-1c); if it passes, set `apply.edge_sync: true` | owner | Q-01 | P2 | BACKLOG | 0 | test password appears in the Default profile |
 | Q-15 | Docs: OVERVIEW/README/DESIGN updated for tailor and auto-apply ("never logs in anywhere" changes) | planner | M20 | P1 | BACKLOG | 0 | docs match the app |
 
