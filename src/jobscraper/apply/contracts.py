@@ -20,7 +20,10 @@ from dataclasses import dataclass, field
 from enum import Enum, IntEnum
 from typing import Any, Callable, Optional, Protocol, Sequence, Union, runtime_checkable
 
-CONTRACT_VERSION = 2   # 2: D-69 (no FAILED after the Submit click, ADR-0004), D-68 context fields
+CONTRACT_VERSION = 3   # 2: D-69 (no FAILED after the Submit click, ADR-0004), D-68 context fields
+                       # 3: D-70 (additive): prefill sources/policy, PREFILLED status, account
+                       #    statuses, sign-up outcomes, Workday entry, identity email, adapter
+                       #    `prefill`/`read_values`, SIGNING_UP -> SIGNING_UP (backup email)
 
 
 # --------------------------------------------------------------------------
@@ -69,7 +72,8 @@ TRANSITIONS: dict[AttemptState, frozenset[AttemptState]] = {
     _S.PLANNING: frozenset({_S.OPENING}),
     _S.OPENING: frozenset({_S.SIGNING_IN, _S.SIGNING_UP, _S.FILLING}),
     _S.SIGNING_IN: frozenset({_S.VERIFYING_EMAIL, _S.FILLING}),
-    _S.SIGNING_UP: frozenset({_S.VERIFYING_EMAIL, _S.SIGNING_IN, _S.FILLING}),
+    # SIGNING_UP -> SIGNING_UP: the one retry with the backup email after "already registered" (D-70)
+    _S.SIGNING_UP: frozenset({_S.SIGNING_UP, _S.VERIFYING_EMAIL, _S.SIGNING_IN, _S.FILLING}),
     # after a click (Greenhouse emailed code, §4.2): SUBMITTING or SUBMITTED_UNCONFIRMED only
     _S.VERIFYING_EMAIL: frozenset({_S.SIGNING_IN, _S.FILLING, _S.SUBMITTING,
                                    _S.SUBMITTED_UNCONFIRMED}),
@@ -324,6 +328,8 @@ class AnswerTier(IntEnum):
 
 class AnswerStatus(str, Enum):
     FILLED = "filled"                   # a value to fill (or filled)
+    PREFILLED = "prefilled"             # the site already had a value (MyGreenhouse, Workday last
+                                        # application, a site default) and it was kept as is (D-70)
     BLANK_OPTIONAL = "blank_optional"   # optional, no grounded answer: left blank
     SKIPPED = "skipped"                 # hidden, or an alternative input not used
     UNKNOWN = "unknown"                 # no tier answered
@@ -332,6 +338,40 @@ class AnswerStatus(str, Enum):
 
 
 Value = Union[str, list[str], None]
+
+
+class AnswerSource(str, Enum):
+    """The part of `Answer.source` before the first ":" (design §7, §9.1.1, §9.4.6).
+    Resolver tiers write "<prefix>:<detail>" ("llm" stands alone); a value the
+    site put there itself and that was kept (status PREFILLED) has tier NONE and
+    one of the three prefill sources as its whole `source`."""
+    FIELD_MAP = "field_map"
+    PROFILE = "profile"
+    MEMORY = "memory"
+    DECLARATION = "declaration"
+    LLM = "llm"
+    MYGREENHOUSE = "mygreenhouse"                          # "Autofill with MyGreenhouse" (D-70)
+    WORKDAY_LAST_APPLICATION = "workday_last_application"  # Workday "Use My Last Application"
+    SITE_DEFAULT = "site_default"                          # a value the form showed before any input
+
+
+PREFILL_SOURCES = frozenset({AnswerSource.MYGREENHOUSE, AnswerSource.WORKDAY_LAST_APPLICATION,
+                             AnswerSource.SITE_DEFAULT})
+
+
+class PrefillPolicy(str, Enum):
+    """How a field that already has a value is treated (design §9.1.1, §9.4.6)."""
+    KEEP = "keep"            # MyGreenhouse: keep every non-empty field except the always-ours
+                             # ones; fill only the empty ones
+    OVERWRITE = "overwrite"  # Workday: the resolver's answer wins; a site value is kept only on
+                             # an optional field the resolver cannot answer
+
+
+PREFILL_POLICY: dict[AnswerSource, PrefillPolicy] = {
+    AnswerSource.MYGREENHOUSE: PrefillPolicy.KEEP,
+    AnswerSource.WORKDAY_LAST_APPLICATION: PrefillPolicy.OVERWRITE,
+    AnswerSource.SITE_DEFAULT: PrefillPolicy.OVERWRITE,
+}
 
 
 @dataclass
@@ -354,6 +394,14 @@ class Answer:
     def fills(self) -> bool:
         return self.status is AnswerStatus.FILLED and self.value not in (None, "", [])
 
+    @property
+    def source_kind(self) -> Optional[AnswerSource]:
+        """The AnswerSource of `source`, or None for an unrecognised prefix."""
+        try:
+            return AnswerSource(self.source.split(":", 1)[0])
+        except ValueError:
+            return None
+
 
 class DeclarationLabel(str, Enum):
     """Attestation classes (PRD F-33, design §7.5)."""
@@ -371,6 +419,20 @@ class DeclarationLabel(str, Enum):
     PREVIOUSLY_APPLIED = "previously_applied"
 
 
+# Declarations about THIS employer: a prefilled value (MyGreenhouse) never stands
+# for them; the resolver's deduction overwrites it (design §9.1.1, D-70).
+EMPLOYER_SPECIFIC_DECLARATIONS = frozenset({
+    DeclarationLabel.PRIOR_EMPLOYMENT, DeclarationLabel.CURRENT_EMPLOYEE,
+    DeclarationLabel.PREVIOUSLY_APPLIED, DeclarationLabel.RELATIVES, DeclarationLabel.SHAREHOLDING,
+})
+
+# Canonical fields that are always JobScraper's under PrefillPolicy.KEEP: the
+# tailored resume replaces any attached file (D-70) and the email must be the
+# address whose mailbox is watched. Single CHECKBOX fields are also always ours
+# (an unticked box cannot be told apart from "not answered"; design §9.1.1).
+ALWAYS_OURS = frozenset({Canonical.RESUME, Canonical.EMAIL})
+
+
 @dataclass(frozen=True)
 class ResolveContext:
     """Everything the resolver may read, handed in by apply_flow (stages do not
@@ -386,6 +448,9 @@ class ResolveContext:
     # aliases.yaml, loaded by apply_flow via tailor_flow.alias_groups (design §7.7, D-68):
     alias_groups: tuple[tuple[str, ...], ...] = ()   # one (canonical, *variants) per entry; no instances
     alias_ambiguous: tuple[str, ...] = ()            # tokens that match only when not all-lowercase
+    # D-70: the address of the ATS account in use (contact.email or contact.backup_email);
+    # tier-1 EMAIL answers with it when set, else with contact.email (design §10.5).
+    account_email: str = ""
 
 
 # --------------------------------------------------------------------------
@@ -404,6 +469,32 @@ class Tenant:
     def vault_service(self) -> str:
         """Windows Credential Manager target name (PRD F-35)."""
         return f"jobscraper:{self.ats}:{self.host.lower()}"
+
+
+class AccountStatus(str, Enum):
+    """`ats_accounts.status` values (design §10.2, §10.5)."""
+    CREATING = "creating"                       # vault written, sign-up not yet answered
+    CREATED = "created"
+    VERIFIED = "verified"
+    SIGNIN_FAILED = "signin_failed"             # never retried automatically (lock-out risk)
+    UNKNOWN = "unknown"                         # exception after the sign-up click
+    EXISTS_NO_PASSWORD = "exists_no_password"   # site said "already registered"; no password here (D-70)
+
+
+class SignUpOutcome(str, Enum):
+    """What `AtsAdapter.sign_up` returns (a str enum: plain strings compare equal)."""
+    SIGNED_IN = "signed_in"
+    VERIFY_EMAIL = "verify_email"
+    SIGN_IN = "sign_in"
+    ALREADY_REGISTERED = "already_registered"   # D-70: the backup email is tried (design §10.5)
+
+
+class WorkdayEntry(str, Enum):
+    """The Workday Apply choice (design §9.4.2)."""
+    APPLY_MANUALLY = "apply_manually"
+    USE_LAST_APPLICATION = "use_last_application"
+    AUTOFILL_WITH_RESUME = "autofill_with_resume"   # never chosen
+    DIRECT = "direct"                               # the tenant showed no choice
 
 
 @dataclass(frozen=True)
@@ -458,12 +549,15 @@ class AttemptContext:
     job: dict[str, Any]                       # store.get_job row plus company name/provider/slug
     tenant: Tenant
     dry_run: bool
-    email: str                                # the profile's email (account and mail matching)
+    email: str                                # the identity in use: contact.email, or contact.backup_email
+                                              # when design §10.5 chose it (account, form email, mail matching)
     resume_path: str
     log: Callable[[str], None]                # one line, no personal values
     screenshot: Callable[[BrowserPage, str], str]   # (page, step) -> saved path
     deadline: float                           # time.monotonic() value after which the attempt fails
     http: Any = None                          # net.HttpClient, for schema adapters
+    applied_on_tenant: bool = False           # D-70: a Submit was clicked on this tenant before (§12.4)
+    prefill: str = ""                         # AnswerSource value that open()/prefill() put on the page, or ""
 
 
 @dataclass
@@ -512,8 +606,23 @@ class AtsAdapter(Protocol):
         ...
 
     def sign_up(self, page: BrowserPage, ctx: AttemptContext, password: Secret) -> str:
-        """Fill and submit the sign-up form; the password is already in the
-        vault. Returns "signed_in" | "verify_email" | "sign_in"."""
+        """Fill and submit the sign-up form for `ctx.email`; the password is
+        already in the vault. Returns a SignUpOutcome value: "signed_in" |
+        "verify_email" | "sign_in" | "already_registered" (D-70)."""
+        ...
+
+    def prefill(self, page: BrowserPage, ctx: AttemptContext) -> str:
+        """Called once after the account wall, before the first read_step. Apply
+        the site's own prefill where the design says so (Greenhouse: MyGreenhouse
+        autofill, §9.1.1) and return the AnswerSource value now on the page, or "".
+        Workday only returns `ctx.prefill` as set by open() (§9.4.2)."""
+        ...
+
+    def read_values(self, page: BrowserPage, ctx: AttemptContext,
+                    fields: Sequence[FormField]) -> dict[str, Value]:
+        """The value each field shows now: str ("" when empty; "true"/"false"
+        for a checkbox; the file name for a file), list[str] for multi-choice.
+        Used by the prefill policies (design §9.1.1, §9.4.6)."""
         ...
 
     def enter_code(self, page: BrowserPage, ctx: AttemptContext, code: str) -> None:

@@ -1,7 +1,7 @@
 # Auto-apply design (KA-1, KA-2, KA-3)
 
 **Stage B dossier** for PRD F-10–F-12, F-30–F-40, NF-01–NF-09 (`docs/prd.md` r1). Queue Q-04. Author: architect, 2026-11-01.
-**Status:** DRAFT for stage E cross-review. Contracts: `src/jobscraper/apply/contracts.py` (CONTRACT_VERSION 1). ADRs: `adr/0001` (browser route), `adr/0002` (vault), `adr/0003` (automatic submission, fail-closed resolution).
+**Status:** DRAFT for stage E cross-review; **D-70 delta (Q-22, 2026-11-02): Workday first-class in M20 (§9.4), MyGreenhouse autofill (§9.1.1), Greenhouse label rule (§9.1.2), `yes_if` (§7.3.3), backup email (§10.5, §11.5), `apply open-profile` (§14.1)**. Contracts: `src/jobscraper/apply/contracts.py` (CONTRACT_VERSION 3; v3 is additive, §20.2). ADRs: `adr/0001` (browser route), `adr/0002` (vault), `adr/0003` (automatic submission, fail-closed resolution).
 **Inputs:** `docs/research/auto_apply_brief.md` §2, §4–§6, §8; spike report `docs/architecture/spikes/S-1_S-3_browser.md` (folded in below, marked **[S-1]** / **[S-3]**).
 
 Decisions D-50…D-63 are not reopened here. Where this design adds something the PRD does not name, it says so in §20.
@@ -48,8 +48,10 @@ src/jobscraper/
     classify.py         page-state classifier: challenge, 2FA, closed, verify-email, errors       (§8.4)
     browser.py          Playwright session, fill primitives, screenshots, HTML dump               (§8)
     mail.py             IMAP fetcher (read-only)                                                  (§11)
+    accounts.py         identity choice (primary / backup email), pure                           (§10.5, D-70)
     ats/__init__.py     REGISTRY = {name: adapter instance}
-    ats/greenhouse.py   (M20)  ats/lever.py  ats/ashby.py  ats/workday.py   (M21)
+    ats/greenhouse.py   (M20, + MyGreenhouse §9.1.1)  ats/workday.py + ats/workday_widgets.py (M20, D-70)
+    ats/lever.py  ats/ashby.py   (M21)
   web/routers/applicant.py, web/routers/apply.py   (M21)
 config/
   questions.yaml        researcher-owned data (format §7.3)
@@ -93,7 +95,11 @@ apply_flow.run():
     planning: detect adapter + tenant ─► build ResolveContext (resume text + alias groups, §7.7) ─► plan_from_schema (Greenhouse) ─► resolve all ─► fail before the browser if a required field is unknown
     opening: browser session (one per job run) ─► new tab ─► adapter.open ─► classify page
     [signing_in | signing_up ─► verifying_email]           (Workday; §10, §11)
-    filling (per step): read_step ─► resolve (DOM adapters) ─► fill ─► read back ─► screenshot ─► classify ─► next_step
+    identity (§10.5): primary or backup email ─► sign in / sign up (one backup retry on "already registered")
+    prefill: adapter.prefill() ─► "" | mygreenhouse (KEEP) | workday_last_application / site_default (OVERWRITE)
+    filling (per step): read_step ─► resolve (DOM adapters) ─► read_values + prefill policy (§9.1.1, §9.4.6)
+                        ─► fill ─► read back ─► screenshot ─► classify ─► next_step (Workday: one corrective retry, §9.4.9)
+    review (Workday): parse + cross-check the answers (§9.4.10)
     review page reached:
        dry_run ─► ready_to_submit (tab stays open)
        auto    ─► record submit_clicked_at ─► submitting ─► submit ─► wait ≤ 60 s for confirmation
@@ -125,6 +131,7 @@ States and the allowed automatic transitions are `AttemptState` and `TRANSITIONS
 | signing_up | verifying_email | `sign_up()` returned `verify_email` |
 | signing_up | signing_in | `sign_up()` returned `sign_in` (site sends you to sign in) |
 | signing_up | filling | `sign_up()` returned `signed_in` |
+| signing_up | signing_up | `sign_up()` returned `already_registered` for the primary email and a backup email is set: the one retry with the backup (§10.5, D-70) |
 | signing_in | verifying_email | after sign-in the site asks to verify the email (classify `verify_email`) |
 | signing_in | filling | signed in, form visible |
 | verifying_email | signing_in | link opened; the site now shows sign-in |
@@ -164,7 +171,7 @@ Owner-facing copy lives in `REASON_TEXTS` (contracts) and is written in one voic
 | `captcha` | `classify` sees a visible challenge widget (§8.4) **before** the Submit click (after the click it is `submitted_unconfirmed` with the note "captcha after submit", §4.1, D-69) | CAPTCHA, stopped, nothing sent | Apply by hand. If `captcha_wait_s` > 0 the tab stays open that long and a confirmation seen meanwhile turns it into `submitted` |
 | `bot_challenge` | Cloudflare/Akamai/PerimeterX interstitial or block page (§8.4), or HTTP 403/429 on the apply page | bot check blocked | Apply by hand |
 | `sms_or_2fa` | classify `two_factor` (phone/SMS/authenticator prompt) | phone or two-step code | Apply by hand |
-| `login_failed` | sign-in error shown; or sign-up says the email already has an account and the vault has no entry (detail: "An account exists for your email but JobScraper has no password for it.") | can't sign in | Check by hand; add the password in Settings → Accounts → "Add an existing account" |
+| `login_failed` | sign-in error shown (detail: rejected password / account locked); a `signin_failed` row for this tenant (no automatic retry); or sign-up says the email already has an account, the vault has no entry and no unused backup email is left (details: §10.5 rules 2–3) | can't sign in | Check by hand; add the password in Settings → Accounts → "Add an existing account" |
 | `email_verification_timeout` | no matching mail within `mail.wait_s` (300) | no email in 5 min | Click the link by hand, retry |
 | `mail_not_set_up` | verification needed before Submit and IMAP host/user/password not configured | mailbox not set up | Settings → Apply → Mailbox |
 | `unanswerable_required` | a required field ends `unknown`, `ungrounded`, or an attestation the classifier can't label; detail = verbatim label (first 120 chars) | no backed-up answer to "…" | Add it to Application details, or apply by hand |
@@ -415,7 +422,7 @@ Adapters tag fields with a `Canonical`. The resolver maps them:
 | FIRST_NAME / LAST_NAME | `identity.legal_first_name` / `legal_last_name` |
 | FULL_NAME | first + " " + last (`surname_first`: last + " " + first) |
 | PREFERRED_NAME | `identity.preferred_name` or blank |
-| EMAIL | `contact.email` |
+| EMAIL | `ctx.account_email` when set (the account identity, §10.5), else `contact.email` |
 | PHONE | `contact.phone_number` (digits only); the adapter fills the country part |
 | PHONE_COUNTRY_CODE | `contact.phone_country_code` → option whose label contains it (e.g. "Singapore +65") |
 | PHONE_DEVICE_TYPE | option "Mobile" |
@@ -457,6 +464,8 @@ questions:
       citizen: [singapore citizen, citizen]
 ```
 
+An `enum` entry may also carry `yes_if` rules for Yes/No labels (§7.3.3).
+
 Selection: for each entry, score = token count of its longest matching synonym, 0 if any `exclude` phrase matches. The highest score wins; a tie between different keys → tier 2 does not answer (note `ambiguous: k1, k2`).
 
 **Minimum content** the researcher MUST provide (keys and kinds; synonyms are theirs): `singapore_status.authorised_to_work.SG` (bool), `singapore_status.requires_sponsorship.SG` (bool), `singapore_status.residency_status` (enum, S; value_map for citizen/pr/foreigner incl. "Singapore Citizen or PR" style options), `singapore_status.nationality` (country), `singapore_status.work_pass` (enum), `singapore_status.ns_status` (enum, S), `singapore_status.race` (enum, S), `identity.gender` (enum, S), `identity.date_of_birth` (date, S), `availability.notice_period_days` (number), `availability.earliest_start_date` (date), `availability.willing_to_relocate` (bool), `availability.willing_to_travel_pct` (number), `pay.expected_salary` (salary), `pay.current_salary` (salary), `education[0].institution` / `.degree` / `.major` / `.end` / `.grade` (text/date), `computed.experience_years` (number), `computed.graduation_year` (number), `links.linkedin` / `links.github` / `links.portfolio` (url), `sourcing.how_heard_default` (text), `consents.certify_true` (bool; "information provided is true", "accurate and complete"), `consents.privacy_consent` (bool), `languages` (text: "English (native), …"), `identity.preferred_name` (text).
@@ -473,6 +482,43 @@ Normalise every option label with §7.1.
 - **date:** ISO from the profile; the adapter formats it.
 - **country:** ISO → name table; option equal to the name or containing it.
 - **url / text:** the value as is; truncated never — over `max_length` → no answer.
+
+#### 7.3.3 Yes/No labels answered from an enum key: `yes_if` (D-70; researcher's gap)
+
+An enum key cannot answer a Yes/No question by §7.3.2 ("Are you a Singapore Citizen?" offers Yes/No, not citizen/pr/foreigner). An enum entry in `questions.yaml` may therefore carry `yes_if` rules:
+
+```yaml
+  - key: singapore_status.residency_status
+    kind: enum
+    sensitive: true
+    synonyms: [...]
+    value_map: {...}
+    yes_if:                                   # optional; kind enum only
+      - id: sg_citizen                        # [a-z0-9_]+, unique within the key
+        values: [citizen]                     # enum values that mean Yes (a subset of value_map's keys)
+        synonyms: [are you a singapore citizen, singapore citizen, singaporean]
+        exclude: [or permanent resident, or pr]
+      - id: sg_citizen_or_pr
+        values: [citizen, pr]
+        synonyms: [singapore citizen or permanent resident, singapore citizen or pr, citizen or pr]
+      - id: sg_pr
+        values: [pr]
+        synonyms: [singapore permanent resident, singapore pr, permanent resident of singapore]
+        exclude: [citizen]
+```
+
+**Loader** (`resolve.load_rules`): `yes_if` only on `kind: enum`; each rule needs `id`, non-empty `values` ⊆ the entry's `value_map` keys, non-empty `synonyms`; `exclude` optional. Anything else → `ValueError` naming `<key>#<id>`. Each rule becomes a **virtual entry** with key `<key>#<id>`, kind `bool`, `sensitive` inherited from its parent.
+
+**Bool-shaped field:** a single CHECKBOX; or a DROPDOWN/RADIO whose options contain exactly one yes-polarity and exactly one no-polarity option by §7.3.2's bool rule, plus at most one decline option (§7.3.2 decline phrases) and nothing else.
+
+**Candidate entries for a field** (then §7.3.1 scoring, unchanged: longest matching synonym, `exclude` → 0, a tie between different keys → no tier-2 answer):
+- bool-shaped field → plain `bool` entries + virtual `yes_if` entries (plain `enum` entries are dropped: their values can't be offered as Yes/No);
+- other choice fields (DROPDOWN, RADIO, MULTI_CHOICE) → plain entries only (virtual entries dropped);
+- TEXT / TEXTAREA → plain entries, plus virtual entries only when the normalised label's first token is one of `are, is, do, does, have, has, will, would, can, were, was` (a question; the answer is the text "Yes"/"No").
+
+**Value:** `v` = the profile value at the parent key. `v` empty → no answer (sensitive → `unknown`, never tier 5). `v == "decline"` → the decline option if offered, else no answer. Otherwise `answer = v in values`, mapped onto the options by §7.3.2 bool (single checkbox: tick for True). `source = "profile:<key>"`, `rule_id = "<key>#<id>"`, confidence 0.95, `sensitive` = the parent's.
+
+**Worked examples** (residency `citizen`): "Are you a Singapore Citizen?" Yes/No → `sg_citizen` (5 tokens) → Yes. "Are you a Singapore Citizen or Permanent Resident?" Yes/No → `sg_citizen` is excluded ("or permanent resident"), `sg_citizen_or_pr` (5 tokens) → Yes; with residency `foreigner` → No. "Singapore Citizen / PR" with options "Singapore Citizen", "Singapore PR", "Foreigner" → not bool-shaped → the plain enum entry and its `value_map` (§7.3.2), unchanged. The researcher adds `yes_if` content to `config/questions.yaml` (WP-A03); `work_pass` and `ns_status` may get rules the same way (e.g. `ns_completed: values [completed]` for "Have you completed National Service?").
 
 ### 7.4 Tier 3: answer memory (confidence 0.95; F-12, M22 writes, M20 reads)
 
@@ -587,7 +633,7 @@ Launch (**[S-1]**): `chromium.launch_persistent_context(user_data_dir=expandvars
 
 The persistent profile can be open in only one process: a second `apply` job would fail to launch, which the JobManager's single slot already prevents.
 
-### 8.2 Fill primitives (all in `browser.py`; adapters call these, never raw Playwright for input)
+### 8.2 Fill primitives (all in `browser.py`, plus Workday's own widgets in `ats/workday_widgets.py` §9.4.7; adapters call these, never raw Playwright for input)
 
 | Primitive | Behaviour |
 |---|---|
@@ -655,6 +701,45 @@ On `captcha`: if `captcha_wait_s` > 0 the tab is brought to front (`page.bring_t
 
 Recorded schemas for fixtures: the spike's `gh_vercel.json`, `gh_dataiku.json` (scratch; the tester copies them, scrubbed of nothing personal since they are public schemas, into `tests/fixtures/apply/greenhouse/` as `gh_vercel.json` and `gh_dataiku.json`, beside the recorded pages `form.html`, `form_challenge.html`, `bot_check.html`, `closed.html`, `confirm.html` and `recaptcha/`; sample inputs `tests/fixtures/apply/applicant.sample.yaml` and `questions.sample.yaml`).
 
+#### 9.1.1 MyGreenhouse autofill, then fill the gaps (M20, D-70)
+
+Owner (D-70): "if there is an option to 'autofill with Greenhouse' … it should, and then fill up the remaining empty areas." Greenhouse's Quick Apply puts an autofill button on Greenhouse-hosted applications when the employer has enabled it; the candidate's MyGreenhouse profile (name, contact, resume, employment, education, links, voluntary self-identification, saved answers to common questions) fills the form; sign-in is by a **code sent to the email**, no password (support.greenhouse.io "MyGreenhouse job alerts and quick apply", fetched 2026-11-02). The button copy differs between sources ("Autofill with Greenhouse", "Autofill my application"), so detection matches both. Selectors and the signed-in behaviour are confirmed by spike **S-6** (after owner task Q-24).
+
+**Where the login lives (honest limit).** The owner's default Edge profile cannot be automated: Chromium-based browsers ignore remote debugging on the default user-data directory (brief §3.1, Chrome 136+; S-1 used a dedicated profile for this reason). So the MyGreenhouse session must live in the **JobScraper Edge profile** (`apply.profile_dir`). Owner step, once (Q-24): `python -m jobscraper apply open-profile https://my.greenhouse.io` (§14.1) → sign in with the emailed code → close the window. When the session lapses (length unknown; S-6 notes it), attempts fall back to the full fill below and the job log says "mygreenhouse: not signed in", and `apply show` shows it; the owner runs `open-profile` again. (Signing in automatically with the emailed code through IMAP is possible later; not in M20.)
+
+**Planning change.** With `apply.mygreenhouse: true` (default) a required field that resolves `unknown`/`ungrounded` in `planning` does **not** fail the attempt before Edge opens; it is re-checked after the prefill (it may come from MyGreenhouse). With it false, or for every other ATS, §6's fail-before-the-browser rule is unchanged.
+
+**`GreenhouseAdapter.prefill(page, ctx) -> str`** (after `open`, before the first fill):
+
+1. `apply.mygreenhouse` false → `""`.
+2. Button: the first visible `button`, `a` or `[role="button"]` whose accessible name matches `/autofill (with )?(my ?greenhouse|greenhouse)|autofill my application/i` (S-6). None → `""` (log "mygreenhouse: no button").
+3. Snapshot `read_values` for every plan field (expected all empty). Click the button.
+4. Within `apply.mygreenhouse_wait_s` (20), poll every 1 s:
+   - **Not signed in** if any of: a new page opens in the context (popup); the tab navigates off `job-boards.greenhouse.io` / the employer page; a visible `[role="dialog"]` contains an `input[type="email"]` or text `/sign in|log in|create (an )?account|enter your email|verification code|continue with/i`. Then: close the popup (`popup.close()`), or `page.go_back()` and re-check `#first_name` (missing → re-`open`), or close the dialog (its `[aria-label="Close"]` / a button named `/^(close|cancel|not now|no thanks)$/i`, else Escape). Never type an email or request a code. Re-read values: unchanged → return `""` (log "mygreenhouse: not signed in"); changed → continue at "signed in".
+   - **Signed in** when any plan field's value changed from the snapshot; then wait until two consecutive snapshots 1 s apart are equal (bounded by the same timeout) → return `"mygreenhouse"`.
+   - Neither by the timeout → `""` (log "mygreenhouse: no effect").
+   - Any other dialog (e.g. a consent "share your profile with <company>") → treated as not signed in in M20; S-6 records it and, if it is a plain consent, the design adds the click.
+5. A screenshot `NN-mygreenhouse.png` in every case where the button was clicked.
+
+**Fill with `PrefillPolicy.KEEP`** (the flow, after `prefill` returned `"mygreenhouse"`; `read_values` per field):
+
+| Field | Shows a value | Action, audit row |
+|---|---|---|
+| RESUME (always ours, D-70) | any | remove an attached file (its remove control: a button named `/remove|delete/i` or `[aria-label*="remove" i]` inside the resume block, S-6), `upload` the tailored file, read back the shown name = the tailored file's name; else FILL_FAILED (required → `validation_error`; never submit MyGreenhouse's resume) |
+| EMAIL (always ours) | different from `ctx.email` | overwrite (the security-code mail must reach the watched mailbox); equal → `filled`, note "already on page" |
+| a single CHECKBOX (always ours) | any | our answer (an unticked box can't be told from "not answered") |
+| a tier-4 answer whose label is in `EMPLOYER_SPECIFIC_DECLARATIONS` | different | overwrite with the resolver's deduction (a saved answer from another employer must not stand; deliberate exception to "only empty", recorded in §20.2) |
+| any other field | non-empty | **keep**; status `prefilled`, tier NONE (0), `source = "mygreenhouse"`, confidence 0.95 (the owner's own saved data), value = the shown value, `sensitive` = the resolved answer's flag or section `compliance`/`demographic`; note "differs from profile (<source>)" when the resolver had a tier 1–4 answer that `fills` with a different value |
+| any other field | empty | the planned answer as in §9.1 (fill; `blank_optional`; required + `unknown`/`ungrounded` → `unanswerable_required`, nothing sent) |
+
+`read_values` for Greenhouse: text/textarea/phone: `input_value()`; react-select (DROPDOWN, LOCATION, `country`): the `.select__single-value` text inside the field's `.select__control` (K, S-6), "" when the placeholder shows; MULTI_CHOICE: `.select__multi-value__label` texts; CHECKBOX: "true"/"false"; FILE: the file name shown in the field's block (S-3 saw it appear), else "".
+
+No MyGreenhouse (button absent, not signed in, no effect, or the flag off) → the full fill of §9.1 with every field; behaviour identical to the pre-D-70 design.
+
+#### 9.1.2 Greenhouse canonical by label (tester Q-08 item 4, decided)
+
+A schema question whose only field is `input_text` gets a link canonical by **phrase match** (§7.1), not exact label: LINKEDIN ← phrase `linkedin`; GITHUB ← `github`; WEBSITE ← `website`, `portfolio`, `personal site`. The §7.1 one-token rule applies (a one-token phrase matches only labels of ≤ 4 tokens), so "LinkedIn Profile", "LinkedIn URL", "Github URL", "Website", "Portfolio link" are tagged and "Please share your LinkedIn profile or another link to your work" is not (it falls to tier 2, `links.*` synonyms). Exactly one canonical must match; two ("LinkedIn or GitHub") → no canonical. `textarea`, select and file questions never get a link canonical. Tester oracle: the Dataiku schema's "LinkedIn URL" → LINKEDIN and "Github URL" → GITHUB.
+
 ### 9.2 Lever (M21)
 
 Selectors below are from prior knowledge and public automation code (marked **K**); the M21 Lever WP starts by recording one real apply page as a fixture and confirming them (a verification step, not a design choice: if a selector differs, the fixture wins and the engineer notes it in the handoff).
@@ -686,28 +771,167 @@ Selectors below are from prior knowledge and public automation code (marked **K*
 
 Sources for Ashby selectors: public automation references (github.com/galiprandi/job-seeker `.agents/skills/browser-automation/references/ats-patterns.md`, read 2026-11-01). Confirm with a fixture in the WP, as for Lever.
 
-### 9.4 Workday (M21)
+### 9.4 Workday (M20, D-70)
 
-Automation ids below were confirmed in several independent public automation projects (GitHub code search 2026-11-01: `ubangura/Workday-Application-Automator/apply.js`, `AbhishekMandapmalvi/AutoApply/bot/apply/workday.py`, `ChrisMBarr/UserScripts`, `Tran-Steven/jobpipe`, `girijesh18/HireOS`). Ids marked **K** were seen in only one source or come from prior knowledge; the Workday WP confirms them on a recorded tenant fixture first.
+Workday is first-class in M20 (D-70: "the largest of my problems and it should be solved"). This section is build-ready: every rule is fixed here; only the **selectors** marked **S-5** wait for spike S-5's recordings, with the best-known default given. Marks: **[pub]** = seen in two or more public automation projects (GitHub code search 2026-11-01, see Sources); **K** = one source or prior knowledge; **S-5** = confirm on the recordings. When a recording differs from a default, the recording wins and the engineer lists the difference in the WP handoff (a verification step, not a design choice).
 
-| Item | Spec |
+**Spike S-5 (Q-23, software-engineer, owner-approved real accounts):** at 2 owner-chosen employers, with the owner's email: open a posting, record the Apply choice, create the account (or sign in), verify through IMAP, walk every wizard step filling the synthetic-safe owner data, **stop at Review** (no Submit). Output per tenant in `tests/fixtures/apply/workday/<tenant>/` (tester scrubs personal values to the synthetic profile's before commit):
+
+| File | Content |
 |---|---|
-| Tenant | `parse_workday(url)` (existing in `scrape/adapters.py`; `detect` receives it via the orchestrator, or the adapter re-implements the same regex in `ats/workday.py` — chosen: re-implement, stages don't import each other): host `<tenant>.wd<n>.myworkdayjobs.com`, board = tenant, site. `vault_service = jobscraper:workday:<host>`. One account per tenant (brief S23) |
-| Open | job URL; click `[data-automation-id="adventureButton"]` or `[data-automation-id="jobPostingApplyButton"]`; then `[data-automation-id="applyManually"]` when offered (never "Autofill with resume", never "Use my last application") |
-| Account wall | sign-in form visible (`signIn-email`/`email` + `password` inputs) or `[data-automation-id="createAccountLink"]` / `utilityButtonSignIn` |
-| Sign in | email `[data-automation-id="email"]` (or `signIn-email`), password `[data-automation-id="password"]` (or `signIn-password`), click `[data-automation-id="signInSubmitButton"]` (if covered by an overlay, click its parent `div[role=button]`). `[data-automation-id="errorMessage"]` visible → `login_failed` |
-| Sign up | `createAccountLink` → `email`, `password`, `verifyPassword`, tick `createAccountCheckbox` (terms; `consents.privacy_consent` must be true, else `unanswerable_required` "account terms") → **vault write first (§10.2)** → `createAccountSubmitButton`. Result: signed in (wizard visible) → `signed_in`; verify-email text → `verify_email`; sign-in form → `sign_in`; "already exists"/"already in use" text → `login_failed` (detail as §4.4) |
-| Steps | step id from the visible page container: `contactInformationPage`→`my_information`, `myExperiencePage`→`my_experience`, `primaryQuestionnairePage`/`secondaryQuestionnairePage`→`questions_1`/`questions_2`, `voluntaryDisclosuresPage`→`voluntary_disclosures`, `selfIdentificationPage`→`self_identify`, `reviewJobApplicationPage`→`review` (`is_review=True`). Active step label `[data-automation-id="progressBarActiveStep"]` is logged. An unknown container → `page_unrecognised` |
-| my_information | `previousWorker` radio (PREVIOUS_WORKER), how-heard source (HOW_HEARD; K: `sourceDropdown`, a two-level listbox — pick category then source), `countryDropdown`/`addressSection_countryRegion` (COUNTRY), `legalNameSection_firstName`, `legalNameSection_lastName`, `addressSection_addressLine1`, `addressSection_city`, `addressSection_postalCode`, `phone-device-type` (PHONE_DEVICE_TYPE), `countryPhoneCode` (K, PHONE_COUNTRY_CODE), `phone-number` (PHONE), `email` (pre-filled; verify only) |
-| my_experience | upload `[data-automation-id="file-upload-input-ref"]` (RESUME); wait for the parse (≤ 20 s: spinner gone). Then make the sections match the profile exactly: delete every pre-filled `workExperience-<n>` and education panel (their Delete buttons), and add one panel per profile entry via the section's `Add` button: experience `jobTitle`, `company`, `location`, `currentlyWorkHere` checkbox, `formField-startDate`/`formField-endDate` → `dateSectionMonth-input` + `dateSectionYear-input`, `description`; education `formField-schoolItem` (typeahead; no matching school → required: `unanswerable_required` "school"), `degree` (listbox), `formField-field-of-study` (typeahead), `gpa`, `formField-firstYearAttended`, `formField-lastYearAttended`; websites `websiteSection` Add + url; `linkedinQuestion`; skills `formField-skillsPrompt` (type a skill, choose the exact suggestion; skills without a suggestion are skipped). These are tier-1 answers with `source = "field_map:experience[i].<key>"` |
-| questions_* | every `[data-automation-id^="formField-"]` item: label = its `legend`/`label` text; control = listbox button → DROPDOWN, radio group → RADIO, `textarea` → TEXTAREA, `input` → TEXT, checkbox group → MULTI_CHOICE, date → DATE. Key `questions_<n>:<index>`. Resolved by tiers 2–5 |
-| voluntary_disclosures | `gender` (EEO_GENDER), `ethnicityDropdown` (EEO_RACE), `hispanicOrLatino` (EEO_HISPANIC), `veteranStatus` (EEO_VETERAN), `agreementCheckbox` (TERMS_AGREEMENT). Other items via tiers |
-| self_identify | `name` (SELF_ID_NAME), date via `dateIcon` → `datePickerSelectedToday` (SELF_ID_DATE), disability choice (EEO_DISABILITY: decline option "I do not want to answer") |
-| Next / Submit | `[data-automation-id="bottom-navigation-next-button"]`; on `review` its text is "Submit" → that click is `submit()` |
-| Confirmation | `[data-automation-id="thankYouMessage"]` visible (K), or text `/application (has been )?submitted|thank you for applying|congratulations/i`; fallback: candidate home lists the job title with status "Submitted" (K) |
-| Errors | `[data-automation-id="errorMessage"]`, error banner text `/errors? found|required/i` after Next → one re-fill of the flagged fields, then `validation_error` |
-| Password rules | `PasswordRules(length=20, symbols="!@#$%^&*")` (Workday requires upper, lower, digit, special; ≥ 8) |
-| Mail | `mail_domains = ("myworkday.com", "myworkdayjobs.com", "workday.com")` + the employer's registrable domain (§11.3) |
+| `NN-<step>.html` | DOM after the step settled (scripts removed, every `data-automation-id`, `aria-*`, `role` kept), one per step incl. `00-posting`, `01-entry`, `02-signin`, `03-create_account`, `04-verify`, wizard steps, `NN-review` |
+| `automation_ids.json` | per step: `[{automation_id, tag, role, type, label, required, in_section}]` for every element carrying a `data-automation-id` |
+| `steps.json` | the progress-bar titles in order, and which container id each step had |
+| `entry.json` | which Apply choices were offered (text + automation id) |
+| `notes.md` | anything the defaults below got wrong; the "already registered" copy if met; date-section order; prompt behaviour on Enter; error-banner markup after a deliberate empty Next on one step |
+| `verify_mail.txt` | the verification mail's sender domain, subject shape, link host and path shape (link token replaced by `TOKEN`) |
+
+**S-5 checklist** (each item → `notes.md`, confirmed / differs):
+1. Apply button id (`adventureButton` / `jobPostingApplyButton`) and the entry dialog ids (`applyManually`, `useMyLastApplication`, `autofillWithResume`); whether `<job_url>/apply/applyManually` opens the manual flow directly.
+2. Sign-in / create-account ids (`email`, `password`, `verifyPassword`, `createAccountCheckbox`, `createAccountSubmitButton`, `signInSubmitButton`, `createAccountLink`, `signInLink`, `errorMessage`) and the click-overlay quirk.
+3. The "already registered" message (exact copy, field error or banner) — provoke it at the 2nd tenant only if the owner already has an account there; else note "not met".
+4. Verification: link or code; sender domain; does the link land on sign-in, on the wizard, or on candidate home.
+5. Step containers (`contactInformationPage`, `myExperiencePage`, `primaryQuestionnairePage`, `secondaryQuestionnairePage`, `voluntaryDisclosuresPage`, `selfIdentificationPage`, `reviewJobApplicationPage`) vs progress-bar titles; any extra tenant step.
+6. Generic field container (`formField-<name>`), label element, required marker.
+7. Listbox (`aria-haspopup="listbox"` + `[role=option]`), radio, checkbox markup.
+8. Multi-select prompt: `searchBox`, `promptOption`, `promptLeafNode`, `selectedItem`, `DELETE_charm`; whether Enter in the search box searches without advancing the step; category drill-down for "How did you hear about us".
+9. Date widget: `dateSectionMonth-input` / `dateSectionDay-input` / `dateSectionYear-input` order and read-back attribute.
+10. Repeating sections: section ids, Add button, panel ids (`workExperience-<n>`, `education-<n>`), delete button; resume upload id, attached-file chip and its delete; parse spinner.
+11. Next button `bottom-navigation-next-button`; its text on Review ("Submit"); error banner/item markup after a deliberate empty Next.
+12. Review page: label/value markup per item, section headings.
+13. Session/candidate-home URLs (`/userHome`), "session expired" copy.
+Confirmation (after Submit) is **not** recorded by S-5 (it stops at Review); the first real gate submission saves `confirm.html` and the fallback is `submitted_unconfirmed` (safe, NF-06).
+
+#### 9.4.1 Tenant
+
+| URL form | Regex (case-insensitive) |
+|---|---|
+| A `https://<tenant>.wd<N>.myworkdayjobs.com/[<locale>/]<site>/job/<location>/<slug>_<req>[/apply[/…]]` [pub] | `^https?://(?P<tenant>[\w-]+)\.(?P<wd>wd\d+)\.myworkdayjobs\.com(?:/[a-z]{2}[-_][a-z]{2})?/(?P<site>[^/?#]+)(?P<rest>/[^?#]*)?` |
+| B `https://wd<N>.myworkdaysite.com/[<locale>/]recruiting/<tenant>/<site>/job/…` (K) | `^https?://(?P<wd>wd\d+)\.myworkdaysite\.com(?:/[a-z]{2}[-_][a-z]{2})?/recruiting/(?P<tenant>[\w-]+)/(?P<site>[^/?#]+)(?P<rest>/[^?#]*)?` |
+
+- `Tenant(ats="workday", host=f"{tenant}.{wd}.myworkdayjobs.com".lower(), board=tenant.lower(), site=site, posting_id=…)`. Form B uses the **same canonical host** so one tenant has one vault service (`jobscraper:workday:<host>`) whichever URL form the posting used.
+- `posting_id` = the job's `external_id` when set (the scraper stores the Workday req id there), else the `_(?P<req>[A-Za-z0-9-]+)$` suffix of the path segment after `/job/<location>/`, else "".
+- `job_url` = the job URL with any `/apply…` suffix, query and fragment dropped (the posting page).
+- `match_url(url)` applies A then B. `tenant_from_company(job)`: provider `workday` and `match_url(job["url"])` → that tenant; else None.
+- Re-implemented in `ats/workday.py` (stages don't import `scrape/`); the tester asserts agreement with `scrape.adapters.parse_workday` on host/tenant/site for form A.
+
+#### 9.4.2 Open and the Apply choice
+
+1. `page.goto(job_url)`; `settle`; `classify` (closed → `posting_closed`). Apply button within `step_timeout_s`: `[data-automation-id="adventureButton"]` [pub], else `[data-automation-id="jobPostingApplyButton"]` (K), else a button or link named `/^apply( now)?$/i`. None → closed-text check → `posting_closed`, else `page_unrecognised` ("workday: no apply button").
+2. Click it. Within 10 s the choice dialog shows some of (S-5): `[data-automation-id="applyManually"]` [pub] / text "Apply Manually"; `[data-automation-id="useMyLastApplication"]` (K) / "Use My Last Application"; `[data-automation-id="autofillWithResume"]` (K) / "Autofill with Resume". No dialog but a sign-in form or a wizard step → entry `direct`. Neither within 10 s → `page.goto(job_url + "/apply/applyManually")` (K) once, then re-check; still nothing → `page_unrecognised` ("workday: apply choice").
+3. **Rule** (`WorkdayEntry`, recorded in the job log and `apply_attempts.step` history):
+   - `ctx.applied_on_tenant` (§12.4: a Submit was already clicked on this tenant) **and** "Use My Last Application" is offered → click it; `ctx.prefill = "workday_last_application"`.
+   - otherwise "Apply Manually" → `ctx.prefill = "site_default"`.
+   - "Autofill with Resume" is **never** clicked: its resume parse is often wrong (brief §2.1, S23) and every parsed value would have to be undone.
+   - only "Autofill with Resume" offered → `page_unrecognised` ("workday: only resume autofill offered").
+   - `apply.workday_entry: manual` (config) forces "Apply Manually" whatever was offered.
+   - In **every** case §9.4.6 applies: each field is checked against the resolver and overwritten when it differs. "Use My Last Application" saves typing; it never decides an answer.
+4. The account wall follows the choice (Workday asks for an account after it). A still-valid session in the persistent profile shows the wizard directly.
+
+#### 9.4.3 Account wall, sign in, create account
+
+- `account_wall(page)`: `"sign_in"` when `[data-automation-id="signInSubmitButton"]` [pub] is visible; `"sign_up"` when `[data-automation-id="createAccountSubmitButton"]` [pub] (or `verifyPassword`) is visible; `None` when a step container or `[data-automation-id="progressBar"]` (K) is visible. **Which action runs is decided by the flow's identity rule (§10.5), not by which form happens to show:** the adapter switches forms with `[data-automation-id="createAccountLink"]` [pub] (sign-in → create) or `[data-automation-id="signInLink"]` (K) / a link named `/^sign in$/i` (create → sign-in).
+- `sign_in(page, ctx, password)`: `fill_text` email `[data-automation-id="email"]` (or `signIn-email`) [pub] with `ctx.email` (read back), password `[data-automation-id="password"]` (or `signIn-password`) [pub] (no read-back of the value; check it is non-empty), click `signInSubmitButton` (if a `[data-automation-id="click_filter"]` (K) overlay intercepts, click its parent `div[role=button]` [pub]). Within `step_timeout_s`: wizard visible → return; classify `verify_email` → return (the flow moves to `verifying_email`); `[data-automation-id="errorMessage"]` or alert text `/wrong|incorrect|invalid|not match/i` → `ApplyFailure(LOGIN_FAILED, "The site rejected the saved password.")`; text `/locked|too many/i` → `ApplyFailure(LOGIN_FAILED, "The account is locked on this site.")`. **One sign-in submit per identity per attempt** (Workday tenants lock accounts after a few failures; Sources). Never "Forgot password" (F-35).
+- `sign_up(page, ctx, password) -> SignUpOutcome`: `fill_text` `email` (= `ctx.email`), `password`, `verifyPassword`; tick `[data-automation-id="createAccountCheckbox"]` [pub] when present (terms: requires `consents.privacy_consent`, else `ApplyFailure(UNANSWERABLE_REQUIRED, "account terms")`); click `createAccountSubmitButton`. Within `step_timeout_s`, first match wins:
+  1. text `/already (exists|in use|registered|been registered)|account (already )?exists|email address is already|an account with this email/i` (S-5 records the exact copy, field error or banner) → `already_registered`;
+  2. an `errorMessage` beside the email or password field → `ApplyFailure(VALIDATION_ERROR, "account form: <field label>")` (§10.2 step 6 rollback);
+  3. a step container / progress bar → `signed_in`;
+  4. classify `verify_email` → `verify_email`;
+  5. the sign-in form → `sign_in`.
+
+#### 9.4.4 Email verification
+
+`verifying_email` (from `verify_email`, or after sign-in when classify says `verify_email`): `MailWatcher.wait_for(since_utc=attempt.started_at, sender_domains=adapter.mail_domains + (employer domain,), link_domains=(tenant.host, "myworkdayjobs.com", "myworkday.com", "myworkdaysite.com", employer domain), otp_pattern=adapter.otp_pattern, want="either", to_addr=ctx.email)` on the mailbox of `ctx.email` (§11.5). Link → `page.goto(link)` in the attempt's tab; code → `enter_code`. Then: sign-in form → `signing_in` with the same identity's vault password; step container → `filling`; anything else (candidate home, a "verified" notice) → `page.goto(job_url)` and §9.4.2 steps 1–3 again (now signed in), then `filling`. On success the account row becomes `verified`.
+
+#### 9.4.5 Wizard loop and step identification
+
+`read_step(page, ctx)` returns `(step_id, fields)`:
+
+1. **Container:** the visible page container's automation id → step id: `contactInformationPage`→`my_information`, `myExperiencePage`→`my_experience`, `primaryQuestionnairePage`→`questions_1`, `secondaryQuestionnairePage`→`questions_2`, `voluntaryDisclosuresPage`→`voluntary_disclosures`, `selfIdentificationPage`→`self_identify`, `reviewJobApplicationPage`→`review` [pub].
+2. **Else the title:** `[data-automation-id="progressBarActiveStep"]` [pub] text, normalised (§7.1): `my information`→`my_information`; `my experience`→`my_experience`; `application questions`, `questions`, `additional questions`, `questionnaire` → `questions_<n>` (n = 1 + questions steps already seen in this attempt); `voluntary disclosures`→`voluntary_disclosures`; `self identify`, `self identification`, `disability` → `self_identify`; `review` → `review`; **any other title** → `custom_<slug>` (slug of the title, `[a-z0-9_]`, ≤ 30 chars), handled by the generic reader. Tenants add their own steps; a generic reader plus the fail-closed resolver is safer than refusing them.
+3. Neither → `page_unrecognised` ("workday: no step").
+
+`FormPlan.steps` = the progress-bar titles, slugged (`[data-automation-id="progressBar"]` items, S-5), logged once. Loop guards (in the adapter's `next_step`): at most 15 Next clicks per attempt; the same step id again after a Next with no visible errors → `page_unrecognised` ("stuck at <step>").
+
+**Generic reader** (questions_*, custom_*, and any field on the named steps not in the tables below): every visible `[data-automation-id^="formField-"]` container (S-5; [pub] for the prefix) is one field. Label = its `label` or `legend` text without a trailing `*`; required = `*` in the label, `aria-required="true"`, or `required`. Type by control: `button[aria-haspopup="listbox"]` → DROPDOWN (options read by opening the list once: click, read `[role="option"]` texts in the open `[role="listbox"]`, press Escape); a prompt (`[data-automation-id="multiselectInputContainer"]` or a `searchBox` inside, K) → MULTI_CHOICE, or TYPEAHEAD when the field holds one value (options are searched at fill time, §9.4.7); a radio group → RADIO; several checkboxes → MULTI_CHOICE; one checkbox → CHECKBOX; `textarea` → TEXTAREA; `input[type=text|email|tel|url|number]` → TEXT; date sections → DATE. Key = `<step>:<container automation id>`, with `#<n>` appended when the id repeats on the step. Resolved by tiers 2–5 (questionnaires) or by the tables' canonicals.
+
+#### 9.4.6 Prefill policy on Workday: OVERWRITE (`PrefillPolicy.OVERWRITE`)
+
+Before filling a step the flow calls `adapter.read_values(page, ctx, fields)`. Per field:
+
+| Resolver result | Field shows a value | Action, audit row |
+|---|---|---|
+| answer that `fills` | equal (normalised §7.1; dates as ISO; multi as sets; file by name) | no input; status `filled`, note "already on page" |
+| answer that `fills` | different or empty | clear, then fill; status `filled` (note "replaced site value" when it was non-empty) |
+| no answer, field **required** | anything | `unanswerable_required` (fail closed: a value we cannot back up is not kept, even our own from a last application) |
+| no answer, optional | non-empty | keep; status `prefilled`, tier NONE (0), `source = ctx.prefill` (`workday_last_application` or `site_default`), confidence 0.9, value = the shown value |
+| no answer, optional | empty | `blank_optional` |
+
+Clearing: text → `fill("")`; prompt → remove every `selectedItem` pill; listbox/radio → choosing the new option replaces it; checkbox → `set_checkbox`; date → each section re-typed. Under "Use My Last Application" the repeating sections and the resume are still rebuilt exactly (§9.4.8).
+
+#### 9.4.7 Widgets (`src/jobscraper/apply/ats/workday_widgets.py`, lane V)
+
+Workday's own controls; adapters use these and `browser.py` (§8.2) only. Every helper returns True/False after a read-back.
+
+| Helper | Behaviour |
+|---|---|
+| `choose_listbox(page, button, label)` | §8.2 (exists in `browser.py`) |
+| `prompt_select(page, field, labels)` | Clear existing pills (`[data-automation-id="selectedItem"]`, remove control `[data-automation-id="DELETE_charm"]`, K). For each label: click the field's `[data-automation-id="searchBox"]` (K) input, `fill(label[:40])`, press **Enter** (this runs the prompt's search; it is the one allowed Enter, inside a search box that is not a form, S-5 item 8), wait ≤ 5 s for `[data-automation-id="promptOption"]` (K) items, click the one whose normalised text equals the label (else the only one containing it). If the clicked item is a category (it has a child-list chevron / is not `promptLeafNode`, K), match again among its children (≤ 3 levels). Read back: the pill texts contain every label |
+| `prompt_options(page, field, search)` | For resolution: type `search` (or nothing, for a category list), Enter, read up to 50 `promptOption` texts (leaf and category), Escape. Used for HOW_HEARD (search "" then each category is a leaf list) and the school / field-of-study / skills prompts |
+| `fill_date(field, iso)` | For each of `[data-automation-id="dateSectionMonth-input"]`, `dateSectionDay-input`, `dateSectionYear-input` (K, [pub] for month/year) present in the field, **by role, not position** (locale order differs): click it, `press_sequentially` MM / DD / YYYY. A `YYYY-MM` value with a Day section present → day `01`; a year-only field (first/last year attended) gets YYYY. Read back each section's value or `aria-valuetext` (S-5 item 9) |
+| `panels(section)`, `add_panel(section)`, `delete_panel(panel)` | Sections: `[data-automation-id="workExperienceSection"]`, `educationSection`, `websiteSection`, `languageSection`, `certificationSection` (K, S-5). Add: `button[data-automation-id="Add"]` or a button named `/^add( another)?\b/i` inside the section. Panels: `[data-automation-id^="workExperience-"]` / `education-` / … (K) or `[role="group"]` children (S-5). Delete: `button[data-automation-id="panel-set-delete-button"]` (K) or a button named `/^delete/i` in the panel. After each add/delete wait ≤ 5 s for the panel count to change, else False |
+
+#### 9.4.8 Named steps
+
+| Step | Fields (all tier 1 unless said; ids [pub] unless marked) |
+|---|---|
+| my_information | `previousWorker` radio (PREVIOUS_WORKER, §7.5 prior employment); "How did you hear about us" `sourceDropdown`/`source--source` prompt (K; HOW_HEARD: `prompt_options` lists categories and leaves, §7.3.2 maps `sourcing.how_heard_default`, then `prompt_select`); `countryDropdown` / `addressSection_countryRegion` (COUNTRY, listbox); `legalNameSection_firstName`, `legalNameSection_lastName` (FIRST/LAST_NAME); `legalNameSection_preferredCheck` (K; tick only when `identity.preferred_name` set, then the preferred-name inputs); `addressSection_addressLine1`, `addressSection_city`, `addressSection_postalCode` (ADDRESS_LINE1, CITY, POSTAL_CODE); `phone-device-type` (PHONE_DEVICE_TYPE); `countryPhoneCode` (K; PHONE_COUNTRY_CODE, prompt or listbox); `phone-number` (PHONE); `email` (EMAIL: pre-filled with the account email; compared, never retyped unless different) |
+| my_experience | **Resume first:** if a file is attached (`[data-automation-id="file-upload-successful"]` or a file chip with `[data-automation-id="delete-file"]`, K) delete it; `upload([data-automation-id="file-upload-input-ref"], ctx.resume_path)`; wait ≤ 20 s for the file name and for the parse spinner to go. Read back: the shown name equals the tailored file's name, else FILL_FAILED (required → `validation_error`; another resume is never submitted, D-70). **Then the sections, rebuilt to match the profile exactly:** delete every existing panel (last to first: the parse or a last application may have added some), then one `add_panel` per entry. Work experience per `experience[]` (profile order): `jobTitle`, `company`, `location`, `currentlyWorkHere` (checkbox, ticked iff `end` is null), `startDate` / `endDate` (`fill_date`, skipped when current), `roleDescription` (K; `description`). Education per `education[]`: `school` prompt (institution; no equal-or-unique match → required: `unanswerable_required` "school", optional: skipped), `degree` listbox (option containing the profile degree's level word: bachelor / master / doctor\|phd / diploma / associate, from `degree`; none or several → `unknown`), `fieldOfStudy` prompt (`major`; no match → skipped if optional), `gradeAverage` (K; `grade`), `firstYearAttended` / `lastYearAttended` (`fill_date` years from `start` / `end`). Websites: delete all, one panel per non-empty `links.linkedin`, `github`, `portfolio`, `other[]`; a separate `linkedinQuestion` (K) gets LINKEDIN. Skills prompt `formField-skills` (K): `prompt_select` once per profile skill ∪ attested skill; a skill with no equal suggestion is skipped (logged count only). Languages section when present: one panel per `languages[]`. Sources: `field_map:experience[i].<key>`, `field_map:education[i].<key>`, `field_map:links.<key>`, `field_map:skills` |
+| questions_* / custom_* | generic reader (§9.4.5); tiers 2–5 |
+| voluntary_disclosures | `gender` (EEO_GENDER), `ethnicityDropdown` (EEO_RACE), `hispanicOrLatino` (EEO_HISPANIC), `veteranStatus` (EEO_VETERAN), `agreementCheckbox` (TERMS_AGREEMENT); any other item via the generic reader (tiers 2–5; attestations tier 4). All from `us_self_id.*` / `consents.*` (§7.2) |
+| self_identify | `name` (SELF_ID_NAME); date: `fill_date` with today (Asia/Singapore), else `dateIcon` → `datePickerSelectedToday` (SELF_ID_DATE); disability radio group (EEO_DISABILITY: `yes`/`no` by §7.3.2 bool polarity on options starting "Yes, I have" / "No, I don't have"; `decline` → the option containing "do not want to answer"); employee id (optional) blank |
+| review | §9.4.10 |
+
+#### 9.4.9 Next, and errors after Next (one corrective retry per step)
+
+`next_step`: click `[data-automation-id="bottom-navigation-next-button"]` [pub] (text "Next"/"Save and Continue"); wait ≤ `step_timeout_s` for the step id to change **or** an error: `[data-automation-id="errorMessage"]` [pub], an error banner (`[data-automation-id="errorBanner"]` / `errorWidgetBar`, K, S-5 item 11) or text `/errors? (found|on this page)|is required|required field/i`. On error:
+
+1. Flagged fields = the field containers holding an error message or `aria-invalid="true"`; their labels.
+2. Per flagged field: an answer that `fills` → re-fill it once from a fresh locator; `blank_optional` / `prefilled` (the site wants it after all) → re-resolve that one field with `dataclasses.replace(field, required=True)` (tiers 1–5 as usual); answer → fill; none → `unanswerable_required` (label).
+3. Click Next once more. Still errors → `validation_error` (up to 3 labels). `StepResult.errors` carries the labels only.
+
+Split of work: the adapter's `next_step` does step 1 and returns `StepResult(step=<same step>, errors=<labels>)` instead of raising; `apply_flow` (generic, both ATSs; WP-B11) does steps 2–3 (it owns the resolver) and raises `validation_error` on the second failure. Greenhouse's "one re-fill, then `validation_error`" (§9.1 Errors) is the same machinery.
+
+#### 9.4.10 Review page parse
+
+On `review` (`is_review=True`): read every displayed item (S-5 item 12: label element + value element per `formField-*`, under section headings = step titles). Write `data/apply/<attempt_id>/review.json` = `[{section, label, value}]` (local, gitignored, never logged; deleted with the attempt). Cross-check each answer with status `filled` or `prefilled`: find the review item with the same normalised label under the same section; compare normalised values (§7.1 on text; dates and phones as digit strings; multi as sets; FILE by file name). Results:
+
+- equal → nothing;
+- item not found → note "not shown on review" (review pages omit some fields; no failure);
+- different on an **optional** field → note "review shows a different value";
+- different on a **required** field, or the resume file name differs → `ApplyFailure(VALIDATION_ERROR, "review page differs: <labels>")` **before** Submit (nothing sent).
+
+`apply show` prints these notes with the answers.
+
+Who: the Workday adapter, in the `next_step` call that lands on `review`, using the answers it was handed in its `fill` calls (the flow passes every answer of the step to `fill`, `prefilled` ones included; `fill` only types those that `fills`). It sets the notes on those `Answer` objects (`note` += "; review: …") and raises `validation_error` per the rules above; the flow, after that `next_step` (or on its failure), calls `store.annotate_answers(attempt_id, {(step, field_key): note})` to update the already-written rows (lane V store V-block, §13).
+
+#### 9.4.11 Submit, confirmation
+
+- `submit`: the review page's `bottom-navigation-next-button` whose text matches `/^submit$/i` [pub]; anything else on review → `page_unrecognised` ("workday: no submit").
+- `after_submit` (polled): text `/application (has been )?submitted|thank you for applying|successfully submitted|congratulations/i` or `[data-automation-id="thankYouMessage"]` (K) → `confirmed:text`; URL containing `/userHome` (K) whose page lists the job title with a status matching `/submitted|under consideration|application received|in review/i` → `confirmed:home`. Errors visible → `errors`. Nothing by `confirm_timeout_s` → `submitted_unconfirmed` (NF-06). The first gate submission records `confirm.html` (owner-approved real submission, D-70).
+- Dialogs: `page.on("dialog")` dismisses "leave this page?" prompts (stay on the page).
+- "Your session has expired" (K) before the click → `ApplyFailure(ERROR, "workday session expired")`.
+
+#### 9.4.12 Constants
+
+| Item | Value |
+|---|---|
+| `needs_account` | True |
+| `password_rules` | `PasswordRules(length=20, symbols="!@#$%^&*")` (Workday: upper, lower, digit, special; ≥ 8) |
+| `mail_domains` | `("myworkday.com", "myworkdayjobs.com", "myworkdaysite.com", "workday.com")` + the employer's registrable domain (§11.3) |
+| `otp_pattern` | `r"\b(\d{6})\b"` (verification is normally a link; a code variant, if S-5 meets one, sets this) |
+| `prefill()` | returns `ctx.prefill` (set in §9.4.2); no action |
+| `read_values()` | text: `input_value()`; listbox: the button text (empty when it shows "Select One", K); prompt: pill texts; radio: the checked option's label; checkbox: "true"/"false"; date: ISO from the sections; file: the attached file name |
 
 Workday's site terms (brief §7, D-54, R-6) are accepted by the owner; caps and the no-evasion rules apply unchanged.
 
@@ -751,7 +975,41 @@ Sign-in failure (`login_failed`) sets status `signin_failed` and `last_signin_ok
 
 ### 10.4 Add an existing account
 
-Settings → Accounts → "Add an account you already have": ATS (Workday only in M21), tenant URL, email, password → `vault.put` + account row status `created`. Fixes the `login_failed` "account exists" case without a password reset.
+Settings → Accounts → "Add an account you already have" (web, M21) and, from M20, the CLI `accounts add --url <tenant URL> --email <address>` (password by `getpass`): ATS (Workday), tenant URL, email, password → `vault.put` + account row status `created` (an existing `signin_failed` / `exists_no_password` row is reset to `created`). Fixes the `login_failed` "account exists" and "sign-in failed before" cases without a password reset.
+
+### 10.5 Which email: identity choice and the backup email (D-70)
+
+Profile: `contact.email` (primary, required) and `contact.backup_email` (optional, new: same validation as `contact.email`, must differ from it, sensitive like every `contact.*` path; template line `backup_email: ""   # used only when an ATS says your main email is already registered and JobScraper has no password for it`).
+
+`apply/accounts.py` (stage, pure, no I/O; lane V):
+
+```python
+@dataclass(frozen=True)
+class Identity:
+    email: str
+    action: str            # "sign_in" | "sign_up"
+
+def choose_identity(primary: str, backup: str, rows: dict[str, str],
+                    has_password: Callable[[str], bool]) -> Identity
+    # rows: {email (lower): AccountStatus value} for this tenant; has_password(email) = vault.get(service, email) is not None
+    # raises ApplyFailure(LOGIN_FAILED, detail) per rule 3/4
+```
+
+Rules, in order (emails compared lower-case; `backup` "" = none):
+
+1. For `e` in (primary, backup), skipping "": if `has_password(e)` and `rows.get(e)` not in {`signin_failed`, `exists_no_password`} → `Identity(e, "sign_in")`.
+2. If `rows.get(e) == "signin_failed"` for an `e` and rule 1 found nothing → `LOGIN_FAILED`, detail "Sign-in failed on this site before; JobScraper won't retry, to avoid locking the account." (The owner fixes it with `accounts add`, §14.1, which stores the password and resets the row to `created`.)
+3. If `rows.get(primary) == "exists_no_password"`: backup set and `rows.get(backup)` is None → `Identity(backup, "sign_up")`; else `LOGIN_FAILED`, detail "An account exists for your email but JobScraper has no password for it. Add a backup email to your profile, or add the password with `accounts add`." (both emails used: "Accounts exist for both your emails, but JobScraper has no password for them.").
+4. Else → `Identity(primary, "sign_up")`.
+
+**The flow** (`apply_flow`, opening → signing_in | signing_up): `ctx.email = identity.email`; `ResolveContext.account_email = identity.email` (tier-1 EMAIL then answers with it, so the form's email matches the account). Sign-up follows §10.2 with `identity.email`. When `sign_up` returns `already_registered` for email `e`:
+
+1. `vault.delete(service, e)` (the generated password was never accepted); row `e` → `exists_no_password`.
+2. `e` is the primary, the backup is set and has no row → `signing_up → signing_up` (the one allowed self-transition, contract v3): generate, `vault.put(service, backup)`, row (backup, `creating`), the adapter re-fills the create-account form with the backup (`ctx.email = backup`), `sign_up` once more, outcomes as §10.2.
+3. Otherwise → `failed(login_failed)` with the rule-3 detail. At most one backup retry per attempt.
+
+Sign-in success: row `last_signin_at` = now, `last_signin_ok = 1`. Sign-in rejection: row → `signin_failed`, `last_signin_ok = 0`, `failed(login_failed)`. A later attempt never signs in automatically with a `signin_failed` row (rule 2). Mail for verification uses the identity's mailbox (§11.5).
+
 
 ---
 
@@ -795,6 +1053,17 @@ From the company's `careers_url` host: the last two labels, or the last three wh
 
 Spike S-4 = step 5 plus one real verification-style message found by `mail test --find-from <domain>` (prints only "found from <domain> at <time>").
 
+### 11.5 Two mailboxes (D-70)
+
+The mailbox for an address `a`:
+- `a == contact.email` → the `apply.mail` mailbox (host, port, username; settings keys `apply.mail.*`);
+- `a == contact.backup_email` → the `apply.mail_backup` mailbox when its host and username are set (settings keys `apply.mail_backup.host|port|username`), else the `apply.mail` mailbox (a backup address that forwards into, or is an alias of, the main inbox);
+- password: `vault.get(IMAP_SERVICE.format(host=<host>), <username>)`, so two Gmail accounts on `imap.gmail.com` are two entries with different usernames;
+- missing host, username or password → `mail_not_set_up` (before Submit; §4.2 after).
+
+`MailWatcher.wait_for` gains `to_addr: Optional[str] = None`: when set, a message is kept only if one of its `To`, `Cc`, `Delivered-To`, `X-Original-To`, `X-Forwarded-To` headers contains `to_addr` (case-insensitive). The flow always passes the identity's address, so one inbox receiving both addresses never confuses the two accounts. CLI: `mail set-password [--backup]`, `mail test [--backup] [--find-from DOMAIN]` (§14.1).
+
+
 ---
 
 ## 12. Caps and duplicate guards (F-30, D-61, NF-05, NF-06)
@@ -817,6 +1086,10 @@ Spike S-4 = step 5 plus one real verification-style message found by `mail test 
 ### 12.3 `previously_applied` for the resolver
 
 True if any `applications` row (status ≠ `to_apply`) or any attempt with `submit_clicked_at` exists for a job of the same `company_id`, excluding the current job. (`store.applied_to_company(company_id, exclude_job_id) -> bool`.)
+
+### 12.4 `applied_on_tenant` for the Workday entry choice (D-70)
+
+`store.applied_on_tenant(ats, tenant_host) -> bool`: an `apply_attempts` row with that `ats` and `tenant_host` and `submit_clicked_at` set exists. `apply_flow` puts it into `AttemptContext.applied_on_tenant`; Workday uses it to prefer "Use My Last Application" (§9.4.2).
 
 ---
 
@@ -872,7 +1145,7 @@ CREATE TABLE IF NOT EXISTS ats_accounts (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     ats TEXT NOT NULL, tenant_host TEXT NOT NULL, email TEXT NOT NULL,
     vault_service TEXT NOT NULL,           -- the Credential Manager target; never the password
-    status TEXT NOT NULL,                  -- creating | created | verified | signin_failed | unknown
+    status TEXT NOT NULL,                  -- AccountStatus: creating | created | verified | signin_failed | unknown | exists_no_password (D-70)
     created_at TEXT NOT NULL, verified_at TEXT,
     last_signin_at TEXT, last_signin_ok INTEGER,
     exported_to_edge_at TEXT,
@@ -894,7 +1167,7 @@ CREATE TABLE IF NOT EXISTS answer_memory (
 
 Column addition in `_migrate`: `app_events.by TEXT` (NULL = the owner; `'jobscraper'` = written by auto-apply; the UI renders "Applied by JobScraper", F-37). `set_application_status` gains `by: Optional[str] = None`.
 
-Store methods (names fixed; SQL is the engineer's): `create_attempt(job_id, company_id, mode, now) -> int`, `set_attempt_state(id, state, *, step=None, reason=None, detail=None, **cols)` (validates `TRANSITIONS`), `mark_submit_clicked(id, now)`, `attempt(id)`, `attempts_for_job(job_id)`, `reap_attempts(now)`, `apply_duplicate(job_id)`, `apply_counts(company_id, day_start)`, `applied_to_company(company_id, exclude_job_id)`, `add_answers(attempt_id, rows)`, `answers(attempt_id)`, `answer_memory_get(label_norm, field_type, ats)`, `answer_memory_put(...)`, `upsert_account(...)`, `account(ats, host, email)`, `accounts()`, `set_account_status(id, status, **cols)`, `delete_account(id)`, `accounts_to_export()`, `mark_exported(ids, now)`.
+Store methods (names fixed; SQL is the engineer's): `create_attempt(job_id, company_id, mode, now) -> int`, `set_attempt_state(id, state, *, step=None, reason=None, detail=None, **cols)` (validates `TRANSITIONS`), `mark_submit_clicked(id, now)`, `attempt(id)`, `attempts_for_job(job_id)`, `reap_attempts(now)`, `apply_duplicate(job_id)`, `apply_counts(company_id, day_start)`, `applied_to_company(company_id, exclude_job_id)`, `add_answers(attempt_id, rows)`, `answers(attempt_id)`, `answer_memory_get(label_norm, field_type, ats)`, `answer_memory_put(...)`, `upsert_account(...)`, `account(ats, host, email)`, `accounts()`, `set_account_status(id, status, **cols)`, `delete_account(id)`, `accounts_to_export()`, `mark_exported(ids, now)`; D-70 (lane V, a V-block, no DDL change): `accounts_for_tenant(ats, host) -> dict[email_lower, status]`, `applied_on_tenant(ats, host) -> bool`, `annotate_answers(attempt_id, notes: dict[tuple[step, field_key], str])` (sets `note` to the given text on the matching rows; §9.4.10). `apply_answers.tier` = 0 and `status = 'prefilled'` for kept site values (§9.1.1, §9.4.6).
 
 Deleting: an application deleted via Undo does not delete attempts (the audit outlives the Undo); `answers` rows are deleted only with their attempt (no UI for it in M21).
 
@@ -911,8 +1184,10 @@ Deleting: an application deleted via Undo does not delete attempts (the audit ou
 | `applicant init` | §5.5 (M21); refuses if the file exists | 0 / 1 |
 | `accounts list` | ATS, tenant, email, status, created, verified, exported (no passwords) | 0 |
 | `accounts export-edge` | §10.3; prints the CSV path and the import steps; `--confirm` deletes the newest export and stamps rows | 0 |
-| `mail set-password` | `getpass`, `vault.put(IMAP_SERVICE…)`; host/username from settings or `--host/--user` | 0 |
-| `mail test [--find-from DOMAIN]` | `test_connection`; with `--find-from`, reports the newest message from that domain (time only) | 0 ok / 1 |
+| `accounts add --url URL --email ADDRESS` (M20, D-70) | §10.4: `match_url` → tenant; `getpass` password; `vault.put` + row `created` (resets `signin_failed` / `exists_no_password`) | 0; 2 URL not a known ATS |
+| `mail set-password [--backup]` | `getpass`, `vault.put(IMAP_SERVICE…)`; host/username from settings (`apply.mail` or, with `--backup`, `apply.mail_backup`) or `--host/--user` | 0 |
+| `mail test [--backup] [--find-from DOMAIN]` | `test_connection` on that mailbox; with `--find-from`, reports the newest message from that domain (time only) | 0 ok / 1 |
+| `apply open-profile [URL]` (M20, D-70) | Opens **headed** Edge on the JobScraper profile (`BrowserSession` with `headed=True` forced, same `profile_dir`) at URL (default `https://my.greenhouse.io/`); prints "Edge is open on the JobScraper profile. Sign in where you need to (MyGreenhouse, a Workday site), then close the window."; blocks in `hold(3600)` until the owner closes the window; nothing is filled, nothing logged beyond that line. The profile is locked while an `apply` job runs: a launch error naming the user-data directory → prints "An apply run is using the profile; try again when it ends." exit 1. `show` and `open-profile` are reserved first words of `apply` (job ids are hashes, never these words) | 0 / 1 |
 | `apply show <job_id\|attempt_id>` (D-68 A-3; M20, lane B) | All digits → that attempt (`store.attempt`); otherwise the job's newest attempt (`store.attempts_for_job`, last). Prints a header (attempt id, job id, company — title, ATS, mode, state, reason code + detail, resume file + source, queued/started/submit-clicked/finished times), then one line per `store.answers(attempt_id)` row in id order: step, verbatim label, value (the exact value sent, **S-fields included**: this is the owner's own terminal; file fields as file name + SHA-256), tier, confidence, source (+ `rule_id`), status, and the note when present; then the evidence paths `data/apply/<attempt_id>/*.png` (and `failed.html`). This is how the owner reads the audit at the M20 gate. Nothing goes to a job log | 0; 1 unknown id / no attempt |
 
 ### 14.2 Job kinds (`web/jobs.py`)
@@ -961,7 +1236,7 @@ Example: SmartRecruiters (M22).
 1. Create `src/jobscraper/apply/ats/smartrecruiters.py` with a class implementing `AtsAdapter` (contracts §"Adapter protocol"): `name = "smartrecruiters"` (equal to the watchlist provider), `needs_account`, `password_rules`, `mail_domains`, `otp_pattern`, and the methods. Use only `browser.py` primitives and `classify.py` for page states; raise `ApplyFailure` with a `ReasonCode` for every stop.
 2. `match_url` / `tenant_from_company`: the URL regex and the board from the company slug.
 3. `plan_from_schema` returns None unless the ATS publishes a form schema; `read_step` maps DOM controls to `FormField`s, tagging standard fields with `Canonical` values (add none: if a new standard field is needed, that is a contract change → architect).
-4. `submit` / `after_submit`: the confirmation signal and the error markers.
+4. `submit` / `after_submit`: the confirmation signal and the error markers; `prefill` (return "" unless the ATS has its own autofill the design adopts) and `read_values` (the shown value per field).
 5. Register: one line in `apply/ats/__init__.py` `REGISTRY`.
 6. Fixture + tests (tester): a recorded HTML page in `tests/fixtures/apply/<ats>/`, served by a local `http.server` in the test, filled in dry-run mode; assert the plan, the answers and `ready_to_submit`.
 
@@ -988,12 +1263,19 @@ apply:
   attempt_timeout_s: 420     # whole attempt, excluding the mail wait (NF-07: ≤ 4 min typical)
   dry_run_hold_s: 600        # F-37 dry run: keep the filled form open
   resume_format: pdf         # pdf | docx: which tailored file to upload when both exist (falls back to the other)
+  mygreenhouse: true         # D-70: click "Autofill with (My)Greenhouse" when present, then fill only the gaps (§9.1.1)
+  mygreenhouse_wait_s: 20
+  workday_entry: auto        # auto = §9.4.2 rule (last application on a tenant applied to before, else Apply Manually) | manual
+  max_wizard_steps: 15
   llm_text_temperature: 0.3
   mail:
     host: imap.gmail.com
     port: 993
     wait_s: 300              # F-36
     poll_s: 10
+  mail_backup:               # mailbox for contact.backup_email; host "" = same mailbox as `mail` (§11.5)
+    host: ""
+    port: 993
 paths:
   applicant: data/applicant.yaml
   questions: config/questions.yaml
@@ -1020,12 +1302,12 @@ paths:
 | F-11 | §5.2, §12.1 (1), §14.3 `/api/applicant`, §14.4 Profile |
 | F-12 | §7.4, §13 `answer_memory`, §14.3 correct (M22) |
 | F-30 | §3, §12, §14.1, §14.2, §14.3 `POST /api/apply`, §14.4 Inbox |
-| F-31 | §6, §9.0, §9.1 plan |
-| F-32 | §7 (tiers, schemas, grounding, recording) |
+| F-31 | §6, §9.0, §9.1 plan, §9.1.2, §9.4.1 |
+| F-32 | §7 (tiers, schemas, grounding, recording), §7.3.3 `yes_if` |
 | F-33 | §7.5 |
-| F-34 | §8, §9 fill specs, §3 resume choice, §16 `resume_format` |
-| F-35 | §10, §9.4 sign-up/in, §13 `ats_accounts` |
-| F-36 | §11 |
+| F-34 | §8, §9 fill specs, §9.1.1 (MyGreenhouse, tailored resume replaces the autofilled one), §9.4.6–§9.4.10, §3 resume choice, §16 `resume_format` |
+| F-35 | §10 (incl. §10.5 backup email), §9.4.3, §13 `ats_accounts`, §14.1 `accounts add`, `apply open-profile` |
+| F-36 | §11 (incl. §11.5 two mailboxes), §9.4.4 |
 | F-37 | §4.1, §4.2, §4.3, §9 confirmation rows |
 | F-38 | §4.4, §8.3, §8.4 |
 | F-39 | §7.8, §13 `apply_answers`, §14.4 |
@@ -1044,7 +1326,10 @@ paths:
 
 ## 19. Lanes
 
-### 19.1 M20 (walking skeleton: Greenhouse dry run + one owner-triggered submission) — 3 lanes
+### 19.1 M20 (re-scoped by D-70: Workday end to end + Greenhouse with MyGreenhouse) — lanes P, B, T, then V
+
+**D-70:** lane V (vault, accounts, mail, Workday) moves from M21 into M20; it starts in the first freed engineer slot, its browser WPs after `browser.py` (WP-B4) and spike S-5's recordings. Lane V owns `vault.py`, `apply/mail.py`, `apply/accounts.py`, `apply/ats/workday.py`, `apply/ats/workday_widgets.py`, and after lane B merges a V-block in `apply_flow.py` (identity, mail, prefill policy OVERWRITE, review cross-check), `store.py` (V-block: `accounts_for_tenant`, `applied_on_tenant`), `cli.py` (V-block: `accounts`, `mail`). Lane B adds MyGreenhouse (`greenhouse.py` `prefill`/`read_values`, the KEEP policy in `apply_flow.py`) and `apply open-profile`. Lane P adds `yes_if` and `contact.backup_email`. The planner's `apply_build_plan.md` §2–§5 has the WPs.
+
 
 | Lane | Branch | Files (only these) | Delivers |
 |---|---|---|---|
@@ -1054,13 +1339,13 @@ paths:
 
 Disjointness: lanes P and B both create `apply/__init__.py` with the identical one-line content (git merges identical adds cleanly); `cli.py` gets one self-contained block per lane (Coordinator resolves the textual merge, `04_team.md` §2); `store.py` is touched by B and T, each appending its own block.
 
-Integration order: P and T first (no browser); B builds against the contracts with a stub resolver (`resolve_all` returning tier-1 answers only) and a stub `tailor_for_apply` (returns the original resume), then a final B work package swaps in the real ones after P and T merge. `vault.py`, `mail.py`, Lever/Ashby/Workday and the web/UI are M21.
+Integration order: P and T first (no browser); B builds against the contracts with a stub resolver (`resolve_all` returning tier-1 answers only) and a stub `tailor_for_apply` (returns the original resume), then a final B work package swaps in the real ones after P and T merge. Lane V follows (D-70). Lever/Ashby and the web/UI stay M21.
 
 Dev rule (NF-08): every lane runs against a copied DB, web on port 8768; real Greenhouse pages only in `--dry-run` until the owner triggers the one M20 submission.
 
 ### 19.2 M21 (preview; the planner splits it)
 
-Lane V: `vault.py`, `apply/mail.py`, `apply/edge_save.ps1`, CLI `accounts`/`mail`, Workday adapter. Lane L: Lever + Ashby adapters. Lane W: web routers `applicant.py`/`apply.py` + Vue (Profile form, attempt panel, audit view, Settings → Apply/Accounts). The tailor LLM layer is its own lane per the tailor design.
+Lane V moved to M20 (D-70); M21 keeps only `apply/edge_save.ps1` (sync route) from it. Lane L: Lever + Ashby adapters. Lane W: web routers `applicant.py`/`apply.py` + Vue (Profile form, attempt panel, audit view, Settings → Apply/Accounts). The tailor LLM layer is its own lane per the tailor design.
 
 ---
 
@@ -1074,7 +1359,9 @@ Lane V: `vault.py`, `apply/mail.py`, `apply/edge_save.ps1`, CLI `accounts`/`mail
 | S-1e Edge CSV columns | `name,url,username,password,note`; owner verifies with a one-row import (first-export note) |
 | S-3 Submit-time reCAPTCHA behaviour (R-3) | classifier as §8.4; the M20 owner submission is the evidence |
 | S-4 Gmail IMAP + Greenhouse security-code format | `otp_pattern = [A-Za-z0-9]{8}` for Greenhouse, `\d{6}` default |
-| Lever / Ashby / Workday ids marked K | confirm on a recorded fixture as the first step of each M21 adapter WP |
+| S-5 real Workday flow at 2 employers (Q-23, D-70) | §9.4 defaults; the 13-item checklist in §9.4; recordings in `tests/fixtures/apply/workday/<tenant>/` |
+| S-6 MyGreenhouse in the JobScraper profile (after owner task Q-24) | §9.1.1 defaults: button regex, not-signed-in signals, `.select__single-value` read-back, resume remove control; dry run only, no Submit |
+| Lever / Ashby ids marked K | confirm on a recorded fixture as the first step of each M21 adapter WP |
 
 ### 20.2 Additions and deviations (not conflicts)
 
@@ -1084,6 +1371,9 @@ Lane V: `vault.py`, `apply/mail.py`, `apply/edge_save.ps1`, CLI `accounts`/`mail
 - `app_events.by` column for "Applied by JobScraper".
 - D-69 (tester testability items): no `submitting → failed` and no `failed` after the click (ADR-0004, contract v2: `POST_CLICK_STATES`, `can_transition(..., clicked=)`, `verifying_email → submitted_unconfirmed`); apostrophes kept in `norm_label`, wider decline phrases; declaration `current_employee_at_company`; signatures `resolve.load_rules(path)`, `declarations.AMBIGUOUS`, `store.reap_attempts(now)`, `apply_flow.run(..., http=None, browser_factory=None)`, `computed_facts(profile, today: date)`; fixture paths `tests/fixtures/apply/...`.
 - D-68 (planner gaps A-1..A-4): alias groups in `ResolveContext` for grounding rule 3; resume-text source decided by `apply_flow`; CLI `apply show`; `experience_months` defined as a merged-interval union (§5.1). Contract change is additive (two new `ResolveContext` fields with defaults).
+- D-70 (contract v3, additive: `AnswerSource`, `PrefillPolicy`, `PREFILL_POLICY`, `AnswerStatus.PREFILLED`, `AccountStatus`, `SignUpOutcome`, `WorkdayEntry`, `EMPLOYER_SPECIFIC_DECLARATIONS`, `ALWAYS_OURS`, `ResolveContext.account_email`, `AttemptContext.applied_on_tenant`/`prefill`, adapter methods `prefill` and `read_values`, transition `signing_up → signing_up`). No ADR: nothing existing changes meaning; the two new protocol methods are required of every adapter (Greenhouse implements them in WP-B11).
+- D-70 deliberate exception to "fill only the empty fields" under MyGreenhouse: the resume, the email, single checkboxes and employer-specific declarations are always JobScraper's (§9.1.1) — a saved answer from another application must not stand in for "Have you worked for <this employer>?".
+- D-70: on Workday a required field the resolver cannot answer fails the attempt even when the site (or our last application) shows a value (fail closed, ADR-0003).
 - Tier-5 choice answers need two agreeing runs and a verbatim evidence quote (stricter than F-32's "one of the offered options").
 - Attestation-like questions the classifier can't label never reach the LLM (fail closed).
 
@@ -1106,3 +1396,9 @@ Lane V: `vault.py`, `apply/mail.py`, `apply/edge_save.ps1`, CLI `accounts`/`mail
 - Workday `data-automation-id` values: GitHub code search for `legalNameSection_firstName`, `bottom-navigation-next-button`, `primaryQuestionnairePage`, `reviewJobApplicationPage`, `progressBarActiveStep`; files read: `ubangura/Workday-Application-Automator/apply.js`, `AbhishekMandapmalvi/AutoApply/bot/apply/workday.py` (read for selector facts only; neither is reused).
 - Ashby form selectors: `galiprandi/job-seeker` `.agents/skills/browser-automation/references/ats-patterns.md`; GitHub code search `_systemfield_resume`.
 - Spike S-1/S-3 report (local, merged on `personal`).
+
+D-70 delta lookups (2026-11-02, 5 of the 10 allowed):
+- MyGreenhouse Quick Apply (button "Autofill my application"; sign-in "with a code sent to their email"; employer enables it under Configure → MyGreenhouse → Quick Apply; profile holds resume, contact, employment, education, links, self-identification): https://support.greenhouse.io/hc/en-us/articles/35746094035099-MyGreenhouse-job-alerts-and-quick-apply (fetched).
+- MyGreenhouse candidate FAQ (account created with an email address; "common application questions" saved): https://my.greenhouse.com/faq (fetched). Search snippets of the same support article give the copy "Autofill with Greenhouse" (search only).
+- Workday Apply choices ("Apply Manually" / "Autofill with Resume" / "Use My Last Application"): no official Workday page found; user and vendor reports only (e.g. https://www.teamblind.com/post/shyte-workday-k0fzthkq, https://intercom.help/earnbetter-83fd641ab32a/en/articles/10063750-how-to-autofill-job-applications-with-extension), search 2026-11-02. Ids stay K until S-5.
+- Workday accounts are per tenant; "account already exists" after social sign-in; lock-out after repeated failed sign-ins (https://kb.wisconsin.edu/workday/152462, https://forums.developer.nvidia.com/t/nvidia-careers-workday-login-blocked/357855), search 2026-11-02. Basis for "one sign-in per identity per attempt" and no automatic retry after `signin_failed`.
