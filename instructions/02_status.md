@@ -6,16 +6,16 @@
 
 ## Now / Next (≤ 10 lines; history goes to `docs/planning/session_log.md`)
 
-- **Now:** M19 merged and pushed. M20 dossier: designs + plans done, test plans and a design patch (Q-19, D-68) finishing; then cross-review (Q-10).
-- **Next:** M20 lanes P, T, B in parallel; owner fills `data/applicant.yaml` for the M20 gate.
-- **Blocked on the owner:** nothing yet. Coming: the applicant profile values and the email to apply with (M20); a Gmail app password (M21).
+- **Now:** M20 dossier merged (designs, plans, tests, seeds). Lanes P, B, T building; architect adding the D-70 delta (Workday first, MyGreenhouse).
+- **Next:** spike S-5 (real Workday flow) once the owner gives the email + app password; then lane V (Workday).
+- **Blocked on the owner:** application email (and confirm backup), Gmail app password via the command, MyGreenhouse sign-in in the JobScraper Edge profile, then `data/applicant.yaml`.
 
 ## 1. Milestones
 
 | Milestone | Goal | Gate (checkable) | Status |
 |---|---|---|---|
 | M19 Cloud port | Engine fixes + UI/UX items from jobscraper-cloud | Both suites pass; a real run on a copied DB shows C-1/C-2 behaviour | DONE 2026-11-02 (cab10af: 410/410 Python, 220+1 skip web; real 6-company run on a DB copy; dev web 8768 healthz ok) |
-| M20 Walking skeleton | `apply <job_id> --dry-run` on Greenhouse, deterministic tailored DOCX, audit | 5 owner-picked Greenhouse postings end `ready_to_submit` or a correct reason; the owner finds no wrong answer; one owner-triggered real submission ends `submitted` | TODO |
+| M20 Walking skeleton (re-scoped D-70) | Workday end to end (account, verification, wizard, submit) + Greenhouse with MyGreenhouse autofill + deterministic tailored resume + audit | Real automatic submissions at the 2 owner-approved Workday employers end `submitted`; Greenhouse dry runs end `ready_to_submit`; `apply show` audit has no wrong answer | IN PROGRESS |
 | M21 MVP | Profile form, full tailor, Lever/Ashby/Workday, vault, IMAP, batch apply | 10 real automatic submissions across ≥ 3 ATSs incl. Workday; G1/G2; golden cases A–C; NF-01 test | TODO |
 | M22 Breadth | More ATSs, generic adapter, answer memory, deferred cloud items | Per item | TODO |
 
@@ -81,6 +81,7 @@ Decided items aren't reopened. If facts change, raise a new decision that refere
 | D-60 | Tailor output | Clean template; DOCX + PDF via Word; page ceiling; temp 0.25 | Coordinator | DECIDED |
 | D-61 | Caps | 10/day, 2/employer/day, 1 in flight | Coordinator | DECIDED |
 | D-62 | Team and git | Standard team, no security reviewer; merge and push allowed | owner | DECIDED |
+| D-70 | Workday first; MyGreenhouse autofill | Owner 2026-11-02: Workday is the biggest problem and must work; Greenhouse uses "Autofill with MyGreenhouse" (owner signs in once in the JobScraper Edge profile) then fills the empty fields; the tailored resume always replaces an autofilled one. Lane V (vault, accounts, IMAP, Workday wizard) moves from M21 into M20; spike S-5 = real Workday flow at 2 employers with the owner's email (owner allowed real accounts AND automatic submission there); a backup email is used when the primary is already registered | owner, 2026-11-02 | DECIDED |
 | D-69 | Tester's testability items | Clicked Submit ends only submitted/submitted_unconfirmed (NF-06); apostrophes kept in labels; `current_employee_at_company` deduced; validator counts standalone numbers only; tester's assumed signatures adopted; fixture paths per tests/fixtures | Coordinator, 2026-11-02 | DECIDED |
 | D-68 | Planner gaps A-1..A-5 | A-1 resolver gets the alias dictionary for grounding; A-2 apply_flow passes resume text (extract_text or tailor master) in the resolver context; A-3 CLI `apply show`; A-4 experience months = merged intervals, internships count, whole months; A-5 `tailor.llm_terms` (default on, M21) separate from `tailor.llm` (off, M22) | Coordinator, 2026-11-02 | DECIDED |
 | D-67 | Tailor LLM layer | Spike S-2: LLM bullet rewrite added 0 coverage over deterministic swaps (54/54 runs), ~6 s/resume, validator gaps found. `tailor.llm: false` by default; M21 tailor is deterministic (swaps, reordering, render, storage, UI); LLM bullet + summary rewrite and validator fixes move to M22 | Coordinator, 2026-11-02 | DECIDED |
