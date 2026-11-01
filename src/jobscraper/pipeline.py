@@ -38,6 +38,7 @@ from .profile import keywords, resume_ingest, titles
 from .scrape import discovery
 from .scrape.adapters import get_adapter, is_capped
 from .scrape.net import FetchError, HttpClient
+from .tailor import storage as tailor_storage
 from .store import Store, utcnow
 
 log = logging.getLogger(__name__)
@@ -341,6 +342,7 @@ def run(cfg: Config, store: Store, *, dry_run: bool = False,
 
         # ---- housekeeping: stored descriptions expire (M17) ----
         days = description_days(cfg)
+        tailor_storage.purge(store, cfg.tailored_dir, utcnow(), cfg.tailor.draft_days, cfg.tailor.sent_days_after_close, cfg.tailor.closed_statuses)  # D-59: tailored files expire
         purged = store.purge_descriptions(days) if days > 0 else 0
         if purged:
             rep.stats["descriptions_purged"] = purged
