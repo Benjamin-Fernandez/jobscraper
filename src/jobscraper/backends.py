@@ -51,9 +51,20 @@ class Backend:
 
     def complete(self, system: str, user: str, max_tokens: int = 4096,
                  schema: Optional[dict] = None,
-                 timeout: Optional[float] = None) -> Completion:
+                 timeout: Optional[float] = None, *,
+                 format: Optional[dict] = None,
+                 temperature: Optional[float] = None,
+                 seed: Optional[int] = None,
+                 top_k: Optional[int] = None) -> Completion:
         """`schema`, when given, is a JSON schema the answer must follow;
-        `timeout` caps this call's seconds below the transport's own."""
+        `timeout` caps this call's seconds below the transport's own.
+
+        Per-call options (apply_design §7.6, M20 WP-P1), keyword only so every
+        existing caller is untouched: `format` is a JSON schema dict (the same
+        thing as `schema`; `format` wins when both are given; neither = plain
+        "json"); `temperature=None` means 0; `seed` and `top_k` reach the
+        model only when given. The resolver's two-run agreement check and the
+        tailor's sampling need these."""
         raise BackendError(self.unavailable_reason or "no model transport configured")
 
 
@@ -147,7 +158,11 @@ class OllamaBackend(Backend):
 
     def complete(self, system: str, user: str, max_tokens: int = 4096,
                  schema: Optional[dict] = None,
-                 timeout: Optional[float] = None) -> Completion:
+                 timeout: Optional[float] = None, *,
+                 format: Optional[dict] = None,
+                 temperature: Optional[float] = None,
+                 seed: Optional[int] = None,
+                 top_k: Optional[int] = None) -> Completion:
         if not self.available:
             raise BackendError(self.unavailable_reason)
         body = {
@@ -157,10 +172,14 @@ class OllamaBackend(Backend):
             "stream": False,
             # A schema makes Ollama constrain every token to it (ids limited to
             # an enum, say); plain "json" only promises valid JSON.
-            "format": schema if schema else "json",
-            "options": {"temperature": 0, "num_ctx": self.num_ctx,
-                        "num_predict": max_tokens},
+            "format": _format(format, schema),
+            "options": {"temperature": 0 if temperature is None else temperature,
+                        "num_ctx": self.num_ctx, "num_predict": max_tokens},
         }
+        if seed is not None:
+            body["options"]["seed"] = seed
+        if top_k is not None:
+            body["options"]["top_k"] = top_k
         if self._has_thinking():
             body["think"] = False
         try:
@@ -207,6 +226,14 @@ def build(budget: dict[str, Any]) -> Backend:
             timeout=float(budget.get("ollama_timeout", 600)),
             num_ctx=int(budget.get("ollama_num_ctx", 16384)))
     return OffBackend(f"unknown budget.backend {kind!r} (expected ollama or off)")
+
+
+def _format(format: Optional[dict], schema: Optional[dict]) -> Any:
+    """The request's `format`: a JSON schema dict when the caller gave one
+    (`format` first, then the older `schema` argument), else plain "json"."""
+    if isinstance(format, dict) and format:
+        return format
+    return schema if schema else "json"
 
 
 def _i(v: Any) -> int:

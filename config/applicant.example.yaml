@@ -1,0 +1,114 @@
+# JobScraper applicant profile: TEMPLATE. Copy to data/applicant.yaml and fill it in.
+# data/applicant.yaml is gitignored. Never put real values in THIS file (the repo is public).
+# S = sensitive: never sent to the AI model, never written to logs.
+# "decline" means "prefer not to say" wherever a form offers it.
+version: 1
+
+identity:
+  legal_first_name: "Firstname"
+  legal_last_name: "Lastname"
+  preferred_name: ""                 # optional
+  name_order: western                # western | surname_first
+  pronouns: ""
+  date_of_birth: null                # S. YYYY-MM-DD. Left empty, a form that requires it fails with a reason
+  gender: decline                    # S. male | female | non_binary | decline
+
+contact:
+  email: "applicant@example.com"     # the one address used for every application and account
+  backup_email: ""   # used only when an ATS says your main email is already registered and JobScraper has no password for it
+  phone_country_code: "+65"
+  phone_number: "90000000"
+  address_line1: "1 Example Road"
+  address_line2: ""
+  postal_code: "000000"              # 6 digits in Singapore
+  city: "Singapore"
+  country: SG                        # ISO 3166-1 alpha-2
+
+singapore_status:
+  nationality: SG                    # ISO country code
+  residency_status: citizen          # S. citizen | pr | foreigner
+  work_pass: none_required           # none_required | ep | s_pass | dp | ltvp_loc | student_pass | other
+  authorised_to_work: {SG: true}     # add other countries a form may ask about, e.g. US: false
+  requires_sponsorship: {SG: false}
+  ns_status: not_applicable          # S. completed | serving | exempted | not_applicable
+  ord_date: null                     # S. YYYY-MM, when ns_status is completed or serving
+  race: decline                      # S. chinese | malay | indian | eurasian | other | decline
+  race_other: ""                     # S
+  religion: decline                  # S. free text or decline
+  marital_status: decline            # S. single | married | decline
+  nric_last4: ""                     # S. optional, e.g. "123A". NEVER the full NRIC
+
+us_self_id:                          # S. US equal-employment questions on global forms
+  eeo_gender: decline                # male | female | non_binary | decline
+  eeo_race_ethnicity: decline        # asian | black | hispanic_latino | white | two_or_more | native_american | pacific_islander | decline
+  veteran_status: decline            # not_a_veteran | veteran | decline
+  disability_status: decline         # no | yes | decline
+
+availability:
+  notice_period_days: 0
+  earliest_start_date: "2026-01-05"  # YYYY-MM-DD
+  willing_to_relocate: false
+  willing_to_travel_pct: 0
+
+pay:
+  expected_salary: {amount: 0, currency: SGD, period: monthly, negotiable: true}
+  current_salary: null               # or {amount: 0, currency: SGD, period: monthly}
+  months_per_year: 12                # 13 if you count the AWS bonus when converting to annual
+
+education:                           # newest first. from_resume: true = filled from your resume, please check
+  - institution: "Example University"
+    degree: "Bachelor of Engineering"
+    major: "Computer Engineering"
+    minor: ""
+    start: "2021-08"                 # YYYY-MM
+    end: "2025-06"                   # YYYY-MM (expected date if still studying)
+    grade_type: cap                  # gpa | cap | honours_class
+    grade: "4.00"
+    grade_scale: "5.00"
+    from_resume: false
+
+experience:                          # internships count: prior employment is deduced from this list
+  - employer: "Example Pte Ltd"
+    title: "Software Engineering Intern"
+    start: "2024-05"
+    end: "2024-08"                   # null = present
+    location: "Singapore"
+    description: "One or two lines, copied from your resume."
+    from_resume: false
+
+skills: ["Python", "SQL"]
+attested_skills: []                  # skills you confirmed with "I have this" in the resume tailor
+languages:
+  - {language: English, spoken: native, written: native}   # native | fluent | professional | basic
+
+links:
+  linkedin: ""
+  github: ""
+  portfolio: ""
+  other: []
+
+documents:
+  resume: ""                         # empty = data/resume.pdf or data/resume.docx
+  transcript: ""
+
+sourcing:
+  how_heard_default: "Company careers website"
+
+consents:
+  privacy_consent: true              # consent to the employer processing your application data
+  data_retention_consent: true       # consent to keep your data for future roles
+  talent_pool_opt_in: false
+  certify_true: true                 # "I certify the information I gave is true and complete"
+
+declarations:                        # D-55 standing answers. S. Change any that stop being true.
+  pep: false                         # politically exposed person (self, family, close associate)
+  conflict_audit_independence: false
+  shareholding_in_company: false
+  holdings: []                       # names of companies you hold shares in; a match with the employer answers Yes
+  relatives_at_company: false
+  relatives_employers: []            # employers where a relative works; a match answers Yes
+  criminal_record: false
+  bankruptcy: false
+  regulatory_disciplinary: false
+  non_compete: false
+  health_disclosure: decline         # decline only; a required health question fails the attempt
