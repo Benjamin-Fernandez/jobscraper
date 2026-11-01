@@ -147,9 +147,16 @@ apply:
   attempt_timeout_s: 420     # whole attempt, excluding the mail wait (NF-07)
   dry_run_hold_s: 600        # F-37 dry run: keep the filled form open
   resume_format: pdf         # pdf | docx: which tailored file to upload when both exist
+  mygreenhouse: true         # D-70: click "Autofill with (My)Greenhouse" when present, then fill only the gaps
+  mygreenhouse_wait_s: 20
+  workday_entry: auto        # D-70: auto = last application on a tenant applied to before, else Apply Manually | manual
+  max_wizard_steps: 15
   llm_text_temperature: 0.3
   mail:
     host: imap.gmail.com
     port: 993
     wait_s: 300              # F-36
     poll_s: 10
+  mail_backup:               # D-70: mailbox for contact.backup_email; host "" = same mailbox as `mail`
+    host: ""
+    port: 993

@@ -15,12 +15,16 @@ from __future__ import annotations
 import html as _html
 import os
 import re
-from typing import Any, Optional
-from urllib.parse import parse_qs, urlsplit
+import time
+from pathlib import Path
+from typing import Any, Optional, Sequence
+from urllib.parse import urlsplit
 
+from .. import browser as B
+from ..classify import PageSignal, classify, visible_text
 from ..contracts import (
-    ApplyFailure, AttemptContext, Canonical, FieldType, FormField, FormPlan, Option,
-    PasswordRules, ReasonCode, Tenant,
+    Answer, ApplyFailure, AttemptContext, Canonical, FieldType, FormField, FormPlan, Option,
+    PasswordRules, ReasonCode, Secret, StepResult, Tenant,
 )
 
 BOARD_HOST = "job-boards.greenhouse.io"
@@ -71,6 +75,34 @@ LINK_PHRASES = (
     (Canonical.GITHUB, ("github",)),
     (Canonical.WEBSITE, ("website", "portfolio", "personal site")),
 )
+
+# §9.1 Open / Submit / Confirmation / Code / Errors
+FORM_MARKER = '[id="first_name"]'
+EXTRA_CLOSED = (r"[?&]error=true",)                  # Greenhouse's closed-posting redirect
+SUBMIT_TEXT = re.compile(r"submit", re.I)
+CONFIRM_TEXT = re.compile(
+    r"thank you for applying|application (has been )?(received|submitted)"
+    r"|we('ve| have) received your application", re.I)
+CODE_TEXT = re.compile(r"security code", re.I)
+CODE_INPUTS = ('input[autocomplete="one-time-code"], input[id*="security" i], '
+               'input[name*="security" i], input[id*="code" i]')
+ERROR_MARKERS = (".helper-text--error",)
+REQUIRED_TEXT = "This field is required"
+# Types filled through the react-select helper on Greenhouse (DROPDOWN, RADIO shown as select).
+REACT_TYPES = (FieldType.DROPDOWN, FieldType.RADIO, FieldType.MULTI_CHOICE, FieldType.TYPEAHEAD)
+
+# §9.1.1 MyGreenhouse (D-70). Selectors pending spike S-6.
+AUTOFILL_NAME = re.compile(r"autofill (with )?(my ?greenhouse|greenhouse)|autofill my application", re.I)
+DIALOG_CLOSE_NAME = re.compile(r"^(close|cancel|not now|no thanks)$", re.I)
+REMOVE_NAME = re.compile(r"remove|delete", re.I)
+FILE_NAME_RE = re.compile(r"[^\s/\\]+\.(?:pdf|docx?|txt|rtf|odt)\b", re.I)
+
+_SIGNAL_REASON = {
+    PageSignal.CAPTCHA: ReasonCode.CAPTCHA,
+    PageSignal.BOT_CHALLENGE: ReasonCode.BOT_CHALLENGE,
+    PageSignal.TWO_FACTOR: ReasonCode.SMS_OR_2FA,
+    PageSignal.CLOSED: ReasonCode.POSTING_CLOSED,
+}
 
 
 def board_base() -> str:
@@ -273,6 +305,332 @@ class GreenhouseAdapter:
     def forget(self, ctx: AttemptContext) -> None:
         """Drop the attempt's cached plan (apply_flow calls this when it ends)."""
         self._plans.pop(ctx.attempt_id, None)
+
+    # ---------------- open (§9.1 Open) ----------------
+
+    def open(self, page: Any, ctx: AttemptContext) -> None:
+        """The posting page (the form is on it, S-3); the embed form when the
+        board redirects to the employer's own site. `#first_name` must appear
+        within `step_timeout_s`; else the page says why (closed, CAPTCHA, bot
+        wall) or it is `page_unrecognised`."""
+        timeout_ms = B.options_for(page).step_timeout_s * 1000
+        resp = page.goto(self.posting_url(ctx.tenant), wait_until="domcontentloaded",
+                         timeout=timeout_ms)
+        status = resp.status if resp is not None else None
+        if urlsplit(page.url).netloc.lower() != urlsplit(board_base()).netloc.lower():
+            ctx.log("greenhouse: posting page left the board; opening the embedded form")
+            resp = page.goto(self.embed_url(ctx.tenant), wait_until="domcontentloaded",
+                             timeout=timeout_ms)
+            status = resp.status if resp is not None else None
+        B.settle(page)
+        end = time.monotonic() + timeout_ms / 1000
+        while True:
+            if page.locator(FORM_MARKER).count():
+                return
+            sig = classify(page, status, extra_closed=EXTRA_CLOSED)
+            if sig in _SIGNAL_REASON:
+                raise ApplyFailure(_SIGNAL_REASON[sig], "", step="open")
+            if time.monotonic() >= end:
+                raise ApplyFailure(ReasonCode.PAGE_UNRECOGNISED, "greenhouse: application",
+                                   step="open")
+            page.wait_for_timeout(500)
+
+    def account_wall(self, page: Any) -> Optional[str]:
+        return None
+
+    def sign_in(self, page: Any, ctx: AttemptContext, password: Secret) -> None:
+        raise ApplyFailure(ReasonCode.PAGE_UNRECOGNISED, "greenhouse: no accounts", step="sign_in")
+
+    def sign_up(self, page: Any, ctx: AttemptContext, password: Secret) -> str:
+        raise ApplyFailure(ReasonCode.PAGE_UNRECOGNISED, "greenhouse: no accounts", step="sign_up")
+
+    # ---------------- locators ----------------
+
+    @staticmethod
+    def locator(page: Any, f: FormField) -> Any:
+        """`[id="<name>"]` (S-3); a single checkbox is `[id="<name>_1"]`."""
+        if f.locator:
+            return page.locator(f.locator).first
+        key = f"{f.key}_1" if f.type is FieldType.CHECKBOX else f.key
+        return page.locator(f'[id="{key}"]').first
+
+    @staticmethod
+    def _block(loc: Any) -> Any:
+        """The field's own block: the nearest ancestor that holds a label."""
+        return loc.locator("xpath=ancestor::*[.//label][1]")
+
+    # ---------------- read (§9.1, D-70 §9.1.1) ----------------
+
+    def read_step(self, page: Any, ctx: AttemptContext) -> tuple[str, list[FormField]]:
+        """One page: the plan's fields that are on it."""
+        plan = self._plans.get(ctx.attempt_id)
+        if plan is None:
+            raise ApplyFailure(ReasonCode.PAGE_UNRECOGNISED, "greenhouse: no plan", step="application")
+        present = [f for f in plan.fields
+                   if f.type is FieldType.HIDDEN or self.locator(page, f).count()]
+        return "application", present
+
+    def read_values(self, page: Any, ctx: AttemptContext,
+                    fields: Sequence[FormField]) -> dict[str, Any]:
+        """What each field shows now (D-70 §9.1.1): "" when empty, "true"/
+        "false" for a checkbox, the file name for a file, a list for multi."""
+        out: dict[str, Any] = {}
+        for f in fields:
+            loc = self.locator(page, f)
+            try:
+                if not loc.count() or f.type is FieldType.HIDDEN:
+                    out[f.key] = ""
+                elif f.type is FieldType.CHECKBOX:
+                    out[f.key] = "true" if loc.is_checked() else "false"
+                elif f.type is FieldType.FILE:
+                    out[f.key] = self._shown_file(loc)
+                elif f.type is FieldType.MULTI_CHOICE:
+                    ctl = loc.locator(B.REACT_SELECT_CONTROL)
+                    out[f.key] = [t.strip() for t in ctl.locator(".select__multi-value__label").all_inner_texts()]
+                elif f.type in REACT_TYPES or f.key == "country":
+                    ctl = loc.locator(B.REACT_SELECT_CONTROL)
+                    single = ctl.locator(".select__single-value")
+                    out[f.key] = single.first.inner_text().strip() if single.count() else ""
+                else:
+                    out[f.key] = loc.input_value()
+            except Exception:
+                out[f.key] = ""
+        return out
+
+    def _shown_file(self, loc: Any) -> str:
+        try:
+            files = loc.evaluate("e => Array.from(e.files || []).map(f => f.name)") or []
+            if files:
+                return files[0]
+            m = FILE_NAME_RE.search(self._block(loc).first.inner_text())
+            return m.group(0) if m else ""
+        except Exception:
+            return ""
+
+    # ---------------- MyGreenhouse (D-70 §9.1.1) ----------------
+
+    def prefill(self, page: Any, ctx: AttemptContext) -> str:
+        """Click "Autofill with MyGreenhouse" when the profile is signed in, and
+        report "mygreenhouse" once the form stops changing; "" otherwise. Never
+        types an email or asks for a code: a sign-in prompt is closed and the
+        attempt falls back to the full fill."""
+        acfg = B.options_for(page)
+        if not acfg.mygreenhouse:
+            return ""
+        btn = self._autofill_button(page)
+        if btn is None:
+            ctx.log("mygreenhouse: no button")
+            return ""
+        plan = self._plans.get(ctx.attempt_id)
+        fields = [f for f in (plan.fields if plan else []) if f.type is not FieldType.HIDDEN]
+        before = self.read_values(page, ctx, fields)
+        host = urlsplit(page.url).netloc.lower()
+        n_pages = len(page.context.pages)
+        btn.click()
+        end = time.monotonic() + acfg.mygreenhouse_wait_s
+        result = ""
+        while time.monotonic() < end:
+            page.wait_for_timeout(1000)
+            blocked = self._close_sign_in(page, ctx, host, n_pages)
+            now = self.read_values(page, ctx, fields)
+            if now != before:
+                result = self._wait_stable(page, ctx, fields, now, end)
+                break
+            if blocked:
+                ctx.log("mygreenhouse: not signed in")
+                break
+        else:
+            ctx.log("mygreenhouse: no effect")
+        ctx.screenshot(page, "mygreenhouse")
+        if result:
+            ctx.log("mygreenhouse: autofilled")
+        return result
+
+    def _autofill_button(self, page: Any) -> Optional[Any]:
+        for role in ("button", "link"):
+            cands = page.get_by_role(role, name=AUTOFILL_NAME)
+            for i in range(min(cands.count(), 5)):
+                if cands.nth(i).is_visible():
+                    return cands.nth(i)
+        return None
+
+    def _close_sign_in(self, page: Any, ctx: AttemptContext, host: str, n_pages: int) -> bool:
+        """Undo a sign-in detour (popup, navigation away, dialog). True if one
+        was seen. Nothing is typed into it."""
+        seen = False
+        extra = page.context.pages[n_pages:]
+        for p in extra:
+            seen = True
+            try:
+                p.close()
+            except Exception:
+                pass
+        if urlsplit(page.url).netloc.lower() != host:
+            seen = True
+            try:
+                page.go_back(wait_until="domcontentloaded")
+            except Exception:
+                pass
+            if not page.locator(FORM_MARKER).count():
+                self.open(page, ctx)
+        # A sign-in dialog (an email box, or sign-in / code text) - and in M20
+        # any other dialog too (e.g. a "share your profile" consent; S-6 will
+        # tell) - counts as not signed in, and is closed.
+        dialogs = page.locator('[role="dialog"]')
+        for i in range(min(dialogs.count(), 5)):
+            d = dialogs.nth(i)
+            if not _safe_visible(d):
+                continue
+            seen = True
+            closer = d.locator('[aria-label="Close"]')
+            if not closer.count():
+                closer = d.get_by_role("button", name=DIALOG_CLOSE_NAME)
+            try:
+                if closer.count():
+                    closer.first.click()
+                else:
+                    page.keyboard.press("Escape")
+            except Exception:
+                pass
+        return seen
+
+    def _wait_stable(self, page: Any, ctx: AttemptContext, fields: list[FormField],
+                     last: dict[str, Any], end: float) -> str:
+        while time.monotonic() < end:
+            page.wait_for_timeout(1000)
+            now = self.read_values(page, ctx, fields)
+            if now == last:
+                return "mygreenhouse"
+            last = now
+        return "mygreenhouse"
+
+    # ---------------- fill (§9.1 Fill) ----------------
+
+    def fill(self, page: Any, ctx: AttemptContext, fields: Sequence[FormField],
+             answers: dict[str, Answer]) -> list[str]:
+        """Fill every answer that `fills`, `country` before `phone`. Returns
+        the keys that would not take their value."""
+        order = sorted(fields, key=lambda f: 0 if f.key == "country" else 1)
+        failed: list[str] = []
+        for f in order:
+            a = answers.get(f.key)
+            if a is None or not a.fills or f.type is FieldType.HIDDEN:
+                continue
+            ok = self._fill_one(page, f, a)
+            if not ok:
+                failed.append(f.key)
+                ctx.log(f"greenhouse: field did not take its value: {f.label[:80]}")
+            B.pause(page)
+        return failed
+
+    def _fill_one(self, page: Any, f: FormField, a: Answer) -> bool:
+        loc = self.locator(page, f)
+        if not loc.count():
+            return False
+        labels = list(a.option_labels) or (a.value if isinstance(a.value, list) else [str(a.value)])
+        if f.type is FieldType.FILE:
+            return self._replace_file(page, loc, str(a.value))
+        if f.type is FieldType.CHECKBOX:
+            return B.set_checkbox(loc, str(a.value).strip().lower() == "true")
+        if f.type is FieldType.TYPEAHEAD:
+            want = B.norm_text(labels[0])
+            return B.typeahead(page, loc, labels[0], lambda ls: next(
+                (i for i, t in enumerate(ls) if B.norm_text(t).startswith(want)), None))
+        if f.type in (FieldType.DROPDOWN, FieldType.RADIO, FieldType.MULTI_CHOICE):
+            if not f.options:                 # async options (the phone country): pick by content
+                want = B.norm_text(labels[0])
+                return B.typeahead(page, loc, labels[0], lambda ls: next(
+                    (i for i, t in enumerate(ls) if want in B.norm_text(t)), None))
+            return all(B.choose_react_select(page, loc, lab) for lab in labels)
+        return B.fill_text(loc, str(a.value))
+
+    def _replace_file(self, page: Any, loc: Any, path: str) -> bool:
+        """Upload our file; first remove one already attached (MyGreenhouse's
+        resume is never sent, D-70). Read back: the shown name is ours."""
+        name = Path(path).name
+        shown = self._shown_file(loc)
+        if shown and shown != name:
+            block = self._block(loc).first
+            remover = block.get_by_role("button", name=REMOVE_NAME)
+            if not remover.count():
+                remover = block.locator('[aria-label*="remove" i]')
+            try:
+                if remover.count():
+                    remover.first.click()
+                    B.pause(page)
+            except Exception:
+                pass
+        if not B.upload(loc, path):
+            return False
+        return self._shown_file(loc) == name
+
+    # ---------------- next, submit, confirmation (§9.1) ----------------
+
+    def next_step(self, page: Any, ctx: AttemptContext) -> StepResult:
+        """One page: the form is its own review page."""
+        return StepResult(step="application", is_review=True, errors=self.visible_errors(page))
+
+    def submit(self, page: Any, ctx: AttemptContext) -> None:
+        btn = page.locator('button[type="submit"]').filter(has_text=SUBMIT_TEXT)
+        if not btn.count():
+            raise ApplyFailure(ReasonCode.PAGE_UNRECOGNISED, "greenhouse: submit button", step="submit")
+        btn.first.click()
+
+    def after_submit(self, page: Any, ctx: AttemptContext) -> Optional[str]:
+        """One poll: confirmed:url / confirmed:text / code_required / errors / None."""
+        if "/confirmation" in urlsplit(page.url).path:
+            return "confirmed:url"
+        text = visible_text(page)
+        if CONFIRM_TEXT.search(text):
+            return "confirmed:text"
+        if CODE_TEXT.search(text) and self._code_input(page) is not None:
+            return "code_required"
+        if self.visible_errors(page):
+            return "errors"
+        return None
+
+    def _code_input(self, page: Any) -> Optional[Any]:
+        cands = page.locator(CODE_INPUTS)
+        for i in range(min(cands.count(), 5)):
+            if _safe_visible(cands.nth(i)):
+                return cands.nth(i)
+        return None
+
+    def enter_code(self, page: Any, ctx: AttemptContext, code: str) -> None:
+        inp = self._code_input(page)
+        if inp is None or not B.fill_text(inp, code):
+            raise ApplyFailure(ReasonCode.PAGE_UNRECOGNISED, "greenhouse: security code box",
+                               step="verifying_email")
+
+    def visible_errors(self, page: Any) -> tuple[str, ...]:
+        """Labels of the fields the page marks invalid, and visible error
+        notes. Labels and the site's own messages only, never values."""
+        out: list[str] = []
+        bad = page.locator('[aria-invalid="true"]')
+        for i in range(min(bad.count(), 20)):
+            el = bad.nth(i)
+            if not _safe_visible(el) and not _safe_visible(self._block(el).first):
+                continue
+            el_id = el.get_attribute("id") or ""
+            lab = page.locator(f'label[for="{el_id}"]') if el_id else None
+            text = lab.first.inner_text().strip() if lab is not None and lab.count() else el_id
+            if text and text not in out:
+                out.append(text)
+        for sel in ERROR_MARKERS:
+            notes = page.locator(sel)
+            for i in range(min(notes.count(), 20)):
+                if _safe_visible(notes.nth(i)) and not out:
+                    out.append(notes.nth(i).inner_text().strip())
+        if not out and REQUIRED_TEXT.lower() in visible_text(page).lower():
+            out.append(REQUIRED_TEXT)
+        return tuple(out)
+
+
+def _safe_visible(loc: Any) -> bool:
+    try:
+        return loc.is_visible()
+    except Exception:
+        return False
 
 
 ADAPTER = GreenhouseAdapter()

@@ -93,17 +93,27 @@ class ApplyConfig:
     attempt_timeout_s: int = 420            # NF-07
     dry_run_hold_s: int = 600               # F-37
     resume_format: str = "pdf"              # pdf | docx
+    mygreenhouse: bool = True               # D-70: MyGreenhouse autofill, then fill the gaps (§9.1.1)
+    mygreenhouse_wait_s: int = 20
+    workday_entry: str = "auto"             # D-70 §9.4.2: auto | manual (lane V)
+    max_wizard_steps: int = 15
     llm_text_temperature: float = 0.3
     mail: ApplyMailConfig = ApplyMailConfig()
+    # D-70 §11.5: the mailbox for contact.backup_email; host "" = the same mailbox as `mail`.
+    mail_backup: ApplyMailConfig = ApplyMailConfig(host="")
 
     @classmethod
     def from_raw(cls, raw: Any) -> "ApplyConfig":
         """Build from the yaml block; missing keys keep the defaults and values
         are coerced to each field's type (a quoted number still works)."""
         raw = raw if isinstance(raw, dict) else {}
-        mail_raw = raw.get("mail") if isinstance(raw.get("mail"), dict) else {}
-        return cls(**_coerce(cls, raw, skip={"mail"}),
-                   mail=ApplyMailConfig(**_coerce(ApplyMailConfig, mail_raw)))
+
+        def block(key: str) -> dict[str, Any]:
+            return raw.get(key) if isinstance(raw.get(key), dict) else {}
+        backup = {"host": "", **block("mail_backup")}
+        return cls(**_coerce(cls, raw, skip={"mail", "mail_backup"}),
+                   mail=ApplyMailConfig(**_coerce(ApplyMailConfig, block("mail"))),
+                   mail_backup=ApplyMailConfig(**_coerce(ApplyMailConfig, backup)))
 
 
 def _coerce(klass: type, raw: dict[str, Any], skip: frozenset | set = frozenset()) -> dict[str, Any]:
