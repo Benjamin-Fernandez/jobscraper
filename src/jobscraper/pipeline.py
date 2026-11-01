@@ -23,6 +23,7 @@ See PRD sections 8.2 and 8.3.
 """
 from __future__ import annotations
 
+import functools
 import logging
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -35,7 +36,7 @@ from .config import CYCLE_DAYS_KEY, Config
 from .models import FetchOutcome, RawJob, WatchedCompany
 from .profile import keywords, resume_ingest, titles
 from .scrape import discovery
-from .scrape.adapters import MAX_JOBS, get_adapter
+from .scrape.adapters import get_adapter, is_capped
 from .scrape.net import FetchError, HttpClient
 from .store import Store
 
@@ -43,6 +44,12 @@ log = logging.getLogger(__name__)
 
 Fetcher = Callable[[HttpClient, WatchedCompany], FetchOutcome]
 Resolver = Callable[[HttpClient, WatchedCompany], "discovery.Resolution"]
+
+# The pipeline logs this and records it in the coverage row's `error` column
+# (a free-text field regardless of status - no schema change) whenever a
+# fetch returns MAX_JOBS postings, so a board that silently truncated past
+# the cap is visible without failing the run (D-33/P0-D4).
+CAP_NOTE = "board returned the 600-posting cap; Singapore roles past it may be missed"
 
 
 @dataclass
@@ -63,8 +70,13 @@ class RunReport:
     stats: dict[str, Any] = field(default_factory=dict)
 
 
-def fetch_one(client: HttpClient, company: WatchedCompany) -> FetchOutcome:
-    """Fetch one company's listings. Returns an outcome; never raises."""
+def fetch_one(client: HttpClient, company: WatchedCompany,
+              locations: tuple[str, ...] = ()) -> FetchOutcome:
+    """Fetch one company's listings. Returns an outcome; never raises.
+
+    `locations` (D-33) is forwarded to the adapter unchanged; adapters that
+    cannot facet a large board by location just ignore it.
+    """
     started = time.monotonic()
     try:
         adapter = get_adapter(company.provider)
@@ -72,7 +84,7 @@ def fetch_one(client: HttpClient, company: WatchedCompany) -> FetchOutcome:
             return FetchOutcome(company.id, False, error_class="schema",
                                 error=f"no adapter for provider {company.provider!r}",
                                 duration_s=time.monotonic() - started)
-        jobs = adapter.fetch(client, company)
+        jobs = adapter.fetch(client, company, locations=locations)
         return FetchOutcome(company.id, True, jobs=jobs, provider=company.provider,
                             duration_s=time.monotonic() - started)
     except FetchError as exc:
@@ -167,8 +179,14 @@ def run(cfg: Config, store: Store, *, dry_run: bool = False,
 
         # ---- fetch (parallel, isolated) ----
         outcomes: dict[int, FetchOutcome] = {}
+        # Bind the allowed locations onto the default fetcher only: a custom
+        # `fetcher` (tests, company_search.py) keeps its own two-arg contract,
+        # and callers may fetch concurrently, so this is a per-call partial,
+        # never state on the shared adapter singletons (D-33).
+        bound_fetcher = (functools.partial(fetcher, locations=tuple(cfg.scrape_locations))
+                         if fetcher is fetch_one else fetcher)
         with ThreadPoolExecutor(max_workers=max(1, int(rc["max_workers"]))) as pool:
-            futures = {pool.submit(fetcher, client, c): c for c in resolved}
+            futures = {pool.submit(bound_fetcher, client, c): c for c in resolved}
             for fut in as_completed(futures):
                 c = futures[fut]
                 try:
@@ -181,7 +199,7 @@ def run(cfg: Config, store: Store, *, dry_run: bool = False,
         # BEFORE de-duplication: a capped board that listed one posting twice
         # is still capped (H1-1).
         capped = {c.id for c in resolved
-                  if outcomes[c.id].ok and len(outcomes[c.id].jobs) >= MAX_JOBS}
+                  if outcomes[c.id].ok and is_capped(outcomes[c.id].jobs)}
 
         # One posting listed twice (overlapping pages) is one posting.
         for c in resolved:
@@ -227,9 +245,18 @@ def run(cfg: Config, store: Store, *, dry_run: bool = False,
         for c in resolved:
             out = outcomes[c.id]
             if out.ok:
+                # Invariant: cap_note is only ever written here, on the ok
+                # branch. It never reaches record_failure or quarantine below
+                # - a capped fetch is a successful one, just possibly
+                # incomplete, not a failure to count against the company.
+                cap_note = None
+                if c.id in capped:
+                    cap_note = CAP_NOTE
+                    say(f"  !! {c.name}: {CAP_NOTE}")
+                    log.warning("%s: %s", c.name, CAP_NOTE)
                 store.record_coverage(rep.run_no, c.id, "ok" if out.jobs else "empty",
                                       len(out.jobs), new_by_company[c.id], 0,
-                                      None, None, None)
+                                      None, None, cap_note)
             else:
                 store.record_coverage(rep.run_no, c.id, "failed", 0, 0, 0,
                                       out.http_status, out.error_class, out.error)

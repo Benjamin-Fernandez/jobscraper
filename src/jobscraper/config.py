@@ -164,6 +164,20 @@ class Config:
         return block
 
     @property
+    def scrape(self) -> dict[str, Any]:
+        return self.raw.get("scrape") or {}
+
+    @property
+    def scrape_locations(self) -> list[str]:
+        """Locations adapters facet large boards for (D-33): Workday and
+        SmartRecruiters query these instead of stopping at the 600-posting
+        cap. Default Singapore."""
+        locs = self.scrape.get("locations")
+        if not locs:
+            return ["Singapore"]
+        return [str(x) for x in locs]
+
+    @property
     def application_statuses(self) -> list[str]:
         """Ordered status vocabulary. Adding one is config, not a migration."""
         statuses = self.raw.get("applications", {}).get("statuses")
