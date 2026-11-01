@@ -244,7 +244,8 @@ def create_app(cfg: Optional[Config] = None,
     app.state.cfg = cfg
     app.state.store_factory = store_factory or _default_store_factory(cfg)
     app.state.jobs = JobManager(cfg.db_path.parent / "jobs",
-                                job_command or cli_command(config_path))
+                                job_command or cli_command(config_path),
+                                store_factory=app.state.store_factory)
 
     # API first: the static mount below catches every path it is given, so
     # anything registered after it would be unreachable.

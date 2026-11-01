@@ -484,6 +484,29 @@ class Store:
         self.conn.commit()
         return cur.rowcount
 
+    def fail_running_runs(self, since: str, reason: str) -> int:
+        """Mark every run still `running` that started at or after `since`
+        failed, with `stats.reason` set (its other stats kept). For a run whose
+        process was killed before its own `finally` could say so (the web
+        app's Cancel, D-64). Returns how many rows changed."""
+        rows = self.conn.execute(
+            "SELECT run_no, stats_json FROM runs WHERE status = 'running' AND started_at >= ?",
+            (since,)).fetchall()
+        now = utcnow()
+        for run_no, stats_json in rows:
+            try:
+                stats = json.loads(stats_json or "{}")
+            except ValueError:
+                stats = {}
+            stats = stats if isinstance(stats, dict) else {}
+            stats["reason"] = reason
+            self.conn.execute(
+                """UPDATE runs SET status = 'failed', finished_at = ?, stats_json = ?
+                   WHERE run_no = ? AND status = 'running'""",
+                (now, json.dumps(stats, sort_keys=True), run_no))
+        self.conn.commit()
+        return len(rows)
+
     def last_run_no(self) -> int:
         v = self.conn.execute("SELECT MAX(run_no) FROM runs").fetchone()[0]
         return int(v or 0)
