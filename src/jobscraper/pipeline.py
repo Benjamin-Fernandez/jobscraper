@@ -225,8 +225,14 @@ def run(cfg: Config, store: Store, *, dry_run: bool = False,
                 out.jobs = list(uniq.values())
 
         failures = [c for c in resolved if not outcomes[c.id].ok]
-        unhealthy = (len(failures) / max(len(resolved), 1)
-                     > float(rc["global_failure_abort_pct"]))
+        # Only the regular due companies speak for the network: probation
+        # boards are already known-bad and fail routinely (D-66).
+        due_ids = {c.id for c in plan.due}
+        due_resolved = [c for c in resolved if c.id in due_ids]
+        due_failed = [c for c in due_resolved if not outcomes[c.id].ok]
+        unhealthy = bool(due_resolved) and (
+            len(due_failed) / len(due_resolved)
+            > float(rc["global_failure_abort_pct"]))
 
         # ---- delta per company ----
         new_by_company: dict[int, int] = {}
@@ -278,7 +284,7 @@ def run(cfg: Config, store: Store, *, dry_run: bool = False,
         if unhealthy and failures:
             rep.status = "aborted_unhealthy"
             rep.message = (
-                f"{len(failures)}/{len(resolved)} companies failed - treating this "
+                f"{len(due_failed)}/{len(due_resolved)} due companies failed - treating this "
                 "as a local network fault. No failures were counted, nobody was "
                 "quarantined, and the batch was not stamped: re-run to retry it.")
             say(f"\n  !! {rep.message}")
