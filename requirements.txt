@@ -12,3 +12,6 @@ fastapi>=0.110
 uvicorn>=0.29
 
 # The model (Qwen3) is reached over HTTP through Ollama - httpx above; no SDK.
+
+# M20 tailor (tailor_design): optional, Word -> PDF on Windows
+pywin32>=306; sys_platform == "win32"

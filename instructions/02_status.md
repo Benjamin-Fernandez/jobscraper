@@ -33,10 +33,10 @@
 | F-10 | Applicant profile (data/applicant.yaml) | P0 | TODO | M20 |
 | F-11 | Profile form in the Profile tab | P0 | TODO | M21 |
 | F-12 | Answer memory | P1 | TODO | M22 |
-| F-20 | Master resume | P0 | TODO | M20 |
-| F-21 | Keyword map and coverage | P0 | TODO | M20 |
+| F-20 | Master resume | P0 | DONE | M20 lane T merged |
+| F-21 | Keyword map and coverage | P0 | DONE | M20 lane T merged |
 | F-22 | Truthful rewrite | P0 | TODO | swaps M20, LLM M21 |
-| F-23 | Parse-safe DOCX/PDF | P0 | TODO | M20 |
+| F-23 | Parse-safe DOCX/PDF | P0 | DONE | M20 lane T merged |
 | F-24 | Temporary storage | P0 | TODO | M21 |
 | F-25 | Tailor from the UI | P0 | TODO | M21 |
 | F-30 | Start an application, duplicates, caps | P0 | TODO | M20 CLI, M21 UI |
