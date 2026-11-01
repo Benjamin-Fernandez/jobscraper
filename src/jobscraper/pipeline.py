@@ -52,6 +52,16 @@ Resolver = Callable[[HttpClient, WatchedCompany], "discovery.Resolution"]
 CAP_NOTE = "board returned the 600-posting cap; Singapore roles past it may be missed"
 
 
+class JobCancelled(BaseException):
+    """The job was asked to stop (the web app's Cancel: CTRL_BREAK on Windows,
+    SIGTERM elsewhere; the CLI's handler raises this).
+
+    A BaseException, like KeyboardInterrupt, on purpose: the engine has `except
+    Exception` blocks (a bad site, a bad model answer must not stop a list), and
+    none of them may swallow a cancel. Every `finally` still runs, so the run
+    row is finished as `failed` with the reason "cancelled" (C-4)."""
+
+
 @dataclass
 class RunReport:
     status: str = "ok"          # ok | nothing_due | aborted_unhealthy | dry_run
@@ -170,6 +180,7 @@ def run(cfg: Config, store: Store, *, dry_run: bool = False,
 
     own_client = client is None
     client = client or make_client(cfg)
+    finished = False
     try:
         # ---- resolve (sequential: cheap, and it mutates the DB) ----
         resolved: list[WatchedCompany] = []
@@ -329,13 +340,45 @@ def run(cfg: Config, store: Store, *, dry_run: bool = False,
         # ---- last: stamp the attempt and close the run ----
         if rep.status == "ok":
             scheduler.mark_attempted(store, resolved, now=now)
+        if rep.message:
+            # Why the run ended as it did (aborted_unhealthy, no profile), for
+            # the Runs tab (C-4, audit G27).
+            rep.stats["message"] = rep.message
         store.finish_run(rep.run_no, rep.status, rep.stats)
+        finished = True
         if purged and store.compact():
             say("  database compacted")
         return rep
+    except BaseException as exc:
+        # Cancelled or crashed: say so now, rather than leave the run
+        # `running` until per_run_timeout reaps it (C-4).
+        if rep.run_no and not finished:
+            _fail_run(store, rep, exc)
+        raise
     finally:
         if own_client:
             client.close()
+
+
+def _fail_run(store: Store, rep: RunReport, exc: BaseException) -> None:
+    """Mark the run `failed` with `stats.reason`: "cancelled", or the error.
+
+    Uncommitted writes (a company's half-written postings) are rolled back
+    first, so a crash is never worse than a no-op; everything committed stays."""
+    reason = ("cancelled" if isinstance(exc, (JobCancelled, KeyboardInterrupt))
+              else f"{type(exc).__name__}: {exc}")[:300]
+    stats = dict(rep.stats, reason=reason)
+    if rep.message:
+        stats.setdefault("message", rep.message)
+    try:
+        store.rollback()
+        store.finish_run(rep.run_no, "failed", stats)
+    except Exception:                       # noqa: BLE001 - the original error matters
+        log.exception("could not mark run %s failed", rep.run_no)
+    if reason == "cancelled":
+        log.warning("run %s cancelled", rep.run_no)
+    else:
+        log.error("run %s failed: %s", rep.run_no, reason)
 
 
 def description_days(cfg: Config) -> float:

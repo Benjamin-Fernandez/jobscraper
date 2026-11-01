@@ -17,6 +17,13 @@ a PID that Windows handed to another program after a reboot does not hold the
 slot (C-5). This process only ever kills a process it started itself; a PID read
 back from disk may by then belong to something else.
 
+Cancel asks first and kills second (C-4). Each job runs in its own process
+group; Cancel sends it CTRL_BREAK_EVENT on Windows (SIGTERM elsewhere), which
+the CLI turns into `JobCancelled`, so the run row is marked `failed` with the
+reason "cancelled" before the process exits 143. After `grace_seconds` whatever
+is left is killed (`taskkill /T /F`, falling back to killing the child itself).
+The record then says `reason: "cancelled"`.
+
 Each job's stdout and stderr go to `data/jobs/<utc-stamp>-<kind>.log`, which is
 what the Runs tab tails. `command` is injectable so tests run a stub instead of
 the real CLI - no network, no model.
@@ -24,7 +31,9 @@ the real CLI - no network, no model.
 from __future__ import annotations
 
 import json
+import logging
 import os
+import signal
 import subprocess
 import sys
 import tempfile
@@ -35,11 +44,15 @@ from typing import Any, Callable, Optional
 
 from jobscraper.store import utcnow
 
+# `logger`, not `log`: start() already names each job's log file `log`.
+logger = logging.getLogger(__name__)
+
 # (kind, options) -> argv. `kind` is "run" or "profile".
 CommandBuilder = Callable[[str, dict[str, Any]], list[str]]
 
 KINDS = ("run", "profile", "titles", "companies")
 RECORD = "current.json"
+EXIT_CANCELLED = 143           # the CLI's cancel handler (128 + 15)
 # src/jobscraper/web/jobs.py -> src
 SRC_DIR = Path(__file__).resolve().parents[2]
 
@@ -57,6 +70,10 @@ class JobIdle(RuntimeError):
 
 class JobNotOurs(RuntimeError):
     """The running job was started by an earlier web process: no handle on it."""
+
+
+class JobStuck(RuntimeError):
+    """Cancel could not stop the job's process; it is still recorded as running."""
 
 
 def cli_command(config_path: Optional[str | os.PathLike] = None) -> CommandBuilder:
@@ -219,6 +236,53 @@ def _looks_like_jobscraper(pid: int) -> bool:
     return "-m jobscraper" in " ".join(cmd.lower().split())
 
 
+def _spawn_kwargs() -> dict[str, Any]:
+    """A process group of the job's own, so Cancel can signal the job (and
+    anything it started) without the signal reaching the web app's console."""
+    if os.name == "nt":
+        return {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP}
+    return {"start_new_session": True}
+
+
+def _ask_to_stop(proc: subprocess.Popen) -> None:
+    """The polite signal: CTRL_BREAK_EVENT to the job's process group on
+    Windows, SIGTERM to its session elsewhere. Failing to send it is not an
+    error - the kill after the grace period still follows."""
+    try:
+        if os.name == "nt":
+            proc.send_signal(signal.CTRL_BREAK_EVENT)
+        else:
+            os.killpg(proc.pid, signal.SIGTERM)
+    except ProcessLookupError:
+        pass
+    except OSError as exc:
+        logger.warning("could not signal job pid %s: %s", proc.pid, type(exc).__name__)
+
+
+def _kill_tree(proc: subprocess.Popen) -> None:
+    """Kill the job and everything it started. Windows: `taskkill /T /F`,
+    falling back to killing the child itself; POSIX: SIGKILL to its session."""
+    if os.name == "nt":
+        try:
+            done = subprocess.run(["taskkill", "/PID", str(proc.pid), "/T", "/F"],
+                                  capture_output=True, timeout=30)
+            if done.returncode != 0:
+                logger.warning("taskkill exited %s for pid %s", done.returncode, proc.pid)
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            logger.warning("taskkill failed for pid %s: %s", proc.pid, type(exc).__name__)
+    else:
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        except OSError as exc:
+            logger.warning("killpg failed for pid %s: %s", proc.pid, type(exc).__name__)
+    try:
+        proc.kill()                                  # at least the child itself
+    except OSError:
+        pass
+
+
 def tail_lines(path: Path, n: int) -> list[str]:
     """The last `n` lines of a log, read from the end - logs can grow large."""
     if n <= 0 or not path.is_file():
@@ -276,7 +340,8 @@ class JobManager:
                 try:
                     self._proc = subprocess.Popen(
                         argv, stdout=fh, stderr=subprocess.STDOUT,
-                        stdin=subprocess.DEVNULL, env=child_env(), close_fds=True)
+                        stdin=subprocess.DEVNULL, env=child_env(), close_fds=True,
+                        **_spawn_kwargs())
                 except OSError as exc:
                     reason = exc.strerror or type(exc).__name__   # no paths
                     fh.write(f"could not start: {reason}\n".encode("utf-8"))
@@ -286,10 +351,15 @@ class JobManager:
             self._record = self._new_record(job_id, kind, log, self._proc.pid)
             self._save()
             self._prune_logs()
+            logger.info("job %s (%s) started, pid %s", job_id, kind, self._proc.pid)
             return self._view(tail)
 
     def cancel(self, tail: int = 200) -> dict[str, Any]:
-        """Terminate the running job, then kill it after the grace period."""
+        """Ask the running job to stop, then kill it after the grace period.
+        `JobStuck` if the process will not die (it stays recorded as running).
+
+        The signal and the waits happen outside the lock, so other requests
+        (the Runs tab polling) are not held for the grace period."""
         with self._lock:
             self._refresh()
             if not self._running():
@@ -298,9 +368,15 @@ class JobManager:
                 raise JobNotOurs(
                     f"the running job (PID {self._record['pid']}) was started by an "
                     "earlier web app process and cannot be cancelled from here")
-            code = self._terminate(self._proc)
-            self._append_log("[cancelled from the web app]")
-            self._finish(code)
+            proc, job_id = self._proc, self._record.get("id")
+        already = proc.poll()               # it may have ended since the refresh
+        cancelled = already is None
+        code = already if already is not None else self._terminate(proc)
+        with self._lock:
+            if self._record and self._record.get("id") == job_id and self._running():
+                self._append_log("[cancelled from the web app]" if cancelled else
+                                 "[the job had already ended when cancel arrived]")
+                self._finish(code, cancelled=cancelled)
             return self._view(tail)
 
     # ---------------------------------------------------------------- state
@@ -337,32 +413,43 @@ class JobManager:
         self._save()
         return True
 
-    def _finish(self, code: Optional[int]) -> None:
+    def _finish(self, code: Optional[int], cancelled: bool = False) -> None:
         rec = self._record
-        rec["state"] = "succeeded" if code == 0 else "failed"
+        rec["state"] = "succeeded" if code == 0 and not cancelled else "failed"
         rec["exit_code"] = code
+        if cancelled or code == EXIT_CANCELLED:
+            rec["reason"] = "cancelled"          # the SPA can say "cancelled", not "failed"
         rec["finished_at"] = utcnow()
         self._proc = None
         self._save()
+        # The job's own log file has the detail; this says which one to open.
+        (logger.info if rec["state"] == "succeeded" else logger.warning)(
+            "job %s (%s) %s, exit code %s", rec.get("id"), rec.get("kind"),
+            rec.get("reason") or rec["state"], code)
 
     def _terminate(self, proc: subprocess.Popen) -> Optional[int]:
-        if os.name == "nt":
-            # The whole tree: a run may have started a model CLI of its own.
-            subprocess.run(["taskkill", "/PID", str(proc.pid), "/T", "/F"],
-                           capture_output=True, timeout=30)
-        else:
-            proc.terminate()
+        """Ask the job to stop; after the grace period kill the whole tree (a
+        run may have started a process of its own). The exit code once it is
+        dead; `JobStuck` if it is still alive after that."""
+        _ask_to_stop(proc)
         try:
             return proc.wait(self.grace_seconds)
         except subprocess.TimeoutExpired:
-            proc.kill()
+            pass
+        _kill_tree(proc)
+        try:
             return proc.wait(self.grace_seconds)
+        except subprocess.TimeoutExpired:
+            logger.error("pid %s did not exit after a kill", proc.pid)
+            raise JobStuck("the job could not be stopped; it is still running") from None
 
     def _view(self, tail: int) -> dict[str, Any]:
         if not self._record:
             return {**IDLE, "log": []}
         rec = self._record
         view = {k: rec.get(k) for k in IDLE}
+        if rec.get("reason"):
+            view["reason"] = rec["reason"]          # "cancelled" (C-4)
         view["log"] = tail_lines(self.jobs_dir / Path(str(rec.get("log") or "")).name,
                                  tail) if rec.get("log") else []
         return view

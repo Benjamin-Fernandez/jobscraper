@@ -243,6 +243,10 @@ class Store:
     def commit(self) -> None:
         self.conn.commit()
 
+    def rollback(self) -> None:
+        """Drop uncommitted writes (a run that is being cancelled, C-4)."""
+        self.conn.rollback()
+
     # ---------------- companies ----------------
 
     def _company(self, row: sqlite3.Row) -> WatchedCompany:

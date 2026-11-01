@@ -18,7 +18,7 @@ from pydantic import BaseModel, Field, StrictBool, StrictInt
 from jobscraper.config import Config
 from jobscraper.web.control import effective_batch_size
 from jobscraper.web.deps import get_config, get_jobs, open_store
-from jobscraper.web.jobs import JobBusy, JobIdle, JobManager, JobNotOurs
+from jobscraper.web.jobs import JobBusy, JobIdle, JobManager, JobNotOurs, JobStuck
 
 router = APIRouter(tags=["jobs"])
 
@@ -90,8 +90,10 @@ def current_job(tail: int = TAIL,
 
 @router.post("/jobs/cancel")
 def cancel_job(jobs: JobManager = Depends(get_jobs)) -> dict[str, Any]:
-    """Terminate the running job; `409` if there is none."""
+    """Stop the running job; `409` if there is none, `500` if it will not die."""
     try:
         return jobs.cancel()
     except (JobIdle, JobNotOurs) as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except JobStuck as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc

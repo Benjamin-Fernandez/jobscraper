@@ -16,6 +16,7 @@
 from __future__ import annotations
 
 import argparse
+import signal
 import sys
 from pathlib import Path
 
@@ -27,6 +28,7 @@ from . import watchlist
 from .store import Store as StoreV2
 
 BAR = "-" * 66
+EXIT_CANCELLED = 143        # 128 + SIGTERM: the job was cancelled (C-4)
 
 
 def _boot_v2(args):
@@ -652,13 +654,45 @@ def build_parser() -> argparse.ArgumentParser:
     return p
 
 
+def _install_cancel_handler() -> None:
+    """The web app's Cancel ends a job through its `finally` blocks, so the run
+    is marked failed ("cancelled") instead of left `running` (C-4).
+
+    Windows: the web app starts each job in its own process group and sends it
+    CTRL_BREAK_EVENT, which Python sees as SIGBREAK. POSIX: SIGTERM. Either way
+    the handler raises `pipeline.JobCancelled` and the command exits 143. If the
+    job does not stop within the grace period the web app kills it outright.
+
+    One-shot: once it has fired, the signal is ignored so a second one cannot
+    interrupt the cleanup."""
+    sig = getattr(signal, "SIGBREAK", None) if sys.platform == "win32" else signal.SIGTERM
+    if sig is None:
+        return
+
+    def handler(signum, frame):
+        try:
+            signal.signal(sig, signal.SIG_IGN)
+        except (ValueError, OSError):
+            pass
+        raise pipeline.JobCancelled("cancelled")
+    try:
+        signal.signal(sig, handler)
+    except (ValueError, OSError):       # not the main thread, or no such signal here
+        pass
+
+
 def main(argv=None) -> int:
     args = build_parser().parse_args(argv)
+    if getattr(args, "fn", None) is not cmd_web:    # uvicorn handles the server's own signals
+        _install_cancel_handler()
     try:
         return args.fn(args)
     except KeyboardInterrupt:
         print("\ninterrupted", file=sys.stderr)
         return 130
+    except pipeline.JobCancelled:
+        print("\ncancelled", file=sys.stderr)
+        return EXIT_CANCELLED
 
 
 if __name__ == "__main__":
