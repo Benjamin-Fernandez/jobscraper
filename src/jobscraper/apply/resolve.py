@@ -676,7 +676,8 @@ def _field_map_value(c: Canonical, f: FormField, ctx: ResolveContext) -> Optiona
     if c is Canonical.PREFERRED_NAME:
         return fit_text(f, pv("identity.preferred_name"))
     if c is Canonical.EMAIL:
-        return fit_text(f, pv("contact.email"))
+        # D-70 (§10.5): the account identity in use, so the form's email matches it.
+        return fit_text(f, ctx.account_email or pv("contact.email"))
     if c is Canonical.PHONE:
         digits = re.sub(r"\D", "", str(pv("contact.phone_number") or ""))
         return fit_text(f, digits)

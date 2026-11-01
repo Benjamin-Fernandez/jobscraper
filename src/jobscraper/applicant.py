@@ -334,9 +334,14 @@ def validate(profile: dict) -> list[FieldError]:
     email = _get(profile, "contact.email")
     if not _empty(email) and not (isinstance(email, str) and EMAIL_RE.match(email.strip())):
         err("contact.email", "must be an email address (name@domain.tld)")
-    backup = _get(profile, "contact.backup_email")         # D-70: optional second address
-    if not _empty(backup) and not (isinstance(backup, str) and EMAIL_RE.match(backup.strip())):
-        err("contact.backup_email", "must be an email address (name@domain.tld)")
+    # D-70 (§10.5): an optional second address, used only when an ATS says the
+    # main one is already registered. Same format, and never the same address.
+    backup = _get(profile, "contact.backup_email")
+    if not _empty(backup):
+        if not (isinstance(backup, str) and EMAIL_RE.match(backup.strip())):
+            err("contact.backup_email", "must be an email address (name@domain.tld)")
+        elif isinstance(email, str) and backup.strip().lower() == email.strip().lower():
+            err("contact.backup_email", "must differ from contact.email")
     country = _get(profile, "contact.country")
     if not _empty(country) and not (isinstance(country, str) and ISO2_RE.match(country)):
         err("contact.country", "must be a 2-letter ISO country code, e.g. SG")

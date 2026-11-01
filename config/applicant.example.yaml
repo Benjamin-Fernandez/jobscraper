@@ -15,6 +15,7 @@ identity:
 
 contact:
   email: "applicant@example.com"     # the one address used for every application and account
+  backup_email: ""   # used only when an ATS says your main email is already registered and JobScraper has no password for it
   phone_country_code: "+65"
   phone_number: "90000000"
   address_line1: "1 Example Road"
