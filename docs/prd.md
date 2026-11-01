@@ -1,6 +1,7 @@
-# JobScraper (personal): PRD r1 — cloud port, ATS resume tailor, auto-apply
+# JobScraper (personal): PRD r2 — cloud port, ATS resume tailor, auto-apply
 
-**Status:** APPROVED r1 (2026-11-01; the owner delegated approval to the Coordinator: "ensure a full proper plan is created and approve it if acceptable") · **Owner:** Benjamin · **Created:** 2026-11-01
+**Status:** APPROVED r1 (2026-11-01; the owner delegated approval to the Coordinator: "ensure a full proper plan is created and approve it if acceptable"); r2 2026-11-02 · **Owner:** Benjamin · **Created:** 2026-11-01
+**Changelog:** r2 (2026-11-02, planner, Q-09): folds in D-65 (answer memory = resolver tier 3; "I have this" → `data/applicant.yaml` `attested_skills`; reason codes `cancelled`, `mail_not_set_up`; `vault.py` in the foundation; `apply_flow` → `tailor_flow` edge; `app_events.by`) and D-67 (spike S-2: the LLM bullet and summary rewrite move to M22, `tailor.llm` off by default).
 **Covers milestones:** M19 (cloud port), M20 (walking skeleton), M21 (MVP), M22 (breadth). M0–M17 are specified and recorded in `.claude/prds/jobscraper-v2.prd.md`, which stays the reference for the existing pipeline. M18 (frontend audit, worktree `../JobScraper-frontend`) is paused and not part of this PRD.
 
 ## 0. How to use this document (for agents)
@@ -117,7 +118,7 @@ Priority: P0 = the milestone can't ship without it, P1 = important, P2 = nice to
 - WHEN the owner saves THE SYSTEM SHALL validate it (e.g. postal code is 6 digits, email has the right format, salary is a positive whole number) and SHALL name each invalid field.
 - IF a field auto-apply needs is empty THEN THE SYSTEM SHALL list it before any auto-apply starts.
 
-**F-12 (P1) Answer memory.** WHEN the owner corrects an answer in an application's audit view and ticks "Remember for this question" THE SYSTEM SHALL store the normalised question label with the answer and SHALL use it ahead of the LLM next time (resolver tier 2).
+**F-12 (P1) Answer memory.** WHEN the owner corrects an answer in an application's audit view and ticks "Remember for this question" THE SYSTEM SHALL store the normalised question label with the answer and SHALL use it ahead of the LLM next time (resolver tier 3, after profile rules: F-32's order; D-65).
 
 ### 5.3 ATS resume tailor (key area KA-4). Design: `docs/architecture/tailor_design.md`, from `docs/research/resume_tailor_brief.md` §4–§5
 
@@ -130,10 +131,11 @@ Priority: P0 = the milestone can't ship without it, P1 = important, P2 = nice to
 - THE SYSTEM SHALL compute "JD keyword coverage" (required weight 2, preferred 1) before and after tailoring, counting a term only in the JD's own spelling. It SHALL never be called an "ATS score".
 
 **F-22 (P0) Truthful rewrite.**
-- THE SYSTEM SHALL first swap variant spellings to the JD's spelling (deterministic, alias list `config/aliases.yaml`), then rewrite bullets per entry with the LLM (JSON schema, temperature 0.25), reorder bullets and skills by relevance, and rewrite the summary.
+- THE SYSTEM SHALL swap variant spellings to the JD's spelling (deterministic, alias list `config/aliases.yaml`) and reorder bullets and skills by relevance (M20–M21).
+- LLM rewrite: M22, off by default (D-67). WHERE `tailor.llm` is on THE SYSTEM SHALL also rewrite bullets per entry and the summary with the LLM (JSON schema, temperature 0.25), after the validator gaps found by spike S-2 are closed.
 - Employers, titles, dates, degrees and institutions SHALL never be sent to the model for rewriting and SHALL be copied verbatim.
 - IF a rewritten bullet adds or drops a number, adds a tool or skill that is not in the master or attested, or loses its id THEN THE SYSTEM SHALL keep the original bullet and record why.
-- Missing terms SHALL be reported, never added. WHEN the owner clicks "I have this" on a missing term THE SYSTEM SHALL save it as an attested skill (profile overrides) and use it from then on.
+- Missing terms SHALL be reported, never added. WHEN the owner clicks "I have this" on a missing term THE SYSTEM SHALL save it in `data/applicant.yaml` under `attested_skills` (D-65; not the owner's protected `config/profile.overrides.yaml`) and use it from then on.
 
 **F-23 (P0) Parse-safe output.**
 - THE SYSTEM SHALL render a single-column DOCX from one ATS template (standard headings, no tables, text boxes, headers or footers) with the owner's page count as a ceiling. WHERE Microsoft Word is installed THE SYSTEM SHALL also produce a PDF through Word.
@@ -257,15 +259,16 @@ orchestrators: tailor_flow.py (master → keywords → rewrite → validate → 
                apply_flow.py  (queue → detect → tailor → plan → resolve → browser/adapter → submit → record)
    ▼
 stages:  tailor/ (master, jd_terms, mapping, rewrite, validate, render)
-         apply/  (detect, plan, resolve, declarations, browser, vault, mail, ats/{greenhouse, lever, ashby, workday, …})
+         apply/  (detect, plan, resolve, declarations, classify, browser, mail, ats/{greenhouse, lever, ashby, workday, …})
    ▼
-foundation: store.py (+ tables tailored, apply_attempts, apply_answers, ats_accounts, answer_memory)
-            backends.py (+ JSON-schema `format` and temperature per call) · applicant.py (profile schema + load/save) · config
+foundation: store.py (+ tables tailored, apply_attempts, apply_answers, ats_accounts, answer_memory; column app_events.by)
+            backends.py (+ JSON-schema `format` and temperature per call) · applicant.py (profile schema + load/save) · vault.py (Credential Manager) · config
 ```
 
 - **Contracts** (written by the architect before any lane builds): `src/jobscraper/apply/contracts.py` (FormField, FormPlan, Answer, AttemptState, ReasonCode, AtsAdapter protocol) and `src/jobscraper/tailor/contracts.py` (MasterResume, Bullet, JdTerm, TailorResult).
 - **Attempt state machine:** `queued → tailoring → planning → opening → [signing_in | signing_up → verifying_email] → filling(step n) → submitting → submitted | submitted_unconfirmed | ready_to_submit (dry run) | failed(reason)`.
-- **Reason codes:** `captcha`, `bot_challenge`, `sms_or_2fa`, `login_failed`, `email_verification_timeout`, `unanswerable_required`, `validation_error`, `page_unrecognised`, `posting_closed`, `unsupported_ats`, `cap_reached`, `duplicate`, `profile_incomplete`, `error`.
+- **Reason codes:** `captcha`, `bot_challenge`, `sms_or_2fa`, `login_failed`, `email_verification_timeout`, `mail_not_set_up`, `unanswerable_required`, `validation_error`, `page_unrecognised`, `posting_closed`, `unsupported_ats`, `cap_reached`, `duplicate`, `profile_incomplete`, `cancelled`, `error` (`cancelled` and `mail_not_set_up` added by D-65).
+- **Layering notes (D-65):** `vault.py` sits in the foundation, not in `apply/`, because the web app needs it directly (Copy password, the IMAP password, the Edge export) and web/ may not import a stage. `apply_flow` may import `tailor_flow`: the one allowed orchestrator-to-orchestrator edge (for `tailor_for_apply`). `tests/test_layering.py` encodes both.
 - **New dependencies:** `playwright` (drives the installed Edge; no browser download), `keyring` (Windows Credential Manager), `pywin32` (Word → PDF, optional). IMAP uses the standard library.
 - **Config:** `config/config.yaml` gains an `apply:` block (mode, caps, headed, captcha wait, profile dir) and a `tailor:` block (temperature, page ceiling, retention days). `config/questions.yaml` (question synonyms → profile keys) and `config/aliases.yaml` (term variants) are public, generic data. Personal values live only in `data/`.
 
@@ -275,15 +278,15 @@ foundation: store.py (+ tables tailored, apply_attempts, apply_answers, ats_acco
 |---|---|---|---|
 | **M19 Cloud port** (runs in parallel with M20 design) | Engine fixes and UI/UX items from the cloud fork | `python tests/run_tests.py` and `cd web; npx vitest run` pass; one real run on a copied DB (port 8768) closes no posting on an empty fetch and finds Singapore roles on a capped Workday board | F-01 to F-07 |
 | **M20 Walking skeleton** | `python -m jobscraper apply <job_id> --dry-run` on one real Greenhouse posting: a hand-filled `data/applicant.yaml`, a deterministic tailored DOCX (variant swaps only), the plan from the Greenhouse schema, resolver tiers 1–5, Edge filled through Playwright, the resume uploaded, stopping at `ready_to_submit` with screenshots and audit rows | On 5 real Greenhouse postings the owner picks: every attempt ends `ready_to_submit` or a correct reason code, and the owner reads the audit and finds no wrong answer; then one real submission, triggered by the owner, ends `submitted` and the role shows as applied | F-10, F-20, F-21, F-22 (swaps), F-23, F-31, F-32, F-33, F-34, F-37, F-38, F-39 |
-| **M21 MVP** | Profile form, tailor with the LLM layer, validator, scores, diff and TTL; Lever, Ashby and Workday adapters; vault, account creation, IMAP verification; batch apply, caps, audit view, settings | 10 real applications submitted automatically across at least 3 ATSs including Workday, with G1/G2 met; tailoring golden cases A–C pass; NF-01 test passes | F-11, F-22 to F-25, F-30, F-35 to F-37, F-40, NF-01 to NF-09 |
-| **M22 Breadth** | More ATSs, generic adapter, answer memory, deferred cloud items | Per item | F-12, F-41, C-9, C-19 to C-21, C-24 |
+| **M21 MVP** | Profile form, tailor UI (scores, missing terms, diff, downloads) with TTL and the LLM JD-term extraction (the LLM rewrite is M22, D-67); Lever, Ashby and Workday adapters; vault, account creation, IMAP verification; batch apply, caps, audit view, settings | 10 real applications submitted automatically across at least 3 ATSs including Workday, with G1/G2 met; tailoring golden cases A–C pass; NF-01 test passes | F-11, F-22 to F-25, F-30, F-35 to F-37, F-40, NF-01 to NF-09 |
+| **M22 Breadth** | More ATSs, generic adapter, answer memory, the LLM bullet and summary rewrite with a hardened validator (D-67), deferred cloud items | Per item | F-12, F-22 (LLM rewrite), F-41, C-9, C-19 to C-21, C-24 |
 
 ## 9. Risks and premises to validate
 
 | # | Risk or premise | Impact | How we validate it | By when |
 |---|---|---|---|---|
 | R-1 | Playwright can drive Edge 156 headed on a dedicated persistent profile, and Edge's password manager and sync work in it (Playwright adds `--disable-sync` and a basic password store by default) | Without sync, passwords reach the Default Edge profile only through a CSV import | **Spike S-1** (1 h): launch, sign in by hand once, save a password on a test site, check it appears in the Default profile | Before M20 build |
-| R-2 | Qwen3-14B rewrites bullets within the rules at temperature 0.25 in ≤ 90 s | Weak tailoring, or the validator rejects most rewrites | **Spike S-2**: golden cases A–C plus 3 real JDs; count validator rejections and time | Before the M21 tailor LLM layer |
+| R-2 | Qwen3-14B rewrites bullets within the rules at temperature 0.25 in ≤ 90 s | Weak tailoring, or the validator rejects most rewrites | **Spike S-2**: golden cases A–C plus 3 real JDs; count validator rejections and time | Done 2026-11-02: no coverage gain over the swaps, validator gaps; see D-67 |
 | R-3 | Greenhouse forms fill reliably (react-select dropdowns, file upload, reCAPTCHA stays invisible at human pace) | The walking skeleton stalls | **Spike S-3**: dry-run fill on 2 real Greenhouse postings, no submit | Before M20 build |
 | R-4 | Gmail IMAP with an app password works for the owner's address (needs 2-Step Verification on) | No automatic verification; Workday attempts end `email_verification_timeout` | **Spike S-4** after the owner creates the app password (owner task) | Before the M21 Workday work |
 | R-5 | Fully automatic submission sends a wrong answer (about 4% of 30-field forms are fully right at 90% per-field accuracy, auto-apply brief §1.2) | A wrong attestation or a poor application under the owner's name | The resolver prefers deterministic tiers; grounding check; `unanswerable_required` fails closed; M20's gate reviews 5 dry runs before `auto` is switched on; full audit | M20 gate |
@@ -309,6 +312,8 @@ foundation: store.py (+ tables tailored, apply_attempts, apply_answers, ats_acco
 | D-61 | Caps | 10 submissions a day, 2 per employer a day, one in flight; editable in Settings | Coordinator, 2026-11-01 | DECIDED |
 | D-62 | Team and process | Standard team (coordinator, researcher, architect, planner, software-engineer, tester, reviewer), no security reviewer; product-first testing; the Coordinator merges into `personal` and may push | owner, 2026-11-01 | DECIDED |
 | D-63 | Cloud UI ports vs paused M18 | Port the UI items to `personal` now (M19); M18 rebases onto the result when resumed. Skip C-11 (M18 already has a better version) | Coordinator, 2026-11-01 | DECIDED |
+| D-65 | Design-time PRD fixes (architect, Q-04) | Answer memory is resolver tier 3; "I have this" skills go to `data/applicant.yaml` `attested_skills`; golden case B: Excel is an exact match; reason codes `cancelled`, `mail_not_set_up`; `vault.py` in the foundation; `apply_flow` may import `tailor_flow`; `app_events.by` column | Coordinator, 2026-11-02 | DECIDED |
+| D-67 | Tailor LLM rewrite after spike S-2 | The per-entry LLM rewrite added no coverage over the deterministic swaps (54/54 runs) and the validator has gaps (verb/seniority upgrades, number words, unknown tools). `tailor.llm: false` by default; M21 ships deterministic swaps, reordering, render, storage/TTL and UI (plus LLM JD-term extraction); the LLM bullet and summary rewrite and the validator fixes move to M22 | Coordinator, 2026-11-02 | DECIDED |
 
 **Open questions:** none blocking. The owner will be asked for, as owner tasks: the email address to apply with and the profile values (M20); a Gmail app password (M21, S-4); one manual sign-in to the Microsoft account in the JobScraper Edge profile if S-1 shows sync works.
 
