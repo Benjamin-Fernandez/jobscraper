@@ -1,0 +1,700 @@
+# JobScraper question-synonym table (M20 resolver, tier 2). Public, generic data: no personal values.
+# Format and matching: docs/architecture/apply_design.md sections 7.1 (phrase match), 7.3.1, 7.3.2.
+# Phrases are plain lowercase, no apostrophes or punctuation (the label normaliser strips both).
+# A one-token phrase matches only labels of 4 tokens or fewer. Score = tokens of the longest
+# matching phrase; a tie between different keys answers nothing, so near-collisions are avoided
+# deliberately (e.g. the 3-token "expected graduation year" beats the 2-token "expected graduation").
+# Provenance tags:  [gh]  wording seen in the recorded Greenhouse schemas gh_vercel.json / gh_dataiku.json
+#   (public, 2026-11-01);  [brief]  auto_apply_brief section 6;  [design]  apply_design 7.3;
+#   [common]  wording common on Greenhouse / Lever / Ashby / Workday and Singapore forms, from general
+#   knowledge of those forms and NOT individually web-verified (2026-11-02). Unusual variants carry a note.
+#
+# NOT in this file on purpose: declarations (PEP, audit-client independence, shareholdings, relatives,
+# criminal, bankruptcy, regulatory, non-compete, health, prior employment, previously applied). They are
+# resolved by tier 4 (declarations.py) because they need company matching over lists; a tier-2 entry
+# would pre-empt that, since tier 2 runs first. Label-variant phrases found while researching, offered
+# for the tier-4 classifier table (apply_design 7.5) in addition to its listed phrases:
+#   pep: "politically exposed person", "pep", "prominent public function", "close associate of a",
+#        "holds or has held a public office", "immediate family member of a senior"
+#   prior_employment_at_company: "are you currently an employee at" [gh], "have you ever worked for",
+#        "ever been employed by", "previously worked for", "former employee", "worked at"
+#   relatives_at_company: "related to anyone", "family member currently working", "friends or relatives"
+#   criminal_record: "ever been convicted", "pending criminal", "criminal proceedings", "criminal offence"
+#   conflict_audit_independence: "audit client", "independence requirements", "conflict of interest"
+#   non_compete: "non compete", "restrictive covenant", "bound by any agreement", "notice or garden leave"
+# US EEO/self-ID labels ("veteran", "disability", "racial/ethnic background", "gender identity",
+# "sexual orientation", "transgender" [gh]) are tier 1 (EEO_* canonical), so they are not repeated here.
+# Known design limits (see report): a Yes/No label for an enum key ("Are you a Singapore Citizen?")
+# cannot be answered from an enum by 7.3.2; "years of experience with <skill>" is excluded on purpose.
+version: 1
+questions:
+  # ---------------- Singapore status ----------------
+  - key: singapore_status.authorised_to_work.SG
+    kind: bool
+    sensitive: false
+    synonyms:
+      - authorised to work in singapore
+      - authorized to work in singapore
+      - legally authorised to work
+      - legally authorized to work
+      - legally entitled to work
+      - legally allowed to work
+      - eligible to work in singapore
+      - right to work in singapore
+      - right to work
+      - work authorisation
+      - work authorization
+      - authorization to work          # [gh] "Your authorization to work in the country where you live" (no country named: treated as SG, the profile's home country)
+      - authorisation to work
+      - permitted to work
+      - eligible to work
+    exclude: [united states, u s, usa, united kingdom, uk, canada, australia, europe, european union, india, germany, hong kong, malaysia, china, japan, argentina]
+
+  - key: singapore_status.authorised_to_work.US
+    kind: bool
+    sensitive: false
+    synonyms:
+      - authorized to work in the united states
+      - authorised to work in the united states
+      - authorized to work in the u s
+      - legally authorized to work in the united states
+      - eligible to work in the united states
+      - right to work in the united states
+      - work authorization in the united states
+    exclude: []
+
+  - key: singapore_status.requires_sponsorship.SG
+    kind: bool
+    sensitive: false
+    synonyms:
+      - require sponsorship               # [gh] "Will you require Visa Sponsorship now, or in the future?"
+      - require visa sponsorship
+      - need sponsorship
+      - visa sponsorship                  # [gh] "Would you require a visa sponsorship or visa transfer"
+      - work visa sponsorship
+      - sponsorship now or in the future
+      - require an employment pass
+      - require a work pass
+      - need a work pass
+      - need an employment pass
+      - work pass sponsorship
+      - require visa support
+      - require a visa
+      - need a visa
+      - visa transfer
+      - immigration sponsorship
+      - sponsorship to work
+    exclude: [united states, u s, usa, united kingdom, uk, canada, australia, europe, european union, india, germany, hong kong, malaysia, china, japan]
+
+  - key: singapore_status.requires_sponsorship.US
+    kind: bool
+    sensitive: false
+    synonyms:
+      - require sponsorship to work in the united states
+      - visa sponsorship in the united states
+      - sponsorship to work in the u s
+      - require visa sponsorship in the u s
+      - require sponsorship for employment in the united states
+    exclude: []
+
+  - key: singapore_status.residency_status
+    kind: enum
+    sensitive: true
+    synonyms:
+      - singapore citizen or permanent resident   # [brief] the common combined question on Singapore forms
+      - singapore citizen or pr
+      - singapore citizen pr
+      - citizen or permanent resident
+      - citizen or pr
+      - citizen pr
+      - residency status
+      - residential status
+      - citizenship status
+      - citizen status
+      - immigration status
+      - pr status
+      - singapore pr
+      - singapore citizen
+      - permanent resident
+      - are you a citizen
+    exclude: []
+    value_map:
+      citizen: [singapore citizen, singaporean, sg citizen, citizen, singapore citizen or permanent resident, singapore citizen or pr, singapore citizen pr, citizen or pr, citizen or permanent resident]
+      pr: [singapore permanent resident, permanent resident, singapore pr, sg pr, spr, pr, singapore citizen or permanent resident, singapore citizen or pr, singapore citizen pr, citizen or pr, citizen or permanent resident]
+      foreigner: [foreigner, foreign national, non singaporean, non resident, international, expatriate, work pass holder, others, other, neither]
+    # Caveat: a profile value of citizen also "contains"-matches the option "Non-Singapore Citizen"; the 7.3.2
+    # rule tries an exact option first, so this only bites when no exact "Singapore Citizen" option exists.
+
+  - key: singapore_status.nationality
+    kind: country
+    sensitive: false
+    synonyms:
+      - nationality
+      - country of citizenship
+      - country of nationality
+      - citizenship
+      - citizen of
+      - your nationality
+    exclude: []
+
+  - key: singapore_status.work_pass
+    kind: enum
+    sensitive: false
+    synonyms:
+      - type of work pass
+      - work pass type
+      - type of pass
+      - pass type
+      - work pass
+      - type of visa
+      - visa type
+      - visa status
+      - work permit type
+      - current pass
+      - current work pass
+      - pass held
+    exclude: []
+    value_map:
+      none_required: [not required, no pass required, none required, not applicable, na, n a, none, no pass needed, singapore citizen or permanent resident, singapore citizen pr, citizen or pr, do not require]
+      ep: [employment pass, ep]
+      s_pass: [s pass, s pass holder]
+      dp: [dependant pass, dependent pass, dp]
+      ltvp_loc: [long term visit pass, ltvp, letter of consent, loc]
+      student_pass: [student pass, student s pass]
+      other: [other, others]
+
+  - key: singapore_status.ns_status
+    kind: enum
+    sensitive: true
+    synonyms:
+      - national service status          # [brief] banks on Workday / SuccessFactors still ask (TAFEP says they should not)
+      - national service
+      - ns status
+      - ns liability
+      - ns obligation
+      - ns completion
+      - completed national service
+      - operationally ready
+      - military service
+      - nsman
+      - nsf
+      - ns
+    exclude: []
+    value_map:
+      completed: [completed, completed ns, completed national service, completed full time national service, nsman, ns man, ord, fulfilled, operationally ready, served, yes completed]
+      serving: [serving, currently serving, still serving, in service, nsf, ongoing, yet to complete, not yet completed, pending]
+      exempted: [exempted, exempt, exempted from ns, disqualified, deferred, medically exempted]
+      not_applicable: [not applicable, na, n a, not liable, female, foreigner, non singaporean, no obligation, not required, nil, none]
+
+  - key: singapore_status.ord_date
+    kind: date
+    sensitive: true
+    synonyms:
+      - ord date
+      - date of ord
+      - expected ord
+      - operationally ready date
+      - ns completion date
+      - ns ord date
+      - date of completion of national service
+    exclude: []
+
+  - key: singapore_status.race
+    kind: enum
+    sensitive: true
+    synonyms:
+      - race
+      - racial group
+      - racial background
+      - ethnic group
+      - ethnic origin
+      - ethnic background
+      - ethnicity
+      - race ethnicity
+      - race or ethnic
+    exclude: []
+    value_map:
+      chinese: [chinese]
+      malay: [malay]
+      indian: [indian]
+      eurasian: [eurasian]
+      other: [other, others]
+      decline: [decline, prefer not to say]
+    # Singapore forms use the CMIO list; US-style options (Asian, White...) belong to the tier 1 EEO fields.
+
+  - key: singapore_status.religion
+    kind: text
+    sensitive: true
+    synonyms:
+      - religion
+      - religious affiliation
+      - religious belief
+      - faith
+    exclude: []
+
+  - key: singapore_status.marital_status
+    kind: enum
+    sensitive: true
+    synonyms:
+      - marital status
+      - civil status
+      - marital
+    exclude: []
+    value_map:
+      single: [single, never married, unmarried, not married]
+      married: [married, civil partnership]
+      decline: [decline, prefer not to say]
+
+  # ---------------- identity ----------------
+  - key: identity.gender
+    kind: enum
+    sensitive: true
+    synonyms:
+      - gender
+      - gender identity
+      - your gender
+      - sex
+      - what is your gender
+    exclude: []
+    value_map:
+      male: [male, man]
+      female: [female, woman]
+      non_binary: [non binary, nonbinary, genderqueer, other]
+      decline: [decline, prefer not to say, i dont wish to answer]
+
+  - key: identity.date_of_birth
+    kind: date
+    sensitive: true
+    synonyms:
+      - date of birth
+      - birth date
+      - birthdate
+      - dob
+      - d o b
+      - birthday
+      - your date of birth
+    exclude: []
+
+  - key: identity.preferred_name
+    kind: text
+    sensitive: false
+    synonyms:
+      - preferred name                 # [gh] "Preferred First Name" is tier 1 on Greenhouse; this covers Lever / Workday free-text
+      - preferred first name
+      - nickname
+      - name you prefer
+      - name you go by
+      - goes by
+      - what should we call you
+      - known as
+    exclude: []
+
+  # ---------------- availability ----------------
+  - key: availability.notice_period_days
+    kind: number
+    sensitive: false
+    synonyms:
+      - notice period
+      - current notice period
+      - notice required
+      - period of notice
+      - length of notice
+      - how much notice
+      - notice to be served
+      - notice in days
+      - notice in weeks
+      - notice in months
+    exclude: []
+
+  - key: availability.earliest_start_date
+    kind: date
+    sensitive: false
+    synonyms:
+      - earliest start date
+      - earliest available date
+      - earliest date you can start
+      - expected start date
+      - available start date
+      - available to start
+      - available from
+      - availability date
+      - date of availability
+      - date available
+      - when can you start
+      - when are you available
+      - commencement date
+      - start date
+      - date you can start
+      - when could you start
+    exclude: []
+
+  - key: availability.willing_to_relocate
+    kind: bool
+    sensitive: false
+    synonyms:
+      - willing to relocate              # [gh] "Are you located in or willing to relocate to this job posting's city?"
+      - open to relocation
+      - open to relocating
+      - willing to move
+      - relocation
+      - relocate
+      - able to relocate
+    exclude: []
+
+  - key: availability.willing_to_travel_pct
+    kind: number
+    sensitive: false
+    synonyms:
+      - willing to travel
+      - percentage of time travel
+      - travel percentage
+      - travel requirement
+      - travel required
+      - ability to travel
+      - able to travel
+      - travel up to
+      - travel is required
+      - travel
+    exclude: []
+
+  # ---------------- pay ----------------
+  - key: pay.expected_salary
+    kind: salary
+    sensitive: false
+    synonyms:
+      - expected salary
+      - expected monthly salary
+      - expected annual salary
+      - expected gross monthly salary
+      - expected base salary
+      - expected compensation
+      - expected remuneration
+      - expected pay
+      - desired salary
+      - desired compensation
+      - desired remuneration
+      - salary expectation
+      - salary expectations              # [gh] "What are your salary expectations?"
+      - salary requirement
+      - salary requirements
+      - compensation expectations
+      - remuneration expectations
+      - expected monthly
+      - salary range
+    exclude: []
+
+  - key: pay.current_salary
+    kind: salary
+    sensitive: false
+    synonyms:
+      - current salary
+      - current monthly salary
+      - current annual salary
+      - current gross monthly salary
+      - current base salary
+      - current compensation
+      - current remuneration
+      - current pay
+      - present salary
+      - last drawn salary                # [common] very frequent on Singapore forms
+      - last drawn
+      - last salary
+      - previous salary
+      - most recent salary
+    exclude: []
+
+  # ---------------- education ----------------
+  - key: education[0].institution
+    kind: text
+    sensitive: false
+    synonyms:
+      - university
+      - school
+      - college
+      - institution
+      - name of university
+      - name of school
+      - name of institution
+      - school name
+      - university name
+      - university or college
+      - education institution
+      - educational institution
+      - school attended
+      - university attended
+    exclude: [high school, secondary school, primary school]
+
+  - key: education[0].degree
+    kind: text
+    sensitive: false
+    synonyms:
+      - degree
+      - degree obtained
+      - degree type
+      - degree level
+      - highest qualification
+      - highest level of education
+      - highest education level
+      - highest degree
+      - qualification
+      - level of education
+      - education level
+      - type of degree
+    exclude: []
+
+  - key: education[0].major
+    kind: text
+    sensitive: false
+    synonyms:
+      - major
+      - field of study
+      - area of study
+      - course of study
+      - discipline
+      - programme of study
+      - program of study
+      - degree major
+      - degree discipline
+      - degree programme
+      - course
+      - major or discipline
+    exclude: []
+
+  - key: education[0].end
+    kind: date
+    sensitive: false
+    synonyms:
+      - graduation date
+      - date of graduation
+      - expected graduation
+      - expected date of graduation
+      - graduating date
+      - graduation month
+      - end date of study
+      - completion date of degree
+      - study end date
+      - education end date
+    exclude: []
+
+  - key: education[0].grade
+    kind: text
+    sensitive: false
+    synonyms:
+      - cgpa
+      - gpa
+      - cap
+      - grade point average
+      - cumulative grade point average
+      - cumulative average point
+      - degree classification
+      - class of degree
+      - honours classification
+      - honours class
+      - academic result
+      - academic grade
+      - overall grade
+      - final grade
+    exclude: []
+
+  # ---------------- computed ----------------
+  - key: computed.experience_years
+    kind: number
+    sensitive: false
+    synonyms:
+      - years of experience
+      - years of work experience
+      - years of professional experience
+      - years of relevant experience
+      - years of total experience
+      - total years of experience
+      - total experience
+      - total work experience
+      - how many years of experience
+      - number of years of experience
+      - years experience
+      - work experience in years
+    # Skill-specific questions ("years of experience with Python") must not get total experience: tier 5 handles them.
+    exclude: [years of experience with, years of experience in, years of experience using, years of experience as, years experience with, years experience in, experience working with, experience using]
+
+  - key: computed.graduation_year
+    kind: number
+    sensitive: false
+    synonyms:
+      - graduation year
+      - expected graduation year
+      - year of graduation
+      - expected year of graduation
+      - year graduated
+      - year of completion
+      - graduating year
+      - year you graduated
+      - year you will graduate
+    exclude: []
+
+  # ---------------- links ----------------
+  - key: links.linkedin
+    kind: url
+    sensitive: false
+    synonyms:
+      - linkedin                         # [gh] "LinkedIn Profile", "LinkedIn URL"
+      - linkedin profile
+      - linkedin url
+      - linkedin profile url
+      - linkedin link
+      - your linkedin
+    exclude: []
+
+  - key: links.github
+    kind: url
+    sensitive: false
+    synonyms:
+      - github                           # [gh] "Github", "Github URL"
+      - github url
+      - github profile
+      - github link
+      - github username
+      - your github
+    exclude: []
+
+  - key: links.portfolio
+    kind: url
+    sensitive: false
+    synonyms:
+      - portfolio
+      - portfolio url
+      - portfolio link
+      - portfolio website
+      - personal website
+      - personal site
+      - personal portfolio
+      - website url
+      - website                          # [gh] "Website"
+      - online portfolio
+    exclude: []
+
+  # ---------------- sourcing and languages ----------------
+  - key: sourcing.how_heard_default
+    kind: text
+    sensitive: false
+    synonyms:
+      - how did you hear
+      - how did you hear about us
+      - where did you hear
+      - where did you first hear          # [gh] "Where did you first hear about this role?"
+      - where did you see or hear         # [gh] "Where did you see or hear about this job?"
+      - where did you see
+      - where did you find
+      - how did you find
+      - how did you learn about
+      - how did you come across
+      - how you heard
+      - heard about us
+      - hear about this
+      - hear about us
+      - source of application
+      - application source
+      - referral source
+      - how did you know about
+    exclude: []
+
+  - key: languages
+    kind: text
+    sensitive: false
+    synonyms:
+      - languages
+      - languages spoken
+      - languages you speak
+      - spoken languages
+      - language proficiency
+      - language skills
+      - languages fluent
+      - languages known
+      - languages and proficiency
+      - language
+    exclude: [programming language, programming languages, coding language, coding languages, frameworks, preferred language, language of communication, language of correspondence]
+
+  # ---------------- consents ----------------
+  - key: consents.certify_true
+    kind: bool
+    sensitive: false
+    synonyms:
+      - information provided is true
+      - information i have provided is true
+      - information given is true
+      - information provided is accurate
+      - information is true
+      - true and complete
+      - true and correct
+      - true and accurate
+      - accurate and complete        # [gh] "I have reviewed and confirmed that all the information provided is accurate and complete."
+      - complete and accurate
+      - correct and complete
+      - certify that the information
+      - declare that the information
+      - correct to the best of my knowledge
+      - true to the best of my knowledge
+      - all the information provided
+      - all information provided
+    exclude: []
+
+  - key: consents.privacy_consent
+    kind: bool
+    sensitive: false
+    synonyms:
+      - privacy notice                   # [gh] "...read and understand Vercel's Job Applicant Privacy Notice"
+      - privacy policy
+      - applicant privacy
+      - job applicant privacy
+      - data protection
+      - personal data
+      - personal information collection
+      - pdpa
+      - gdpr
+      - consent to the collection
+      - consent to the processing
+      - processing of my personal data
+      - collection use and disclosure
+      - collect use and disclose
+      - agree to the terms
+      - terms and conditions
+      - terms of use
+      - acknowledge that i have read
+    exclude: []
+
+  - key: consents.data_retention_consent
+    kind: bool
+    sensitive: false
+    synonyms:
+      - retain my personal data
+      - retain my data
+      - retain my information
+      - retain my application
+      - keep my data
+      - keep my information
+      - keep my details on file
+      - store my information
+      - store my data
+      - future opportunities
+      - future roles
+      - future positions
+      - future vacancies
+      - future employment opportunities
+      - consider me for future
+    exclude: []
+
+  - key: consents.talent_pool_opt_in
+    kind: bool
+    sensitive: false
+    synonyms:
+      - talent pool
+      - talent community
+      - talent network
+      - join our talent
+      - job alerts
+      - other roles                      # [common] "May we email you about other roles?"
+      - contact me about other
+      - contacted about other
+      - receive updates
+      - marketing communications
+      - newsletter
+    exclude: []
