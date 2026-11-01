@@ -6,15 +6,15 @@
 
 ## Now / Next (≤ 10 lines; history goes to `docs/planning/session_log.md`)
 
-- **Now:** kickoff done (PRD r1 approved under the owner's delegation). M19 port lanes, the browser spike (S-1 + S-3) and the auto-apply design (KA-1 to KA-3) start in parallel.
-- **Next:** tailor design (KA-4) and spike S-2; test plans and build plans for M20; then the M20 walking skeleton build.
+- **Now:** M19 merged and pushed. M20 dossier: designs + plans done, test plans and a design patch (Q-19, D-68) finishing; then cross-review (Q-10).
+- **Next:** M20 lanes P, T, B in parallel; owner fills `data/applicant.yaml` for the M20 gate.
 - **Blocked on the owner:** nothing yet. Coming: the applicant profile values and the email to apply with (M20); a Gmail app password (M21).
 
 ## 1. Milestones
 
 | Milestone | Goal | Gate (checkable) | Status |
 |---|---|---|---|
-| M19 Cloud port | Engine fixes + UI/UX items from jobscraper-cloud | Both suites pass; a real run on a copied DB shows C-1/C-2 behaviour | TODO |
+| M19 Cloud port | Engine fixes + UI/UX items from jobscraper-cloud | Both suites pass; a real run on a copied DB shows C-1/C-2 behaviour | DONE 2026-11-02 (cab10af: 410/410 Python, 220+1 skip web; real 6-company run on a DB copy; dev web 8768 healthz ok) |
 | M20 Walking skeleton | `apply <job_id> --dry-run` on Greenhouse, deterministic tailored DOCX, audit | 5 owner-picked Greenhouse postings end `ready_to_submit` or a correct reason; the owner finds no wrong answer; one owner-triggered real submission ends `submitted` | TODO |
 | M21 MVP | Profile form, full tailor, Lever/Ashby/Workday, vault, IMAP, batch apply | 10 real automatic submissions across ≥ 3 ATSs incl. Workday; G1/G2; golden cases A–C; NF-01 test | TODO |
 | M22 Breadth | More ATSs, generic adapter, answer memory, deferred cloud items | Per item | TODO |
@@ -23,13 +23,13 @@
 
 | ID | Requirement (short) | Pri | Status | Notes |
 |---|---|---|---|---|
-| F-01 | Postings close only on evidence (C-1) | P0 | TODO | M19 engine lane |
-| F-02 | Capped boards faceted to Singapore (C-2) | P0 | TODO | M19 engine lane |
-| F-03 | Robust judging (C-3) | P0 | TODO | M19 engine lane |
-| F-04 | Cancelled/crashed runs say so (C-4, C-5) | P0 | TODO | M19 engine lane |
-| F-05 | Grace, logging, block reasons (C-6–C-8) | P1 | TODO | M19 engine lane |
-| F-06 | UI/UX ports (C-10, C-12–C-18) | P1 | TODO | M19 UI lane |
-| F-07 | Hardening (C-22, C-23) | P2 | TODO | M19 |
+| F-01 | Postings close only on evidence (C-1) | P0 | DONE | M19 engine lane |
+| F-02 | Capped boards faceted to Singapore (C-2) | P0 | DONE | M19 engine lane |
+| F-03 | Robust judging (C-3) | P0 | DONE | M19 engine lane |
+| F-04 | Cancelled/crashed runs say so (C-4, C-5) | P0 | DONE | M19 engine lane |
+| F-05 | Grace, logging, block reasons (C-6–C-8) | P1 | DONE | M19 engine lane |
+| F-06 | UI/UX ports (C-10, C-12–C-18) | P1 | DONE | M19 UI lane |
+| F-07 | Hardening (C-22, C-23) | P2 | DONE | M19 |
 | F-10 | Applicant profile (data/applicant.yaml) | P0 | TODO | M20 |
 | F-11 | Profile form in the Profile tab | P0 | TODO | M21 |
 | F-12 | Answer memory | P1 | TODO | M22 |
@@ -81,6 +81,7 @@ Decided items aren't reopened. If facts change, raise a new decision that refere
 | D-60 | Tailor output | Clean template; DOCX + PDF via Word; page ceiling; temp 0.25 | Coordinator | DECIDED |
 | D-61 | Caps | 10/day, 2/employer/day, 1 in flight | Coordinator | DECIDED |
 | D-62 | Team and git | Standard team, no security reviewer; merge and push allowed | owner | DECIDED |
+| D-68 | Planner gaps A-1..A-5 | A-1 resolver gets the alias dictionary for grounding; A-2 apply_flow passes resume text (extract_text or tailor master) in the resolver context; A-3 CLI `apply show`; A-4 experience months = merged intervals, internships count, whole months; A-5 `tailor.llm_terms` (default on, M21) separate from `tailor.llm` (off, M22) | Coordinator, 2026-11-02 | DECIDED |
 | D-67 | Tailor LLM layer | Spike S-2: LLM bullet rewrite added 0 coverage over deterministic swaps (54/54 runs), ~6 s/resume, validator gaps found. `tailor.llm: false` by default; M21 tailor is deterministic (swaps, reordering, render, storage, UI); LLM bullet + summary rewrite and validator fixes move to M22 | Coordinator, 2026-11-02 | DECIDED |
 | D-66 | Local-network-fault guard | Count only regular due companies; probation failures never abort a batch (pre-existing flaw found in the M19 check: 6 ok + 11 probation failures aborted run #30 on a DB copy) | Coordinator, 2026-11-02 | DECIDED |
 | D-65 | Design-time PRD fixes (architect, Q-04) | Answer memory is resolver tier 3 (F-32 order wins over F-12's "tier 2"); "I have this" skills go to `data/applicant.yaml` `attested_skills`, not the protected overrides file; golden case B: Excel is an exact match; new reason codes `cancelled`, `mail_not_set_up`; `vault.py` in foundation; `apply_flow` may import `tailor_flow`; `app_events.by` column. Planner folds these into the PRD (Q-09) | Coordinator, 2026-11-02 | DECIDED |
