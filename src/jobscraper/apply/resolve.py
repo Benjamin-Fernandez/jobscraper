@@ -157,6 +157,14 @@ class Rule:
     synonyms: tuple[tuple[str, ...], ...]      # normalised token tuples
     exclude: tuple[tuple[str, ...], ...] = ()
     value_map: dict[str, tuple[str, ...]] = dc_field(default_factory=dict)
+    # A virtual `yes_if` entry (§7.3.3): key "<parent>#<id>", kind bool; Yes when
+    # the parent enum's profile value is one of `yes_values`.
+    parent: str = ""
+    yes_values: frozenset[str] = frozenset()
+
+    @property
+    def is_virtual(self) -> bool:
+        return bool(self.parent)
 
     def score(self, label_toks: Sequence[str]) -> int:
         """Token count of the longest matching synonym; 0 if an exclude matches."""
@@ -174,12 +182,15 @@ class QuestionRules:
     def load(cls, path: Union[str, Path]) -> "QuestionRules":
         return load_rules(path)
 
-    def select(self, label_norm: str) -> tuple[list[Rule], int]:
-        """The top-scoring rules for a label and their score (§7.3.1 selection).
-        One rule = a match; two or more = a tie (tier 2 does not answer)."""
+    def select(self, label_norm: str, f: Optional[FormField] = None) -> tuple[list[Rule], int]:
+        """The top-scoring rules for a label and their score (§7.3.1 selection),
+        among the entries a field of this shape may take (§7.3.3). One rule = a
+        match; two or more = a tie (tier 2 does not answer)."""
         toks = label_norm.split()
         best, top = [], 0
         for r in self.rules:
+            if f is not None and not _candidate(r, f, toks):
+                continue
             s = r.score(toks)
             if s > top:
                 best, top = [r], s
@@ -236,11 +247,85 @@ def load_rules(path: Union[str, Path]) -> QuestionRules:
             value_map[str(v)] = tuple(phrases)
         if kind == "enum" and not value_map:
             raise ValueError(f"{where}: an enum needs a value_map")
-        rules.append(Rule(key=key, kind=kind, sensitive=bool(e.get("sensitive", False)),
-                          synonyms=synonyms,
+        sensitive = bool(e.get("sensitive", False))
+        rules.append(Rule(key=key, kind=kind, sensitive=sensitive, synonyms=synonyms,
                           exclude=_phrase_list(e.get("exclude"), f"{where}.exclude"),
                           value_map=value_map))
+        rules.extend(_yes_if_rules(e, key, kind, sensitive, value_map, seen))
     return QuestionRules(tuple(rules))
+
+
+_YES_IF_ID = re.compile(r"^[a-z0-9_]+$")
+
+
+def _yes_if_rules(e: dict, key: str, kind: str, sensitive: bool,
+                  value_map: dict[str, tuple[str, ...]], seen: set[str]) -> list[Rule]:
+    """The virtual entries of an enum's `yes_if` list (§7.3.3). Any problem
+    raises ValueError naming `<key>#<id>`."""
+    raw = e.get("yes_if")
+    if raw is None:
+        return []
+    if kind != "enum":
+        raise ValueError(f"{key}#?: yes_if is allowed on kind enum only")
+    if not isinstance(raw, list):
+        raise ValueError(f"{key}#?: yes_if must be a list of rules")
+    out = []
+    for item in raw:
+        rid = item.get("id") if isinstance(item, dict) else None
+        name = f"{key}#{rid if isinstance(rid, str) and rid else '?'}"
+        if not isinstance(item, dict) or not isinstance(rid, str) or not _YES_IF_ID.match(rid):
+            raise ValueError(f"{name}: needs an id of [a-z0-9_]+")
+        if name in seen:
+            raise ValueError(f"{name}: duplicate id")
+        seen.add(name)
+        values = item.get("values")
+        if not isinstance(values, list) or not values \
+                or not all(isinstance(v, str) and v in value_map for v in values):
+            raise ValueError(f"{name}: values must be a non-empty subset of value_map's keys")
+        synonyms = _phrase_list(item.get("synonyms"), name)
+        exclude = _phrase_list(item.get("exclude"), f"{name}.exclude")
+        if not synonyms:
+            raise ValueError(f"{name}: needs at least one synonym")
+        out.append(Rule(key=name, kind="bool", sensitive=sensitive, synonyms=synonyms,
+                        exclude=exclude, parent=key, yes_values=frozenset(values)))
+    return out
+
+
+QUESTION_WORDS = frozenset({"are", "is", "do", "does", "have", "has", "will", "would", "can",
+                            "were", "was"})
+
+
+def bool_shaped(f: FormField) -> bool:
+    """§7.3.3: a single checkbox, or a dropdown/radio offering exactly one yes
+    option, one no option, at most one decline option and nothing else."""
+    if f.type is FieldType.CHECKBOX:
+        return True
+    if f.type not in SINGLE_CHOICE or not f.options:
+        return False
+    yes = no = dec = 0
+    for o in f.options:
+        if _is_decline(o.label):
+            dec += 1
+            continue
+        pol = polarity(o.label)
+        if pol is True:
+            yes += 1
+        elif pol is False:
+            no += 1
+        else:
+            return False
+    return yes == 1 and no == 1 and dec <= 1
+
+
+def _candidate(r: Rule, f: FormField, label_toks: Sequence[str]) -> bool:
+    """May this entry answer a field of this shape (§7.3.3)?"""
+    if bool_shaped(f):
+        return r.kind == "bool"            # plain bool entries + virtual yes_if entries
+    if f.type in CHOICE_TYPES:
+        return not r.is_virtual
+    if f.type in (FieldType.TEXT, FieldType.TEXTAREA):
+        return not r.is_virtual or (bool(label_toks) and label_toks[0] in QUESTION_WORDS)
+    return not r.is_virtual
 
 
 # --------------------------------------------------------------------------
@@ -332,11 +417,18 @@ def fit_bool(f: FormField, value: Any) -> Optional[Fit]:
             return None
         return ("true" if value else "false"), ()
     if f.type in CHOICE_TYPES:
-        hits = [o for o, _t in _opts(f) if polarity(o.label) is value]
+        hits = [o for o in f.options
+                if not _is_decline(o.label) and polarity(o.label) is value]
         return _choose(f, hits) if len(hits) == 1 else None
     if f.type in (FieldType.TEXT, FieldType.TEXTAREA, FieldType.TYPEAHEAD):
         return ("Yes" if value else "No"), ()
     return None
+
+
+def _is_decline(label: str) -> bool:
+    """A "prefer not to say" option ("I don't wish to answer" is not a No)."""
+    toks = tokens(label)
+    return any(phrase_match_tokens(p.split(), toks) for p in DECLINE_PHRASES)
 
 
 def decline_option(f: FormField) -> Optional[Option]:
@@ -690,21 +782,29 @@ class _Tier2:
 
 def _tier2(f: FormField, label_norm: str, ctx: ResolveContext,
            rules: QuestionRules) -> _Tier2:
-    best, _score = rules.select(label_norm)
+    best, _score = rules.select(label_norm, f)
     if not best:
         return _Tier2()
     if len(best) > 1:
         return _Tier2(sensitive=any(r.sensitive for r in best),
                       note="ambiguous: " + ", ".join(r.key for r in best))
     r = best[0]
-    value = profile_value(ctx.profile, r.key)
-    fit = fit_kind(f, r.kind, value, value_map=r.value_map, profile=ctx.profile)
-    # TODO(D-70 yes_if): a Yes/No label on an enum key ("Are you a Singapore
-    # Citizen?") needs the architect's `yes_if` rule (arch/Q-22-workday-first),
-    # not specified when this was built. Until then fit_enum finds no option for
-    # it, so a sensitive key stops at unknown below and nothing is guessed.
+    if r.is_virtual:
+        # §7.3.3 yes_if: a Yes/No question answered from the parent enum.
+        value = profile_value(ctx.profile, r.parent)
+        if _blank(value):
+            fit = None
+        elif value == "decline":
+            fit = fit_decline(f)
+        else:
+            fit = fit_bool(f, str(value) in r.yes_values)
+        source = f"profile:{r.parent}"
+    else:
+        value = profile_value(ctx.profile, r.key)
+        fit = fit_kind(f, r.kind, value, value_map=r.value_map, profile=ctx.profile)
+        source = f"profile:{r.key}"
     if fit is not None:
-        return _Tier2(answer=_answer(f, fit, AnswerTier.PROFILE_RULE, f"profile:{r.key}",
+        return _Tier2(answer=_answer(f, fit, AnswerTier.PROFILE_RULE, source,
                                      CONF_PROFILE, rule_id=r.key, sensitive=r.sensitive),
                       sensitive=r.sensitive)
     if r.sensitive:
