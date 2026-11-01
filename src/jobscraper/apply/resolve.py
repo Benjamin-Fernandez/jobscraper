@@ -24,6 +24,7 @@ and the model as a `backends.Backend` handed in by apply_flow.
 from __future__ import annotations
 
 import datetime as _dt
+import hashlib
 import json
 import re
 from dataclasses import dataclass, field as dc_field
@@ -33,6 +34,7 @@ from typing import Any, Callable, Optional, Sequence, Union
 import yaml
 
 from .. import applicant
+from ..backends import BackendError
 from .contracts import (
     CHOICE_TYPES, Answer, AnswerStatus, AnswerTier, Canonical, FieldType, FormField,
     Option, ResolveContext,
@@ -764,9 +766,351 @@ def _tier4(f: FormField, label_norm: str, ctx: ResolveContext):
     return declarations.answer(label, f, ctx), True
 
 
-def _tier5(f: FormField, ctx: ResolveContext, backend: Any) -> Optional[Answer]:
-    """The local model (WP-P6)."""
+SYSTEM_PROMPT = """You answer one question on a job application for the applicant described below.
+Rules:
+1. Use only facts in APPLICANT, RESUME or JOB. Never invent an employer, title, date, degree,
+   number, skill or tool.
+2. If the facts do not settle the answer, answer unknown (choice -1, or unknown true).
+3. For a choice question, pick the option the facts support, and copy into "evidence" a short
+   exact quote (3-200 characters) from APPLICANT, RESUME or JOB that supports it.
+4. For free text, write plain first-person sentences, no greeting or sign-off, within the
+   character limit. Mention only skills and experience present in APPLICANT or RESUME.
+Return JSON only, matching the schema."""
+
+RULE_ID_LLM = "llm:v1"
+CONF_LLM_CHOICE = 0.9
+CONF_LLM_TEXT = 0.8
+SEED = 7
+PROMPT_CHARS = 6000
+TEXT_LIMITS = {FieldType.TEXT: 255, FieldType.TEXTAREA: 1500}
+COVER_LETTER_LIMIT = 2500
+
+
+def _llm_kind(f: FormField) -> Optional[str]:
+    """choice | multi | number | text, or None when the field is not one the
+    model may answer (§7.6 eligibility; a box to tick, a file, an email, a
+    phone, a date, a URL or a typeahead stays with tiers 1-4)."""
+    if f.canonical is Canonical.COVER_LETTER:
+        return "text" if f.required else None
+    if f.type in SINGLE_CHOICE:
+        return "choice" if f.options else None
+    if f.type is FieldType.MULTI_CHOICE:
+        return "multi" if f.options else None
+    if f.type is FieldType.NUMBER:
+        return "number"
+    if f.type in (FieldType.TEXT, FieldType.TEXTAREA):
+        return "text"
     return None
+
+
+def _text_limit(f: FormField) -> int:
+    if f.max_length:
+        return int(f.max_length)
+    if f.canonical is Canonical.COVER_LETTER:
+        return COVER_LETTER_LIMIT
+    return TEXT_LIMITS.get(f.type, 255)
+
+
+def llm_schema(kind: str, n: int = 0, limit: int = 255) -> dict:
+    """The JSON schema sent as `format` (§7.6)."""
+    if kind == "choice":
+        return {"type": "object", "properties": {
+            "choice": {"type": "integer", "minimum": -1, "maximum": n - 1},
+            "evidence": {"type": "string", "maxLength": 200}},
+            "required": ["choice", "evidence"]}
+    if kind == "multi":
+        return {"type": "object", "properties": {
+            "choices": {"type": "array", "items": {"type": "integer", "minimum": 0,
+                                                   "maximum": n - 1},
+                        "uniqueItems": True, "maxItems": n},
+            "unknown": {"type": "boolean"},
+            "evidence": {"type": "string", "maxLength": 200}},
+            "required": ["choices", "unknown", "evidence"]}
+    if kind == "number":
+        return {"type": "object", "properties": {
+            "unknown": {"type": "boolean"}, "value": {"type": "number"}},
+            "required": ["unknown", "value"]}
+    return {"type": "object", "properties": {
+        "unknown": {"type": "boolean"}, "text": {"type": "string", "maxLength": limit}},
+        "required": ["unknown", "text"]}
+
+
+def user_prompt(f: FormField, kind: str, ctx: ResolveContext, limit: int) -> str:
+    """§7.6 user prompt. Only llm_extract + computed facts from the profile:
+    no S value can reach it."""
+    facts = applicant.computed_facts(ctx.profile, applicant.today_sg())
+    person = dict(applicant.llm_extract(ctx.profile), computed=facts)
+    lines = [f"QUESTION: {f.label}", f"HELP: {f.description}",
+             f"TYPE: {kind}", f"REQUIRED: {'yes' if f.required else 'no'}"]
+    if kind == "text":
+        lines.append(f"LIMIT: {limit} characters")
+    if kind in ("choice", "multi"):
+        lines.append("OPTIONS:")
+        lines += [f"{i}. {o.label}" for i, o in enumerate(f.options)]
+    lines += ["", "APPLICANT (JSON):", json.dumps(person, ensure_ascii=False),
+              "", "RESUME:", (ctx.resume_text or "")[:PROMPT_CHARS],
+              "", f"JOB: {ctx.employer_name}", (ctx.jd_text or "")[:PROMPT_CHARS]]
+    return "\n".join(lines)
+
+
+def prompt_hash(system: str, user: str) -> str:
+    return hashlib.sha256((system + "\n\n" + user).encode("utf-8")).hexdigest()[:16]
+
+
+# ---------------------------------------------------------------- grounding (§7.7)
+
+_DIGIT_COMMA = re.compile(r"(?<=\d),(?=\d)")
+_NUMBER_TOKEN = re.compile(r"(?<![A-Za-z0-9])\d[\d,.]*%?(?![A-Za-z0-9])")
+_YEAR = re.compile(r"(?<![A-Za-z0-9])(?:19|20)\d\d(?![A-Za-z0-9])")
+MONTHS = ("january", "february", "march", "april", "may", "june", "july", "august",
+          "september", "october", "november", "december")
+WEEKDAYS = ("monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday")
+CAPITAL_ALLOW = frozenset({"i", "i'm", "i've", "singapore", "english", *MONTHS, *WEEKDAYS})
+_WORD = re.compile(r"[A-Za-z][A-Za-z0-9]*(?:['’][A-Za-z]+)?")
+
+
+def corpus_norm(text: str) -> str:
+    """Lowercase, whitespace collapsed, "," removed inside digit groups."""
+    return " ".join(_DIGIT_COMMA.sub("", text or "").lower().split())
+
+
+def corpus_text(ctx: ResolveContext) -> str:
+    """Profile (non-sensitive) + resume + JD + employer name (§7.7)."""
+    return "\n".join([applicant.grounding_text(ctx.profile), ctx.resume_text or "",
+                      ctx.jd_text or "", ctx.employer_name or ""])
+
+
+def _number_norm(tok: str) -> str:
+    tok = tok.rstrip(".,").replace(",", "").rstrip("%")
+    return tok[:-2] if tok.endswith(".0") else tok
+
+
+def _corpus_numbers(cnorm: str) -> set[str]:
+    return {_number_norm(m.group(0)) for m in _NUMBER_TOKEN.finditer(cnorm)}
+
+
+def _has_word(cnorm: str, word: str) -> bool:
+    return re.search(r"(?<![a-z0-9+#])" + re.escape(word.lower()) + r"(?![a-z0-9+#])",
+                     cnorm) is not None
+
+
+def _term_pattern(term: str) -> re.Pattern:
+    body = r"\s+".join(re.escape(p) for p in term.split())
+    return re.compile(r"(?<![A-Za-z0-9+#])" + body + r"(?![A-Za-z0-9+#])", re.IGNORECASE)
+
+
+def _term_in(text: str, term: str, ambiguous: frozenset[str]) -> bool:
+    """Whole-token, case-insensitive; an ambiguous token ("go", "c", "r")
+    counts only when written not all-lowercase."""
+    for m in _term_pattern(term).finditer(text):
+        if term.lower() in ambiguous and m.group(0) == m.group(0).lower():
+            continue
+        return True
+    return False
+
+
+def _dictionary(ctx: ResolveContext) -> list[tuple[str, tuple[str, ...]]]:
+    """(term, its alias group) for every alias-group member, profile skill and
+    attested skill."""
+    out: list[tuple[str, tuple[str, ...]]] = []
+    for group in ctx.alias_groups:
+        for term in group:
+            out.append((term, tuple(group)))
+    p = ctx.profile or {}
+    for term in list(p.get("skills") or []) + list(p.get("attested_skills") or []):
+        if isinstance(term, str) and term.strip():
+            group = next((g for g in ctx.alias_groups
+                          if any(t.lower() == term.lower() for t in g)), (term,))
+            out.append((term, tuple(group)))
+    return out
+
+
+def grounded(kind: str, reply: dict, ctx: ResolveContext, *, n_options: int = 0,
+             limit: int = 255, corpus: Optional[str] = None) -> list[str]:
+    """The violations of one model reply (§7.7); [] = grounded. Violations
+    name only the offending tokens, never a profile value."""
+    raw = corpus if corpus is not None else corpus_text(ctx)
+    cnorm = corpus_norm(raw)
+    v: list[str] = []
+    if kind in ("choice", "multi"):
+        idx = [reply.get("choice")] if kind == "choice" else list(reply.get("choices") or [])
+        if any(not isinstance(i, int) or isinstance(i, bool) or not 0 <= i < n_options
+               for i in idx):
+            v.append("choice out of range")
+        ev = corpus_norm(str(reply.get("evidence") or ""))
+        if len(ev) < 3:
+            v.append("no evidence quote")
+        elif ev not in cnorm:
+            v.append("evidence not found: " + ev[:60])
+        return v
+    if kind == "number":
+        val = reply.get("value")
+        if isinstance(val, bool) or not isinstance(val, (int, float)):
+            return ["no number"]
+        txt = _int_text(val)
+        if not re.search(r"(?<![\d.])" + re.escape(txt) + r"(?![\d]|\.\d)", cnorm):
+            v.append(f"number not found: {txt}")
+        return v
+    # text
+    text = str(reply.get("text") or "").strip()
+    if not text:
+        return ["empty text"]
+    if len(text) > limit:
+        v.append(f"longer than {limit} characters")
+    numbers = _corpus_numbers(cnorm)
+    for m in _NUMBER_TOKEN.finditer(text):
+        n = _number_norm(m.group(0))
+        if n and n not in numbers:
+            v.append(f"number {n}")
+    for m in _YEAR.finditer(text):
+        if m.group(0) not in numbers and f"year {m.group(0)}" not in v \
+                and f"number {m.group(0)}" not in v:
+            v.append(f"year {m.group(0)}")
+    for m in _WORD.finditer(text):
+        w = m.group(0)
+        if w.lower() in MONTHS and (w.lower() != "may" or w[0].isupper()) \
+                and not _has_word(cnorm, w):
+            v.append(f"month {w}")
+    amb = frozenset(a.lower() for a in ctx.alias_ambiguous)
+    seen_terms: set[str] = set()
+    for term, group in _dictionary(ctx):
+        key = term.lower()
+        if key in seen_terms or not _term_in(text, term, amb):
+            continue
+        seen_terms.add(key)
+        if not any(_term_in(raw, g, amb) for g in group):
+            v.append(f"term {term}")
+    sentence_start = True
+    pos = 0
+    for m in _WORD.finditer(text):
+        between = text[pos:m.start()]
+        if pos and re.search(r"[.!?]\s*$|[\r\n]", between):
+            sentence_start = True
+        w = m.group(0)
+        if w[0].isupper() and not sentence_start and w.lower().replace("’", "'") \
+                not in CAPITAL_ALLOW and not _has_word(cnorm, w):
+            v.append(f"word {w}")
+        sentence_start = False
+        pos = m.end()
+    return list(dict.fromkeys(v))
+
+
+# ---------------------------------------------------------------- tier 5 (§7.6)
+
+class _Unavailable(Exception):
+    pass
+
+
+def _ask(backend: Any, user: str, kind: str, schema: dict, max_tokens: int,
+         temperature: float) -> Optional[dict]:
+    """One model call. None = the reply was not the JSON asked for."""
+    try:
+        comp = backend.complete(SYSTEM_PROMPT, user, max_tokens, format=schema,
+                                temperature=temperature, seed=SEED)
+    except BackendError as exc:
+        raise _Unavailable() from exc
+    try:
+        data = json.loads(comp.text)
+    except (TypeError, ValueError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def _is_unknown(kind: str, reply: dict) -> bool:
+    if kind == "choice":
+        return reply.get("choice") == -1
+    return bool(reply.get("unknown"))
+
+
+def _llm_failed(f: FormField, ungrounded: bool, note: str, model: str, phash: str) -> Answer:
+    if f.required:
+        st = AnswerStatus.UNGROUNDED if ungrounded else AnswerStatus.UNKNOWN
+    else:
+        st = AnswerStatus.BLANK_OPTIONAL
+    return Answer(field_key=f.key, value=None, tier=AnswerTier.LLM if ungrounded
+                  else AnswerTier.NONE, source="llm" if ungrounded else "",
+                  confidence=0.0, status=st, rule_id=RULE_ID_LLM if ungrounded else "",
+                  model=model, prompt_hash=phash, note=note[:300])
+
+
+def _tier5(f: FormField, ctx: ResolveContext, backend: Any) -> Optional[Answer]:
+    """The local model (§7.6), checked by `grounded` (§7.7). None when the
+    field is not one the model may answer; otherwise a final Answer."""
+    kind = _llm_kind(f)
+    if kind is None:
+        return None
+    model = str(getattr(backend, "model_id", "") or "")
+    if backend is None or not getattr(backend, "available", False):
+        return _llm_failed(f, False, "model unavailable", model, "")
+    limit = _text_limit(f)
+    n = len(f.options)
+    schema = llm_schema(kind, n, limit)
+    user = user_prompt(f, kind, ctx, limit)
+    phash = prompt_hash(SYSTEM_PROMPT, user)
+    corpus = corpus_text(ctx)
+    try:
+        if kind == "text":
+            return _tier5_text(f, ctx, backend, user, schema, limit, corpus, model)
+        replies = []
+        for temp in (0, 0.7):
+            r = _ask(backend, user, kind, schema, 200, temp)
+            if r is None:
+                return _llm_failed(f, False, "model reply was not the JSON asked for",
+                                   model, phash)
+            if _is_unknown(kind, r):
+                return _llm_failed(f, False, "model: the facts do not settle it", model, phash)
+            bad = grounded(kind, r, ctx, n_options=n, corpus=corpus)
+            if bad:
+                return _llm_failed(f, True, "ungrounded: " + "; ".join(bad), model, phash)
+            replies.append(r)
+    except _Unavailable:
+        return _llm_failed(f, False, "model unavailable", model, phash)
+    a, b = replies
+    if kind == "choice":
+        same = a["choice"] == b["choice"]
+        chosen = [f.options[a["choice"]]]
+    elif kind == "multi":
+        same = set(a["choices"]) == set(b["choices"])
+        chosen = [f.options[i] for i in sorted(set(a["choices"]))]
+        if not chosen:
+            return _llm_failed(f, False, "model chose nothing", model, phash)
+    else:
+        same = a["value"] == b["value"]
+    if not same:
+        return _llm_failed(f, False, "model runs disagree", model, phash)
+    if kind == "number":
+        fit = (_int_text(a["value"]), ())
+    else:
+        fit = _choose(f, chosen)
+    return Answer(field_key=f.key, value=fit[0], tier=AnswerTier.LLM, source="llm",
+                  confidence=CONF_LLM_CHOICE, status=AnswerStatus.FILLED,
+                  option_labels=tuple(fit[1]), rule_id=RULE_ID_LLM, model=model,
+                  prompt_hash=phash)
+
+
+def _tier5_text(f: FormField, ctx: ResolveContext, backend: Any, user: str, schema: dict,
+                limit: int, corpus: str, model: str) -> Answer:
+    """One call at temperature 0.3; one retry naming the violations."""
+    prompt = user
+    bad: list[str] = []
+    for attempt in range(2):
+        if attempt:
+            prompt = user + "\n\nPREVIOUS ANSWER WAS REJECTED BECAUSE: " + "; ".join(bad)
+        phash = prompt_hash(SYSTEM_PROMPT, prompt)
+        r = _ask(backend, prompt, "text", schema, limit // 2 + 100, 0.3)
+        if r is None:
+            bad = ["reply was not the JSON asked for"]
+            continue
+        if _is_unknown("text", r):
+            return _llm_failed(f, False, "model: the facts do not settle it", model, phash)
+        bad = grounded("text", r, ctx, limit=limit, corpus=corpus)
+        if not bad:
+            note = "cover letter text" if f.canonical is Canonical.COVER_LETTER else ""
+            return Answer(field_key=f.key, value=str(r.get("text")).strip(),
+                          tier=AnswerTier.LLM, source="llm", confidence=CONF_LLM_TEXT,
+                          status=AnswerStatus.FILLED, rule_id=RULE_ID_LLM, model=model,
+                          prompt_hash=phash, note=note)
+    return _llm_failed(f, True, "ungrounded: " + "; ".join(bad), model, phash)
 
 
 # ---------------------------------------------------------------- the resolver
@@ -806,12 +1150,13 @@ def resolve_field(f: FormField, ctx: ResolveContext, *, backend: Any, rules: Que
     if t4 is not None:
         return t4
 
-    notes = [n for n in (t2.note,) if n]
     if not t2.sensitive and not attestation:
         t5 = _tier5(f, ctx, backend)
         if t5 is not None:
+            if t2.note and not t5.fills:          # keep why tier 2 passed it on
+                t5.note = f"{t2.note}; {t5.note}" if t5.note else t2.note
             return t5
-    return _final(f, note="; ".join(notes))
+    return _final(f, note=t2.note)
 
 
 def resolve_all(fields: Sequence[FormField], ctx: ResolveContext, *, backend: Any,
