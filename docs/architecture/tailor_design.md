@@ -38,6 +38,8 @@ data/ (gitignored)      master_resume.json · tailored/<job_id>/<First>_<Last>_R
 
 **Layering:** `tailor/` imports only `tailor.contracts`, foundation (`store` is not needed by the stage; `backends` objects are passed in), stdlib, `python-docx`, `pypdf`, `yaml`, and `pywin32` (optional, render only). Functions the stage needs from other stages are injected by `tailor_flow`: `extract_text(path) -> str` and `find_resume(dir) -> Path` and `file_hash(path) -> str` from `profile/resume_ingest.py`, `html_to_text(s) -> str` from `scrape/adapters.py` (the same pattern as `keywords.overlap` being handed to the filter). `tests/test_layering.py` changes are in `apply_design.md` §2.3 (STAGES += tailor; ORCHESTRATOR += tailor_flow; `apply_flow → tailor_flow` allowed; web may import `tailor.contracts`).
 
+**Stage call shapes (D-69, adopted from the tester's golden tests):** `terms.load_dictionary(aliases_path, extra: Iterable[str] = ()) -> Dictionary` (extra = applicant skills + attested + master skills items, §4.2), `terms.find(text, term)`, `terms.extract(jd_text, dictionary) -> list[JdTerm]` (§4.3, JD order, status unset), `terms.knockouts(jd_text) -> list[str]`, `terms.llm_extract(jd_text, title, backend, dictionary) -> list[JdTerm]` and `terms.merge(det, llm) -> list[JdTerm]` (§4.4), `mapping.classify(terms, master, dictionary, attested=()) -> list[JdTerm]`, `mapping.resume_text(master) -> str` (§5.1, contact excluded), `mapping.coverage(terms, text) -> float`, `rewrite.swap(master, terms, dictionary) -> tuple[MasterResume, list[BulletChange]]` (a new object; the input is not mutated), `rewrite.reorder(master, terms, attested=()) -> MasterResume` (§6.3 bullet order and skills order), `validate.bullet(src, out, ctx: validate.BulletContext) -> list[ValidationIssue]` with `BulletContext(dictionary, allowed_terms=())` (a dataclass in `validate.py`), `validate.invariants(master, tailored) -> list[str]` (violations; empty = ok).
+
 **Orchestrator API:**
 
 ```python
@@ -197,7 +199,7 @@ Each changed bullet records a `BulletChange(source="swap")`.
 ### 6.3 Skills list and reorder
 
 - **Skills order:** required terms present after swaps in JD order, then preferred present in JD order, then the remaining items in master order; then attested missing JD terms (JD spelling) appended. Items only ever come from the master items (after swaps) and attested skills (validator §8.3).
-- **Bullet order: relevance reordering** (`rewrite.reorder(master_after_swaps, terms) -> document`; deterministic, the only ordering in M21 and also in M22, where the model's order is ignored, §7.3):
+- **Bullet order: relevance reordering** (`rewrite.reorder(master_after_swaps, terms, attested=()) -> MasterResume`; deterministic, the only ordering in M21 and also in M22, where the model's order is ignored, §7.3):
   1. *Score* of a bullet = Σ `weight(t)` (2 required, 1 preferred) over the distinct JD terms `t` (one per canonical, §4.3 step 3) for which `find(bullet_text, t.term)` is non-empty, where `bullet_text` is the bullet's final text (post-swap in M21; the accepted or fallback text in M22). Only the JD spelling counts (the same rule as coverage, §5.2), each term counts once per bullet however often it occurs, and attested-but-missing terms count nothing (they are never in bullets).
   2. Within each entry, in every section kind, bullets are ordered by **descending score; ties keep master order** (a stable sort keyed on `(-score, master position)`). An entry with 0 or 1 bullet is unchanged.
   3. Entries within a section, sections, protected fields and non-skills `items` lists keep master order; a bullet never moves to another entry (§8.3).
@@ -280,8 +282,8 @@ Check (`validate.summary`, deterministic): numbers (digits and `NUMBER_WORDS`) i
 
 - **Ids** (entry level, M22 model output only): output ids = input ids, each once (`ID_MISSING`, `ID_UNKNOWN`, `ID_DUPLICATE`).
 - **Empty:** stripped output empty → `EMPTY`.
-- **Numbers:** multiset of `\d+(?:[.,]\d+)*(?:%|[kKmMbB]\b|x\b)?` (commas inside digit groups removed; no left boundary, so "p95" yields 95; "S$1.2M" yields "1.2M") must be equal: extra → `NUMBER_ADDED`, missing → `NUMBER_DROPPED`.
-- **Fact tokens** `facts(text)` = canonicals of dictionary hits (§4.1/§4.2, longest-match) ∪ acronyms (tokens of ≥ 2 chars, not starting with a digit, with no lowercase letters and at least one letter) ∪ capitalised words not at sentence start (lowercased), minus a stop list (`I`, month and weekday names). Acronyms and capitalised words are taken **only from tokens outside every dictionary-hit span** (so "ML" counts once, as "machine learning", and "REST" inside "REST APIs" is not a second fact). Compare after mapping each through the alias table (so "Postgres" ≡ "PostgreSQL"): `facts(out) − facts(src)` non-empty → `FACT_ADDED` (attested terms are **not** exempt in bullets: an attested skill goes only into the skills list and summary); `facts(src) − facts(out)` non-empty → `FACT_DROPPED`.
+- **Numbers (D-69: standalone numeric tokens only):** multiset of matches of `(?<![A-Za-z0-9])\d+(?:[.,]\d+)*(?:%|[kKmMbB]|x)?(?![A-Za-z0-9])` (commas inside digit groups removed), taken **only outside every dictionary-hit span** (alias-dictionary terms are exempt, so the swap "k8s" → "Kubernetes" drops no number). Digits inside an alphanumeric token are not numbers: "k8s", "S3", "EC2", "Python3", "p95" yield nothing; "S$1.2M" yields "1.2M" (`$` is not alphanumeric); "35%", "2M", "(82%" yield "35%", "2M", "82%". Must be equal: extra → `NUMBER_ADDED`, missing → `NUMBER_DROPPED`. Alphanumeric tokens with both a letter and a digit that are not dictionary hits ("p95", "Python3") are fact tokens instead (next rule), so "p95" → "p99" is still caught.
+- **Fact tokens** `facts(text)` = canonicals of dictionary hits (§4.1/§4.2, longest-match) ∪ acronyms (tokens of ≥ 2 chars, not starting with a digit, with no lowercase letters and at least one letter) ∪ capitalised words of ≥ 2 letters not at sentence start (lowercased; so the "S" of "S$1.2M" is not a fact) ∪ alphanumeric tokens containing both a letter and a digit (lowercased, e.g. "p95"), minus a stop list (`I`, month and weekday names). Acronyms, capitalised words and letter-digit tokens are taken **only from tokens outside every dictionary-hit span** (so "ML" counts once, as "machine learning", and "REST" inside "REST APIs" is not a second fact). Compare after mapping each through the alias table (so "Postgres" ≡ "PostgreSQL"): `facts(out) − facts(src)` non-empty → `FACT_ADDED` (attested terms are **not** exempt in bullets: an attested skill goes only into the skills list and summary); `facts(src) − facts(out)` non-empty → `FACT_DROPPED`.
 - **Length:** `0.6 × len(src) ≤ len(out) ≤ 1.4 × len(src)` → else `LENGTH`.
 
 In M21 the only rewriter is the deterministic swap; its output is validated this way (it passes by construction; this guards bugs). The `keywords_used` rule of the first draft is gone (§7.2); M22 adds the §7.4 checks for model output.
@@ -453,7 +455,7 @@ paths:
 
 ## 15. Golden cases (oracles for the tester; synthetic, no real person)
 
-Fixtures (tester writes them from this section): `tests/fixtures/tailor/aliases_golden.yaml`, three masters as JSON (`master_a.json` …), three JD texts, and the expected outputs below. Golden tests use these fixtures, **not** `config/aliases.yaml`, and mock the backend (deterministic mode needs none).
+Fixtures (tester, from this section): `tests/fixtures/tailor/aliases_golden.yaml` and `tests/fixtures/tailor/case_{a,b,c}/` each with `master.json` (the master), `resume.txt` (its source text, for the leaf check), `jd.txt` and `expected.json` (the oracles below). Golden tests use these fixtures, **not** `config/aliases.yaml`, and mock the backend (deterministic mode needs none).
 
 `aliases_golden.yaml`:
 ```yaml
@@ -510,7 +512,7 @@ Expected:
 - Coverage before 4/14 = 0.2857 (29%); after 9/14 = 0.6429 (64%); `title_match` true.
 - After (deterministic): bullet 1 "Built REST APIs in Python and PostgreSQL for shipment tracking."; bullet 2 "Deployed services on Kubernetes with GitHub Actions; cut p95 latency 35%."; bullet 3 "Trained a machine learning model to predict delivery delays (82% accuracy)." (article fix). Bullet order unchanged (scores 6, 2, 1; §6.3). Skills [Python, PostgreSQL, Kubernetes, machine learning, GitHub Actions, Git].
 - Absent everywhere in the output text: "Go", "Kafka", "CI/CD".
-- Invariants: e1/e2 protected fields byte-equal; numbers per bullet {95, 35%} and {82%} unchanged.
+- Invariants: e1/e2 protected fields byte-equal; numbers per bullet (§8.1, D-69 standalone rule) {} / {35%} / {82%} unchanged ("p95" is a fact token, not a number; "k8s" is a dictionary hit).
 
 ### Case B — data analyst (no tool swapping)
 
