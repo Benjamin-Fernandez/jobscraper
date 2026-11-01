@@ -237,6 +237,10 @@ class Store:
             self.conn.execute(
                 "ALTER TABLE jobs ADD COLUMN missed_runs INTEGER NOT NULL DEFAULT 0")
 
+    def ping(self) -> None:
+        """Raise if the database cannot be read (GET /api/healthz, C-6)."""
+        self.conn.execute("SELECT COUNT(*) FROM meta").fetchone()
+
     def close(self) -> None:
         self.conn.close()
 

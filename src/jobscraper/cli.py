@@ -16,6 +16,8 @@
 from __future__ import annotations
 
 import argparse
+import logging
+import os
 import signal
 import sys
 from pathlib import Path
@@ -29,6 +31,41 @@ from .store import Store as StoreV2
 
 BAR = "-" * 66
 EXIT_CANCELLED = 143        # 128 + SIGTERM: the job was cancelled (C-4)
+
+LOG_FORMAT = "%(asctime)s %(levelname)s %(name)s: %(message)s"
+
+
+class _Handler(logging.StreamHandler):
+    """The package's own stderr handler: its type says it is already there."""
+
+
+def configure_logging() -> None:
+    """Send log records to stderr, once (C-6).
+
+    Every command goes through `main`, `web` included, so this is the one
+    place logging is set up. The level comes from JOBSCRAPER_LOG_LEVEL
+    (default INFO). Calling it again changes nothing but the level: a second
+    handler would print every line twice. A web-started job's child process
+    inherits the environment, and its stderr is the job log, so that log gets
+    the same records.
+    """
+    root = logging.getLogger()
+    name = os.environ.get("JOBSCRAPER_LOG_LEVEL", "INFO").strip().upper()
+    level = logging.getLevelNamesMapping().get(name)
+    root.setLevel(level if level is not None else logging.INFO)
+    if not any(isinstance(h, _Handler) for h in root.handlers):
+        handler = _Handler(sys.stderr)
+        handler.setFormatter(logging.Formatter(LOG_FORMAT))
+        root.addHandler(handler)
+    # httpx logs every request at INFO: a run's hundreds of fetches and model
+    # calls would bury what matters. Kept unless DEBUG is asked for.
+    quiet = logging.DEBUG if root.level <= logging.DEBUG else logging.WARNING
+    for chatty in ("httpx", "httpcore"):
+        logging.getLogger(chatty).setLevel(quiet)
+    if level is None:
+        # A typo must not hide itself: say what was used instead.
+        logging.getLogger(__name__).warning(
+            "JOBSCRAPER_LOG_LEVEL=%r is not a level; using INFO", name)
 
 
 def _boot_v2(args):
@@ -683,6 +720,7 @@ def _install_cancel_handler() -> None:
 
 def main(argv=None) -> int:
     args = build_parser().parse_args(argv)
+    configure_logging()
     if getattr(args, "fn", None) is not cmd_web:    # uvicorn handles the server's own signals
         _install_cancel_handler()
     try:
