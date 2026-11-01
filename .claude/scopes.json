@@ -2,27 +2,86 @@
   "_comment": "Write scopes per role. Keep in sync with instructions/04_team.md section 2. Patterns: 'dir/' = everything under dir; an exact path; or a glob.",
   "roles": {
     "researcher": {
-      "allow": ["docs/research/", "config/questions.yaml", "config/aliases.yaml", "comms/outbox/researcher.md"]
+      "allow": [
+        "docs/research/",
+        "config/questions.yaml",
+        "config/aliases.yaml",
+        "comms/outbox/researcher.md"
+      ]
     },
     "architect": {
-      "allow": ["docs/architecture/", "src/jobscraper/apply/contracts.py", "src/jobscraper/tailor/contracts.py", "comms/outbox/architect.md"]
+      "allow": [
+        "docs/architecture/",
+        "src/jobscraper/apply/contracts.py",
+        "src/jobscraper/tailor/contracts.py",
+        "comms/outbox/architect.md"
+      ]
     },
     "planner": {
-      "allow": ["docs/prd.md", "docs/planning/", "docs/user/", "docs/OVERVIEW.md", "docs/DESIGN.md", "README.md", "comms/outbox/planner.md"],
-      "deny": ["docs/planning/session_log.md"]
+      "allow": [
+        "docs/prd.md",
+        "docs/planning/",
+        "docs/user/",
+        "docs/OVERVIEW.md",
+        "docs/DESIGN.md",
+        "README.md",
+        "comms/outbox/planner.md"
+      ],
+      "deny": [
+        "docs/planning/session_log.md"
+      ]
     },
     "software-engineer": {
-      "allow": ["src/", "web/src/", "web/index.html", "web/package.json", "web/package-lock.json", "web/vite.config.js", "requirements.txt", "run.ps1", "config/config.yaml", "config/rules.yaml", ".env.example", "comms/outbox/software-engineer.md"],
-      "deny": ["src/jobscraper/apply/contracts.py", "src/jobscraper/tailor/contracts.py", "src/jobscraper/web/static/"]
+      "allow": [
+        "src/",
+        "web/src/",
+        "web/index.html",
+        "web/package.json",
+        "web/package-lock.json",
+        "web/vite.config.js",
+        "requirements.txt",
+        "run.ps1",
+        "config/config.yaml",
+        "config/rules.yaml",
+        ".env.example",
+        "config/applicant.example.yaml",
+        "comms/outbox/software-engineer.md"
+      ],
+      "deny": [
+        "src/jobscraper/apply/contracts.py",
+        "src/jobscraper/tailor/contracts.py",
+        "src/jobscraper/web/static/"
+      ]
     },
     "tester": {
-      "allow": ["tests/", "web/tests/", "comms/outbox/tester.md"]
+      "allow": [
+        "tests/",
+        "web/tests/",
+        "comms/outbox/tester.md"
+      ]
     },
     "reviewer": {
-      "allow": ["docs/reviews/", "comms/outbox/reviewer.md"]
+      "allow": [
+        "docs/reviews/",
+        "comms/outbox/reviewer.md"
+      ]
     }
   },
-  "protected": [".env", ".env.local", "data/", "config/watchlist.yaml", "config/profile.overrides.yaml"],
+  "protected": [
+    ".env",
+    ".env.local",
+    "data/",
+    "config/watchlist.yaml",
+    "config/profile.overrides.yaml"
+  ],
   "enforce_main_session": false,
-  "main_session_allow": ["CLAUDE.md", "instructions/", "docs/planning/session_log.md", "comms/", ".claude/", ".gitignore", ".worktreeinclude"]
+  "main_session_allow": [
+    "CLAUDE.md",
+    "instructions/",
+    "docs/planning/session_log.md",
+    "comms/",
+    ".claude/",
+    ".gitignore",
+    ".worktreeinclude"
+  ]
 }
