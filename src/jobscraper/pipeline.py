@@ -126,7 +126,7 @@ def run(cfg: Config, store: Store, *, dry_run: bool = False,
     resolve = resolver or discovery.resolve
 
     if not dry_run:
-        reaped = store.reap_stale_runs(float(rc.get("per_run_timeout", 3600)), now=now)
+        reaped = store.reap_stale_runs(cfg.per_run_timeout, now=now)
         if reaped:
             say(f"marked {reaped} crashed run(s) failed")
     # watchlist.yaml plus the companies found from the user's list (M16).
@@ -468,21 +468,46 @@ def _funnel(cfg: Config, store: Store, rep: RunReport, client: HttpClient,
         def lookup(job_id: str, h: str):
             row = store.get_decision(job_id, pv, h)
             return row if row and row["model"] == model else None
+        # The judging budget runs from here: when it is spent, decide stops
+        # taking new batches and the run goes on to write the shortlist and
+        # stamp its companies as usual. What was not judged waits (it has no
+        # decision, so the next run picks it up). Unset in config = no limit.
+        limit = cfg.decide_deadline_s
         _, ds = decide.decide(
             postings, summary=str(profile.get("summary") or ""), backend=backend,
             model=model, lookup=lookup, save=save,
-            batch_size=int(budget.get("decide_batch", 20)),
+            batch_size=cfg.decide_batch,
             ceiling_years=int(ruleset.ceiling_years or 3),
             max_consecutive_failures=int(budget.get("max_consecutive_failures", 3)),
-            interests=(cfg.raw.get("judge") or {}).get("interests"))
+            interests=(cfg.raw.get("judge") or {}).get("interests"),
+            allowed_locations=_allowed_locations(ruleset),
+            failed_before=lambda j, h: store.decision_failures(j, pv, h, model),
+            record_failure=lambda j, h: store.add_decision_failure(j, pv, h, model),
+            deadline=time.monotonic() + limit if limit else None)
         rep.stats.update(judged=ds.judged, decisions_cached=ds.cached,
                          undecided=ds.undecided, accepted_total=ds.accepted,
                          rejected_by_postcondition=ds.rejected_by_postcondition,
                          model_calls=ds.model_calls, input_tokens=ds.input_tokens,
-                         output_tokens=ds.output_tokens)
+                         output_tokens=ds.output_tokens,
+                         prompt_eval_s=ds.prompt_eval_s, eval_s=ds.eval_s,
+                         decide_splits=ds.splits, decide_parse_failures=ds.parse_failures,
+                         undecidable=ds.undecidable + ds.newly_parked,
+                         decide_truncated=ds.truncated, decide_outage=ds.outage,
+                         decide_deadline_hit=ds.deadline_hit,
+                         skipped_by_deadline=ds.skipped_by_deadline)
         say(f"  decide: {ds.judged} judged in {ds.model_calls} call(s), "
             f"{ds.cached} cached, {ds.undecided} undecided; "
             f"{ds.input_tokens:,} tokens in")
+        if ds.outage:
+            say("  !! decide: stopped - the model kept returning nothing readable; "
+                "the rest wait for the next run")
+            log.warning("decide stopped as an outage: %s", (ds.errors or [""])[-1])
+        if ds.deadline_hit:
+            say(f"  decide: the {limit:g}s judging deadline passed; "
+                f"{ds.skipped_by_deadline} posting(s) wait for the next run")
+        if ds.undecidable or ds.newly_parked:
+            say(f"  decide: {ds.undecidable + ds.newly_parked} posting(s) parked as "
+                "undecidable (the model could not answer for them 3 times)")
         for err in ds.errors[:3]:
             say(f"  !! model: {err}")
 
@@ -490,6 +515,18 @@ def _funnel(cfg: Config, store: Store, rep: RunReport, client: HttpClient,
     doc = shortlist.write(store, cfg.shortlist_path, pv, rules_hash=rules_key)
     rep.stats["shortlisted"] = len(doc["jobs"])
     say(f"  shortlist: {len(doc['jobs'])} roles -> {cfg.shortlist_path}")
+
+
+def _allowed_locations(ruleset: prefilter.RuleSet) -> list[str]:
+    """The places the prefilter lets through: `location_explicit`'s allow_tokens.
+
+    The decide guard uses the same list, so the free rule and the check on the
+    model's accept can never disagree on what counts as an allowed place. If
+    the rule is absent or switched off there is nothing to check against."""
+    for rule in ruleset.rules:
+        if rule.id == "location_explicit" and rule.enabled:
+            return [str(t) for t in rule.spec.get("allow_tokens") or []]
+    return []
 
 
 def _hydrate(client: HttpClient, store: Store, job: dict[str, Any]) -> str:

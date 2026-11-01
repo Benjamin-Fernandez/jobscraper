@@ -32,6 +32,9 @@ class Completion:
     text: str
     input_tokens: int = 0
     output_tokens: int = 0
+    prompt_eval_ns: int = 0     # Ollama's own timings, in nanoseconds: reading the
+    eval_ns: int = 0            # prompt, then writing the answer (0 = not reported)
+    done_reason: str = ""       # Ollama's: "stop", or "length" when the output cap cut it
 
 
 class Backend:
@@ -46,7 +49,11 @@ class Backend:
     def describe(self) -> str:
         return self.name
 
-    def complete(self, system: str, user: str, max_tokens: int = 4096) -> Completion:
+    def complete(self, system: str, user: str, max_tokens: int = 4096,
+                 schema: Optional[dict] = None,
+                 timeout: Optional[float] = None) -> Completion:
+        """`schema`, when given, is a JSON schema the answer must follow;
+        `timeout` caps this call's seconds below the transport's own."""
         raise BackendError(self.unavailable_reason or "no model transport configured")
 
 
@@ -64,8 +71,9 @@ class OllamaBackend(Backend):
     (default http://127.0.0.1:11434). In Docker the app talks to an Ollama
     service instead (D-11, R-8).
 
-    Every call asks for no "thinking" (Qwen3 reasons at length by default - slow,
-    and pointless for a yes/no screen or a resume summary) and for JSON output,
+    Every call asks for no "thinking" where the model has one (Qwen3 reasons at
+    length by default - slow, and pointless for a yes/no screen or a resume
+    summary) and for JSON output - or a JSON schema, when the caller has one -
     which Ollama enforces while the model generates, so a malformed answer is
     unlikely rather than merely discouraged. Temperature 0: the same input gets
     the same answer.
@@ -84,8 +92,10 @@ class OllamaBackend(Backend):
         self.url = url.rstrip("/")
         self.model_id = model
         self.num_ctx = int(num_ctx)
-        self._http = client or httpx.Client(timeout=timeout)
+        self.timeout = float(timeout)
+        self._http = client or httpx.Client(timeout=self.timeout)
         self._probed: Optional[bool] = None
+        self._thinks: Optional[bool] = None     # does the model have a thinking mode?
 
     def _probe(self) -> bool:
         """Is Ollama up, and is the model pulled? Asked once, then remembered."""
@@ -117,7 +127,27 @@ class OllamaBackend(Backend):
     def describe(self) -> str:
         return f"ollama ({self.model_id} at {self.url})"
 
-    def complete(self, system: str, user: str, max_tokens: int = 4096) -> Completion:
+    def _has_thinking(self) -> bool:
+        """Does `/api/show` list the `thinking` capability? Asked once.
+
+        Ollama refuses `think: false` (HTTP 400) for a model with no thinking
+        mode, such as the Qwen3 instruct-2507 builds. If Ollama cannot say (an
+        older server, or the call fails) we assume it does, which is the request
+        this app always sent."""
+        if self._thinks is None:
+            try:
+                resp = self._http.post(f"{self.url}/api/show",
+                                       json={"model": self.model_id}, timeout=10.0)
+                resp.raise_for_status()
+                caps = resp.json().get("capabilities")
+                self._thinks = "thinking" in caps if isinstance(caps, list) else True
+            except Exception:
+                self._thinks = True
+        return self._thinks
+
+    def complete(self, system: str, user: str, max_tokens: int = 4096,
+                 schema: Optional[dict] = None,
+                 timeout: Optional[float] = None) -> Completion:
         if not self.available:
             raise BackendError(self.unavailable_reason)
         body = {
@@ -125,13 +155,18 @@ class OllamaBackend(Backend):
             "messages": [{"role": "system", "content": system},
                          {"role": "user", "content": user}],
             "stream": False,
-            "think": False,
-            "format": "json",
+            # A schema makes Ollama constrain every token to it (ids limited to
+            # an enum, say); plain "json" only promises valid JSON.
+            "format": schema if schema else "json",
             "options": {"temperature": 0, "num_ctx": self.num_ctx,
                         "num_predict": max_tokens},
         }
+        if self._has_thinking():
+            body["think"] = False
         try:
-            resp = self._http.post(f"{self.url}/api/chat", json=body)
+            resp = self._http.post(f"{self.url}/api/chat", json=body,
+                                   timeout=min(self.timeout, timeout) if timeout
+                                   else self.timeout)
         except Exception as exc:
             raise BackendError(f"Ollama request failed: {type(exc).__name__}: {exc}")
         if resp.status_code != 200:
@@ -145,7 +180,10 @@ class OllamaBackend(Backend):
             raise BackendError(f"Ollama error: {str(data['error'])[:200]}")
         return Completion(text=str((data.get("message") or {}).get("content") or ""),
                           input_tokens=_i(data.get("prompt_eval_count")),
-                          output_tokens=_i(data.get("eval_count")))
+                          output_tokens=_i(data.get("eval_count")),
+                          prompt_eval_ns=_i(data.get("prompt_eval_duration")),
+                          eval_ns=_i(data.get("eval_duration")),
+                          done_reason=str(data.get("done_reason") or ""))
 
 
 def build(budget: dict[str, Any]) -> Backend:

@@ -164,6 +164,25 @@ class Config:
         return block
 
     @property
+    def decide_batch(self) -> int:
+        """Postings per judge call: `budget.decide_batch`, else 20."""
+        return int(self.budget.get("decide_batch", 20))
+
+    @property
+    def per_run_timeout(self) -> float:
+        """Seconds before a run still marked `running` is taken to have crashed:
+        `run.per_run_timeout`, else 3600."""
+        return float(self.run.get("per_run_timeout", 3600))
+
+    @property
+    def decide_deadline_s(self) -> Optional[float]:
+        """Seconds a run may spend judging before it stops taking new batches,
+        writes the shortlist and ends normally: `budget.decide_deadline_s`;
+        unset or 0 = no deadline."""
+        n = self.budget.get("decide_deadline_s")
+        return float(n) if n else None
+
+    @property
     def scrape(self) -> dict[str, Any]:
         return self.raw.get("scrape") or {}
 

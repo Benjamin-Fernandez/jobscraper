@@ -88,6 +88,19 @@ CREATE TABLE IF NOT EXISTS decisions (
 CREATE INDEX IF NOT EXISTS idx_decisions_profile
     ON decisions(profile_version, decision, decided_at);
 
+-- Times the model's answer for a posting could not be read, alone (AWS-2). At
+-- 3 the posting is "undecidable" and is no longer sent. Keyed like a decision
+-- plus the model, so a changed extract or a different model starts again.
+CREATE TABLE IF NOT EXISTS decision_failures (
+    job_id TEXT NOT NULL,
+    profile_version INTEGER NOT NULL,
+    vital_hash TEXT NOT NULL,
+    model TEXT NOT NULL,
+    failures INTEGER NOT NULL DEFAULT 0,
+    last_failed_at TEXT NOT NULL,
+    PRIMARY KEY (job_id, profile_version, vital_hash, model)
+);
+
 CREATE TABLE IF NOT EXISTS applications (
     job_id TEXT PRIMARY KEY,
     status TEXT NOT NULL,
@@ -673,6 +686,27 @@ class Store:
             (job_id, profile_version, vital_hash, decision, _b(is_singapore),
              yoe_min, reason, model, utcnow()))
         self.conn.commit()
+
+    def decision_failures(self, job_id: str, profile_version: int, vital_hash: str,
+                          model: str) -> int:
+        """How many times this model's answer for this extract was unreadable."""
+        r = self.conn.execute(
+            """SELECT failures FROM decision_failures WHERE job_id = ?
+               AND profile_version = ? AND vital_hash = ? AND model = ?""",
+            (job_id, profile_version, vital_hash, model)).fetchone()
+        return int(r[0]) if r else 0
+
+    def add_decision_failure(self, job_id: str, profile_version: int,
+                             vital_hash: str, model: str) -> int:
+        """Count one more unreadable answer; returns the new total."""
+        self.conn.execute(
+            """INSERT INTO decision_failures (job_id, profile_version, vital_hash,
+               model, failures, last_failed_at) VALUES (?,?,?,?,1,?)
+               ON CONFLICT (job_id, profile_version, vital_hash, model)
+               DO UPDATE SET failures = failures + 1, last_failed_at = excluded.last_failed_at""",
+            (job_id, profile_version, vital_hash, model, utcnow()))
+        self.conn.commit()
+        return self.decision_failures(job_id, profile_version, vital_hash, model)
 
     def accepted_jobs(self, profile_version: int,
                       rules_hash: Optional[str] = None) -> list[dict[str, Any]]:
