@@ -14,6 +14,7 @@ resolved here to the CLI as `--batch-size`.
 from __future__ import annotations
 
 import json
+import re
 from typing import Any, Optional
 
 import yaml
@@ -183,14 +184,27 @@ SCAN_ERRORS = {
 }
 
 
+# Who refused, when the fetch recognised a bot wall (scrape/net.detect_block,
+# C-8): the signature is in the stored error text, "HTTP 403 (cloudflare) for
+# ...". It sharpens the reason; the `kind` the tab groups by is unchanged.
+BLOCK_REASONS = {
+    "cloudflare": "the site blocks automated access (Cloudflare's bot check)",
+    "akamai": "the site blocks automated access (Akamai's bot check)",
+    "captcha": "the site asks for a CAPTCHA, which JobScraper never solves",
+    "rate_limited": "the site is limiting requests (rate limited) - retried on the next scan",
+}
+_SIGNATURE = re.compile(r"\((" + "|".join(BLOCK_REASONS) + r")\)")
+
+
 def _stamp(v: Any) -> str:
     return str(v or "").replace("T", " ")[:16]
 
 
 def company_health_view(store: Any) -> dict[str, Any]:
     """Every watched company and whether it can be scanned (the Companies tab's
-    CSV): `ok` - the last scan worked; `failed` - it did not (with the reason);
-    `not_scanned` - never tried yet. Scannable first, then failed, by name."""
+    CSV): `ok` - the last scan worked (with a reason when it found nothing,
+    H1-1); `failed` - it did not (with the reason); `not_scanned` - never tried
+    yet. Scannable first, then failed, by name."""
     found = {r["company_key"] for r in store.company_list() if r.get("company_key")}
     rows = []
     for r in store.company_health():
@@ -207,8 +221,15 @@ def company_health_view(store: Any) -> dict[str, Any]:
             kind = r.get("last_error_class") or ""
             kind = kind if kind in SCAN_ERRORS else "other"
             reason = SCAN_ERRORS.get(kind, "an unexpected error")
+            sig = _SIGNATURE.search(r.get("last_error") or "")
+            if sig:
+                reason = BLOCK_REASONS[sig.group(1)]
             if paused:
                 reason += "; paused after repeated failures, retried later"
+        elif state == "ok" and r.get("last_status") == "empty":
+            # H1-1: an empty answer closes nothing, so it must not read as fine.
+            reason = ("the last scan found no open roles; its earlier postings stay "
+                      "open until a scan lists roles again")
         rows.append({
             "company": r["name"], "state": state, "reason": reason,
             # For grouping failures in the Companies tab: the error class

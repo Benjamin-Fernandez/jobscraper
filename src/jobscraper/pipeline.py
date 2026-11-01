@@ -23,6 +23,8 @@ See PRD sections 8.2 and 8.3.
 """
 from __future__ import annotations
 
+import functools
+import logging
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
@@ -34,12 +36,30 @@ from .config import CYCLE_DAYS_KEY, Config
 from .models import FetchOutcome, RawJob, WatchedCompany
 from .profile import keywords, resume_ingest, titles
 from .scrape import discovery
-from .scrape.adapters import get_adapter
+from .scrape.adapters import get_adapter, is_capped
 from .scrape.net import FetchError, HttpClient
-from .store import Store
+from .store import Store, utcnow
+
+log = logging.getLogger(__name__)
 
 Fetcher = Callable[[HttpClient, WatchedCompany], FetchOutcome]
 Resolver = Callable[[HttpClient, WatchedCompany], "discovery.Resolution"]
+
+# The pipeline logs this and records it in the coverage row's `error` column
+# (a free-text field regardless of status - no schema change) whenever a
+# fetch returns MAX_JOBS postings, so a board that silently truncated past
+# the cap is visible without failing the run (D-33/P0-D4).
+CAP_NOTE = "board returned the 600-posting cap; Singapore roles past it may be missed"
+
+
+class JobCancelled(BaseException):
+    """The job was asked to stop (the web app's Cancel: CTRL_BREAK on Windows,
+    SIGTERM elsewhere; the CLI's handler raises this).
+
+    A BaseException, like KeyboardInterrupt, on purpose: the engine has `except
+    Exception` blocks (a bad site, a bad model answer must not stop a list), and
+    none of them may swallow a cancel. Every `finally` still runs, so the run
+    row is finished as `failed` with the reason "cancelled" (C-4)."""
 
 
 @dataclass
@@ -60,8 +80,13 @@ class RunReport:
     stats: dict[str, Any] = field(default_factory=dict)
 
 
-def fetch_one(client: HttpClient, company: WatchedCompany) -> FetchOutcome:
-    """Fetch one company's listings. Returns an outcome; never raises."""
+def fetch_one(client: HttpClient, company: WatchedCompany,
+              locations: tuple[str, ...] = ()) -> FetchOutcome:
+    """Fetch one company's listings. Returns an outcome; never raises.
+
+    `locations` (D-33) is forwarded to the adapter unchanged; adapters that
+    cannot facet a large board by location just ignore it.
+    """
     started = time.monotonic()
     try:
         adapter = get_adapter(company.provider)
@@ -69,7 +94,7 @@ def fetch_one(client: HttpClient, company: WatchedCompany) -> FetchOutcome:
             return FetchOutcome(company.id, False, error_class="schema",
                                 error=f"no adapter for provider {company.provider!r}",
                                 duration_s=time.monotonic() - started)
-        jobs = adapter.fetch(client, company)
+        jobs = adapter.fetch(client, company, locations=locations)
         return FetchOutcome(company.id, True, jobs=jobs, provider=company.provider,
                             duration_s=time.monotonic() - started)
     except FetchError as exc:
@@ -107,11 +132,14 @@ def run(cfg: Config, store: Store, *, dry_run: bool = False,
     can run the whole sequence without a network or a model.
     """
     rc = cfg.run
+    # The batch is stamped as of the run's start, not its end, so a 40-minute
+    # run does not push next cycle's due time 40 minutes later (C-7).
+    started = now or utcnow()
     say = print if verbose else (lambda *a, **k: None)
     resolve = resolver or discovery.resolve
 
     if not dry_run:
-        reaped = store.reap_stale_runs(float(rc.get("per_run_timeout", 3600)), now=now)
+        reaped = store.reap_stale_runs(cfg.per_run_timeout, now=now)
         if reaped:
             say(f"marked {reaped} crashed run(s) failed")
     # watchlist.yaml plus the companies found from the user's list (M16).
@@ -151,10 +179,11 @@ def run(cfg: Config, store: Store, *, dry_run: bool = False,
         (f" + {len(probation)} on probation" if probation else "") +
         (" (dry run - nothing will be written)" if dry_run else ""))
     if not dry_run:
-        rep.run_no = store.start_run(at=now)
+        rep.run_no = store.start_run(at=started)
 
     own_client = client is None
     client = client or make_client(cfg)
+    finished = False
     try:
         # ---- resolve (sequential: cheap, and it mutates the DB) ----
         resolved: list[WatchedCompany] = []
@@ -164,8 +193,14 @@ def run(cfg: Config, store: Store, *, dry_run: bool = False,
 
         # ---- fetch (parallel, isolated) ----
         outcomes: dict[int, FetchOutcome] = {}
+        # Bind the allowed locations onto the default fetcher only: a custom
+        # `fetcher` (tests, company_search.py) keeps its own two-arg contract,
+        # and callers may fetch concurrently, so this is a per-call partial,
+        # never state on the shared adapter singletons (D-33).
+        bound_fetcher = (functools.partial(fetcher, locations=tuple(cfg.scrape_locations))
+                         if fetcher is fetch_one else fetcher)
         with ThreadPoolExecutor(max_workers=max(1, int(rc["max_workers"]))) as pool:
-            futures = {pool.submit(fetcher, client, c): c for c in resolved}
+            futures = {pool.submit(bound_fetcher, client, c): c for c in resolved}
             for fut in as_completed(futures):
                 c = futures[fut]
                 try:
@@ -173,6 +208,12 @@ def run(cfg: Config, store: Store, *, dry_run: bool = False,
                 except Exception as exc:     # a fetcher that broke its own contract
                     outcomes[c.id] = FetchOutcome(c.id, False, error_class="transient",
                                                   error=f"worker error: {exc}")
+
+        # Whether the board hit the posting cap is read from the raw answer,
+        # BEFORE de-duplication: a capped board that listed one posting twice
+        # is still capped (H1-1).
+        capped = {c.id for c in resolved
+                  if outcomes[c.id].ok and is_capped(outcomes[c.id].jobs)}
 
         # One posting listed twice (overlapping pages) is one posting.
         for c in resolved:
@@ -218,9 +259,18 @@ def run(cfg: Config, store: Store, *, dry_run: bool = False,
         for c in resolved:
             out = outcomes[c.id]
             if out.ok:
+                # Invariant: cap_note is only ever written here, on the ok
+                # branch. It never reaches record_failure or quarantine below
+                # - a capped fetch is a successful one, just possibly
+                # incomplete, not a failure to count against the company.
+                cap_note = None
+                if c.id in capped:
+                    cap_note = CAP_NOTE
+                    say(f"  !! {c.name}: {CAP_NOTE}")
+                    log.warning("%s: %s", c.name, CAP_NOTE)
                 store.record_coverage(rep.run_no, c.id, "ok" if out.jobs else "empty",
                                       len(out.jobs), new_by_company[c.id], 0,
-                                      None, None, None)
+                                      None, None, cap_note)
             else:
                 store.record_coverage(rep.run_no, c.id, "failed", 0, 0, 0,
                                       out.http_status, out.error_class, out.error)
@@ -253,7 +303,8 @@ def run(cfg: Config, store: Store, *, dry_run: bool = False,
             if c.id in probation_ids:
                 say(f"  ** {c.name} recovered from quarantine")
             # close_missing runs ONLY after a successful fetch: a timeout must
-            # never mass-close a company's postings.
+            # never mass-close a company's postings. A posting closes only when
+            # 2 such fetches in a row leave it out (store.CLOSE_AFTER_MISSES).
             known = store.known_job_ids(c.id)
             seen: set[str] = set()
             for raw in out.jobs:
@@ -261,7 +312,19 @@ def run(cfg: Config, store: Store, *, dry_run: bool = False,
                 seen.add(jid)
                 store.upsert_job(jid, c.id, raw, rep.run_no, jid not in known)
             store.commit()
-            store.close_missing(c.id, seen)
+            # Nor after an empty or capped one (H1-1): an empty 200 is what a
+            # soft block looks like, and a capped list stops before the rest.
+            # Neither says a posting was taken down, so neither counts a miss.
+            # Logged, not only said: a quiet run drops `say`, and a board that
+            # stays empty is otherwise indistinguishable from a healthy one.
+            if not out.jobs:
+                say(f"  {c.name}: an empty answer - no posting counted as missing")
+                log.warning("%s: an empty answer - no posting counted as missing", c.name)
+            elif c.id in capped:
+                say(f"  {c.name}: a capped answer - no posting counted as missing")
+                log.warning("%s: a capped answer - no posting counted as missing", c.name)
+            else:
+                store.close_missing(c.id, seen)
 
         rep.relinked = store.relink_orphan_applications()
         if rep.relinked:
@@ -279,14 +342,46 @@ def run(cfg: Config, store: Store, *, dry_run: bool = False,
 
         # ---- last: stamp the attempt and close the run ----
         if rep.status == "ok":
-            scheduler.mark_attempted(store, resolved, now=now)
+            scheduler.mark_attempted(store, resolved, now=started)
+        if rep.message:
+            # Why the run ended as it did (aborted_unhealthy, no profile), for
+            # the Runs tab (C-4, audit G27).
+            rep.stats["message"] = rep.message
         store.finish_run(rep.run_no, rep.status, rep.stats)
+        finished = True
         if purged and store.compact():
             say("  database compacted")
         return rep
+    except BaseException as exc:
+        # Cancelled or crashed: say so now, rather than leave the run
+        # `running` until per_run_timeout reaps it (C-4).
+        if rep.run_no and not finished:
+            _fail_run(store, rep, exc)
+        raise
     finally:
         if own_client:
             client.close()
+
+
+def _fail_run(store: Store, rep: RunReport, exc: BaseException) -> None:
+    """Mark the run `failed` with `stats.reason`: "cancelled", or the error.
+
+    Uncommitted writes (a company's half-written postings) are rolled back
+    first, so a crash is never worse than a no-op; everything committed stays."""
+    reason = ("cancelled" if isinstance(exc, (JobCancelled, KeyboardInterrupt))
+              else f"{type(exc).__name__}: {exc}")[:300]
+    stats = dict(rep.stats, reason=reason)
+    if rep.message:
+        stats.setdefault("message", rep.message)
+    try:
+        store.rollback()
+        store.finish_run(rep.run_no, "failed", stats)
+    except Exception:                       # noqa: BLE001 - the original error matters
+        log.exception("could not mark run %s failed", rep.run_no)
+    if reason == "cancelled":
+        log.warning("run %s cancelled", rep.run_no)
+    else:
+        log.error("run %s failed: %s", rep.run_no, reason)
 
 
 def description_days(cfg: Config) -> float:
@@ -419,21 +514,46 @@ def _funnel(cfg: Config, store: Store, rep: RunReport, client: HttpClient,
         def lookup(job_id: str, h: str):
             row = store.get_decision(job_id, pv, h)
             return row if row and row["model"] == model else None
+        # The judging budget runs from here: when it is spent, decide stops
+        # taking new batches and the run goes on to write the shortlist and
+        # stamp its companies as usual. What was not judged waits (it has no
+        # decision, so the next run picks it up). Unset in config = no limit.
+        limit = cfg.decide_deadline_s
         _, ds = decide.decide(
             postings, summary=str(profile.get("summary") or ""), backend=backend,
             model=model, lookup=lookup, save=save,
-            batch_size=int(budget.get("decide_batch", 20)),
+            batch_size=cfg.decide_batch,
             ceiling_years=int(ruleset.ceiling_years or 3),
             max_consecutive_failures=int(budget.get("max_consecutive_failures", 3)),
-            interests=(cfg.raw.get("judge") or {}).get("interests"))
+            interests=(cfg.raw.get("judge") or {}).get("interests"),
+            allowed_locations=_allowed_locations(ruleset),
+            failed_before=lambda j, h: store.decision_failures(j, pv, h, model),
+            record_failure=lambda j, h: store.add_decision_failure(j, pv, h, model),
+            deadline=time.monotonic() + limit if limit else None)
         rep.stats.update(judged=ds.judged, decisions_cached=ds.cached,
                          undecided=ds.undecided, accepted_total=ds.accepted,
                          rejected_by_postcondition=ds.rejected_by_postcondition,
                          model_calls=ds.model_calls, input_tokens=ds.input_tokens,
-                         output_tokens=ds.output_tokens)
+                         output_tokens=ds.output_tokens,
+                         prompt_eval_s=ds.prompt_eval_s, eval_s=ds.eval_s,
+                         decide_splits=ds.splits, decide_parse_failures=ds.parse_failures,
+                         undecidable=ds.undecidable + ds.newly_parked,
+                         decide_truncated=ds.truncated, decide_outage=ds.outage,
+                         decide_deadline_hit=ds.deadline_hit,
+                         skipped_by_deadline=ds.skipped_by_deadline)
         say(f"  decide: {ds.judged} judged in {ds.model_calls} call(s), "
             f"{ds.cached} cached, {ds.undecided} undecided; "
             f"{ds.input_tokens:,} tokens in")
+        if ds.outage:
+            say("  !! decide: stopped - the model kept returning nothing readable; "
+                "the rest wait for the next run")
+            log.warning("decide stopped as an outage: %s", (ds.errors or [""])[-1])
+        if ds.deadline_hit:
+            say(f"  decide: the {limit:g}s judging deadline passed; "
+                f"{ds.skipped_by_deadline} posting(s) wait for the next run")
+        if ds.undecidable or ds.newly_parked:
+            say(f"  decide: {ds.undecidable + ds.newly_parked} posting(s) parked as "
+                "undecidable (the model could not answer for them 3 times)")
         for err in ds.errors[:3]:
             say(f"  !! model: {err}")
 
@@ -441,6 +561,18 @@ def _funnel(cfg: Config, store: Store, rep: RunReport, client: HttpClient,
     doc = shortlist.write(store, cfg.shortlist_path, pv, rules_hash=rules_key)
     rep.stats["shortlisted"] = len(doc["jobs"])
     say(f"  shortlist: {len(doc['jobs'])} roles -> {cfg.shortlist_path}")
+
+
+def _allowed_locations(ruleset: prefilter.RuleSet) -> list[str]:
+    """The places the prefilter lets through: `location_explicit`'s allow_tokens.
+
+    The decide guard uses the same list, so the free rule and the check on the
+    model's accept can never disagree on what counts as an allowed place. If
+    the rule is absent or switched off there is nothing to check against."""
+    for rule in ruleset.rules:
+        if rule.id == "location_explicit" and rule.enabled:
+            return [str(t) for t in rule.spec.get("allow_tokens") or []]
+    return []
 
 
 def _hydrate(client: HttpClient, store: Store, job: dict[str, Any]) -> str:

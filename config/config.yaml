@@ -57,6 +57,12 @@ run:
   respect_robots: true
   user_agent: "JobScraper/2.0 (personal job-search tool)"
 
+scrape:
+  # Places large boards are narrowed to (D-33). A Workday board with more than
+  # the 600-posting cap is re-queried with its own location facet for these;
+  # SmartRecruiters gets `&country=sg`. Small boards cost no extra request.
+  locations: [Singapore]
+
 budget:
   enable_llm: true
   # How JobScraper reaches a model - for judging postings AND for parsing the

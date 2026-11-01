@@ -16,8 +16,10 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import time
+from collections import deque
 from dataclasses import dataclass, field
-from typing import Any, Callable, Optional
+from typing import Any, Callable, Optional, Sequence
 
 from .backends import Backend, BackendError
 
@@ -307,6 +309,7 @@ def _section_body(lines: list[tuple[str, bool]], strong: re.Pattern,
 # ones, and they are closed by construction rather than by prompt wording.
 
 REJECT_LOCATION = "location not confirmed Singapore"
+REJECT_LOCATION_EVIDENCE = "the extract's location line names no allowed location"
 REJECT_YEARS = "requires more than {n} years"
 
 SYSTEM_PROMPT = """You screen job postings for one candidate: a new graduate \
@@ -379,44 +382,145 @@ class DecideStats:
     model_calls: int = 0
     input_tokens: int = 0
     output_tokens: int = 0
+    prompt_eval_s: float = 0.0      # Ollama's own time reading prompts / writing answers
+    eval_s: float = 0.0
+    splits: int = 0                 # unparseable batches cut in half and retried
+    parse_failures: int = 0         # postings that failed alone, this run
+    newly_parked: int = 0           # ...of which reached the retry limit now
+    undecidable: int = 0            # parked earlier: not sent to the model at all
+    deadline_hit: bool = False
+    skipped_by_deadline: int = 0    # left for the next run when the deadline passed
+    truncated: int = 0              # calls cut off by the output cap (not blamed on postings)
+    outage: bool = False            # stopped: calls kept coming back unreadable
     errors: list[str] = field(default_factory=list)
 
 
 Lookup = Callable[[str, str], Optional[dict]]      # (job_id, vital_hash) -> row
 Save = Callable[[Decision], None]
+FailedBefore = Callable[[str, str], int]           # (job_id, vital_hash) -> failures
+RecordFailure = Callable[[str, str], int]          # -> the posting's failures so far
+
+MAX_PARSE_FAILURES = 3          # across runs; then the posting is `undecidable`
+REASON_CHARS = 120              # schema maxLength of `reason` (~40 tokens at most)
+TOKENS_PER_POSTING = 130        # output cap per posting: an answer object is ~50-90
+TOKENS_OVERHEAD = 64            # tokens, with the longest allowed reason
+MAX_EMPTY_CALLS = 3             # consecutive calls with nothing readable = an outage
 
 
 def vital_hash(vital_text: str) -> str:
     return hashlib.sha256((vital_text or "").encode("utf-8")).hexdigest()[:32]
 
 
+FIELD_ONLY_EVIDENCE = ("central region",)
+_LOCATION_LINE = re.compile(r"^LOCATION: ?(.*?)(?=\nEXPERIENCE: |\Z)", re.S)
+
+
+def location_names(vital_text: str, allowed: Sequence[str]) -> bool:
+    """Does the extract's LOCATION line name one of `allowed`, as a whole word?
+
+    The line is the location field plus the description's own place sentence
+    (`vital_extract`), so this is the evidence the model had. Other lines are
+    not looked at: "Singapore clients" under EXPERIENCE says nothing about
+    where the job is.
+
+    Labels that only mean Singapore when the location FIELD says them (UOB's
+    Workday: "Central Region (City Area)") count there, not in the body."""
+    m = _LOCATION_LINE.search(vital_text or "")
+    if not m or not allowed:
+        return False
+    line = m.group(1)
+    if _word_match(allowed, line):
+        return True
+    return _word_match(FIELD_ONLY_EVIDENCE, line.split(" | ", 1)[0])
+
+
+def _word_match(words: Sequence[str], text: str) -> bool:
+    words = sorted({w.strip().lower() for w in words if w and w.strip()},
+                   key=len, reverse=True)
+    if not words:
+        return False
+    pattern = r"\b(?:" + "|".join(re.escape(w) for w in words) + r")\b"
+    return re.search(pattern, text, re.I) is not None
+
+
 def guard(decision: str, is_singapore: Optional[bool], yoe_min: Optional[int],
-          reason: str, ceiling_years: int) -> tuple[str, str, bool]:
+          reason: str, ceiling_years: int, *, vital_text: Optional[str] = None,
+          allowed: Sequence[str] = ()) -> tuple[str, str, bool]:
     """The 8.3[5] post-conditions. Returns (decision, reason, downgraded).
 
     Never trusted to the model: an accept survives only if Singapore is
     affirmed exactly (`True`, not null) and the stated minimum is within the
     ceiling. A reject is never upgraded.
+
+    With `vital_text` and `allowed` (a small model says "Singapore" too
+    easily), the extract's LOCATION line must also name an allowed location.
+    Without them the check is off, as before.
     """
     if decision != "accept":
         return "reject", reason, False
     if is_singapore is not True:
         return "reject", REJECT_LOCATION, True
+    if vital_text is not None and allowed and not location_names(vital_text, allowed):
+        return "reject", REJECT_LOCATION_EVIDENCE, True
     if yoe_min is not None and yoe_min > ceiling_years:
         return "reject", REJECT_YEARS.format(n=ceiling_years), True
     return "accept", reason, False
 
 
+def short_id(n: int) -> str:
+    """The id the model sees for the n-th posting of a call (1-based)."""
+    return f"p{n}"
+
+
+def decision_schema(n: int) -> dict[str, Any]:
+    """The JSON schema for one call of `n` postings, for Ollama's `format`.
+
+    The ids are an enum of p1..pN, so the model cannot invent or miscopy one,
+    and `maxItems` bounds how long it can run on."""
+    ids = [short_id(i) for i in range(1, n + 1)]
+    item = {"type": "object", "additionalProperties": False,
+            "required": ["id", "fit", "is_singapore", "yoe_min", "reason"],
+            "properties": {"id": {"type": "string", "enum": ids},
+                           "fit": {"type": "boolean"},
+                           "is_singapore": {"type": ["boolean", "null"]},
+                           "yoe_min": {"type": ["integer", "null"]},
+                           "reason": {"type": "string", "maxLength": REASON_CHARS}}}
+    return {"type": "object", "required": ["decisions"], "additionalProperties": False,
+            "properties": {"decisions": {"type": "array", "items": item,
+                                         "minItems": n, "maxItems": n}}}
+
+
 def decide(postings: list[Posting], *, summary: str, backend: Backend, model: str,
            lookup: Lookup, save: Save, batch_size: int = 20,
            ceiling_years: int = 3, max_consecutive_failures: int = 3,
-           interests=None) -> tuple[list[Decision], DecideStats]:
+           interests=None, allowed_locations: Sequence[str] = (),
+           failed_before: Optional[FailedBefore] = None,
+           record_failure: Optional[RecordFailure] = None,
+           max_parse_failures: int = MAX_PARSE_FAILURES,
+           deadline: Optional[float] = None,
+           clock: Callable[[], float] = time.monotonic) -> tuple[list[Decision], DecideStats]:
     """Decide every posting, cheapest path first: cache, then batched calls.
+
+    Inside a call the postings are p1..pN (a small model miscopies 32-hex ids);
+    answers are mapped back here, and an id outside the call is ignored.
 
     A posting the model skips, or that a failed call leaves behind, is simply
     not decided - nothing is stored, so the next run tries it again. After
     `max_consecutive_failures` transport errors in a row the stage stands down
     for this run rather than burning time on a dead backend.
+
+    A call whose answer does not parse is retried on its unanswered postings:
+    cut in half when nothing came back, down to one. A posting that still fails
+    alone has one failure recorded (`record_failure`); at `max_parse_failures`
+    across runs it is undecidable and no longer sent (`failed_before`), so one
+    poisonous description cannot cost a call on every run. Both hooks are
+    optional, and a changed extract or model starts the count again. Failures
+    are recorded only if the model answered for something this run (or cached
+    answers exist), and `MAX_EMPTY_CALLS` unreadable calls in a row end the
+    stage as an outage with everything left pending.
+
+    `deadline` is a `clock()` reading: once it has passed no new call is made,
+    and what is left stays undecided for the next run.
     """
     stats = DecideStats()
     out: list[Decision] = []
@@ -424,71 +528,138 @@ def decide(postings: list[Posting], *, summary: str, backend: Backend, model: st
     for p in postings:
         h = vital_hash(p.vital_text)
         row = lookup(p.job_id, h)
+        if row and row["reason"] == REJECT_LOCATION_EVIDENCE and \
+                allowed_locations and location_names(p.vital_text, allowed_locations):
+            row = None      # rejected for want of evidence the list now supplies
         if row:
             out.append(Decision(p.job_id, row["decision"], _tri(row["is_singapore"]),
                                 row["yoe_min"], row["reason"] or "", row["model"] or "",
                                 h, cached=True))
             stats.cached += 1
+        elif failed_before and failed_before(p.job_id, h) >= max_parse_failures:
+            stats.undecidable += 1
         else:
             todo.append((p, h))
 
     size = max(batch_size, 1)
-    failures = 0
-    for i in range(0, len(todo), size):
-        chunk = todo[i:i + size]
+    system = system_prompt(ceiling_years, interests)
+    work = deque(todo[i:i + size] for i in range(0, len(todo), size))
+    failures = 0                # consecutive transport errors / truncated calls
+    empty_calls = 0             # consecutive calls from which nothing was readable
+    suspects: list[tuple[Posting, str]] = []   # failed alone; blamed at the end
+    while work:
+        chunk = work.popleft()
         if failures >= max_consecutive_failures:
             stats.undecided += len(chunk)
             continue
+        extra: dict[str, Any] = {}
+        if deadline is not None:
+            remaining = deadline - clock()
+            if remaining <= 0:
+                stats.deadline_hit = True
+                stats.skipped_by_deadline += len(chunk)
+                stats.undecided += len(chunk)
+                continue
+            extra["timeout"] = max(remaining, 1.0)   # a call may not outlive the deadline
+        ids = [short_id(n) for n in range(1, len(chunk) + 1)]
         try:
-            comp = backend.complete(system_prompt(ceiling_years, interests),
-                                    _user_prompt(summary, [p for p, _ in chunk]))
+            comp = backend.complete(
+                system, _user_prompt(summary, [p for p, _ in chunk], ids),
+                max_tokens=TOKENS_PER_POSTING * len(chunk) + TOKENS_OVERHEAD,
+                schema=decision_schema(len(chunk)), **extra)
         except BackendError as exc:
             failures += 1
             stats.undecided += len(chunk)
             stats.errors.append(str(exc)[:200])
             continue
+        if comp.done_reason == "length":
+            # Cut off by the output cap: the backend's limit, not these
+            # postings' fault. Nothing is split, blamed or kept.
+            failures += 1
+            stats.truncated += 1
+            stats.undecided += len(chunk)
+            stats.errors.append("the answer hit the output cap (done_reason length)")
+            continue
         failures = 0
         stats.model_calls += 1
         stats.input_tokens += comp.input_tokens
         stats.output_tokens += comp.output_tokens
-        answers = parse_decisions(comp.text)
-        for p, h in chunk:
-            raw = answers.get(p.job_id)
+        stats.prompt_eval_s = round(stats.prompt_eval_s + comp.prompt_eval_ns / 1e9, 3)
+        stats.eval_s = round(stats.eval_s + comp.eval_ns / 1e9, 3)
+        answers = {k.lower(): v for k, v in parse_decisions(comp.text).items()}
+        missed: list[tuple[Posting, str]] = []
+        for sid, (p, h) in zip(ids, chunk):
+            raw = answers.get(sid)
             if raw is None:
-                stats.undecided += 1
+                missed.append((p, h))
                 continue
-            final, reason, downgraded = guard(raw["decision"], raw["is_singapore"],
-                                              raw["yoe_min"], raw["reason"],
-                                              ceiling_years)
+            final, reason, downgraded = guard(
+                raw["decision"], raw["is_singapore"], raw["yoe_min"], raw["reason"],
+                ceiling_years, vital_text=p.vital_text, allowed=allowed_locations)
             d = Decision(p.job_id, final, raw["is_singapore"], raw["yoe_min"],
                          reason, model, h)
             save(d)
             out.append(d)
             stats.judged += 1
             stats.rejected_by_postcondition += int(downgraded)
+        if not missed:
+            empty_calls = 0
+            continue
+        empty_calls = empty_calls + 1 if len(missed) == len(chunk) else 0
+        if len(chunk) == 1:                 # one posting, failed alone
+            suspects.append(missed[0])
+            stats.undecided += 1
+            stats.parse_failures += 1
+        if empty_calls >= MAX_EMPTY_CALLS:
+            # Several calls in a row said nothing readable: that is the model
+            # or the format, not the postings. Stop, keep everything pending.
+            stats.outage = True
+            stats.undecided += sum(len(c) for c in work) + (
+                len(missed) if len(chunk) > 1 else 0)
+            stats.errors.append(f"{empty_calls} calls in a row returned nothing readable")
+            work.clear()
+        elif len(chunk) == 1:
+            continue
+        elif len(missed) == len(chunk):
+            half = len(chunk) // 2          # nothing parsed: halve and retry
+            stats.splits += 1
+            work.extendleft(reversed([missed[:half], missed[half:]]))
+        else:
+            work.appendleft(missed)         # some parsed: ask again for the rest
+
+    # Blame a posting only when the model is plainly working - it answered for
+    # others this run, or earlier runs' answers are cached - so a bad model or
+    # schema cannot park the whole backlog.
+    if suspects and record_failure and (stats.judged or stats.cached):
+        for p, h in suspects:
+            if (record_failure(p.job_id, h) or 0) >= max_parse_failures:
+                stats.newly_parked += 1
     stats.accepted = sum(1 for d in out if d.decision == "accept")
     return out, stats
 
 
-def _user_prompt(summary: str, postings: list[Posting]) -> str:
+def _user_prompt(summary: str, postings: list[Posting],
+                 ids: Optional[list[str]] = None) -> str:
     """Candidate, postings, then the output contract again, last.
 
     Measured in run #1: given the format only in the system prompt, the cheap
     model answered with a Markdown "screening report" and nothing parsed. It
     follows the most recent instruction, so the contract - with the exact ids it
-    must answer for - is restated after the data.
+    must answer for - is restated after the data. `ids` are what the model is
+    shown for each posting (default: the posting's own id).
     """
+    ids = ids or [p.job_id for p in postings]
     parts = [f"CANDIDATE: {summary.strip()}", ""]
-    for p in postings:
-        parts.append(f'<posting id="{p.job_id}">\nTITLE: {p.title}\n'
+    for pid, p in zip(ids, postings):
+        parts.append(f'<posting id="{pid}">\nTITLE: {p.title}\n'
                      f"{p.vital_text}\n</posting>")
-    ids = ", ".join(f'"{p.job_id}"' for p in postings)
+    listed = ", ".join(f'"{i}"' for i in ids)
     parts += ["", "Reply with ONLY this JSON object - no heading, no table, no "
               "prose before or after it:",
               '{"decisions": [{"id": ..., "fit": true | false, '
               '"is_singapore": true | false | null, "yoe_min": <int or null>, '
               '"reason": "<at most 15 words>"}]}',
-              f"with exactly one object for each of these ids: {ids}"]
+              f"with exactly one object for each of these ids: {listed}"]
     return "\n".join(parts)
 
 

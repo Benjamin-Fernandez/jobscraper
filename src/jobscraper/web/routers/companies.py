@@ -17,11 +17,13 @@ from __future__ import annotations
 import csv
 import datetime as _dt
 import io
+import logging
 import zipfile
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import Response
+from starlette.concurrency import run_in_threadpool
 
 from jobscraper import watchlist
 from jobscraper.config import Config
@@ -32,6 +34,8 @@ from jobscraper.web.deps import get_config, open_store
 router = APIRouter(tags=["companies"])
 
 MAX_BYTES = 1024 * 1024
+MAX_DOCX_UNZIPPED = 5 * 1024 * 1024     # a DOCX is a zip: refuse a zip bomb before parsing
+logger = logging.getLogger(__name__)
 TXT_TYPE = "text/plain"
 DOCX_TYPE = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 
@@ -57,7 +61,8 @@ async def put_list(request: Request, cfg: Config = Depends(get_config)) -> dict[
         body.extend(chunk)
         if len(body) > MAX_BYTES:
             raise HTTPException(status_code=413, detail="the list is over 1 MB")
-    text = _text(media, bytes(body))
+    # Parsing a DOCX is CPU work: off the event loop, so other requests go on.
+    text = await run_in_threadpool(_text, media, bytes(body))
     names = parse_company_lines(text)
     if not names:
         raise HTTPException(status_code=422,
@@ -140,13 +145,25 @@ def _text(media: str, body: bytes) -> str:
     if media == DOCX_TYPE:
         if not body.startswith(b"PK\x03\x04"):
             raise HTTPException(status_code=415, detail="that is not a DOCX file")
+        # Under 1 MB packed is no promise about unpacked: add up what the zip
+        # says it holds before python-docx inflates any of it (C-22).
+        try:
+            with zipfile.ZipFile(io.BytesIO(body)) as archive:
+                unzipped = sum(info.file_size for info in archive.infolist())
+        except (zipfile.BadZipFile, OSError, ValueError, RuntimeError):
+            raise HTTPException(status_code=415, detail="that is not a DOCX file") from None
+        if unzipped > MAX_DOCX_UNZIPPED:
+            raise HTTPException(status_code=413, detail="that DOCX is too large when unpacked")
         try:
             import docx                         # python-docx, also used for resumes
             doc = docx.Document(io.BytesIO(body))
-        except (zipfile.BadZipFile, KeyError, ValueError, OSError) as exc:
-            raise HTTPException(status_code=415, detail=f"that DOCX could not be read ({exc})")
-        lines = [p.text for p in doc.paragraphs]
-        for table in doc.tables:                 # a list pasted as a table
+            lines = [p.text for p in doc.paragraphs]
+            tables = list(doc.tables)
+        except Exception as exc:                # noqa: BLE001 - any parser fault is a 415
+            logger.warning("a DOCX list could not be read: %s", type(exc).__name__)
+            raise HTTPException(status_code=415,
+                                detail="that DOCX could not be read") from None
+        for table in tables:                 # a list pasted as a table
             for row in table.rows:
                 lines.extend(cell.text for cell in row.cells[:1])
         return "\n".join(lines)
