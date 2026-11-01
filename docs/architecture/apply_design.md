@@ -900,6 +900,8 @@ Workday's own controls; adapters use these and `browser.py` (§8.2) only. Every 
 2. Per flagged field: an answer that `fills` → re-fill it once from a fresh locator; `blank_optional` / `prefilled` (the site wants it after all) → re-resolve that one field with `dataclasses.replace(field, required=True)` (tiers 1–5 as usual); answer → fill; none → `unanswerable_required` (label).
 3. Click Next once more. Still errors → `validation_error` (up to 3 labels). `StepResult.errors` carries the labels only.
 
+Split of work: the adapter's `next_step` does step 1 and returns `StepResult(step=<same step>, errors=<labels>)` instead of raising; `apply_flow` (generic, both ATSs; WP-B11) does steps 2–3 (it owns the resolver) and raises `validation_error` on the second failure. Greenhouse's "one re-fill, then `validation_error`" (§9.1 Errors) is the same machinery.
+
 #### 9.4.10 Review page parse
 
 On `review` (`is_review=True`): read every displayed item (S-5 item 12: label element + value element per `formField-*`, under section headings = step titles). Write `data/apply/<attempt_id>/review.json` = `[{section, label, value}]` (local, gitignored, never logged; deleted with the attempt). Cross-check each answer with status `filled` or `prefilled`: find the review item with the same normalised label under the same section; compare normalised values (§7.1 on text; dates and phones as digit strings; multi as sets; FILE by file name). Results:
@@ -910,6 +912,8 @@ On `review` (`is_review=True`): read every displayed item (S-5 item 12: label el
 - different on a **required** field, or the resume file name differs → `ApplyFailure(VALIDATION_ERROR, "review page differs: <labels>")` **before** Submit (nothing sent).
 
 `apply show` prints these notes with the answers.
+
+Who: the Workday adapter, in the `next_step` call that lands on `review`, using the answers it was handed in its `fill` calls (the flow passes every answer of the step to `fill`, `prefilled` ones included; `fill` only types those that `fills`). It sets the notes on those `Answer` objects (`note` += "; review: …") and raises `validation_error` per the rules above; the flow, after that `next_step` (or on its failure), calls `store.annotate_answers(attempt_id, {(step, field_key): note})` to update the already-written rows (lane V store V-block, §13).
 
 #### 9.4.11 Submit, confirmation
 
@@ -1163,7 +1167,7 @@ CREATE TABLE IF NOT EXISTS answer_memory (
 
 Column addition in `_migrate`: `app_events.by TEXT` (NULL = the owner; `'jobscraper'` = written by auto-apply; the UI renders "Applied by JobScraper", F-37). `set_application_status` gains `by: Optional[str] = None`.
 
-Store methods (names fixed; SQL is the engineer's): `create_attempt(job_id, company_id, mode, now) -> int`, `set_attempt_state(id, state, *, step=None, reason=None, detail=None, **cols)` (validates `TRANSITIONS`), `mark_submit_clicked(id, now)`, `attempt(id)`, `attempts_for_job(job_id)`, `reap_attempts(now)`, `apply_duplicate(job_id)`, `apply_counts(company_id, day_start)`, `applied_to_company(company_id, exclude_job_id)`, `add_answers(attempt_id, rows)`, `answers(attempt_id)`, `answer_memory_get(label_norm, field_type, ats)`, `answer_memory_put(...)`, `upsert_account(...)`, `account(ats, host, email)`, `accounts()`, `set_account_status(id, status, **cols)`, `delete_account(id)`, `accounts_to_export()`, `mark_exported(ids, now)`; D-70 (lane V, a V-block, no DDL change): `accounts_for_tenant(ats, host) -> dict[email_lower, status]`, `applied_on_tenant(ats, host) -> bool`. `apply_answers.tier` = 0 and `status = 'prefilled'` for kept site values (§9.1.1, §9.4.6).
+Store methods (names fixed; SQL is the engineer's): `create_attempt(job_id, company_id, mode, now) -> int`, `set_attempt_state(id, state, *, step=None, reason=None, detail=None, **cols)` (validates `TRANSITIONS`), `mark_submit_clicked(id, now)`, `attempt(id)`, `attempts_for_job(job_id)`, `reap_attempts(now)`, `apply_duplicate(job_id)`, `apply_counts(company_id, day_start)`, `applied_to_company(company_id, exclude_job_id)`, `add_answers(attempt_id, rows)`, `answers(attempt_id)`, `answer_memory_get(label_norm, field_type, ats)`, `answer_memory_put(...)`, `upsert_account(...)`, `account(ats, host, email)`, `accounts()`, `set_account_status(id, status, **cols)`, `delete_account(id)`, `accounts_to_export()`, `mark_exported(ids, now)`; D-70 (lane V, a V-block, no DDL change): `accounts_for_tenant(ats, host) -> dict[email_lower, status]`, `applied_on_tenant(ats, host) -> bool`, `annotate_answers(attempt_id, notes: dict[tuple[step, field_key], str])` (sets `note` to the given text on the matching rows; §9.4.10). `apply_answers.tier` = 0 and `status = 'prefilled'` for kept site values (§9.1.1, §9.4.6).
 
 Deleting: an application deleted via Undo does not delete attempts (the audit outlives the Undo); `answers` rows are deleted only with their attempt (no UI for it in M21).
 
