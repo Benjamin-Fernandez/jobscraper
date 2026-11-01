@@ -119,7 +119,7 @@ def test_pipeline_nothing_due_exits_with_next_due_date():
     _run(cfg, st)
     rep = _run(cfg, st, now=shift(T0, days=1))
     assert rep.status == "nothing_due" and rep.run_no == 0
-    assert rep.next_due_at == shift(T0, days=7)          # the weekly cycle
+    assert rep.next_due_at == shift(T0, days=7, seconds=-12 * 3600)  # weekly cycle less the C-7 grace
     assert _count(st, "runs") == 1
 
 
@@ -172,10 +172,95 @@ def test_pipeline_crash_before_stamp_is_a_no_op_and_is_reaped():
         pass
     st.relink_orphan_applications = real
     assert all(c.last_scraped_at is None for c in st.companies())
-    assert st.list_runs()[0]["status"] == "running"
-    rep = _run(cfg, st, now=shift(T0, seconds=7200))       # past per_run_timeout
+    # C-4: a crash marks its own run failed at once (no wait for the reaper)
+    row = st.list_runs()[0]
+    assert row["status"] == "failed"
+    rep = _run(cfg, st, now=shift(T0, seconds=7200))
     assert {r["run_no"]: r["status"] for r in st.list_runs()}[1] == "failed"
     assert rep.status == "ok" and len(rep.due) == 10       # the batch comes round
+
+
+def _fetching(jobs_for):
+    """A fetcher whose postings come from `jobs_for(company)`."""
+    def fetch(client, company):
+        return FetchOutcome(company.id, True, jobs=jobs_for(company), provider=company.provider)
+    return fetch
+
+
+def _later(k):
+    return shift(T0, days=40 * k)       # past any cycle: the company is due again
+
+
+def _open(st):
+    return {r[0] for r in st.conn.execute("SELECT external_id FROM jobs WHERE closed_at IS NULL")}
+
+
+def test_pipeline_closes_a_posting_only_after_two_misses_in_a_row():
+    """H1-1: one run that leaves a posting out does not close it."""
+    cfg, st = _world(1)
+    _run(cfg, st)
+    only_first = _fetching(lambda c: _jobs(c, n=1))
+    _run(cfg, st, fetcher=only_first, now=_later(1))
+    assert _open(st) == {"co01-0", "co01-1"}
+    _run(cfg, st, fetcher=only_first, now=_later(2))
+    assert _open(st) == {"co01-0"}
+
+
+def test_pipeline_a_failed_fetch_between_two_misses_neither_counts_nor_resets():
+    cfg, st = _world(1)
+    _run(cfg, st)
+    only_first = _fetching(lambda c: _jobs(c, n=1))
+    _run(cfg, st, fetcher=only_first, now=_later(1))              # miss 1
+    _run(cfg, st, fetcher=fail_fetcher, now=_later(2))            # no news
+    assert _open(st) == {"co01-0", "co01-1"}
+    _run(cfg, st, fetcher=only_first, now=_later(3))              # miss 2
+    assert _open(st) == {"co01-0"}
+
+
+def test_pipeline_a_capped_fetch_closes_nothing():
+    from jobscraper.scrape.adapters import MAX_JOBS
+    cfg, st = _world(1)
+    _run(cfg, st)
+    capped = _fetching(lambda c: [RawJob(external_id=f"x{k}", title="Backend Engineer",
+                                         url=f"https://x.example.com/{k}", location="Singapore")
+                                  for k in range(MAX_JOBS)])
+    for k in (1, 2):
+        _run(cfg, st, fetcher=capped, now=_later(k))
+    assert {"co01-0", "co01-1"} <= _open(st)
+
+
+def test_pipeline_an_empty_fetch_closes_nothing():
+    """An empty 200 is what a soft block looks like: "no news", never
+    "everything was taken down"."""
+    cfg, st = _world(1)
+    _run(cfg, st)
+    empty = _fetching(lambda c: [])
+    for k in (1, 2, 3):
+        _run(cfg, st, fetcher=empty, now=_later(k))
+    assert _open(st) == {"co01-0", "co01-1"}
+    _run(cfg, st, fetcher=_fetching(lambda c: _jobs(c, n=1)), now=_later(4))
+    assert _open(st) == {"co01-0", "co01-1"}
+
+
+def test_pipeline_logs_an_empty_answer_even_when_quiet():
+    import logging
+
+    records: list[logging.LogRecord] = []
+
+    class _Catch(logging.Handler):
+        def emit(self, record):
+            records.append(record)
+
+    logger = logging.getLogger("jobscraper.pipeline")
+    handler = _Catch(logging.WARNING)
+    logger.addHandler(handler)
+    try:
+        cfg, st = _world(1)
+        _run(cfg, st, fetcher=_fetching(lambda c: []))           # verbose=False
+    finally:
+        logger.removeHandler(handler)
+    assert any(r.levelno == logging.WARNING and "Co01" in r.getMessage()
+               and "empty" in r.getMessage() for r in records)
 
 
 def test_pipeline_relinks_a_migrated_application():
@@ -202,7 +287,7 @@ class _AcceptSingapore(Backend):
     def available(self):
         return True
 
-    def complete(self, system, user, max_tokens=4096):
+    def complete(self, system, user, max_tokens=4096, schema=None, timeout=None):
         import json
         self.calls += 1
         out, cur = [], None

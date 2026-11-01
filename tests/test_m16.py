@@ -150,7 +150,7 @@ class _Qwen(Backend):
     def available(self):
         return True
 
-    def complete(self, system, user, max_tokens=4096):
+    def complete(self, system, user, max_tokens=4096, schema=None, timeout=None):
         names = user.split("<companies>\n")[1].split("\n</companies>")[0].split("\n")
         self.asked.append(names)
         if self.fail:

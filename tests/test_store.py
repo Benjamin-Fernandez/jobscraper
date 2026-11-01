@@ -46,8 +46,12 @@ def test_failed_fetch_must_not_close_jobs():
     cid = st.companies()[0].id
     jid = _job(st, cid)
 
-    # A SUCCESSFUL fetch that omits the job closes it...
+    # One SUCCESSFUL fetch that omits the job only counts a miss (H1-1)...
+    assert st.close_missing(cid, set()) == 0
+    assert st.get_job(jid)["closed_at"] is None
+    # ...the second consecutive miss closes it.
     assert st.close_missing(cid, set()) == 1
+    assert st.get_job(jid)["closed_at"] is not None
     # ...and close_missing is the only path that closes anything; the pipeline
     # calls it exclusively for outcomes where ok=True. Re-seeing it reopens it.
     raw = RawJob(external_id="1", title="Software Engineer", url="https://x/1",
@@ -55,6 +59,66 @@ def test_failed_fetch_must_not_close_jobs():
     st.upsert_job(jid, cid, raw, 2, False)
     st.commit()
     assert st.get_job(jid)["closed_at"] is None
+
+
+def test_one_miss_does_not_close_a_job():
+    """H1-1: a posting a board leaves out once stays open; it closes on the
+    second miss in a row."""
+    st = _store(1)
+    cid = st.companies()[0].id
+    jid = _job(st, cid)
+    assert st.close_missing(cid, set()) == 0
+    job = st.get_job(jid)
+    assert job["closed_at"] is None and job["missed_runs"] == 1
+    assert st.close_missing(cid, set()) == 1
+    assert st.get_job(jid)["closed_at"] is not None
+
+
+def test_seeing_a_job_again_resets_its_misses():
+    st = _store(1)
+    cid = st.companies()[0].id
+    jid = _job(st, cid)
+    st.close_missing(cid, set())                      # missed once
+    raw = RawJob(external_id="1", title="Software Engineer", url="https://x/1",
+                 location="Singapore")
+    st.upsert_job(jid, cid, raw, 2, False)            # seen again
+    st.commit()
+    assert st.get_job(jid)["missed_runs"] == 0
+    assert st.close_missing(cid, set()) == 0          # a new first miss
+    assert st.get_job(jid)["closed_at"] is None
+
+
+def test_an_older_database_gains_the_miss_counter():
+    path = _db()
+    st = Store(path)
+    st.conn.execute("ALTER TABLE jobs DROP COLUMN missed_runs")
+    st.conn.commit()
+    st.close()
+    cols = {r["name"] for r in Store(path).conn.execute("PRAGMA table_info(jobs)")}
+    assert "missed_runs" in cols
+
+
+def test_fail_running_runs_marks_a_killed_run_failed_with_the_reason():
+    """D-64: a run whose process was killed never reached its own `finally`;
+    the web app marks the row failed, keeping its other stats. Rows that
+    started before the job, and finished rows, are left alone."""
+    import json as _json
+    st = _store(1)
+    old = st.start_run("2026-09-01T00:00:00")
+    st.finish_run(old, "ok", {"n": 1})
+    stale = st.start_run("2026-09-02T00:00:00")          # running, but before `since`
+    live = st.start_run("2026-09-25T00:00:00")
+    st.conn.execute("UPDATE runs SET stats_json = ? WHERE run_no = ?",
+                    (_json.dumps({"postings": 7}), live))
+    st.conn.commit()
+    assert st.fail_running_runs("2026-09-24T00:00:00", "cancelled (killed)") == 1
+    rows = {r["run_no"]: r for r in st.list_runs()}
+    assert rows[live]["status"] == "failed"
+    assert rows[old]["status"] == "ok" and rows[stale]["status"] == "running"
+    stats = _json.loads(st.conn.execute(
+        "SELECT stats_json FROM runs WHERE run_no = ?", (live,)).fetchone()[0])
+    assert stats["reason"] == "cancelled (killed)" and stats["postings"] == 7
+    assert st.fail_running_runs("2026-09-24T00:00:00", "x") == 0     # idempotent
 
 
 def test_store_fresh_schema_has_v2_columns_and_due_index():

@@ -249,7 +249,7 @@ class _Qwen(Backend):
     def available(self):
         return True
 
-    def complete(self, system, user, max_tokens=4096):
+    def complete(self, system, user, max_tokens=4096, schema=None, timeout=None):
         self.seen.append((system, user))
         if isinstance(self.text, Exception):
             raise self.text

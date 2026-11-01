@@ -317,14 +317,15 @@ def _kill(pid: int) -> None:
         time.sleep(0.05)
 
 
-def _write_record(data: Path, pid: int) -> None:
+def _write_record(data: Path, pid: int, pid_id=None) -> None:
     (data / "jobs").mkdir(parents=True, exist_ok=True)
     (data / "jobs" / "20260925T000000Z-run.log").write_text("earlier output\n",
                                                            encoding="utf-8")
     (data / "jobs" / "current.json").write_text(json.dumps({
         "id": "20260925T000000Z-run", "kind": "run", "state": "running",
         "started_at": "2026-09-25T00:00:00", "finished_at": None,
-        "exit_code": None, "pid": pid, "log": "20260925T000000Z-run.log"}),
+        "exit_code": None, "pid": pid, "pid_id": pid_id,
+        "log": "20260925T000000Z-run.log"}),
         encoding="utf-8")
 
 
@@ -356,7 +357,10 @@ def test_web_jobs_a_recorded_job_still_running_holds_the_slot():
         with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
             cfg = _config(Path(tmp))
             Store(cfg.db_path).close()
-            _write_record(cfg.db_path.parent, orphan.pid)
+            from jobscraper.web.jobs import process_identity
+            ident = process_identity(orphan.pid)
+            assert ident                         # C-5: the record names the process
+            _write_record(cfg.db_path.parent, orphan.pid, ident)
             with TestClient(create_app(cfg, job_command=_stub(QUICK)),
                             base_url="http://localhost") as c:
                 assert c.get("/api/jobs/current").json()["state"] == "running"
@@ -369,6 +373,32 @@ def test_web_jobs_a_recorded_job_still_running_holds_the_slot():
     finally:
         if orphan.poll() is None:
             orphan.kill()
+
+
+def test_web_jobs_c5_a_recorded_pid_that_is_not_that_process_is_not_ours():
+    """C-5: a PID that is alive but whose creation time differs from the
+    recorded identity (a reused PID), or a pre-C-5 record with no identity
+    whose process is not jobscraper, must read `failed`, never hold the slot."""
+    from jobscraper.web.jobs import process_identity
+    for pid_id in ("not-the-real-identity", None):
+        other = subprocess.Popen([sys.executable, "-c", SLOW], stdout=subprocess.DEVNULL)
+        try:
+            assert process_identity(other.pid)
+            with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
+                cfg = _config(Path(tmp))
+                Store(cfg.db_path).close()
+                _write_record(cfg.db_path.parent, other.pid, pid_id)
+                with TestClient(create_app(cfg, job_command=_stub(QUICK)),
+                                base_url="http://localhost") as c:
+                    job = c.get("/api/jobs/current").json()
+                    assert job["state"] == "failed", (pid_id, job)
+                    assert other.poll() is None          # and it was never killed
+                    assert c.post("/api/jobs/run").status_code == 202
+                    _wait(c)
+        finally:
+            if other.poll() is None:
+                other.kill()
+                other.wait()
 
 
 def test_web_jobs_default_command_is_the_cli_as_a_child_process():

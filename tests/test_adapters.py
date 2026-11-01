@@ -22,7 +22,7 @@ from jobscraper.models import (BLOCKED, GONE, SCHEMA, TRANSIENT, UNKNOWN,  # noq
                                RawJob, WatchedCompany)
 from jobscraper.scrape import adapters as A  # noqa: E402
 from jobscraper.scrape.net import (FetchError, classify_exception,  # noqa: E402
-                                   classify_status)
+                                   classify_status, detect_block)
 
 
 class FakeClient:
@@ -67,6 +67,48 @@ def test_every_watchlist_provider_has_an_adapter():
     used = {e.provider for e in load() if e.provider}
     assert used <= set(A.REGISTRY), sorted(used - set(A.REGISTRY))
     assert A.get_adapter(None) is None and A.get_adapter("nope") is None
+
+
+def test_non_faceting_adapters_accept_and_ignore_the_locations_keyword():
+    """Adapter.fetch(client, company, locations=()) is a base-class kwarg
+    (P0-D1); providers that cannot facet just ignore it - same result with or
+    without it."""
+    payload = {"jobs": [{"id": 1, "title": "T"}]}
+    client_a = FakeClient(get={"https://boards-api.greenhouse.io/v1/boards/acme/": payload})
+    client_b = FakeClient(get={"https://boards-api.greenhouse.io/v1/boards/acme/": payload})
+    without = A.Greenhouse().fetch(client_a, co("greenhouse"))
+    withloc = A.Greenhouse().fetch(client_b, co("greenhouse"), locations=["Singapore"])
+    assert [j.external_id for j in without] == [j.external_id for j in withloc]
+
+    lever_payload = [{"id": "L1", "text": "SRE", "hostedUrl": "https://lever/L1"}]
+    jobs = A.Lever().fetch(FakeClient(get={"https://api.lever.co/": lever_payload}),
+                           co("lever"), locations=["Singapore"])
+    assert len(jobs) == 1
+
+    rc = {"offers": [{"id": 7, "title": "Backend Engineer"}]}
+    jobs = A.Recruitee().fetch(FakeClient(get={"https://acme.recruitee.com/": rc}),
+                               co("recruitee"), locations=[])
+    assert len(jobs) == 1
+
+
+def test_is_capped_reports_the_max_jobs_boundary():
+    assert A.is_capped([1] * A.MAX_JOBS) is True
+    assert A.is_capped([1] * (A.MAX_JOBS - 1)) is False
+    assert A.is_capped([]) is False
+
+
+def test_as_total_coerces_defensively():
+    """P0 review HIGH: a board's reported total is untrusted input. Anything
+    that is not a non-negative int/float - a string, None, a dict, a bool
+    (technically an int in Python) or a negative number - reads as 0, the
+    existing small-board path, rather than raising."""
+    assert A._as_total(1200) == 1200
+    assert A._as_total(1200.0) == 1200
+    assert A._as_total("1200") == 0
+    assert A._as_total(None) == 0
+    assert A._as_total({}) == 0
+    assert A._as_total(True) == 0
+    assert A._as_total(-5) == 0
 
 
 # ---------------------------------------------------------------- helpers
@@ -171,6 +213,58 @@ def test_smartrecruiters_hydrate_joins_sections_and_survives_errors():
     assert job2.description == ""                     # a failed detail is not fatal
 
 
+def test_smartrecruiters_small_board_ignores_locations():
+    """total <= MAX_JOBS: no country request, even when locations are given."""
+    base = "https://api.smartrecruiters.com/v1/companies/acme/postings"
+    payload = {"totalFound": 3,
+               "content": [{"id": f"s{i}", "name": "Engineer"} for i in range(3)]}
+    client = FakeClient(get={base: payload})
+    jobs = A.SmartRecruiters().fetch(client, co("smartrecruiters"),
+                                     locations=["Singapore"])
+    assert len(jobs) == 3 and jobs.faceted is False
+    assert len(client.calls) == 1
+    assert all("country=" not in c[1] for c in client.calls)
+
+
+def test_smartrecruiters_facets_by_country_for_a_large_board():
+    """total > MAX_JOBS and Singapore maps to a known ISO code: re-query with
+    &country=sg and use those results (P0-D3)."""
+    sg_page = {"content": [{"id": "sg1", "name": "Engineer",
+                            "location": {"city": "Singapore", "country": "sg"}}]}
+    unfiltered_first = {"totalFound": 2000,
+                        "content": [{"id": f"s{i}", "name": "Engineer"}
+                                    for i in range(100)]}
+
+    class Country(FakeClient):
+        def get_json(self, url):
+            self.calls.append(("GET", url, None))
+            return sg_page if "country=sg" in url else unfiltered_first
+
+    client = Country()
+    jobs = A.SmartRecruiters().fetch(client, co("smartrecruiters"),
+                                     locations=["Singapore"])
+    assert jobs.faceted is True
+    assert len(jobs) == 1 and jobs[0].external_id == "sg1"
+    assert any("country=sg" in c[1] for c in client.calls)
+
+
+def test_smartrecruiters_survives_a_non_numeric_totalfound():
+    """A `totalFound` that is not a real number (string, None, or missing)
+    must not crash the fetch or read as a schema failure - it takes the
+    existing small-board path and still returns the postings (P0 review)."""
+    base = "https://api.smartrecruiters.com/v1/companies/acme/postings"
+    for bad_total in ("not-a-number", None, "__missing__"):
+        payload = {"content": [{"id": "s0", "name": "Engineer"}]}
+        if bad_total != "__missing__":
+            payload["totalFound"] = bad_total
+        client = FakeClient(get={base: payload})
+        jobs = A.SmartRecruiters().fetch(client, co("smartrecruiters"),
+                                         locations=["Singapore"])
+        assert len(jobs) == 1 and jobs[0].external_id == "s0"
+        assert jobs.faceted is False
+        assert all("country=" not in c[1] for c in client.calls)
+
+
 def test_workable_and_recruitee_map_their_fields():
     wk = {"jobs": [{"shortcode": "W1", "title": "DevOps Engineer",
                     "url": "https://wk/W1", "city": "Singapore", "country": "SG",
@@ -232,6 +326,123 @@ def test_workday_rejects_a_non_workday_url_and_hydrates_by_path():
         ("Build it", "Singapore", "2026-09-09")
 
 
+def test_workday_small_board_costs_one_request_even_with_a_matching_facet():
+    """total <= MAX_JOBS: never facet, so a small board costs one request."""
+    url = "https://acme.wd3.myworkdayjobs.com/en-US/Careers"
+    payload = {"total": 5,
+               "jobPostings": [{"title": f"T{i}", "externalPath": f"/job/{i}"}
+                               for i in range(5)],
+               "facets": [{"facetParameter": "locationCountry",
+                           "values": [{"descriptor": "Singapore", "id": "sg"}]}]}
+    client = FakeClient(post=[payload])
+    jobs = A.Workday().fetch(client, co("workday", careers_url=url),
+                             locations=["Singapore"])
+    assert len(client.calls) == 1 and len(jobs) == 5
+    assert jobs.faceted is False and not A.is_capped(jobs)
+    assert client.calls[0][2]["appliedFacets"] == {}
+
+
+def test_workday_large_board_facets_by_a_nested_location_value():
+    """total > MAX_JOBS: Workday nests facets, so a value that itself carries
+    facetParameter + values (here locationCountry, nested one level under the
+    top-level "locations" facet) must be searched too. A second request
+    carries appliedFacets keyed by the facetParameter of the matching level,
+    and its results - not the first page's - are returned (P0-D2)."""
+    url = "https://acme.wd3.myworkdayjobs.com/en-US/Careers"
+    facets = [
+        {"facetParameter": "timeType",
+         "values": [{"descriptor": "Full time", "id": "t1", "count": 900}]},
+        {"facetParameter": "locations",
+         "values": [
+             {"descriptor": "Asia Pacific", "id": "region-apac", "count": 500,
+              "facetParameter": "locationCountry",
+              "values": [{"descriptor": "Singapore", "id": "loc-sg", "count": 45},
+                        {"descriptor": "Malaysia", "id": "loc-my", "count": 30}]},
+             {"descriptor": "Americas", "id": "region-amer", "count": 700},
+         ]},
+    ]
+    first_page = {"total": 1200, "facets": facets,
+                 "jobPostings": [{"title": f"T{i}", "externalPath": f"/job/{i}"}
+                                 for i in range(20)]}
+    faceted_page = {"jobPostings": [{"title": "SG Engineer",
+                                     "externalPath": "/job/sg1",
+                                     "bulletFields": ["SG1"]}]}
+    client = FakeClient(post=[first_page, faceted_page])
+    jobs = A.Workday().fetch(client, co("workday", careers_url=url),
+                             locations=["Singapore"])
+    assert len(client.calls) == 2
+    assert client.calls[1][2]["appliedFacets"] == {"locationCountry": ["loc-sg"]}
+    assert client.calls[1][2]["offset"] == 0
+    assert len(jobs) == 1 and jobs[0].external_id == "SG1"
+    assert jobs.faceted is True and not A.is_capped(jobs)
+
+
+def test_workday_large_board_with_no_matching_facet_falls_back_capped():
+    """total > MAX_JOBS but no facet value matches an allowed location: keep
+    the unfaceted, capped results rather than failing the fetch."""
+    url = "https://acme.wd3.myworkdayjobs.com/en-US/Careers"
+    facets = [{"facetParameter": "locationCountry",
+              "values": [{"descriptor": "United States", "id": "us"},
+                        {"descriptor": "Germany", "id": "de"}]}]
+
+    class Big(FakeClient):
+        def post_json(self, u, json=None, headers=None):
+            self.calls.append(("POST", u, json))
+            offset = json["offset"]
+            page = [{"title": f"T{offset + i}", "externalPath": f"/job/{offset + i}"}
+                   for i in range(20)]
+            data = {"jobPostings": page}
+            if offset == 0:
+                data.update(total=5000, facets=facets)
+            return data
+
+    client = Big()
+    jobs = A.Workday().fetch(client, co("workday", careers_url=url),
+                             locations=["Singapore"])
+    assert jobs.faceted is False and A.is_capped(jobs)
+    assert len(jobs) == A.MAX_JOBS
+
+
+def test_workday_facet_matching_uses_word_boundaries_not_substrings():
+    """"India" must not match "Indianapolis, Indiana" - a naive substring
+    match would pull in the wrong facet id(s) (P0 review MEDIUM)."""
+    url = "https://acme.wd3.myworkdayjobs.com/en-US/Careers"
+    facets = [{"facetParameter": "locationCountry",
+              "values": [{"descriptor": "Indianapolis, Indiana", "id": "us-in"},
+                        {"descriptor": "India", "id": "in"}]}]
+    first_page = {"total": 1200, "facets": facets,
+                 "jobPostings": [{"title": f"T{i}", "externalPath": f"/job/{i}"}
+                                 for i in range(20)]}
+    faceted_page = {"jobPostings": [{"title": "IN Engineer",
+                                     "externalPath": "/job/in1",
+                                     "bulletFields": ["IN1"]}]}
+    client = FakeClient(post=[first_page, faceted_page])
+    jobs = A.Workday().fetch(client, co("workday", careers_url=url),
+                             locations=["India"])
+    assert client.calls[1][2]["appliedFacets"] == {"locationCountry": ["in"]}
+    assert jobs.faceted is True and len(jobs) == 1
+
+
+def test_workday_survives_a_non_numeric_total():
+    """A `total` that is not a real number (string, None, or missing) must
+    not crash the fetch or read as a schema failure - it takes the existing
+    small-board path and still returns the postings (P0 review)."""
+    url = "https://acme.wd3.myworkdayjobs.com/en-US/Careers"
+    page = {"jobPostings": [{"title": "SE 0", "externalPath": "/job/0",
+                             "bulletFields": ["R0"]}]}
+    for bad_total in ("not-a-number", None, "__missing__"):
+        body = dict(page)
+        if bad_total != "__missing__":
+            body = {**page, "total": bad_total}
+        client = FakeClient(post=[body])
+        jobs = A.Workday().fetch(client, co("workday", careers_url=url),
+                                 locations=["Singapore"])
+        assert len(jobs) == 1 and jobs[0].external_id == "R0"
+        assert jobs.faceted is False
+        assert client.calls[0][2]["appliedFacets"] == {}
+    assert all(j["appliedFacets"] == {} for _, _, j in client.calls)
+
+
 # ---------------------------------------------------------------- generic HTML
 
 def test_generic_html_keeps_job_links_and_drops_noise():
@@ -279,3 +490,57 @@ def test_exception_classification():
     assert classify_exception(httpx.ReadTimeout("slow", request=req)) == TRANSIENT
     assert classify_exception(httpx.TooManyRedirects("loop", request=req)) == SCHEMA
     assert classify_exception(ValueError("?")) == UNKNOWN
+
+
+# ---------------------------------------------------------------- block signatures (P0-D5)
+
+def test_detect_block_cloudflare_by_header_and_body():
+    assert detect_block(403, {"cf-ray": "abc123"}, "") == "cloudflare"
+    assert detect_block(200, {"cf-mitigated": "challenge"}, "") == "cloudflare"
+    assert detect_block(503, {"server": "cloudflare"}, "") == "cloudflare"
+    assert detect_block(200, {}, "Just a moment...") == "cloudflare"
+    assert detect_block(403, {}, "Attention Required! | Cloudflare") == "cloudflare"
+    assert detect_block(403, {}, "cf-chl-bypass token") == "cloudflare"
+    # server: cloudflare with an ordinary 200 is not enough on its own
+    assert detect_block(200, {"server": "cloudflare"}, "welcome") == ""
+
+
+def test_detect_block_header_only_signals_are_gated_on_block_relevant_statuses():
+    """cf-ray rides along on nearly every Cloudflare-proxied response, blocked
+    or not - so a header-only claim (cf-ray, server: cloudflare, server:
+    AkamaiGHost) must not fire on a plain 404/410, a real app 401 with no
+    corroborating body text, or an unrelated 500. It still fires on a status
+    that is itself block-shaped (403, 429, 503). Body markers are unaffected -
+    they can decide on any status, including the 200-challenge-page case
+    net.py handles separately."""
+    assert detect_block(404, {"cf-ray": "abc"}, "") == ""
+    assert detect_block(410, {"cf-ray": "abc"}, "") == ""
+    assert detect_block(401, {"cf-ray": "abc"}, "") == "forbidden", \
+        "a header alone must not promote a real 401 to a block signature"
+    assert detect_block(500, {"cf-ray": "abc"}, "") == ""
+    assert detect_block(403, {"cf-ray": "abc"}, "") == "cloudflare"
+    assert detect_block(503, {}, "Just a moment...") == "cloudflare"
+    assert detect_block(404, {"server": "AkamaiGHost"}, "") == ""
+    # a body marker still decides regardless of the header gate
+    assert detect_block(401, {"cf-ray": "abc"}, "Just a moment...") == "cloudflare"
+
+
+def test_detect_block_akamai_needs_the_header_or_both_body_markers():
+    assert detect_block(403, {"server": "AkamaiGHost"}, "") == "akamai"
+    assert detect_block(403, {}, "Access Denied\nReference #18.abc123") == "akamai"
+    assert detect_block(403, {}, "Access Denied - see errors.edgesuite.net") == "akamai"
+    # "Access Denied" with no confirming marker is just a plain 403
+    assert detect_block(403, {}, "Access Denied") == "forbidden"
+
+
+def test_detect_block_captcha_regardless_of_status():
+    assert detect_block(200, {}, "Please complete the reCAPTCHA below") == "captcha"
+    assert detect_block(403, {}, "hCaptcha challenge") == "captcha"
+
+
+def test_detect_block_rate_limited_and_forbidden_and_plain_404():
+    assert detect_block(429, {}, "") == "rate_limited"
+    assert detect_block(403, {}, "") == "forbidden"
+    assert detect_block(401, {}, "") == "forbidden"
+    assert detect_block(404, {}, "not found") == "", "a plain 404 has no block signature"
+    assert detect_block(500, {}, "internal error") == ""

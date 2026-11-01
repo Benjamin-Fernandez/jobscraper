@@ -75,6 +75,7 @@ def test_shortlist_keeps_closed_roles_flagged():
     """Q4: a role that closed stays, marked stale, rather than vanishing."""
     _, st, ids = _world()
     st.close_missing(st.company_by_key("grab").id, set())
+    st.close_missing(st.company_by_key("grab").id, set())   # two misses close (H1-1)
     doc = shortlist.build(st, 1)
     grab = [j for j in doc["jobs"] if j["company"] == "Grab"]
     assert len(grab) == 2 and all(j.get("closed") is True for j in grab)

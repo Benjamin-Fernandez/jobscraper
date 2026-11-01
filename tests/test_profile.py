@@ -177,7 +177,7 @@ class StubBackend:
         self.raw = raw
         self.calls: list[tuple[str, str]] = []
 
-    def complete(self, system, user, max_tokens=4096):
+    def complete(self, system, user, max_tokens=4096, schema=None, timeout=None):
         self.calls.append((system, user))
         text = self.raw if self.raw is not None else (
             "```json\n" + json.dumps(self.answer) + "\n```")
