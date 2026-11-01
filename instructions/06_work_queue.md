@@ -13,7 +13,7 @@ The handover note lives in `handover.md`. This file holds only the queue and sho
 | Q-04 ∥ | **Design KA-1/2/3:** `docs/architecture/apply_design.md`, `src/jobscraper/apply/contracts.py`, store tables, config schema, ADRs (browser route, vault) | architect | research done | P0 | DONE | 0 | `05` §5 design checklist; maps F-10, F-30 to F-40, NF-01 to NF-09 |
 | Q-05 | **Design KA-4:** `docs/architecture/tailor_design.md`, `src/jobscraper/tailor/contracts.py` | architect | Q-04 (same agent) | P0 | DONE | 0 | maps F-20 to F-25 |
 | Q-06 | **Spike S-2:** Qwen3-14B bullet rewrite on golden cases A–C + 3 real JDs at temp 0.25: validator rejections, latency | software-engineer (spike) | Q-05 draft | P0 | IN PROGRESS | 0 | `docs/architecture/spikes/S-2_tailor_llm.md` with numbers |
-| Q-07 | Port cloud tests for M19 (test_h1, test_small_model*, test_schedule_rule, test_net, D-33 adapter cases, web h1/ux1) | tester | Q-02, Q-03 on int/M19 | P1 | IN PROGRESS | 0 | ported tests pass on `personal` |
+| Q-07 | Port cloud tests for M19 (test_h1, test_small_model*, test_schedule_rule, test_net, D-33 adapter cases, web h1/ux1) | tester | Q-02, Q-03 on int/M19 | P1 | DONE | 0 | ported tests pass on `personal` |
 | Q-08 | Test plans: `tests/plans/apply_test_plan.md`, `tests/plans/tailor_test_plan.md` | tester (top) | Q-04, Q-05 | P0 | IN PROGRESS | 0 | `05` §5 test-plan checklist |
 | Q-09 | Build plans M20 + M21: `docs/planning/apply_build_plan.md`, `tailor_build_plan.md` with lanes | planner | Q-04, Q-05 | P0 | IN PROGRESS | 0 | `05` §5 build-plan checklist |
 | Q-10 | Cross-review (stage E) → READY TO BUILD | Coordinator chairs | Q-04, Q-05, Q-08, Q-09, Q-01 | P0 | BACKLOG | 0 | zero blocking issues |
@@ -21,6 +21,8 @@ The handover note lives in `handover.md`. This file holds only the queue and sho
 | Q-12 | M19 merge + live check on a copied DB (port 8768) | Coordinator | Q-02, Q-03 | P0 | BACKLOG | 0 | M19 gate |
 | Q-13 | Owner: fill `data/applicant.yaml` from the template; give the application email | owner | Q-04 (template) | P0 | BACKLOG | 0 | `python -m jobscraper applicant check` passes |
 | Q-14 | Owner: Gmail app password into Credential Manager (instructions from the design) | owner | Q-04 | P0 | BACKLOG | 0 | spike S-4 reads a test message |
+| Q-17 | D-66 abort guard counts due companies only + TD-01 start-failure ERROR log | software-engineer | Q-07 | P0 | IN PROGRESS | 0 | pipeline/web_control tests pass; a real 6-company run on a DB copy stamps its batch |
+| Q-18 | Pins for D-66 and TD-01 (un-park `_skip_td01_…`) | tester | Q-17 | P1 | BACKLOG | 0 | tests pass |
 | Q-16 | Owner (optional): Edge sync test with `owner_sync_test.py` (spike report S-1c); if it passes, set `apply.edge_sync: true` | owner | Q-01 | P2 | BACKLOG | 0 | test password appears in the Default profile |
 | Q-15 | Docs: OVERVIEW/README/DESIGN updated for tailor and auto-apply ("never logs in anywhere" changes) | planner | M20 | P1 | BACKLOG | 0 | docs match the app |
 
