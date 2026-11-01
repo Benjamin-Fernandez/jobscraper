@@ -90,7 +90,7 @@ apply_flow.run():
   reap stale attempts (§4.3) ─► for each job_id, in order:
     create attempt (queued) ─► guards: duplicate · caps · profile (§12) ─► fail early or continue
     tailoring: tailor_flow.tailor_for_apply()  (no current file) ─► resume path (tailored PDF/DOCX or original)
-    planning: detect adapter + tenant ─► plan_from_schema (Greenhouse) ─► resolve all ─► fail before the browser if a required field is unknown
+    planning: detect adapter + tenant ─► build ResolveContext (resume text + alias groups, §7.7) ─► plan_from_schema (Greenhouse) ─► resolve all ─► fail before the browser if a required field is unknown
     opening: browser session (one per job run) ─► new tab ─► adapter.open ─► classify page
     [signing_in | signing_up ─► verifying_email]           (Workday; §10, §11)
     filling (per step): read_step ─► resolve (DOM adapters) ─► fill ─► read back ─► screenshot ─► classify ─► next_step
@@ -207,6 +207,12 @@ def redaction_values(profile) -> list[str]         # every string value ≥ 3 ch
 def computed_facts(profile, today) -> dict         # {"experience_months": int, "experience_years": int, "graduation_year": int|None}
 def from_resume(profile_derived: dict, master: dict|None) -> dict   # M21 prefill (§5.5)
 ```
+
+**`computed_facts` (D-68 A-4).** `experience_months` = the length of the **union** of the intervals of every `experience[]` entry (internships included; `education[]` never counts), whole months rounded down:
+- Month position of a date: `YYYY-MM` → `12·Y + (M−1)` (start of that month); `YYYY-MM-DD` → `12·Y + (M−1) + (D−1)/days_in_month`.
+- Interval of an entry = `[pos(start), pos_end)`, where `pos_end` = `pos(end) + 1` for a `YYYY-MM` end (the end month counts in full), `pos(end) + 1/days_in_month` for a `YYYY-MM-DD` end (the end day counts), and `pos(today) + 1/days_in_month(today)` when `end` is null (present); every `pos_end` is clipped to that "today" value. An entry with no `start`, or with `start` after today, contributes nothing.
+- Overlapping or touching intervals are merged; `experience_months = floor(Σ merged lengths)`; `experience_years = experience_months // 12`. Example: 2024-05 → 2024-08 plus 2024-07 → 2024-12 = one interval 2024-05 → 2024-12 = 8 months.
+- `graduation_year` = the year of the latest `education[].end`, else None.
 
 Saving drops YAML comments; the Profile form is the editor (the template's comments exist for the first hand-fill in M20).
 
@@ -520,7 +526,7 @@ Rules:
    character limit. Mention only skills and experience present in APPLICANT or RESUME.
 Return JSON only, matching the schema.
 ```
-**User prompt:** `QUESTION: <label>\nHELP: <description>\nTYPE: <choice|multi|text|number>\nREQUIRED: yes|no\nLIMIT: <n> characters\nOPTIONS:\n0. <label>\n1. <label>…\n\nAPPLICANT (JSON):\n<llm_extract + computed_facts>\n\nRESUME:\n<master resume text, first 6000 chars>\n\nJOB: <company> — <title>\n<jd_text, first 6000 chars>`.
+**User prompt:** `QUESTION: <label>\nHELP: <description>\nTYPE: <choice|multi|text|number>\nREQUIRED: yes|no\nLIMIT: <n> characters\nOPTIONS:\n0. <label>\n1. <label>…\n\nAPPLICANT (JSON):\n<llm_extract + computed_facts>\n\nRESUME:\n<ctx.resume_text, first 6000 chars>\n\nJOB: <company> — <title>\n<jd_text, first 6000 chars>`.
 
 **Schemas (`format`):**
 - choice: `{"type":"object","properties":{"choice":{"type":"integer","minimum":-1,"maximum":N-1},"evidence":{"type":"string","maxLength":200}},"required":["choice","evidence"]}`
@@ -534,14 +540,18 @@ Return JSON only, matching the schema.
 
 ### 7.7 Grounding check (`resolve.grounded`)
 
-**Corpus** = `applicant.grounding_text(profile)` (non-sensitive values, one per line, plus computed facts as sentences, e.g. "Total professional experience: 14 months (1 years).") + master resume text + JD text + employer name. `corpus_norm` = lowercase, whitespace collapsed, `,` removed inside digit groups.
+**Corpus** = `applicant.grounding_text(profile)` (non-sensitive values, one per line, plus computed facts as sentences, e.g. "Total professional experience: 14 months (1 years).") + `ctx.resume_text` + JD text + employer name.
+
+**Resume text (D-68 A-2).** `apply_flow` (the orchestrator; stages never import each other) fills `ResolveContext.resume_text` once per attempt: the tailor master's text from `tailor_flow.master_text(cfg)` when a master cache valid for the current resume hash exists (tailor design §2), else `resume_ingest.extract_text(find_resume(<resume dir>))` (the profile stage's existing functions; the same file that is uploaded on the original-resume path). Either fails or no resume → `""` and the job-log line "resume text unavailable" (grounding then relies on profile + JD only, which only makes it stricter). `resume_text` never reaches a log.
+
+**Alias groups (D-68 A-1).** `apply_flow` also fills `ResolveContext.alias_groups` and `alias_ambiguous` from `config/aliases.yaml` through `tailor_flow.alias_groups(cfg) -> tuple[tuple[tuple[str, ...], ...], tuple[str, ...]]` (the tailor's loader, tailor design §6.1; `apply/` does not import `tailor/`). One group per aliases entry = `(canonical, *variants)`; `instances` are not included (an instance is a one-way claim, not a synonym). A missing or invalid `aliases.yaml` → empty groups and the log line "aliases unavailable" (rule 3 then uses profile and attested skills only). `corpus_norm` = lowercase, whitespace collapsed, `,` removed inside digit groups.
 
 - **choice / multi:** chosen index in range (schema); `evidence` normalised has ≥ 3 chars and is a substring of `corpus_norm`.
 - **number:** the value formatted as an integer (or as given if fractional) occurs as a whole number in `corpus_norm`.
 - **text:** fails on any of:
   1. a number token (`\d[\d,.]*%?`, normalised) not occurring as a whole token in the corpus;
   2. a month-name or year (`19xx|20xx`) not in the corpus;
-  3. a dictionary term (aliases.yaml canonical terms and variants ∪ profile skills ∪ attested skills) present in the text but absent from the corpus;
+  3. a dictionary term (every string in `ctx.alias_groups` ∪ profile skills ∪ attested skills) present in the text but **not grounded**: a term is grounded when it, or any other member of its alias group, occurs in the corpus (so "Postgres" in the text is grounded by a profile skill "PostgreSQL", and "k8s" by "Kubernetes"). Matching is case-insensitive on whole tokens, except tokens in `ctx.alias_ambiguous` (`go`, `c`, `r`), which match only when not all-lowercase (tailor design §4.1);
   4. a capitalised word not at sentence start, not in the allow-list (`I`, `I'm`, `I've`, `Singapore`, weekday and month names, `English`) and not occurring (case-insensitive) in the corpus;
   5. length > L, or empty when `unknown` is false.
   The violations list (no values beyond the offending tokens) goes into `Answer.note` and the retry prompt.
@@ -895,6 +905,7 @@ Deleting: an application deleted via Undo does not delete attempts (the audit ou
 | `accounts export-edge` | §10.3; prints the CSV path and the import steps; `--confirm` deletes the newest export and stamps rows | 0 |
 | `mail set-password` | `getpass`, `vault.put(IMAP_SERVICE…)`; host/username from settings or `--host/--user` | 0 |
 | `mail test [--find-from DOMAIN]` | `test_connection`; with `--find-from`, reports the newest message from that domain (time only) | 0 ok / 1 |
+| `apply show <job_id\|attempt_id>` (D-68 A-3; M20, lane B) | All digits → that attempt (`store.attempt`); otherwise the job's newest attempt (`store.attempts_for_job`, last). Prints a header (attempt id, job id, company — title, ATS, mode, state, reason code + detail, resume file + source, queued/started/submit-clicked/finished times), then one line per `store.answers(attempt_id)` row in id order: step, verbatim label, value (the exact value sent, **S-fields included**: this is the owner's own terminal; file fields as file name + SHA-256), tier, confidence, source (+ `rule_id`), status, and the note when present; then the evidence paths `data/apply/<attempt_id>/*.png` (and `failed.html`). This is how the owner reads the audit at the M20 gate. Nothing goes to a job log | 0; 1 unknown id / no attempt |
 
 ### 14.2 Job kinds (`web/jobs.py`)
 
@@ -1030,7 +1041,7 @@ paths:
 | Lane | Branch | Files (only these) | Delivers |
 |---|---|---|---|
 | **P: profile + resolver** | `eng/M20-P-resolver` | `src/jobscraper/applicant.py`, `src/jobscraper/apply/resolve.py`, `src/jobscraper/apply/declarations.py`, `src/jobscraper/apply/__init__.py` (exact content §2.1), `src/jobscraper/backends.py`, `config/applicant.example.yaml`, `cli.py` (one new block: `applicant` verb) | §5.1–§5.4, §7 complete (tiers 1–5 incl. memory lookup through an injected callable), backend `format`/`temperature`/`seed`/`top_k` |
-| **B: browser + Greenhouse + flow** | `eng/M20-B-greenhouse` | `src/jobscraper/apply/{__init__.py, detect.py, plan.py, classify.py, browser.py}`, `src/jobscraper/apply/ats/{__init__.py, greenhouse.py}`, `src/jobscraper/apply_flow.py`, `src/jobscraper/models.py` (+`posting_key`), `src/jobscraper/web/data.py` (import moved), `src/jobscraper/store.py` (one appended block: §13 tables + methods + `app_events.by`), `src/jobscraper/config.py` (ApplyConfig), `config/config.yaml` (`apply:` block), `requirements.txt` (`playwright`, `keyring`), `cli.py` (one new block: `apply` verb), `web/jobs.py` (kind `apply`) | §3, §4, §6, §8, §9.0–§9.1, §12, §13, §16, §17 |
+| **B: browser + Greenhouse + flow** | `eng/M20-B-greenhouse` | `src/jobscraper/apply/{__init__.py, detect.py, plan.py, classify.py, browser.py}`, `src/jobscraper/apply/ats/{__init__.py, greenhouse.py}`, `src/jobscraper/apply_flow.py`, `src/jobscraper/models.py` (+`posting_key`), `src/jobscraper/web/data.py` (import moved), `src/jobscraper/store.py` (one appended block: §13 tables + methods + `app_events.by`), `src/jobscraper/config.py` (ApplyConfig), `config/config.yaml` (`apply:` block), `requirements.txt` (`playwright`, `keyring`), `cli.py` (one new block: `apply` verb incl. `apply show`), `web/jobs.py` (kind `apply`) | §3, §4, §6, §7.7 context building (resume text, alias groups), §8, §9.0–§9.1, §12, §13, §14.1 `apply show`, §16, §17 |
 | **T: deterministic tailor** | per `tailor_design.md` | per tailor design | the tailored DOCX/PDF for `tailor_for_apply` |
 
 Disjointness: lanes P and B both create `apply/__init__.py` with the identical one-line content (git merges identical adds cleanly); `cli.py` gets one self-contained block per lane (Coordinator resolves the textual merge, `04_team.md` §2); `store.py` is touched by B and T, each appending its own block.
@@ -1063,6 +1074,7 @@ Lane V: `vault.py`, `apply/mail.py`, `apply/edge_save.ps1`, CLI `accounts`/`mail
 - `vault.py` in the foundation instead of `apply/` (web needs it).
 - `apply_flow` imports `tailor_flow` (one orchestrator→orchestrator edge).
 - `app_events.by` column for "Applied by JobScraper".
+- D-68 (planner gaps A-1..A-4): alias groups in `ResolveContext` for grounding rule 3; resume-text source decided by `apply_flow`; CLI `apply show`; `experience_months` defined as a merged-interval union (§5.1). Contract change is additive (two new `ResolveContext` fields with defaults).
 - Tier-5 choice answers need two agreeing runs and a verbatim evidence quote (stricter than F-32's "one of the offered options").
 - Attestation-like questions the classifier can't label never reach the LLM (fail closed).
 

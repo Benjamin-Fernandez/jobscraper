@@ -3,9 +3,9 @@
 **Stage B dossier** for PRD F-20–F-25 (`docs/prd.md` r1). Queue Q-05. Author: architect, 2026-11-02.
 **Status:** DRAFT for stage E cross-review. Contracts: `src/jobscraper/tailor/contracts.py` (CONTRACT_VERSION 1). Related: `apply_design.md` (the hand-off in §12), ADR-0003 (fail-closed principle).
 **Inputs:** `docs/research/resume_tailor_brief.md` §4, §5, §7, §8 and "Recommended design".
-**Patched (Q-19, 2026-11-02)** per spike S-2 (`spikes/S-2_tailor_llm.md`) and D-67: §4.3 step 4 list-item rule; the M21 tailor is deterministic (swaps, relevance reordering §6.3, render, storage/TTL, UI) with `tailor.llm: false`; the per-entry LLM bullet rewrite, the LLM summary rewrite, LLM JD term extraction and the validator additions S-2 found necessary are in **§7 "M22: LLM layer"**.
+**Patched (Q-19, 2026-11-02)** per spike S-2 (`spikes/S-2_tailor_llm.md`) and D-67: §4.3 step 4 list-item rule; the M21 tailor is deterministic (swaps, relevance reordering §6.3, render, storage/TTL, UI) with `tailor.llm: false`; the per-entry LLM bullet rewrite, the LLM summary rewrite and the validator additions S-2 found necessary are in **§7 "M22: LLM layer"**. **D-68 (A-5):** LLM JD term extraction (§4.4) has its own flag `tailor.llm_terms`, default true in M21, independent of `tailor.llm`; D-68 also adds `tailor_flow.master_text` and `tailor_flow.alias_groups` for auto-apply (§2).
 
-Truthfulness rule for the whole feature: **code decides facts, the model only rewords.** Employers, titles, dates, degrees, institutions and locations are copied by code and never sent for rewriting; every rewritten bullet passes a deterministic validator or the original text is kept. In M21 no per-job model call is made at all (the only model call is the cached master parse, §3.2).
+Truthfulness rule for the whole feature: **code decides facts, the model only rewords.** Employers, titles, dates, degrees, institutions and locations are copied by code and never sent for rewriting; every rewritten bullet passes a deterministic validator or the original text is kept. In M21 the model never writes resume text: the only model calls are the cached master parse (§3.2) and, with `tailor.llm_terms: true`, one JD term-extraction call per job (§4.4), whose output is kept only where it occurs in the JD.
 
 ---
 
@@ -26,7 +26,7 @@ src/jobscraper/
     __init__.py         engineer; exact content: """Resume tailor stage package (docs/architecture/tailor_design.md)."""
     contracts.py        architect (done)
     master.py           master parse (LLM + leaf check), cache load/save                 §3
-    terms.py            matcher, dictionary (aliases.yaml), JD extraction, required/preferred, knockouts   §4 (§7.6 LLM extraction: M22)
+    terms.py            matcher, dictionary (aliases.yaml), JD extraction (§4.4 under tailor.llm_terms), required/preferred, knockouts   §4
     mapping.py          classify terms against the master; coverage                      §5
     rewrite.py          deterministic swaps, skills order, relevance reorder              §6 (§7 LLM entry + summary rewrite: M22)
     validate.py         bullet validator, resume-wide invariants                         §8 (§7.4, §7.5 additions: M22)
@@ -45,9 +45,13 @@ def tailor(cfg, store, job_id: str, *, backend, report_only: bool = False,
            force: bool = False) -> TailorResult
 def tailor_for_apply(cfg, store, job_id: str, *, backend) -> TailorResult   # returns the current file if any (§11.2), else tailor()
 def purge(cfg, store, now: str) -> int                                        # called by cmd_purge and the end-of-run purge
+def master_text(cfg) -> Optional[str]                                        # D-68 A-2, for apply_flow
+def alias_groups(cfg) -> tuple[tuple[tuple[str, ...], ...], tuple[str, ...]] # D-68 A-1, for apply_flow
 ```
 
-`tailor()` steps: load applicant + master (parse if the resume hash changed) → JD text (fetch if missing) → terms → mapping → coverage before → swaps → validate (§8.1, guards the swaps) → [M22, `tailor.llm: true` only: LLM entry rewrite + validate, summary rewrite, §7] → relevance reorder (§6.3) → page ceiling + render → round trip → coverage after → store row + files. Any exception → `TailorResult(ok=False, status=failed, error=<class: message without resume text>)` and a `failed` row; `tailor_for_apply` then hands back the original resume path (apply design §4.1).
+`master_text(cfg)`: the cached master's resume text (§5.1 "resume text for mapping": summary, entry fields, bullets, items joined by newlines; contact excluded) when `data/master_resume.json` exists and `master.load` accepts it for the current resume file's hash (§3.1); else `None`. It never parses (no model call) and never raises (any error → `None`). `alias_groups(cfg)`: loads `config/aliases.yaml` with the §6.1 loader and returns `(groups, ambiguous)`, one group `(canonical, *variants)` per entry (instances excluded); a missing or invalid file → `((), ())`. Both exist so `apply_flow` can build `ResolveContext` without importing the stage (`apply_design.md` §7.7).
+
+`tailor()` steps: load applicant + master (parse if the resume hash changed) → JD text (fetch if missing) → terms (dictionary, + §4.4 when `tailor.llm_terms`) → mapping → coverage before → swaps → validate (§8.1, guards the swaps) → [M22, `tailor.llm: true` only: LLM entry rewrite + validate, summary rewrite, §7] → relevance reorder (§6.3) → page ceiling + render → round trip → coverage after → store row + files. Any exception → `TailorResult(ok=False, status=failed, error=<class: message without resume text>)` and a `failed` row; `tailor_for_apply` then hands back the original resume path (apply design §4.1).
 
 ---
 
@@ -121,9 +125,9 @@ Code then assigns entry ids `e1…` and bullet ids `1…` in reading order. A `s
    Override: an item or body line that itself contains one of `is a plus|preferred|nice to have|bonus|advantageous` (case-insensitive) is *preferred* regardless of the block. A hit's label is its line's label; a term with any required hit is required.
 5. **Knockouts:** JD lines matching `/citizen|permanent resident|\bPR\b|work pass|employment pass|visa|sponsorship|right to work|must be (based|located) in|security clearance/i` (trimmed, ≤ 200 chars, at most 5) go to `TailorResult.knockouts` (shown as "Application questions to expect"; never resume content).
 
-### 4.4 LLM extraction (moved to M22, §7.6)
+### 4.4 LLM extraction (M21, `tailor.llm_terms`; one call, temperature 0)
 
-M21 terms are dictionary-only (§4.2, §4.3); every `JdTerm.source` is `dictionary`. The LLM extraction call below runs only in M22 with `tailor.llm: true`; its specification is kept here unchanged and is part of §7.6.
+**Switch (D-68 A-5):** `tailor.llm_terms` (default `true`), independent of `tailor.llm` (the M22 rewrite layer, default `false`). It is safe in M21 because a model term is kept only if it occurs in the JD (filter below), so the model can add a term to the *list* but never text to the resume. `false` → dictionary-only terms (every `JdTerm.source = "dictionary"`), the same as a `BackendError`. Golden cases A–C run with the backend mocked to return no terms (dictionary oracle); the filter oracle is in §15 "Also".
 
 System: `List the skills, tools, technologies, qualifications and practices this job asks for, copying each term exactly as the job description spells it. Put must-haves in "required" and nice-to-haves in "preferred". Use at most 4 words per term. List acronym pairs written in the text, like "machine learning (ML)", as [short, long].` User: `JOB TITLE: <title>\n\n<jd text>`. Schema: `{"type":"object","required":["required","preferred","acronym_pairs"],"properties":{"required":{"type":"array","items":{"type":"string","maxLength":60},"maxItems":25},"preferred":{"type":"array","items":{"type":"string","maxLength":60},"maxItems":15},"acronym_pairs":{"type":"array","items":{"type":"array","items":{"type":"string"},"minItems":2,"maxItems":2},"maxItems":10}}}`.
 
@@ -206,7 +210,7 @@ Each changed bullet records a `BulletChange(source="swap")`.
 
 ## 7. M22: LLM layer (moved out of M21 by D-67; spike S-2)
 
-**Status.** Not built in M21. `tailor.llm` defaults to `false` (§14) and M21 ships with it off: S-2 measured 0 coverage gain over the deterministic swaps in 54 of 54 runs, 0 to 2 % of real-resume bullets changed (all cosmetic), about 6 s per resume, and found the validator gaps listed in §7.4. M22 may build this layer, but `tailor.llm: true` is allowed only once **every** §7.4 check and the §7.3 handling are in place and tested. When on, `mode = "llm"` (§11.1) and the inputs hash changes (§11.2). The layer has four parts: the per-entry bullet rewrite (§7.1–7.3), the validator additions (§7.4), the summary rewrite (§7.5) and LLM JD term extraction (§7.6). Everything below runs after the M21 swaps and before the §6.3 reorder, and none of it may change §6, §8 or the M21 golden outputs (§15).
+**Status.** Not built in M21. `tailor.llm` defaults to `false` (§14) and M21 ships with it off: S-2 measured 0 coverage gain over the deterministic swaps in 54 of 54 runs, 0 to 2 % of real-resume bullets changed (all cosmetic), about 6 s per resume, and found the validator gaps listed in §7.4. M22 may build this layer, but `tailor.llm: true` is allowed only once **every** §7.4 check and the §7.3 handling are in place and tested. When on, `mode = "llm"` (§11.1) and the inputs hash changes (§11.2). The layer has three parts: the per-entry bullet rewrite (§7.1–7.3), the validator additions (§7.4) and the summary rewrite (§7.5); LLM JD term extraction is not part of it (§7.6, D-68). Everything below runs after the M21 swaps and before the §6.3 reorder, and none of it may change §6, §8 or the M21 golden outputs (§15).
 
 Revisit the value question before building: as defined, ALLOWED TERMS are terms the entry already contains in JD spelling after the swaps, so the rewrite cannot raise coverage (S-2 recommendation 4a). Value appears only if §7.6 surfaces terms the dictionary misses and ALLOWED TERMS is redefined; that is a design change (architect), not a prompt tweak.
 
@@ -264,9 +268,9 @@ System: `Rewrite this resume summary for the job below in at most 60 words, firs
 
 Check (`validate.summary`, deterministic): numbers (digits and `NUMBER_WORDS`) in the new summary ⊆ numbers anywhere in the master; facts (with rule 5's first-word handling) ⊆ facts(master) ∪ attested canonicals; no organisation, title or institution string that isn't in the master; no `UPGRADE_WORDS` token absent from the master; `P(new) ⊆ P(original summary)`; length ≤ max(1.4 × original, 80 words). Fail → the post-swap summary, **no retry**. Not measured by S-2: M22 measures it on A–C before turning it on.
 
-### 7.6 LLM JD term extraction
+### 7.6 LLM JD term extraction (not part of this layer after D-68)
 
-The §4.4 call and filter, run only with `tailor.llm: true`. S-2 did not measure it; it is the one part of this layer that could raise coverage (terms the dictionary misses), so M22 measures it first on the S-2 cases before the rewrite parts.
+§4.4 runs in M21 under its own flag `tailor.llm_terms` (D-68 A-5). It is the one model step that could raise coverage (terms the dictionary misses); M22 uses its measured effect to decide whether ALLOWED TERMS should be redefined (see the value note above).
 
 ---
 
@@ -361,7 +365,7 @@ Store methods: `add_tailored(row) -> int`, `latest_tailored(job_id)`, `current_t
 
 ### 11.2 "Current" tailored file
 
-`inputs_hash = sha256(json.dumps([resume_hash, jd_hash, aliases_hash, sorted(attested canonicals), render.TEMPLATE_VERSION, mode, headline flag]))`, `jd_hash = sha256(jd text used)`. Current = the newest row for the job with that `inputs_hash`, status `draft` or `sent`, `files_deleted_at IS NULL`, and its DOCX on disk with a matching SHA-256. `tailor_for_apply` reuses it; `tailor` creates a new row unless `force` is false and a current one exists (then it returns it).
+`inputs_hash = sha256(json.dumps([resume_hash, jd_hash, aliases_hash, sorted(attested canonicals), render.TEMPLATE_VERSION, mode, headline flag, llm_terms flag]))`, `jd_hash = sha256(jd text used)`. Current = the newest row for the job with that `inputs_hash`, status `draft` or `sent`, `files_deleted_at IS NULL`, and its DOCX on disk with a matching SHA-256. `tailor_for_apply` reuses it; `tailor` creates a new row unless `force` is false and a current one exists (then it returns it).
 
 ### 11.3 Retention (`storage.purge`, run from `cmd_purge` and where the run calls `purge_descriptions`)
 
@@ -426,7 +430,8 @@ Store methods: `add_tailored(row) -> int`, `latest_tailored(job_id)`, `current_t
 ```yaml
 tailor:
   enabled: true
-  llm: false                 # D-67: default false; M21 is deterministic. true only in M22 once §7.4 is built
+  llm: false                 # D-67: bullet + summary rewrite (M22 layer, §7); true only once §7.4 is built
+  llm_terms: true            # D-68: LLM JD term extraction (§4.4); terms kept only if they occur in the JD
   temperature: 0.25          # D-60; used only when llm is true (M22)
   top_k: 20
   seed: 7
@@ -590,7 +595,7 @@ All three JDs put their terms on `- ` list lines, so under the patched step 4 ev
 | F-20 | §3 (parse, leaf check, cache by hash) |
 | F-21 | §4 (dictionary + LLM with occurs-in-JD filter), §5 (classification, coverage, naming) |
 | F-22 | M21 (D-67): §6.2 (swaps, aliases.yaml §6.1), §6.3 (deterministic relevance reordering), §8.1 + §8.3 (validator guarding swaps, invariants), §9 (summary: swaps only), §5.1 + §13.3 attest ("I have this"); protected fields §3, §8.3. M22: §7 (per-entry LLM rewrite, temperature 0.25, no retry, §7.4 validator additions, §7.5 summary rewrite + check) |
-| F-21 (LLM part) | M22: §7.6 / §4.4 (LLM JD term extraction); M21 terms are dictionary-only |
+| F-21 (LLM part) | M21: §4.4 LLM JD term extraction under `tailor.llm_terms` (D-68), occurs-in-JD filter |
 | F-23 | §10 (template, Word PDF, page ceiling, round trip, file naming) |
 | F-24 | §11 (table, paths, D-59 retention in purge, privacy), §19 |
 | F-25 | §12 (auto-tailor on apply), §13 (CLI, job, API, UI panel) |
@@ -616,7 +621,7 @@ All three JDs put their terms on `- ` list lines, so under the patched step 4 ev
 **M20 lane T (deterministic tailor)** — branch `eng/M20-T-tailor`, files: `src/jobscraper/tailor/{__init__.py, master.py, terms.py, mapping.py, rewrite.py (swaps, skills/bullet order only), validate.py (§8.1 + §8.3; it guards the swaps), render.py, storage.py}`, `src/jobscraper/tailor_flow.py`, `src/jobscraper/store.py` (one appended block: `tailored` + methods), `src/jobscraper/config.py` (TailorConfig block), `config/config.yaml` (`tailor:` block), `requirements.txt` (`pywin32` marked optional), `cli.py` (one `tailor` verb block + one line in `cmd_purge`), `src/jobscraper/pipeline.py` (one call to `tailor.storage.purge` beside `purge_descriptions`), `web/jobs.py` (kind `tailor` — shared with lane B's `apply` kind: each adds one `elif`; Coordinator merges).
 Includes the master parse (one cached LLM call per resume hash; the per-job tailoring itself makes no model call). Verify: golden cases A–C deterministic outputs and validator rows (§15) pass; `tailor <job_id> --report` on a real job; a full `tailor <job_id>` produces a DOCX + PDF that pass the round trip in ≤ 10 s.
 
-**M21 tailor scope (D-67):** deterministic swaps + relevance reordering (§6), render (§10), storage/TTL (§11), UI (§13.3, §13.4), with `tailor.llm: false`; the core is lane T above (M20), M21 finishes it with the golden cases A–C gate. **M22 lane LLM** (not M21): `tailor/terms.py` (§7.6), `tailor/rewrite.py` (§7.1–7.3, §7.5), `tailor/validate.py` (§7.4, §7.5 check); `tailor.llm: true` only after §7.4 passes its tests. **M21 lane UI** (shared with the apply UI lane): `web/routers/tailor.py`, Vue panel §13.4, "Mark applied" → `mark_tailored_sent`.
+**M21 tailor scope (D-67):** deterministic swaps + relevance reordering (§6), render (§10), storage/TTL (§11), UI (§13.3, §13.4), with `tailor.llm: false`; the core is lane T above (M20), M21 finishes it with the golden cases A–C gate. M21 also adds §4.4 (`tailor/terms.py`, switch `tailor.llm_terms`, D-68) and `tailor_flow.master_text` / `alias_groups` (§2; needed by auto-apply lane B's context building, so they land with lane T in M20). **M22 lane LLM** (not M21): `tailor/rewrite.py` (§7.1–7.3, §7.5), `tailor/validate.py` (§7.4, §7.5 check); `tailor.llm: true` only after §7.4 passes its tests. **M21 lane UI** (shared with the apply UI lane): `web/routers/tailor.py`, Vue panel §13.4, "Mark applied" → `mark_tailored_sent`.
 
 Shared-file protocol as in `apply_design.md` §19.1 (store.py, cli.py, config.py, config.yaml, requirements.txt, web/jobs.py: each lane appends a self-contained block).
 
@@ -639,7 +644,7 @@ Job log lines: `tailor <job_id>: terms=8 (required 6) exact=2 variant=3 missing=
 2. **Golden case B:** the brief lists Excel as `present_variant`; this design's matcher makes it `present_exact` (the JD spelling occurs inside "Microsoft Excel"). A deliberate oracle change; the reasoning is in §15.
 3. **Weights:** the brief multiplied by a multi-word weight; F-21 states required 2 / preferred 1 only. This design follows F-21.
 4. **Review gate:** the brief recommended a human diff review before use; D-58 (decided) removed it. Followed D-58.
-5. **Tailor LLM layer milestone (D-67):** PRD §7 M21 says "tailor with the LLM layer" and R-2 "before the M21 tailor LLM layer"; D-67 moves the LLM bullet and summary rewrite (and, here, LLM JD extraction) to M22. Planner to fold into the PRD.
+5. **Tailor LLM layer milestone (D-67):** PRD §7 M21 says "tailor with the LLM layer" and R-2 "before the M21 tailor LLM layer"; D-67 moves the LLM bullet and summary rewrite to M22; LLM JD extraction stays M21 under `tailor.llm_terms` (D-68). Planner to fold into the PRD.
 
 **Requests**
 - Researcher: `config/aliases.yaml` per §6.1 (true synonyms only; instances only as deliberate claims; include the golden terms at minimum).

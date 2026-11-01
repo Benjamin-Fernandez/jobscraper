@@ -360,9 +360,12 @@ class ResolveContext:
     employer_aliases: tuple[str, ...] = ()  # other names (watchlist key, ATS board name)
     previously_applied: bool = False        # from Applications + attempts (F-33)
     jd_text: str = ""
-    resume_text: str = ""                   # master resume text (grounding corpus)
+    resume_text: str = ""                   # grounding corpus: tailor master text, else the extracted resume (design §7.7, D-68)
     resume_path: str = ""                   # the file to upload
     ats: str = ""
+    # aliases.yaml, loaded by apply_flow via tailor_flow.alias_groups (design §7.7, D-68):
+    alias_groups: tuple[tuple[str, ...], ...] = ()   # one (canonical, *variants) per entry; no instances
+    alias_ambiguous: tuple[str, ...] = ()            # tokens that match only when not all-lowercase
 
 
 # --------------------------------------------------------------------------
