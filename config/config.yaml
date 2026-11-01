@@ -30,6 +30,9 @@ paths:
   shortlist: data/shortlist.json              # the accepted queue the web app reads
   applicant: data/applicant.yaml              # your application details (M20) - gitignored
   questions: config/questions.yaml            # how form questions map onto them (M20)
+  aliases: config/aliases.yaml                # tailor: term variants (true synonyms only)
+  master_resume: data/master_resume.json      # tailor: your resume, parsed once (gitignored)
+  tailored_dir: data/tailored                 # tailor: per-job resumes, deleted after a while (gitignored)
 
 run:
   # Companies per run. PRD R-7: at 295 companies this needs ~4.2 runs/day to
@@ -160,3 +163,21 @@ apply:
   mail_backup:               # D-70: mailbox for contact.backup_email; host "" = same mailbox as `mail`
     host: ""
     port: 993
+
+tailor:
+  # The resume tailor (M20, docs/architecture/tailor_design.md). It never adds a
+  # skill, tool, employer, title, date or number: it swaps a resume word for a
+  # true synonym of the job's own word, and puts the most relevant bullets first.
+  enabled: true
+  llm: false                 # D-67: bullet + summary rewrite (M22 layer); stays false
+  llm_terms: true            # D-68: LLM JD term extraction (M21); no effect in M20
+  temperature: 0.25          # D-60; used only when llm is true (M22)
+  top_k: 20
+  seed: 7
+  headline: true             # D-60: the job title as a headline under your name
+  pdf: true                  # through Word, when installed
+  page_ceiling: auto         # auto = your resume's page count, or a number
+  max_jd_chars: 12000
+  draft_days: 7              # D-59: a draft's files are deleted after this many days
+  sent_days_after_close: 30  # D-59: a sent resume's files, after the application closes
+  closed_statuses: [rejected, withdrawn]

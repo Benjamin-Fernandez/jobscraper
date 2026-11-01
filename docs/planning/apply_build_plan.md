@@ -1,6 +1,7 @@
 # Auto-apply build plan (M20 walking skeleton, M21 MVP)
 
 **Stage D** for queue Q-09. Author: planner, 2026-11-02. Status: DRAFT for stage E cross-review (Q-10).
+**Revised for D-70 (Q-22, architect acting as planner, 2026-11-02):** Workday is first-class in M20. Lane V (V1–V7) moves into M20 after WP-B4 and spike S-5; new WPs A03, S5, S6, P7, P8, B10, B11, B12; WP-F1/F4 move into M20; the M20 gate now ends with real Workday submissions at the 2 owner-approved employers. Design references are to `apply_design.md` with the D-70 delta (contracts v3).
 **Inputs:** `docs/prd.md` r2 §4, §5.2, §5.4, §5.5, §8; `docs/architecture/apply_design.md` (cited as **AD §n**); `src/jobscraper/apply/contracts.py` (CONTRACT_VERSION 1); spike report `docs/architecture/spikes/S-1_S-3_browser.md`; decisions D-50…D-65. The tailor half is in `tailor_build_plan.md` (**TB**); its lane T runs beside lanes P and B in M20.
 
 ## 0. How to read this plan
@@ -46,6 +47,61 @@
 - **Done when:** fixtures and the §6 M20 test files are committed; each test file fails only because its module is not built yet.
 - **Requirements:** NF-01 (no personal data in fixtures), F-31, F-34, F-38 (test basis).
 
+#### WP-A03 · `yes_if` rules in `config/questions.yaml` (D-70)
+- **STATUS:** TODO
+- **Inputs:** AD §7.3.3 (format, loader rules, bool-shaped fields, worked examples); the file's own header note on the enum yes/no gap.
+- **Files:** `config/questions.yaml`.
+- **Depends on:** WP-A01.
+- **Lane:** researcher (`research/Q-22-yes-if`).
+- **Do:** add `yes_if` to `singapore_status.residency_status` (at least `sg_citizen` [citizen], `sg_citizen_or_pr` [citizen, pr], `sg_pr` [pr], with the `exclude` phrases that keep "citizen" and "citizen or PR" labels apart), and where real forms ask Yes/No about them, to `singapore_status.ns_status` (e.g. `ns_completed` [completed]) and `singapore_status.work_pass` (e.g. `holds_ep` [ep]). Replace the header's "known design limits" line with a pointer to AD §7.3.3.
+- **Verify:** `python -c "import yaml; d=yaml.safe_load(open('config/questions.yaml',encoding='utf-8')); q={e['key']:e for e in d['questions']}; r=q['singapore_status.residency_status']; ids={y['id']:y for y in r['yes_if']}; assert set(ids)>={'sg_citizen','sg_citizen_or_pr','sg_pr'}; assert all(set(y['values'])<=set(r['value_map']) and y['synonyms'] for y in r['yes_if']); assert all(e['kind']=='enum' for e in d['questions'] if 'yes_if' in e); print('yes_if ok')"`
+- **Done when:** the command prints `yes_if ok`.
+- **Requirements:** F-32 (tier 2), F-33 (status questions).
+
+#### WP-S5 · Spike S-5: real Workday flow at 2 employers (Q-23, D-70)
+- **STATUS:** BLOCKED (owner: email + Gmail app password, Q-14) — then TODO.
+- **Inputs:** AD §9.4 (the 13-item S-5 checklist and the output table), §11.4 (Gmail app password), D-70 (owner allowed real accounts and automatic submission at these 2 employers).
+- **Files:** scratch scripts in the session scratchpad only; outputs in `tests/fixtures/apply/workday/<tenant>/` are handed to the tester (engineers don't write `tests/**`).
+- **Depends on:** owner choosing the 2 employers and giving the email + app password; Playwright Edge (S-1).
+- **Lane:** software-engineer (spike, `spike/Q-23-workday`).
+- **Do:** headed Edge on a throwaway profile copy; at each employer: open a posting, record the Apply choice, create the account with a generated password stored in Credential Manager (`jobscraper:workday:<host>`), verify via IMAP (read-only, `EXAMINE`/`BODY.PEEK`), walk every wizard step with the owner's real data, one deliberate empty Next on one step to record the error markup, **stop at Review** (no Submit). Record per AD §9.4's table; answer the 13 checklist items in `notes.md`.
+- **Verify:** `python -c "import json,pathlib; d=[p for p in pathlib.Path('tests/fixtures/apply/workday').iterdir() if p.is_dir()]; assert len(d)>=2, d; [json.load(open(p/'automation_ids.json',encoding='utf-8')) for p in d]; assert all((p/'notes.md').exists() and list(p.glob('*review*.html')) for p in d); print(len(d),'tenants ok')"` (run after the tester commits the scrubbed recordings, WP-F1).
+- **Done when:** both tenants recorded up to Review; checklist answered; the accounts exist in `ats_accounts`-compatible form (the spike writes a JSON note; lane V's `accounts add` imports them later).
+- **Requirements:** F-31, F-35, F-36 (evidence for the Workday design).
+
+#### WP-F1 · Workday fixtures from the S-5 recordings (moved into M20)
+- **STATUS:** TODO after WP-S5.
+- **Inputs:** WP-S5 outputs; AD §9.4; NF-01.
+- **Files:** `tests/fixtures/apply/workday/<tenant>/**`, `tests/fixtures/apply/workday/README.txt`, the WP-V5…V7 tests.
+- **Depends on:** WP-S5.
+- **Lane:** tester (`test/Q-23-workday-fixtures`).
+- **Do:** replace every personal value with the synthetic profile's (`tests/fixtures/apply/applicant.sample.yaml`); keep every `data-automation-id`, `aria-*` and `role`; strip scripts; add hand-built `confirm.html` (AD §9.4.11 text) and `already_registered.html` (AD §9.4.3 regex copy, or S-5's real copy if met), marked as hand-built in the README; write `tests/test_workday_account.py`, `tests/test_workday_widgets.py`, `tests/test_workday_steps.py`.
+- **Verify:** `python -c "import pathlib; f=list(pathlib.Path('tests/fixtures/apply/workday').rglob('*.html')); s=' '.join(p.read_text(encoding='utf-8') for p in f); miss=[i for i in ['signInSubmitButton','createAccountLink','legalNameSection_firstName','bottom-navigation-next-button','reviewJobApplicationPage'] if i not in s]; assert not miss, miss; print(len(f),'pages ok')"`
+- **Done when:** the command prints `N pages ok` and `python tests/run_tests.py -k test_nf01` still passes (no personal value committed).
+- **Requirements:** F-31, F-35 (test basis), NF-01.
+
+#### WP-F4 · Fake IMAP fixtures (moved into M20)
+- **STATUS:** TODO
+- **Inputs:** AD §11.1, §11.5 (`to_addr`).
+- **Files:** `tests/fixtures/mail/*.eml` (synthetic Workday verification link to the primary address, the same to the backup address, a Greenhouse code, a foreign-domain phishing-style link), the WP-V3 test.
+- **Depends on:** nothing.
+- **Lane:** tester.
+- **Do:** synthetic messages only; a fake `IMAP4_SSL` class in the test that records every command.
+- **Verify:** `python -c "from pathlib import Path; f=list(Path('tests/fixtures/mail').glob('*.eml')); assert len(f)>=4; print(len(f),'messages')"`
+- **Done when:** the command prints the count.
+- **Requirements:** F-36.
+
+#### WP-S6 · Spike S-6: MyGreenhouse in the JobScraper profile (D-70)
+- **STATUS:** BLOCKED (owner task Q-24, which needs WP-B10) — then TODO.
+- **Inputs:** AD §9.1.1 (defaults to confirm: button regex, not-signed-in signals, settle rule, `.select__single-value` read-back, the resume remove control, any consent dialog).
+- **Files:** scratch only; recordings handed to the tester as `tests/fixtures/apply/greenhouse/mygreenhouse/` (`before.html`, `after_autofill.html`, `not_signed_in.html`, `notes.md`), scrubbed to the synthetic profile.
+- **Depends on:** WP-B10, Q-24 (the owner signed in once with `apply open-profile`).
+- **Lane:** software-engineer (spike).
+- **Do:** on 2 open Greenhouse postings whose boards show the autofill button: click it signed in (record which fields filled, how long it took, whether a resume was attached and how to remove it); sign out in a copy of the profile and click it again (record the not-signed-in surface). No Submit.
+- **Verify:** `python -c "import pathlib; d=pathlib.Path('tests/fixtures/apply/greenhouse/mygreenhouse'); assert (d/'notes.md').exists() and (d/'after_autofill.html').exists(); print('ok')"`
+- **Done when:** `ok`; `notes.md` answers each §9.1.1 default (confirmed / differs).
+- **Requirements:** F-34.
+
 The tailor-side prerequisites (WP-T00 aliases seed, WP-T01 golden fixtures) are in TB §1.
 
 ## 2. M20 lanes
@@ -57,6 +113,7 @@ The architect's split (AD §19.1, TD §18) with one planner change: **`apply/pla
 | **P** profile + resolver | `eng/M20-P-resolver` | `src/jobscraper/applicant.py`, `src/jobscraper/apply/__init__.py`, `src/jobscraper/apply/plan.py`, `src/jobscraper/apply/resolve.py`, `src/jobscraper/apply/declarations.py`, `src/jobscraper/backends.py`, `config/applicant.example.yaml` | `cli.py` P-block; `config.py` P-block |
 | **B** browser + Greenhouse + flow | `eng/M20-B-greenhouse` | `src/jobscraper/apply/{detect,classify,browser}.py`, `src/jobscraper/apply/ats/{__init__,greenhouse}.py`, `src/jobscraper/apply_flow.py`, `src/jobscraper/models.py`, `src/jobscraper/web/data.py` | `store.py` B-block; `cli.py` B-block; `config.py` B-block; `config/config.yaml` B-block; `requirements.txt` B-block; `web/jobs.py` B-block; `apply/__init__.py` (identical one-line add) |
 | **T** deterministic tailor | `eng/M20-T-tailor` | TB §2 | `store.py` T-block; `cli.py` T-block; `config.py` T-block; `config/config.yaml` T-block; `requirements.txt` T-block; `web/jobs.py` T-block; `pipeline.py` T-line |
+| **V** vault, accounts, mail, Workday (D-70) | `eng/M20-V-workday` | §2.4 | §2.4 (`cli.py`, `store.py`, `apply_flow.py`, `apply/ats/__init__.py`, `web/jobs.py` V-blocks) |
 
 ### 2.1 Shared files: the exact block each lane adds (append-only; the Coordinator resolves the textual merge)
 
@@ -140,6 +197,28 @@ The architect's split (AD §19.1, TD §18) with one planner change: **`apply/pla
 - **Verify:** `python tests/run_tests.py -k apply_resolve_llm`
 - **Done when:** with a scripted fake backend: two agreeing choice runs answer; disagreeing runs do not; an evidence quote absent from the corpus fails; a text answer adding a number, year, unknown capitalised word or dictionary term is rejected then retried once; sensitive and attestation fields never reach the backend (the fake asserts it is not called).
 - **Requirements:** F-32 (tier 5, grounding, free text, recording), NF-02/NF-03 (no S value in prompts, Ollama only).
+
+#### WP-P7 · `yes_if` in tier 2 (D-70)
+- **STATUS:** TODO
+- **Inputs:** AD §7.3.3 (loader validation, virtual entries `<key>#<id>`, bool-shaped fields, candidate sets per field type, value rule incl. decline, source/rule_id), §7.3.1 scoring (unchanged), §7.3.2 bool mapping.
+- **Files:** `src/jobscraper/apply/resolve.py`.
+- **Depends on:** WP-P4, WP-A03.
+- **Lane:** P.
+- **Do:** extend `load_rules` and tier 2 exactly as AD §7.3.3.
+- **Verify:** `python tests/run_tests.py -k apply_resolve_rules`
+- **Done when:** the tester's `yes_if` cases pass: "Are you a Singapore Citizen?" Yes/No with residency `citizen` → Yes, `pr` → No; "…Citizen or Permanent Resident?" → Yes for citizen and pr, No for foreigner; a 3-option citizen/PR/foreigner dropdown still uses `value_map`; an invalid `yes_if` (value not in `value_map`) raises `ValueError` naming `<key>#<id>`; an empty residency status → `unknown`, never tier 5.
+- **Requirements:** F-32, F-33.
+
+#### WP-P8 · `contact.backup_email` and the account email (D-70)
+- **STATUS:** TODO
+- **Inputs:** AD §10.5 (profile field, validation, template line), §5.2–§5.4, §7.2 EMAIL row (`ctx.account_email`).
+- **Files:** `src/jobscraper/applicant.py`, `config/applicant.example.yaml`, `src/jobscraper/apply/resolve.py`.
+- **Depends on:** WP-P2, WP-P4.
+- **Lane:** P.
+- **Do:** optional `contact.backup_email` (email regex; must differ from `contact.email`; sensitive; in `redaction_values`); template line per AD §10.5; tier-1 EMAIL answers `ctx.account_email or contact.email`.
+- **Verify:** `python tests/run_tests.py -k apply_contracts`
+- **Done when:** the profile tests and the template-vs-sample oracle pass with the new field; a backup equal to the primary is a validation error; EMAIL resolves to `account_email` when set.
+- **Requirements:** F-10, F-11, F-35.
 
 ### 2.3 Lane B: browser + Greenhouse + flow
 
@@ -242,10 +321,128 @@ The architect's split (AD §19.1, TD §18) with one planner change: **`apply/pla
 - **Done when:** the end-to-end fixture test (synthetic profile, deterministic tailor on a fixture master, `form.html`, fake backend) ends `ready_to_submit` with a tailored resume uploaded and an `apply_answers` row per field with the expected tiers.
 - **Requirements:** F-25 bullet 2 (auto-tailor), F-32, F-33, F-34 (tailored or original resume), F-39.
 
+#### WP-B10 · CLI `apply open-profile` (D-70; needed by owner task Q-24)
+- **STATUS:** TODO
+- **Inputs:** AD §14.1 `apply open-profile [URL]` row (headed forced, default URL, message, hold until closed, locked-profile message, reserved words), §8.1.
+- **Files:** `src/jobscraper/cli.py` (B-block), `src/jobscraper/apply/browser.py`.
+- **Depends on:** WP-B4.
+- **Lane:** B.
+- **Do:** the subcommand; `BrowserSession` gains a `headed` override argument if it has none; a launch error that names the user-data directory → the AD message, exit 1.
+- **Verify:** `python tests/run_tests.py -k apply_cli`
+- **Done when:** with a fake session factory: default URL `https://my.greenhouse.io/`, headed forced even when `apply.headed` is false, a locked profile exits 1 with the message, `apply show` still works. Manual smoke (owner, Q-24): the window opens on the JobScraper profile.
+- **Requirements:** F-34 (MyGreenhouse sign-in), F-35 (manual sign-ins).
+
+#### WP-B11 · Prefill policies and the corrective retry in the flow (D-70, both ATSs)
+- **STATUS:** TODO
+- **Inputs:** AD §3 (prefill step), §9.1.1 (KEEP table, planning change), §9.4.6 (OVERWRITE table), §9.4.9 "Split of work" (flow does the re-resolve/re-fill and the second Next), contracts v3 (`PREFILL_POLICY`, `ALWAYS_OURS`, `EMPLOYER_SPECIFIC_DECLARATIONS`, `AnswerStatus.PREFILLED`, `AnswerSource`, adapter `prefill`/`read_values`).
+- **Files:** `src/jobscraper/apply_flow.py`.
+- **Depends on:** WP-B7 (and WP-B9 if already merged; this WP rebases on it).
+- **Lane:** B.
+- **Do:** call `adapter.prefill` once after the account wall; per step `read_values` when a policy applies; implement both tables exactly (audit rows: tier 0, `source` = the prefill source, status `prefilled`, conflict note); the planning deferral for Greenhouse when `apply.mygreenhouse` is on; the generic "errors after Next" retry (re-fill, or re-resolve with `required=True`; second failure → `validation_error`). `ApplyConfig` gains `mygreenhouse`, `mygreenhouse_wait_s`, `workday_entry`, `max_wizard_steps`, `mail_backup` (AD §16; B-block in `config.py`/`config.yaml`).
+- **Verify:** `python tests/run_tests.py -k apply_flow`
+- **Done when:** with a fake adapter: KEEP keeps a non-empty field as `prefilled` and fills only empty ones, always replaces the resume and overwrites a differing email and an employer-specific declaration; OVERWRITE replaces differing values, keeps an optional unanswerable one as `prefilled`, fails a required unanswerable one; a required `unknown` in planning reaches the browser only with MyGreenhouse on, and fails if still empty after prefill; the retry happens once.
+- **Requirements:** F-32, F-34, F-38, F-39.
+
+#### WP-B12 · Greenhouse: MyGreenhouse `prefill` and `read_values`; label canonicals by phrase
+- **STATUS:** TODO; selectors BLOCKED (S-6) — build with the AD §9.1.1 defaults, then confirm on the S-6 recordings.
+- **Inputs:** AD §9.1.1 (`prefill` steps 1–5, `read_values` per type, the resume remove control), §9.1.2 (link canonicals by phrase match, decided).
+- **Files:** `src/jobscraper/apply/ats/greenhouse.py`.
+- **Depends on:** WP-B6, WP-B11; WP-S6 for the confirmation step.
+- **Lane:** B.
+- **Do:** `prefill` and `read_values` as AD; switch the label → LINKEDIN/GITHUB/WEBSITE tagging in `plan_from_schema` to §9.1.2's phrase rule.
+- **Verify:** `python tests/run_tests.py -k greenhouse`
+- **Done when:** on `form.html` plus the tester's MyGreenhouse fixture variants (signed in: fields appear after a delay; not signed in: a dialog with an email input; no button): `prefill` returns `mygreenhouse` / `""` / `""`, the dialog is closed without typing, values are read back per type; Dataiku's "LinkedIn URL" / "Github URL" get LINKEDIN / GITHUB.
+- **Requirements:** F-31, F-34.
+
+### 2.4 Lane V: vault, accounts, mail, Workday (moved into M20 by D-70)
+
+Branch `eng/M20-V-workday`. Starts in the first engineer slot freed by lane P or T (≤ 3 engineer lanes at once). V1 and V3 need no browser or store and can start at once; V2 and V4 need lane B merged (store methods); V5–V7 need WP-B4 (`browser.py`) merged and the S-5 fixtures (WP-F1); V4 needs lane B merged (it adds a V-block to `apply_flow.py`).
+
+| Own files | Shared-file blocks |
+|---|---|
+| `src/jobscraper/vault.py`, `src/jobscraper/apply/mail.py`, `src/jobscraper/apply/accounts.py`, `src/jobscraper/apply/ats/workday.py`, `src/jobscraper/apply/ats/workday_widgets.py` | `cli.py` V-block (`accounts`, `mail` verbs); `store.py` V-block (section `# ---------------- apply accounts (M20 lane V) ----------------` at the end of `Store`: `accounts_for_tenant`, `applied_on_tenant`, `annotate_answers`; no DDL change); `apply_flow.py` V-block (identity, mail, account rows; after lane B merged); `apply/ats/__init__.py` one `REGISTRY` line; `web/jobs.py` V-block (`mailtest` kind) |
+
+#### WP-V1 · Vault and Edge CSV export
+- **STATUS:** TODO
+- **Inputs:** AD §10.1 (API, generator), §10.3 CSV (columns, file name, zero-overwrite delete, 1-hour cleanup), §10.4; ADR-0002.
+- **Files:** `src/jobscraper/vault.py`.
+- **Depends on:** WP-A00.
+- **Lane:** V.
+- **Do:** `service_for`, `IMAP_SERVICE`, `get`/`put` (read-back compare, else `VaultError`)/`delete`, `generate(rules)` (one of each required class, `SystemRandom` shuffle, length clamped), `export_edge_csv(rows, out_dir)`, `delete_export(path)` (overwrite with zeros, unlink), `purge_stale_exports(data_dir, now)` (> 1 hour). Never log a secret.
+- **Verify:** `python tests/run_tests.py -k apply_vault`
+- **Done when:** generated passwords meet every rule over 1000 draws; put/get/delete round-trips through a fake keyring backend; the CSV has the header `name,url,username,password,note` and one row per account; stale exports are removed.
+- **Requirements:** F-35, NF-02.
+
+#### WP-V2 · CLI `accounts` (list, add, export-edge) and `mail set-password [--backup]`
+- **STATUS:** TODO
+- **Inputs:** AD §14.1 rows `accounts list`, `accounts add`, `accounts export-edge [--confirm]`, `mail set-password [--backup]`; §10.4; §11.5.
+- **Files:** `src/jobscraper/cli.py` (V-block).
+- **Depends on:** WP-V1; lane B merged (`upsert_account`/`accounts` from WP-B1 reach `personal` only then). The `mail set-password` half may land first.
+- **Lane:** V.
+- **Do:** `cmd_accounts` (`list`; `add --url --email` with `getpass`, tenant via the Workday `match_url` — import `apply.ats.workday` lazily; until WP-V5 lands, the AD §9.4.1 regex A is enough; resets `signin_failed`/`exists_no_password` to `created`; `export-edge`, `--confirm`); `cmd_mail set-password [--backup]`.
+- **Verify:** `python tests/run_tests.py -k accounts_cli`
+- **Done when:** `accounts list` prints no password; `accounts add` writes the vault entry and the row (and resets a failed row); export writes the CSV and `--confirm` deletes it and stamps rows; `--backup` stores under the backup mailbox's username.
+- **Requirements:** F-35, F-36, F-40, NF-02.
+
+#### WP-V3 · IMAP mail watcher, two mailboxes, `mail test`, `mailtest` kind
+- **STATUS:** TODO (real-mailbox check: owner task Q-14 / S-4, done inside WP-S5)
+- **Inputs:** AD §11.1 (EXAMINE only, PEEK, SINCE window, sender/link domain rules, code extraction, polling, logging), §11.3, §11.5 (mailbox per address, `to_addr` filter), §14.1 `mail test [--backup] [--find-from]`, §14.2 `mailtest`.
+- **Files:** `src/jobscraper/apply/mail.py`, `src/jobscraper/cli.py` (V-block), `src/jobscraper/web/jobs.py` (V-block).
+- **Depends on:** WP-V1, WP-F4.
+- **Lane:** V.
+- **Do:** `MailWatcher.wait_for(..., to_addr=None)`, `test_connection`, `employer_domain(careers_url)`, `mailbox_for(address, profile, settings) -> (host, port, username) | None` (AD §11.5), `mail test`, kind `mailtest`.
+- **Verify:** `python tests/run_tests.py -k apply_mail`
+- **Done when:** against the fake `IMAP4_SSL`: only `select(..., readonly=True)` and `FETCH … BODY.PEEK[]`; a foreign-domain link is never returned; a code is extracted with the adapter pattern; `to_addr` keeps only the backup address's message; the backup address without `apply.mail_backup` maps to the main mailbox; timeout raises `email_verification_timeout`.
+- **Requirements:** F-36, NF-02.
+
+#### WP-V4 · Identity, accounts and mail in the orchestrator
+- **STATUS:** TODO
+- **Inputs:** AD §10.5 (`choose_identity` rules 1–4, the `already_registered` branch, one backup retry, `signin_failed` never retried), §10.2 (vault write before the sign-up click; outcomes; field-error rollback; exception keeps both), §4.1 (incl. `signing_up → signing_up`), §4.2 (Greenhouse code after Submit, one re-submit), §11.2, §11.5, §12.4.
+- **Files:** `src/jobscraper/apply/accounts.py`, `src/jobscraper/apply_flow.py` (V-block), `src/jobscraper/store.py` (V-block: `accounts_for_tenant`, `applied_on_tenant`, `annotate_answers`).
+- **Depends on:** WP-V1, WP-V3, WP-P8, lane B merged (WP-B11 included).
+- **Lane:** V.
+- **Do:** `choose_identity` (pure); the account-wall branch (`ctx.email` and `ResolveContext.account_email` = the identity); sign-up with §10.2 order and the backup retry; `verifying_email` via `MailWatcher` on the identity's mailbox with `to_addr`; `ctx.applied_on_tenant`; review notes through `annotate_answers`; Greenhouse `code_required` with `code_resubmits ≤ 1`.
+- **Verify:** `python tests/run_tests.py -k apply_flow_accounts`
+- **Done when:** with fakes: every `choose_identity` rule and both login-failed details; `already_registered` on the primary → one backup sign-up (vault entry for the primary deleted, row `exists_no_password`); on the backup too → `login_failed`; a `signin_failed` row → `login_failed` without a sign-in click; the vault entry exists before `sign_up`; a sign-up field error deletes the vault entry and the row; an exception after the sign-up click keeps both (`unknown`); no mailbox → `mail_not_set_up` before Submit and `submitted_unconfirmed` after it.
+- **Requirements:** F-35, F-36, F-37, NF-02, NF-06.
+
+#### WP-V5 · Workday: tenant, open and the Apply choice, account wall, sign in / sign up
+- **STATUS:** TODO after WP-F1 (S-5 recordings).
+- **Inputs:** AD §9.4 checklist items 1–4, §9.4.1, §9.4.2 (entry rule), §9.4.3 (forms, outcomes incl. `already_registered`, one sign-in submit), §9.4.4, §9.4.12; contracts v3 `WorkdayEntry`, `SignUpOutcome`.
+- **Files:** `src/jobscraper/apply/ats/workday.py`, `src/jobscraper/apply/ats/__init__.py`.
+- **Depends on:** WP-F1, WP-B4.
+- **Lane:** V.
+- **Do:** first check each S-5-marked selector this WP uses against the recordings and list confirmed/differing ids in the handoff (the recording wins); then `match_url` (forms A and B, canonical host), `tenant_from_company`, `open` (apply button, entry rule, `/apply/applyManually` fallback, `ctx.prefill`), `account_wall`, `sign_in`, `sign_up`, `enter_code`, `prefill`, constants; register `"workday"`.
+- **Verify:** `python tests/run_tests.py -k workday_account`
+- **Done when:** on the recorded pages served locally: both URL forms give the same tenant/vault service and agree with `parse_workday`; the entry rule picks "Use My Last Application" only with `applied_on_tenant`, never "Autofill with Resume"; sign-in and sign-up fill the right controls; each sign-up outcome is classified, including `already_registered` on the hand-built page.
+- **Requirements:** F-31, F-34, F-35.
+
+#### WP-V6 · Workday widgets
+- **STATUS:** TODO after WP-F1.
+- **Inputs:** AD §9.4 checklist items 7–10, §9.4.7 (every helper, the one allowed Enter, date sections by role, panels).
+- **Files:** `src/jobscraper/apply/ats/workday_widgets.py`.
+- **Depends on:** WP-F1, WP-B4.
+- **Lane:** V.
+- **Do:** `prompt_select`, `prompt_options`, `fill_date`, `panels`/`add_panel`/`delete_panel`, each with read-back; confirm the selectors on the recordings first.
+- **Verify:** `python tests/run_tests.py -k workday_widgets`
+- **Done when:** on the recorded my_experience and questions pages (with the tester's minimal script stubs for search and add/delete): a two-level how-heard prompt picks the leaf, dates fill in either section order, panels add and delete to the profile's count.
+- **Requirements:** F-34.
+
+#### WP-V7 · Workday wizard: steps, named and generic fields, review cross-check, submit, confirmation
+- **STATUS:** TODO after WP-V5, WP-V6.
+- **Inputs:** AD §9.4 checklist items 5, 6, 11–13; §9.4.5 (step id by container then title, `custom_<slug>`, guards), §9.4.6 (`read_values`), §9.4.8 (every named step; my_experience resume replace + exact section rebuild), §9.4.9 (adapter side: flagged labels in `StepResult.errors`), §9.4.10 (review parse, `review.json`, mismatch rules), §9.4.11, §6 Workday keys.
+- **Files:** `src/jobscraper/apply/ats/workday.py`.
+- **Depends on:** WP-V5, WP-V6, WP-V4 (for the end-to-end run).
+- **Lane:** V.
+- **Do:** confirm the step and field selectors on the recordings; `read_step`, `read_values`, `fill`, `next_step`, `submit`, `after_submit`, `visible_errors`.
+- **Verify:** `python tests/run_tests.py -k workday_steps`
+- **Done when:** on each tenant's recordings in dry-run mode the adapter reaches `review` with every field filled and read back; an unknown step title is read generically; a flagged required field yields `StepResult.errors`; a review value differing on a required field raises `validation_error`; the hand-built `confirm.html` yields `confirmed:*`.
+- **Requirements:** F-31, F-34, F-37, F-38, F-39.
+
 ## 3. M20 integration and gate (Coordinator)
 
 #### WP-I1 · M20 merge order and gate run
-- **STATUS:** BLOCKED (A-3) for gate step 7 only; steps 1–6 TODO.
+- **STATUS:** TODO (A-3 answered by D-68: `apply show`).
 - **Inputs:** PRD §8 M20 gate; AD §19.1; TD §18; `05_workflow.md`; CLAUDE.md git rules.
 - **Files:** none written by this WP besides `instructions/**` status (Coordinator scope).
 - **Depends on:** all M20 WPs.
@@ -255,93 +452,29 @@ The architect's split (AD §19.1, TD §18) with one planner change: **`apply/pla
   2. Data and fixtures: WP-A01, TB WP-T00 (researcher), WP-A02, TB WP-T01 (tester) → `personal`.
   3. Lane P (WP-P1…P6) → `personal`.
   4. Lane T (TB WP-T1…T8) → `personal` (it depends on WP-P1/P2 already there).
-  5. Lane B rebased on `personal`; WP-B9 on lane B; then lane B → `personal`. `store.py`, `cli.py`, `config.py`, `config/config.yaml`, `requirements.txt`, `web/jobs.py`: keep every lane's block per §2.1; `SCHEMA_VERSION` = 3 exactly once.
+  5. Lane B rebased on `personal`; WP-B9, B10, B11, B12 on lane B; then lane B → `personal`. `store.py`, `cli.py`, `config.py`, `config/config.yaml`, `requirements.txt`, `web/jobs.py`: keep every lane's block per §2.1; `SCHEMA_VERSION` = 3 exactly once.
+  5a. (D-70) WP-S5 → WP-F1 (tester) → `personal`; lane V (V1–V3 may merge early; V4–V7 after lane B) rebased on `personal` → `personal`. Owner task Q-24 (`apply open-profile`, MyGreenhouse sign-in) after lane B merges, then WP-S6 and the WP-B12 confirmation.
   6. Owner task Q-13: the owner copies `config/applicant.example.yaml` to `data/applicant.yaml`, fills it, and gives the application email; `python -m jobscraper applicant check` exits 0.
-  7. **Gate:** the owner picks 5 open Greenhouse postings; in the main checkout with a copy of the DB (`JOBSCRAPER_DB=<copy>`), run `python -m jobscraper apply <id1> <id2> <id3> <id4> <id5> --dry-run`; each ends `ready_to_submit` or a correct reason code; the owner reads each attempt's answers (how: A-3) and finds no wrong answer. Then, **only when the owner triggers it**, the owner runs `python -m jobscraper apply <job_id>` in the main checkout against the live DB with `apply.mode: auto`; it ends `submitted` and the role shows as applied ("Applied by JobScraper") in Applications. The Coordinator never clicks Submit or runs the real submission.
+  7. **Gate (D-70):** (a) Greenhouse: the owner picks 5 open Greenhouse postings; in the main checkout with a copy of the DB (`JOBSCRAPER_DB=<copy>`), `python -m jobscraper apply <id1> … <id5> --dry-run`; each ends `ready_to_submit` or a correct reason code, at least one through MyGreenhouse autofill (`apply show` lists `mygreenhouse` sources) with the tailored resume attached. (b) Workday: Workday dry runs at the 2 owner-approved employers end `ready_to_submit` with no review mismatch; then the owner (who approved automatic submission there, D-70) runs `python -m jobscraper apply <job_id>` for each with `apply.mode: auto` against the live DB; each ends `submitted` (or `submitted_unconfirmed` resolved by the owner) and shows "Applied by JobScraper"; the first saves `confirm.html` for the tester. (c) The owner reads every attempt with `python -m jobscraper apply show <id>` and finds no wrong answer. The Coordinator never clicks Submit or runs a real submission.
 - **Verify:** `python tests/run_tests.py`
 - **Done when:** the suite is green on `personal`, the 5 dry-run outcomes and the owner's audit verdict are recorded in `02_status.md`, the owner's submission ended `submitted`, NF-07 timings noted (attempt ≤ 4 min, tailoring ≤ 10 s deterministic).
-- **Requirements:** PRD §8 M20 gate: F-10, F-20, F-21, F-22 (swaps), F-23, F-31–F-34, F-37–F-39; NF-07, NF-08.
+- **Requirements:** PRD §8 M20 gate (re-scoped by D-70): F-10, F-11, F-20, F-21, F-22 (swaps), F-23, F-31–F-39; NF-02, NF-06, NF-07, NF-08.
 
 ## 4. M21 lanes (MVP)
 
-At most 3 engineer lanes run at once (CLAUDE.md rule 6). Slots: **V** and **W** start at once after M20; **L** starts at once and, when done, its slot runs the small **tailor lane TL** (TB §4: LLM JD-term extraction only; by D-67 the LLM bullet and summary rewrite moved to M22).
+At most 3 engineer lanes run at once (CLAUDE.md rule 6). Slots: **W** and **L** start at once after M20; when L is done its slot runs the small **tailor lane TL** (TB §4: LLM JD-term extraction only; by D-67 the LLM bullet and summary rewrite moved to M22). Lane V moved into M20 (D-70, §2.4); only `apply/edge_save.ps1` (the Edge sync route) remains for M21, as a W-lane task when the owner chooses the sync route.
 
 | Lane | Branch | Own files | Shared-file blocks |
 |---|---|---|---|
-| **V** vault, accounts, mail, Workday | `eng/M21-V-workday` | `src/jobscraper/vault.py`, `src/jobscraper/apply/mail.py`, `src/jobscraper/apply/edge_save.ps1`, `src/jobscraper/apply/ats/workday.py`, `src/jobscraper/apply_flow.py` (sole owner in M21) | `cli.py` V-block (`accounts`, `mail` verbs); `store.py` — none (M20 methods suffice); `apply/ats/__init__.py` one `REGISTRY` line; `web/jobs.py` V-block (`mailtest` kind) |
 | **L** Lever + Ashby | `eng/M21-L-lever-ashby` | `src/jobscraper/apply/ats/lever.py`, `src/jobscraper/apply/ats/ashby.py` | `apply/ats/__init__.py` two `REGISTRY` lines |
 | **W** web API + UI | `eng/M21-W-web` | `src/jobscraper/web/routers/{applicant,apply,tailor}.py`, `src/jobscraper/applicant.py` (M21: `from_resume`), `web/src/**` new files and the tabs named per WP | `cli.py` W-block (`applicant init` subcommand inside `cmd_applicant`); `web/src/api.js` W-block |
-| **F** fixtures (tester) | `test/M21-fixtures` | `tests/fixtures/{lever,ashby,workday,mail}/**`, the §6 M21 test files | — |
+| **F** fixtures (tester) | `test/M21-fixtures` | `tests/fixtures/{lever,ashby}/**`, the §6 M21 test files (Workday and mail fixtures moved to M20: WP-F1, WP-F4) | — |
 
 `web/routers/applications.py` (existing) gets one W-block (WP-W4). No M21 WP changes `store.py` (the M20 methods cover M21).
 
-### 4.1 Lane V: vault, accounts, mail, Workday
+### 4.1 Lane V
 
-#### WP-V1 · Vault and Edge CSV export
-- **STATUS:** TODO
-- **Inputs:** AD §10.1 (API, generator), §10.3 CSV (columns, file name, zero-overwrite delete, 1-hour cleanup), §10.4; ADR-0002.
-- **Files:** `src/jobscraper/vault.py`.
-- **Depends on:** M20 merged.
-- **Lane:** V.
-- **Do:** `service_for`, `IMAP_SERVICE`, `get`/`put` (read-back compare, else `VaultError`)/`delete`, `generate(rules)` (one of each required class, `SystemRandom` shuffle, length clamped), `export_edge_csv(rows, out_dir)`, `delete_export(path)` (overwrite with zeros, unlink), `purge_stale_exports(data_dir, now)` (> 1 hour). Never log a secret.
-- **Verify:** `python tests/run_tests.py -k apply_vault`
-- **Done when:** generated passwords meet every rule over 1000 draws; put/get/delete round-trips through a fake keyring backend; the CSV has the header `name,url,username,password,note` and one row per account; stale exports are removed.
-- **Requirements:** F-35 (generator, storage, Edge CSV, Copy-password source), NF-02.
-
-#### WP-V2 · CLI `accounts` and `mail set-password`
-- **STATUS:** TODO
-- **Inputs:** AD §14.1 rows `accounts list`, `accounts export-edge [--confirm]`, `mail set-password`.
-- **Files:** `src/jobscraper/cli.py` (V-block).
-- **Depends on:** WP-V1.
-- **Lane:** V.
-- **Do:** `cmd_accounts` (`list`, `export-edge`, `export-edge --confirm`), `cmd_mail` (`set-password` with `getpass`, host/user from settings or `--host/--user`; `test` arrives in WP-V3).
-- **Verify:** `python tests/run_tests.py -k accounts_cli`
-- **Done when:** `accounts list` prints no password; export writes the CSV and prints the Edge import steps; `--confirm` deletes it and stamps `exported_to_edge_at`.
-- **Requirements:** F-35, F-40 (accounts list), NF-02.
-
-#### WP-V3 · IMAP mail watcher, `mail test`, `mailtest` job kind
-- **STATUS:** TODO (real-mailbox check needs owner task Q-14 / spike S-4)
-- **Inputs:** AD §11.1 (EXAMINE only, PEEK, SINCE window, sender/link domain rules, code extraction, polling, logging), §11.3, §14.1 `mail test [--find-from]`, §14.2 `mailtest`.
-- **Files:** `src/jobscraper/apply/mail.py`, `src/jobscraper/cli.py` (V-block), `src/jobscraper/web/jobs.py` (V-block).
-- **Depends on:** WP-V1, WP-F4 (fake IMAP fixtures).
-- **Lane:** V.
-- **Do:** `MailWatcher.wait_for(...)`, `test_connection`, `employer_domain(careers_url)` (AD §11.3), `mail test [--find-from DOMAIN]` (prints only "found from <domain> at <time>"), kind `mailtest` → `["mail","test"]`.
-- **Verify:** `python tests/run_tests.py -k apply_mail`
-- **Done when:** against a fake `IMAP4_SSL`: only `select(..., readonly=True)` and `FETCH ... BODY.PEEK[]` are issued (no STORE/COPY/MOVE/EXPUNGE/APPEND); a link on a foreign domain is never returned; a code is extracted with the adapter pattern; timeout raises `email_verification_timeout`. Then (owner task S-4) `python -m jobscraper mail test` prints "Connected, read-only: N messages in INBOX".
-- **Requirements:** F-36, NF-02.
-
-#### WP-V4 · Accounts and mail in the orchestrator
-- **STATUS:** TODO
-- **Inputs:** AD §4.1 rows opening → signing_in/signing_up, signing_up → …, verifying_email → …, submitting → verifying_email; §4.2 (Greenhouse code after Submit, one re-submit); §10.2 (order: vault write **before** sign-up submit; outcomes; field-error rollback; exception keeps both); §11.2 (`mail_not_set_up` before Submit).
-- **Files:** `src/jobscraper/apply_flow.py`.
-- **Depends on:** WP-V1, WP-V3.
-- **Lane:** V.
-- **Do:** the account-wall branch (vault lookup by `tenant.vault_service` + profile email; sign in, or the AD §10.2 seven steps), `verifying_email` via `MailWatcher` with `adapter.mail_domains` + employer domain, link opened in the attempt tab, or `enter_code`; `login_failed` sets `signin_failed`; Greenhouse `code_required` path with `code_resubmits ≤ 1`.
-- **Verify:** `python tests/run_tests.py -k apply_flow_accounts`
-- **Done when:** with fakes: the vault entry exists before `sign_up` is called; a sign-up field error deletes the vault entry and the row; an exception after the sign-up click keeps both (`unknown`); no mailbox → `mail_not_set_up` before Submit and `submitted_unconfirmed` after it; the code re-submit happens at most once.
-- **Requirements:** F-35, F-36, F-37 (code after Submit), NF-02, NF-06.
-
-#### WP-V5 · Workday: recorded-page selector check, tenant, account wall, sign in/up
-- **STATUS:** TODO
-- **Inputs:** AD §9.4 rows Tenant, Open, Account wall, Sign in, Sign up, Password rules, Mail; AD §20.1 (ids marked K are confirmed on a fixture first; the fixture wins and the engineer notes any difference in the handoff).
-- **Files:** `src/jobscraper/apply/ats/workday.py`, `src/jobscraper/apply/ats/__init__.py`.
-- **Depends on:** WP-F1 (recorded Workday pages), WP-V4.
-- **Lane:** V.
-- **Do:** first, check every AD §9.4 selector used by this WP against the recorded pages and list confirmed/differing ids in the handoff; then `match_url`/`tenant_from_company` (re-implemented `parse_workday` regex), `open` (apply button, `applyManually`, never autofill/last application), `account_wall`, `sign_in`, `sign_up` (outcomes `signed_in`/`verify_email`/`sign_in`/`login_failed`), `password_rules`, `mail_domains`; register `"workday"`.
-- **Verify:** `python tests/run_tests.py -k workday_account`
-- **Done when:** on the recorded sign-in/create-account fixtures served locally, sign-in and sign-up fill the right controls and classify each outcome; an "already in use" page → `login_failed` with the AD §4.4 detail.
-- **Requirements:** F-31, F-35, F-34.
-
-#### WP-V6 · Workday wizard steps, submit, confirmation
-- **STATUS:** TODO
-- **Inputs:** AD §9.4 rows Steps, my_information, my_experience, questions_*, voluntary_disclosures, self_identify, Next/Submit, Confirmation, Errors; §6 Workday keys.
-- **Files:** `src/jobscraper/apply/ats/workday.py`.
-- **Depends on:** WP-V5.
-- **Lane:** V.
-- **Do:** first check the step-container and field ids against the recorded step pages (same rule as WP-V5); then `read_step` per step (unknown container → `page_unrecognised`), `fill` per AD (two-level how-heard listbox; my_experience: upload, wait for parse, delete pre-filled panels, add one panel per profile entry as tier-1 answers with `source = "field_map:experience[i].<key>"`; unmatched school typeahead on a required field → `unanswerable_required` "school"), `next_step`, `submit` (the review page's Next), `after_submit` (thankYouMessage / text / candidate-home fallback), `visible_errors`.
-- **Verify:** `python tests/run_tests.py -k workday_steps`
-- **Done when:** on the recorded wizard fixtures the adapter reaches `review` with every field filled and read back, and the confirmation fixture yields `confirmed:*`.
-- **Requirements:** F-31, F-34, F-37, F-38.
+Moved into M20 by D-70: see §2.4 (WP-V1…V7).
 
 ### 4.2 Lane L: Lever and Ashby
 
@@ -472,16 +605,7 @@ Each Vue WP also adds its calls to `web/src/api.js` (W-block at the end of the f
 
 ### 4.4 Lane F: M21 fixtures (tester)
 
-#### WP-F1 · Record Workday pages
-- **STATUS:** TODO
-- **Inputs:** AD §9.4; CLAUDE.md rule 12 (read public pages only; no account creation, no submission).
-- **Files:** `tests/fixtures/workday/` (sign-in, create-account, each wizard step container, review, thank-you: saved DOM with scripts removed and `data-automation-id` attributes kept; the account and later steps may be hand-built from public automation references where they cannot be reached without an account, marked as such in a `README.txt`).
-- **Depends on:** nothing (M21 start).
-- **Lane:** F.
-- **Do:** record one real public Workday posting's apply entry pages headed in Edge, dry-run only; scrub any personal value; add the WP-V5/V6 tests.
-- **Verify:** `python -c "import pathlib; f=list(pathlib.Path('tests/fixtures/workday').glob('*.html')); s=' '.join(p.read_text(encoding='utf-8') for p in f); miss=[i for i in ['signInSubmitButton','createAccountLink','legalNameSection_firstName','bottom-navigation-next-button','reviewJobApplicationPage'] if i not in s]; assert not miss, miss; print(len(f),'pages ok')"`
-- **Done when:** the command prints `N pages ok`.
-- **Requirements:** F-31, F-35 (test basis).
+WP-F1 (Workday fixtures) moved into M20 (§1), built from the S-5 recordings.
 
 #### WP-F2 · Record a Lever page and an Ashby page
 - **STATUS:** TODO
@@ -494,16 +618,7 @@ Each Vue WP also adds its calls to `web/src/api.js` (W-block at the end of the f
 - **Done when:** the command prints `ok`.
 - **Requirements:** F-31.
 
-#### WP-F4 · Fake IMAP fixtures
-- **STATUS:** TODO
-- **Inputs:** AD §11.1.
-- **Files:** `tests/fixtures/mail/*.eml` (synthetic Workday verification link, Greenhouse code, a foreign-domain phishing-style link), the WP-V3 test.
-- **Depends on:** nothing.
-- **Lane:** F.
-- **Do:** synthetic messages only; a fake `IMAP4_SSL` class in the test that records every command.
-- **Verify:** `python -c "from pathlib import Path; f=list(Path('tests/fixtures/mail').glob('*.eml')); assert len(f)>=3; print(len(f),'messages')"`
-- **Done when:** the command prints the count.
-- **Requirements:** F-36.
+WP-F4 (fake IMAP fixtures) moved into M20 (§1).
 
 ### 4.5 M21 integration and gate (Coordinator)
 
@@ -511,18 +626,24 @@ Each Vue WP also adds its calls to `web/src/api.js` (W-block at the end of the f
 - **STATUS:** TODO
 - **Inputs:** PRD §8 M21 gate, §3 G1/G2; TB WP-I-T (tailor gate items).
 - **Files:** none (Coordinator records status).
-- **Depends on:** all M21 WPs; owner task Q-14 (Gmail app password) before the Workday gate attempts.
+- **Depends on:** all M21 WPs (Workday and mail were proven at the M20 gate).
 - **Lane:** Coordinator (`int/M21`).
-- **Do:** merge order: lane F fixtures → lane L → lane V → lane W (after V, since WP-W3 needs `vault.py`) → lane TL (TB §4). Coordinator builds the SPA in the main checkout after W merges (`cd web; npm run build`) and commits the bundle. Full suites green after each merge. Gate (owner-triggered submissions only, `apply.mode: auto` set by the owner in Settings): 10 real applications submitted automatically across ≥ 3 ATSs including Workday; record per-ATS rates against G1 (≥ 70% Greenhouse/Lever/Ashby, ≥ 50% Workday) and G2 (every failure has reason, step, screenshot; 0 duplicates); tailoring golden A–C pass; NF-01 test passes; NF-07 timings recorded.
+- **Do:** merge order: lane F fixtures → lane L → lane W (`vault.py` is already on `personal` from M20) → lane TL (TB §4). Coordinator builds the SPA in the main checkout after W merges (`cd web; npm run build`) and commits the bundle. Full suites green after each merge. Gate (owner-triggered submissions only, `apply.mode: auto` set by the owner in Settings): 10 real applications submitted automatically across ≥ 3 ATSs including Workday; record per-ATS rates against G1 (≥ 70% Greenhouse/Lever/Ashby, ≥ 50% Workday) and G2 (every failure has reason, step, screenshot; 0 duplicates); tailoring golden A–C pass; NF-01 test passes; NF-07 timings recorded.
 - **Verify:** `python tests/run_tests.py`
 - **Done when:** the suite and `cd web; npx vitest run` are green on `personal`, and the gate numbers are recorded in `02_status.md`.
 - **Requirements:** PRD §8 M21 gate: F-11, F-22–F-25, F-30, F-35–F-37, F-40, NF-01–NF-09; G1, G2.
 
 ## 5. Critical path
 
-M19 merge (Q-12) → WP-A00 + designs/plan merged → **WP-P1** (backend) → lane T master parse (TB WP-T5) and lane P resolver (P2…P6) in parallel with lane B (B1…B8 on stubs) → merge P, then T → **WP-B9** → owner fills `data/applicant.yaml` (Q-13) → **M20 gate** (WP-I1) → M21: lane V (V1→V3→V4→V5→V6, the longest chain, plus owner task Q-14/S-4) ∥ lane W ∥ lane L → TL → **M21 gate** (WP-I2).
+**M20 (D-70), two chains that meet at the gate:**
 
-Longest M20 chain: A00 → P1 → P2 → P3 → P4 → P5 → P6 → (merge) → B9 → I1 (lane B finishes B1…B8 in parallel). Longest M21 chain: lane V (6 WPs) then the Workday gate attempts.
+- **Greenhouse chain:** WP-A00 + designs merged → WP-P1 → lane P (P2…P8) ∥ lane T ∥ lane B (B1…B8 on stubs, then B10, B11) → merge P, then T → WP-B9 → lane B merged → owner task Q-24 (`apply open-profile`) → WP-S6 → WP-B12 confirmation.
+- **Workday chain (longest):** owner gives email + Gmail app password (Q-14) → **WP-S5** (real flow at 2 employers, to Review) → **WP-F1** (scrubbed fixtures) → WP-V5 ∥ WP-V6 (both also need WP-B4) → **WP-V7**; in parallel V1 → V3 (needs WP-F4) → **WP-V4** (needs lane B merged and WP-P8) → lane V merged.
+- Then owner fills `data/applicant.yaml` incl. `backup_email` (Q-13) → **M20 gate** (WP-I1 step 7: Greenhouse dry runs incl. MyGreenhouse; Workday dry runs then the owner's 2 real submissions).
+
+Longest M20 chain: Q-14 → S5 → F1 → V6 → V7 → (V4 merged) → I1. It is gated by the owner's email/app password and the 2 employer choices, so S-5 should start the moment those arrive; V1–V3 and lane B proceed meanwhile.
+
+**M21:** lane W ∥ lane L → TL → **M21 gate** (WP-I2).
 
 ## 6. Tests and fixtures this plan relies on (tester; coordinated in `comms/outbox/planner.md`)
 
@@ -541,12 +662,17 @@ Longest M20 chain: A00 → P1 → P2 → P3 → P4 → P5 → P6 → (merge) →
 | B7 | `tests/test_apply_flow.py` (`apply_flow`) | fake adapter, fake browser |
 | B8 | `tests/test_apply_cli.py` (`apply_cli`) | fake flow |
 | B9 | `tests/test_apply_e2e.py` (`apply_e2e`) | all of the above + `tests/fixtures/tailor/master_a.json` |
+| A03, P7 | `tests/test_apply_resolve_rules.py` (`apply_resolve_rules`): `yes_if` cases (AD §7.3.3 worked examples) | `config/questions.yaml`, synthetic profile |
+| P8 | `tests/test_apply_contracts.py` profile/template oracles + backup-email cases | `applicant.sample.yaml` (+ `backup_email`) |
+| B10 | `tests/test_apply_cli.py` (`apply_cli`): `open-profile` | fake session factory |
+| B11 | `tests/test_apply_flow.py` (`apply_flow`): KEEP / OVERWRITE tables, planning deferral, corrective retry | fake adapter with `prefill`/`read_values` |
+| B12 | `tests/test_apply_greenhouse_fill.py` (`greenhouse_fill`): MyGreenhouse variants; `tests/test_apply_greenhouse_plan.py`: §9.1.2 label rule | `form.html` variants (button + delayed fill; sign-in dialog; none), `tests/fixtures/apply/greenhouse/mygreenhouse/` after S-6 |
 | V1 | `tests/test_apply_vault.py` (`apply_vault`) | fake keyring backend |
 | V2 | `tests/test_accounts_cli.py` (`accounts_cli`) | fake keyring |
-| V3 | `tests/test_apply_mail.py` (`apply_mail`) | `tests/fixtures/mail/*.eml` |
-| V4 | `tests/test_apply_flow_accounts.py` (`apply_flow_accounts`) | fakes |
-| V5, V6 | `tests/test_workday_account.py` (`workday_account`), `tests/test_workday_steps.py` (`workday_steps`) | `tests/fixtures/workday/` |
-| L1, L2 | `tests/test_apply_lever.py` (`apply_lever`), `tests/test_apply_ashby.py` (`apply_ashby`) | `tests/fixtures/lever/`, `tests/fixtures/ashby/` |
+| V3 | `tests/test_apply_mail.py` (`apply_mail`) | `tests/fixtures/mail/*.eml` (incl. the backup-address message) |
+| V4 | `tests/test_apply_flow_accounts.py` (`apply_flow_accounts`) | fakes (identity rules, backup retry, mailbox per address) |
+| V5, V6, V7 | `tests/test_workday_account.py` (`workday_account`), `tests/test_workday_widgets.py` (`workday_widgets`), `tests/test_workday_steps.py` (`workday_steps`) | `tests/fixtures/apply/workday/<tenant>/` (S-5 recordings, scrubbed; hand-built `confirm.html`, `already_registered.html`) |
+| L1, L2 | `tests/test_apply_lever.py` (`apply_lever`), `tests/test_apply_ashby.py` (`apply_ashby`) | `tests/fixtures/lever/`, `tests/fixtures/ashby/` (M21) |
 | W1–W4 | `tests/test_web_applicant.py` (`web_applicant`), `tests/test_web_apply_attempts.py` (`web_apply_attempts`), `tests/test_web_apply_settings.py` (`web_apply_settings`), `tests/test_web_tailor.py` (`web_tailor`) | FastAPI TestClient, copied fixture DB |
 | W5–W9 | `web/tests/ApplicationDetails.test.js`, `AttemptPanel.test.js`, `TailorPanel.test.js`, `AuditView.test.js`, `ApplySettings.test.js` | JSON payloads |
 
@@ -556,19 +682,19 @@ Note: `-k apply_flow` also selects `test_apply_flow_accounts.py` once it exists;
 
 | Req | WPs |
 |---|---|
-| F-10 | P2, P3, P5, W1, W5 |
-| F-11 | P2, P3, W1, W5 |
+| F-10 | P2, P3, P5, P8, W1, W5 |
+| F-11 | P2, P3, P8, W1, W5 |
 | F-12 (lookup only; M22 writes) | P4 |
 | F-30 | B1, B7, B8, W2, W6 |
-| F-31 | B5, V5, V6, L1, L2 |
-| F-32 | P1, P4, P5, P6, B9 |
-| F-33 | P4, P5, B9 |
-| F-34 | B4, B6, B7, B9, V5, V6, L1, L2 |
-| F-35 | V1, V2, V4, V5, W3, W9 |
-| F-36 | V3, V4, W3, W9 |
-| F-37 | B1, B6, B7, B8, V4, V6, W2, W6 |
-| F-38 | B3, B6, B7, V6, W2, W6, W8 |
-| F-39 | B1, B7, B9, W2, W8 |
+| F-31 | B5, B12, S5, F1, V5, V7, L1, L2 |
+| F-32 | P1, P4, P5, P6, P7, A03, B9, B11 |
+| F-33 | P4, P5, P7, A03, B9 |
+| F-34 | B4, B6, B7, B9, B10, B11, B12, S6, V5, V6, V7, L1, L2 |
+| F-35 | S5, V1, V2, V4, V5, P8, B10, W3, W9 |
+| F-36 | S5, F4, V3, V4, W3, W9 |
+| F-37 | B1, B6, B7, B8, V4, V7, I1 (real Workday submissions), W2, W6 |
+| F-38 | B3, B6, B7, B11, V7, W2, W6, W8 |
+| F-39 | B1, B7, B9, B11, V7 (review cross-check), W2, W8 |
 | F-40 | B2, B8, V2, W3, W9 |
 | NF-01 | A00, A02, P2 |
 | NF-02 | P3, P6, B7, V1–V4, W3, W9 |
@@ -580,7 +706,7 @@ Note: `-k apply_flow` also selects `test_apply_flow_accounts.py` once it exists;
 | NF-08 | §0 dev rule, I1 |
 | NF-09 | P3, B7, B8 |
 
-Tailor requirements (F-20–F-25) are covered in TB §6.
+Tailor requirements (F-20–F-25) are covered in TB §6. M20 now covers F-35 and F-36 (were M21) and the Workday half of F-31/F-34/F-37 (D-70).
 
 ## 8. Open questions to the architect (raised in `comms/outbox/planner.md`; not invented here)
 

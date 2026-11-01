@@ -235,6 +235,26 @@ CREATE TABLE IF NOT EXISTS answer_memory (
     uses INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (label_norm, field_type, ats)
 );
+
+-- M20 tailor (tailor_design §11)
+CREATE TABLE IF NOT EXISTS tailored (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    job_id TEXT NOT NULL,
+    inputs_hash TEXT NOT NULL,             -- §11.2
+    resume_hash TEXT NOT NULL, jd_hash TEXT NOT NULL,
+    mode TEXT NOT NULL,                    -- deterministic | llm
+    model TEXT, options_json TEXT,         -- {"temperature":0.25,"top_k":20,"seed":7,"template":1}
+    status TEXT NOT NULL CHECK (status IN ('draft', 'sent', 'failed')),
+    created_at TEXT NOT NULL, sent_at TEXT, files_deleted_at TEXT,
+    docx_name TEXT, docx_sha256 TEXT, pdf_name TEXT, pdf_sha256 TEXT,
+    coverage_before REAL, coverage_after REAL, title_match INTEGER,
+    terms_json TEXT,                       -- [{term, canonical, required, source, status, variant, via, related, attested}]
+    knockouts_json TEXT,
+    changes_json TEXT,                     -- BulletChange list + summary before/after; cleared when files are purged
+    issues_json TEXT,
+    error TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_tailored_job ON tailored(job_id, id);
 """
 
 # The one status that does not mean "an application went out". Moving to any
@@ -1416,6 +1436,92 @@ class Store:
                               (now, i))
         self.conn.commit()
 
+    # ---------------- tailored (M20) ----------------
+
+    _TAILORED_COLS = (
+        "job_id", "inputs_hash", "resume_hash", "jd_hash", "mode", "model", "options_json",
+        "status", "created_at", "sent_at", "files_deleted_at", "docx_name", "docx_sha256",
+        "pdf_name", "pdf_sha256", "coverage_before", "coverage_after", "title_match",
+        "terms_json", "knockouts_json", "changes_json", "issues_json", "error")
+
+    def add_tailored(self, row: dict[str, Any]) -> int:
+        """Insert one tailoring attempt (tailor_design §11.1); returns its id.
+        Unknown keys are ignored; `created_at` defaults to now."""
+        data = {k: row.get(k) for k in self._TAILORED_COLS if k in row}
+        data.setdefault("created_at", utcnow())
+        cur = self.conn.execute(
+            f"INSERT INTO tailored ({', '.join(data)}) VALUES ({', '.join('?' * len(data))})",
+            tuple(data.values()))
+        self.conn.commit()
+        return int(cur.lastrowid)
+
+    def get_tailored(self, tailored_id: int) -> Optional[dict[str, Any]]:
+        r = self.conn.execute("SELECT * FROM tailored WHERE id = ?", (tailored_id,)).fetchone()
+        return dict(r) if r else None
+
+    def latest_tailored(self, job_id: str) -> Optional[dict[str, Any]]:
+        r = self.conn.execute(
+            "SELECT * FROM tailored WHERE job_id = ? ORDER BY id DESC LIMIT 1", (job_id,)).fetchone()
+        return dict(r) if r else None
+
+    def current_tailored(self, job_id: str, inputs_hash: str,
+                         files_dir: Optional[Path] = None) -> Optional[dict[str, Any]]:
+        """The newest draft/sent row for these inputs whose files were not
+        purged (§11.2). With `files_dir` (the job's directory) the DOCX must
+        also be on disk with the recorded SHA-256."""
+        import hashlib
+        r = self.conn.execute(
+            """SELECT * FROM tailored
+                WHERE job_id = ? AND inputs_hash = ? AND status IN ('draft', 'sent')
+                  AND files_deleted_at IS NULL
+                ORDER BY id DESC LIMIT 1""", (job_id, inputs_hash)).fetchone()
+        if r is None:
+            return None
+        row = dict(r)
+        if files_dir is not None:
+            p = Path(files_dir) / (row["docx_name"] or "")
+            try:
+                if hashlib.sha256(p.read_bytes()).hexdigest() != row["docx_sha256"]:
+                    return None
+            except OSError:
+                return None
+        return row
+
+    def mark_tailored_sent(self, tailored_id: int, now: Optional[str] = None) -> None:
+        self.conn.execute("UPDATE tailored SET status = 'sent', sent_at = ? WHERE id = ?",
+                          (now or utcnow(), tailored_id))
+        self.conn.commit()
+
+    def tailored_to_purge(self, now: str, draft_days: float, sent_days: float,
+                          closed_statuses: Iterable[str]) -> list[dict[str, Any]]:
+        """Rows whose files are due for deletion (D-59): drafts older than
+        `draft_days`, and sent rows whose application has been in a closed
+        status (the latest transition to it, from app_events) for more than
+        `sent_days`. Rows already purged are not returned."""
+        closed = list(closed_statuses)
+        out = [dict(r) for r in self.conn.execute(
+            """SELECT * FROM tailored WHERE status = 'draft' AND files_deleted_at IS NULL
+                  AND created_at < ? ORDER BY id""", (shift(now, days=-float(draft_days)),))]
+        if closed:
+            marks = ", ".join("?" * len(closed))
+            out += [dict(r) for r in self.conn.execute(
+                f"""SELECT t.* FROM tailored t
+                      JOIN applications a ON a.job_id = t.job_id
+                     WHERE t.status = 'sent' AND t.files_deleted_at IS NULL
+                       AND a.status IN ({marks})
+                       AND (SELECT MAX(e.at) FROM app_events e
+                             WHERE e.job_id = t.job_id AND e.to_status = a.status) < ?
+                     ORDER BY t.id""",
+                (*closed, shift(now, days=-float(sent_days))))]
+        return out
+
+    def mark_tailored_purged(self, tailored_id: int, now: Optional[str] = None) -> None:
+        """Files are gone: stamp it and clear the bullet diff. The row stays."""
+        self.conn.execute(
+            "UPDATE tailored SET files_deleted_at = ?, changes_json = NULL WHERE id = ?",
+            (now or utcnow(), tailored_id))
+        self.conn.commit()
+
 
 # ---------------- apply (M20): the attempt state machine as plain strings ----------------
 #
@@ -1435,7 +1541,8 @@ ATTEMPT_TRANSITIONS: dict[str, frozenset[str]] = {
     "planning": frozenset({"opening", "failed"}),
     "opening": frozenset({"signing_in", "signing_up", "filling", "failed"}),
     "signing_in": frozenset({"verifying_email", "filling", "failed"}),
-    "signing_up": frozenset({"verifying_email", "signing_in", "filling", "failed"}),
+    # signing_up -> signing_up: the one backup-email retry (D-70, contract v3)
+    "signing_up": frozenset({"signing_up", "verifying_email", "signing_in", "filling", "failed"}),
     "verifying_email": frozenset({"signing_in", "filling", "submitting",
                                   "submitted_unconfirmed", "failed"}),
     "filling": frozenset({"filling", "submitting", "ready_to_submit", "failed"}),
