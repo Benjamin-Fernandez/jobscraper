@@ -1,0 +1,25 @@
+From: Workday <noreply@myworkday.com>
+To: Alex Testcase <alex.testcase@example.com>
+Subject: Verify your email address NOW
+Date: Mon, 02 Nov 2026 10:04:00 +0000
+Message-ID: <phishing_foreign_link@synthetic.test>
+MIME-Version: 1.0
+Content-Type: multipart/alternative;
+ boundary="===============5921685694124890035=="
+
+--===============5921685694124890035==
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: 7bit
+
+Your account will close. Verify your email address:
+https://acme-verify.evil.example/verify-account?u=alex
+
+--===============5921685694124890035==
+Content-Type: text/html; charset="utf-8"
+Content-Transfer-Encoding: quoted-printable
+MIME-Version: 1.0
+
+<p><a href=3D"https://acme-verify.evil.example/verify-account?u=3Dalex">Verif=
+y Email</a></p>
+
+--===============5921685694124890035==--
