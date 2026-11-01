@@ -38,7 +38,7 @@ from .profile import keywords, resume_ingest, titles
 from .scrape import discovery
 from .scrape.adapters import get_adapter, is_capped
 from .scrape.net import FetchError, HttpClient
-from .store import Store
+from .store import Store, utcnow
 
 log = logging.getLogger(__name__)
 
@@ -132,6 +132,9 @@ def run(cfg: Config, store: Store, *, dry_run: bool = False,
     can run the whole sequence without a network or a model.
     """
     rc = cfg.run
+    # The batch is stamped as of the run's start, not its end, so a 40-minute
+    # run does not push next cycle's due time 40 minutes later (C-7).
+    started = now or utcnow()
     say = print if verbose else (lambda *a, **k: None)
     resolve = resolver or discovery.resolve
 
@@ -176,7 +179,7 @@ def run(cfg: Config, store: Store, *, dry_run: bool = False,
         (f" + {len(probation)} on probation" if probation else "") +
         (" (dry run - nothing will be written)" if dry_run else ""))
     if not dry_run:
-        rep.run_no = store.start_run(at=now)
+        rep.run_no = store.start_run(at=started)
 
     own_client = client is None
     client = client or make_client(cfg)
@@ -339,7 +342,7 @@ def run(cfg: Config, store: Store, *, dry_run: bool = False,
 
         # ---- last: stamp the attempt and close the run ----
         if rep.status == "ok":
-            scheduler.mark_attempted(store, resolved, now=now)
+            scheduler.mark_attempted(store, resolved, now=started)
         if rep.message:
             # Why the run ended as it did (aborted_unhealthy, no profile), for
             # the Runs tab (C-4, audit G27).

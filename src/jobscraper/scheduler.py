@@ -1,7 +1,8 @@
 """Who is due to be scraped, and when.
 
-A company is due when it has never been scraped, or was last scraped more than
-`cycle_days` ago. Each run takes the `batch_size` most-neglected due companies.
+A company is due when it has never been scraped, or was last scraped `cycle_days`
+ago (less a short grace, see `grace_seconds`). Each run takes the `batch_size`
+most-neglected due companies.
 
 This replaces v1's global cursor. A cursor answers "how far through the list are
 we"; it cannot answer "has *this company* been checked in the past cycle",
@@ -27,9 +28,28 @@ from .store import TIME_FMT, Store, shift, utcnow
 SOON_DAYS = 7          # "due within 7 days" in the status report
 
 
+GRACE_HOURS = 12       # most a due test is allowed to look ahead
+GRACE_SHARE = 0.1      # ...and never more than this share of the cycle
+
+
+def grace_seconds(cycle_days: float) -> float:
+    """How early a company may come due again (C-7).
+
+    A weekly schedule starts its run at the same clock time, give or take a few
+    minutes. A company stamped at 03:05 last Monday must be due at 03:04 this
+    Monday, not wait a whole day for the next run. The share keeps a one-day
+    cycle from collapsing to twelve hours."""
+    return min(GRACE_HOURS * 3600, GRACE_SHARE * cycle_days * 86400)
+
+
 def cutoff(now: str, cycle_days: int) -> str:
     """Anything last scraped at or before this moment is due again."""
-    return shift(now, days=-cycle_days)
+    return shift(now, days=-cycle_days, seconds=grace_seconds(cycle_days))
+
+
+def next_due(last_scraped: str, cycle_days: int) -> str:
+    """When a company stamped at `last_scraped` becomes due (the inverse of `cutoff`)."""
+    return shift(last_scraped, days=cycle_days, seconds=-grace_seconds(cycle_days))
 
 
 @dataclass
@@ -46,7 +66,7 @@ def plan(store: Store, batch_size: int, cycle_days: int,
     if due:
         return Plan(due, None)
     oldest = store.schedule_counts(cutoff(now, cycle_days), now)["oldest_scrape"]
-    return Plan([], shift(oldest, days=cycle_days) if oldest else None)
+    return Plan([], next_due(oldest, cycle_days) if oldest else None)
 
 
 def mark_attempted(store: Store, companies: Iterable[WatchedCompany],
@@ -97,7 +117,7 @@ def status(store: Store, batch_size: int, cycle_days: int,
         now=now, enabled=counts["enabled"], due_now=counts["due_now"],
         due_soon=counts["due_soon"], never_scraped=counts["never_scraped"],
         quarantined=store.quarantined_companies(),
-        next_due_at=(shift(oldest, days=cycle_days)
+        next_due_at=(next_due(oldest, cycle_days)
                      if counts["due_now"] == 0 and oldest else None),
         runs_per_day=rate, runs_needed=needed, projected_done=done,
         required_runs_per_day=(counts["enabled"] / batch_size / cycle_days
