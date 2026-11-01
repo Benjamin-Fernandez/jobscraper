@@ -1,0 +1,33 @@
+# A tiny questions.yaml for the resolver oracles (format: apply_design.md §7.3.1).
+# Tests use this, NOT config/questions.yaml (researcher-owned, changes with real forms).
+version: 1
+questions:
+  - key: singapore_status.requires_sponsorship.SG
+    kind: bool
+    sensitive: false
+    synonyms: [require sponsorship, need sponsorship, visa sponsorship, require a visa sponsorship]
+    exclude: [united states, u s]
+  - key: singapore_status.authorised_to_work.SG
+    kind: bool
+    sensitive: false
+    synonyms: [authorised to work in singapore, authorized to work in singapore, legally eligible to work in singapore]
+  - key: singapore_status.residency_status
+    kind: enum
+    sensitive: true
+    synonyms: [residency status, citizenship status, singapore citizen or permanent resident]
+    value_map:
+      citizen: [singapore citizen, citizen]
+      pr: [permanent resident, singapore pr]
+      foreigner: [foreigner, work pass holder]
+  - key: availability.notice_period_days
+    kind: number
+    sensitive: false
+    synonyms: [notice period]
+  - key: pay.expected_salary
+    kind: salary
+    sensitive: false
+    synonyms: [expected salary, salary expectations, expected monthly salary]
+  - key: computed.experience_years
+    kind: number
+    sensitive: false
+    synonyms: [years of experience, years of relevant experience]

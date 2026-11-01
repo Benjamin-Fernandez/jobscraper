@@ -1,0 +1,8 @@
+Data Analyst
+Requirements:
+- SQL and Power BI
+- Excel
+- stakeholder management
+Nice to have:
+- A/B testing
+- Python

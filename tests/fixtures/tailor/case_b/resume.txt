@@ -1,0 +1,9 @@
+Wei Ling Lim
+Singapore
+Experience
+Business Analyst Intern, Example Bank	Jan 2025 – Jun 2025
+• Automated 40 weekly reports with SQL and Python (pandas).
+• Built Tableau dashboards tracking S$1.2M in card spend.
+• Analysed pivot tables in Microsoft Excel for the ops team.
+Skills
+SQL, Python, pandas, Tableau, Excel

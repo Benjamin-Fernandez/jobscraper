@@ -1,0 +1,148 @@
+{
+  "_source": "docs/architecture/tailor_design.md §15 (synthetic person)",
+  "job_title": "Data Analyst",
+  "terms": [
+    {
+      "term": "SQL",
+      "required": true,
+      "status": "present_exact",
+      "variant": "",
+      "via": "",
+      "related": ""
+    },
+    {
+      "term": "Power BI",
+      "required": true,
+      "status": "missing",
+      "variant": "",
+      "via": "",
+      "related": ""
+    },
+    {
+      "term": "Excel",
+      "required": true,
+      "status": "present_exact",
+      "variant": "",
+      "via": "",
+      "related": ""
+    },
+    {
+      "term": "stakeholder management",
+      "required": true,
+      "status": "missing",
+      "variant": "",
+      "via": "",
+      "related": ""
+    },
+    {
+      "term": "A/B testing",
+      "required": false,
+      "status": "missing",
+      "variant": "",
+      "via": "",
+      "related": ""
+    },
+    {
+      "term": "Python",
+      "required": false,
+      "status": "present_exact",
+      "variant": "",
+      "via": "",
+      "related": ""
+    }
+  ],
+  "coverage_before": [
+    5,
+    10
+  ],
+  "coverage_after": [
+    5,
+    10
+  ],
+  "title_match": true,
+  "bullets_after": {
+    "1": "Automated 40 weekly reports with SQL and Python (pandas).",
+    "2": "Built Tableau dashboards tracking S$1.2M in card spend.",
+    "3": "Analysed pivot tables in Microsoft Excel for the ops team."
+  },
+  "bullet_scores": {
+    "1": 3,
+    "2": 0,
+    "3": 2
+  },
+  "bullet_order": {
+    "e1": [
+      1,
+      3,
+      2
+    ]
+  },
+  "skills_after": [
+    "SQL",
+    "Excel",
+    "Python",
+    "pandas",
+    "Tableau"
+  ],
+  "absent": [
+    "Power BI",
+    "stakeholder management",
+    "A/B testing"
+  ],
+  "knockouts": [],
+  "numbers_per_bullet": {
+    "1": [
+      "40"
+    ],
+    "2": [
+      "1.2M"
+    ],
+    "3": []
+  },
+  "rejections": [
+    {
+      "bullet": 1,
+      "out": "Automated 40 weekly reports with SQL and Python (pandas), saving 10 hours.",
+      "issues": [
+        [
+          "number_added",
+          "10"
+        ]
+      ]
+    },
+    {
+      "bullet": 2,
+      "out": "Built Tableau dashboards tracking card spend.",
+      "issues": [
+        [
+          "number_dropped",
+          "1.2M"
+        ]
+      ]
+    },
+    {
+      "bullet": 2,
+      "out": "Built Power BI dashboards tracking S$1.2M in card spend.",
+      "issues": [
+        [
+          "fact_added",
+          "power bi"
+        ],
+        [
+          "fact_dropped",
+          "tableau"
+        ]
+      ]
+    },
+    {
+      "bullet": 3,
+      "out": "Analysed pivot tables in Microsoft Excel with SQL for the ops team.",
+      "issues": [
+        [
+          "fact_added",
+          "sql"
+        ]
+      ]
+    }
+  ]
+}

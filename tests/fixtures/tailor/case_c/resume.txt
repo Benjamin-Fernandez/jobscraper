@@ -1,0 +1,9 @@
+Arjun Nair
+Singapore
+Experience
+Software Engineer, Example Pay Pte Ltd	Jul 2023 – present
+• Developed payment microservices in Java and Spring, exposing REST endpoints.
+• Integrated RabbitMQ message queues; processed 2M transactions/day.
+• Wrote KYC document checks reducing manual review by 30%.
+Education
+BSc Computer Science	2023

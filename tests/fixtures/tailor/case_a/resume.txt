@@ -1,0 +1,11 @@
+Jane Tan
+Singapore
+Education
+B.Eng. Computer Engineering, Nanyang Example University	2025
+Experience
+Software Engineering Intern, Acme Logistics Pte Ltd	May 2024 – Aug 2024
+• Built REST APIs in Python and Postgres for shipment tracking.
+• Deployed services on k8s with GitHub Actions; cut p95 latency 35%.
+• Trained an ML model to predict delivery delays (82% accuracy).
+Skills
+Python, Postgres, k8s, GitHub Actions, ML, Git

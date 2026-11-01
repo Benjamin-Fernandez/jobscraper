@@ -1,0 +1,8 @@
+Backend Engineer, Payments
+Requirements:
+- Java, Spring Boot, REST APIs
+- Kafka and microservices
+- Must be a Singapore Citizen/PR
+Nice to have:
+- AML/KYC
+- Docker

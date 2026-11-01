@@ -1,0 +1,30 @@
+# Golden alias list (tailor_design.md §15), verbatim. Golden tests use THIS file,
+# never config/aliases.yaml (researcher-owned; it grows).
+version: 1
+ambiguous: [go, c, r]
+terms:
+  - {canonical: PostgreSQL, variants: [Postgres], kind: tool}
+  - {canonical: Kubernetes, variants: [k8s], kind: platform}
+  - {canonical: machine learning, variants: [ML], kind: domain}
+  - {canonical: REST APIs, variants: [REST API, REST endpoints], kind: practice}
+  - {canonical: CI/CD, variants: [], kind: practice}
+  - {canonical: Go, variants: [Golang], kind: language}
+  - {canonical: Kafka, variants: [], kind: tool}
+  - {canonical: Python, variants: [], kind: language}
+  - {canonical: Git, variants: [], kind: tool}
+  - {canonical: GitHub Actions, variants: [], kind: tool}
+  - {canonical: SQL, variants: [], kind: language}
+  - {canonical: Power BI, variants: [], kind: tool}
+  - {canonical: Excel, variants: [MS Excel], kind: tool}
+  - {canonical: Tableau, variants: [], kind: tool}
+  - {canonical: pandas, variants: [], kind: tool}
+  - {canonical: A/B testing, variants: [], kind: practice}
+  - {canonical: stakeholder management, variants: [], kind: soft}
+  - {canonical: Java, variants: [], kind: language}
+  - {canonical: Spring, variants: [], kind: framework}
+  - {canonical: Spring Boot, variants: [], kind: framework}
+  - {canonical: microservices, variants: [], kind: practice}
+  - {canonical: RabbitMQ, variants: [], kind: tool}
+  - {canonical: AML, variants: [], kind: domain}
+  - {canonical: KYC, variants: [], kind: domain}
+  - {canonical: Docker, variants: [], kind: tool}
