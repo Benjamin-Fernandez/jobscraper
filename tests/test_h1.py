@@ -143,10 +143,8 @@ def test_company_health_says_when_the_last_scan_found_nothing():
     assert "no open roles" in row["reason"]
 
 
-# SKIPPED (not collected): defect TD-01 in comms/outbox/tester.md - personal's
-# JobManager.start() does not log an ERROR when the program cannot start.
-# Rename to test_a_job_that_cannot_start_is_logged once the engineer fixes it.
-def _skip_td01_a_job_that_cannot_start_is_logged():
+# TD-01 pin (fixed in Q-17): a program that cannot start logs an ERROR naming the job.
+def test_a_job_that_cannot_start_is_logged():
     tmp = Path(tempfile.mkdtemp())
     jm = JobManager(tmp / "jobs", lambda kind, opts: [str(tmp / "no-such-program"), "-m", "x"])
     with _Records("jobscraper.web.jobs") as log:
