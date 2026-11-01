@@ -14,7 +14,8 @@ import datetime as _dt
 import json
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Optional, Union
-from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+
+from ..models import posting_key  # noqa: F401  (moved to models.py, M20; re-exported)
 
 RunSelector = Union[int, str, frozenset]   # a run number, "all", or a set of runs
 
@@ -114,19 +115,6 @@ def with_status(jobs: Iterable[dict[str, Any]],
 
 
 # ---------------------------------------------------------------- one posting, two ids (M17)
-
-def posting_key(url: Any) -> str:
-    """A posting's URL compared loosely: the scheme, the host's case, a trailing
-    slash, a #fragment and utm_* tracking parameters do not make it another
-    posting. Anything else in the query (Greenhouse's gh_jid) does."""
-    raw = str(url or "").strip()
-    if not raw:
-        return ""
-    parts = urlsplit(raw)
-    query = urlencode(sorted((k, v) for k, v in parse_qsl(parts.query, keep_blank_values=True)
-                             if not k.lower().startswith("utm_")))
-    return urlunsplit(("", parts.netloc.lower(), parts.path.rstrip("/"), query, ""))
-
 
 def mark_tracked_twins(jobs: list[dict[str, Any]],
                        applications: Iterable[Mapping[str, Any]]) -> list[dict[str, Any]]:
