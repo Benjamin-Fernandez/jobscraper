@@ -11,9 +11,10 @@ retried request) cannot put a duplicate into the history (M6-T2).
 from __future__ import annotations
 
 from typing import Any, Optional
+from urllib.parse import urlparse
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Request
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from jobscraper.config import Config
 from jobscraper.web.data import load_shortlist
@@ -37,6 +38,17 @@ class StatusChange(BaseModel):
     company: Optional[str] = Field(None, max_length=200)
     role: Optional[str] = Field(None, max_length=300)
     url: Optional[str] = Field(None, max_length=2000)
+
+    @field_validator("url")
+    @classmethod
+    def _http_url(cls, value: Optional[str]) -> Optional[str]:
+        # The SPA renders this as a link: only a web address may be stored,
+        # never javascript: or data: (C-22; the SPA's safeUrl is the other half).
+        if value is not None and value != "":
+            parsed = urlparse(value.strip())
+            if parsed.scheme not in ("http", "https") or not parsed.netloc:
+                raise ValueError("url must be an http or https address")
+        return value
 
 
 @router.get("/applications")
