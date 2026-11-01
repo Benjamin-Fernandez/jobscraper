@@ -360,6 +360,7 @@ class JobManager:
                     fh.write(f"could not start: {reason}\n".encode("utf-8"))
                     self._record = self._new_record(job_id, kind, log, None)
                     self._finish(None)
+                    logger.error("job %s (%s) could not start: %s", job_id, kind, reason)
                     raise
             self._record = self._new_record(job_id, kind, log, self._proc.pid)
             self._save()
