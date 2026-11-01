@@ -61,8 +61,22 @@ const shown = computed(() => (stage.value === 'all'
   ? inScope.value
   : inScope.value.filter(r => r.status === stage.value)))
 
+// Company A-Z groups a company's roles together; Recent activity lists every
+// application on its own, the latest change first.
+const sort = ref('company')
+
+// The time of a row's last change: its newest event, else what the row says.
+function lastAt(row) {
+  return row.events?.at(-1)?.at ?? row.updated_at ?? row.applied_at ?? ''
+}
+
 // Companies A-Z; inside one, roles by stage (config order), then title.
 const groups = computed(() => {
+  if (sort.value === 'recent') {
+    return [...shown.value]
+      .sort((a, b) => String(lastAt(b)).localeCompare(String(lastAt(a))))
+      .map(r => ({ company: companyOf(r), key: r.application_id ?? r.job_id, rows: [r] }))
+  }
   const by = new Map()
   for (const r of shown.value) {
     const key = companyOf(r)
@@ -74,6 +88,7 @@ const groups = computed(() => {
     .sort(([a], [b]) => a.localeCompare(b, undefined, { sensitivity: 'base' }))
     .map(([company, list]) => ({
       company,
+      key: company,
       rows: list.sort((x, y) => rank(x.status) - rank(y.status)
         || String(x.role || '').localeCompare(String(y.role || ''))),
     }))
@@ -124,6 +139,33 @@ async function change(row, status) {
   }
 }
 
+// ---- notes: the same POST with the row's own status, so the history gets no
+// new event; an empty note clears it ----
+
+const noteFor = ref('')          // job id whose note is open for editing
+const noteDraft = ref('')
+const savingNote = ref(false)
+
+function editNote(row) {
+  noteFor.value = row.job_id
+  noteDraft.value = row.notes || ''
+}
+
+async function saveNote(row) {
+  savingNote.value = true
+  error.value = ''
+  try {
+    await setApplicationStatus(row.job_id, row.status, { notes: noteDraft.value.trim() })
+    // Close this row's editor only - never one opened since.
+    if (noteFor.value === row.job_id) noteFor.value = ''
+    await load()
+  } catch (e) {
+    error.value = `Could not save the note for ${row.company ?? row.job_id}: ${describeError(e)}`
+  } finally {
+    savingNote.value = false
+  }
+}
+
 onMounted(load)
 </script>
 
@@ -142,6 +184,13 @@ onMounted(load)
           <span class="visually-hidden">Search applications</span>
           <input v-model="query" type="search" placeholder="Search company or role" aria-keyshortcuts="/">
           <kbd class="key-hint" aria-hidden="true">/</kbd>
+        </label>
+        <label>
+          <span class="visually-hidden">Sort</span>
+          <select v-model="sort" class="app-sort">
+            <option value="company">Company A–Z</option>
+            <option value="recent">Recent activity</option>
+          </select>
         </label>
         <RunSelector
           :runs="runs"
@@ -186,20 +235,53 @@ onMounted(load)
       </div>
 
       <div class="groups">
-        <section v-for="group in groups" :key="group.company" class="company-group surface" :data-company="group.company">
+        <section v-for="group in groups" :key="group.key" class="company-group surface" :data-company="group.company">
           <header class="group-head">
             <CompanyMark :name="group.company" size="sm" />
             <h3 class="group-name">{{ group.company }}</h3>
-            <span class="group-n">{{ plural(group.rows.length, 'role') }}</span>
+            <span v-if="sort !== 'recent'" class="group-n">{{ plural(group.rows.length, 'role') }}</span>
           </header>
           <ul class="app-rows">
-            <li v-for="row in group.rows" :key="row.job_id" class="app-row" :data-job="row.job_id" :data-status="row.status">
+            <li v-for="row in group.rows" :key="row.application_id ?? row.job_id" class="app-row" :data-job="row.job_id" :data-status="row.status">
               <div class="role">
                 <a v-if="safeUrl(row.url)" class="role-title" :href="safeUrl(row.url)" target="_blank" rel="noopener noreferrer">
                   {{ row.role ?? row.job_id }}<Icon name="external" :size="13" />
                 </a>
                 <span v-else class="role-title">{{ row.role ?? row.job_id }}</span>
-                <p v-if="row.notes" class="notes">{{ row.notes }}</p>
+                <form
+                  v-if="noteFor === row.job_id"
+                  class="note-form"
+                  @submit.prevent="saveNote(row)"
+                  @keydown.esc="noteFor = ''"
+                >
+                  <label class="visually-hidden" :for="`note-${row.job_id}`">Note on {{ row.company ?? row.job_id }} · {{ row.role ?? '' }}</label>
+                  <textarea
+                    :id="`note-${row.job_id}`"
+                    v-model="noteDraft"
+                    class="note-input"
+                    rows="3"
+                    maxlength="4000"
+                    placeholder="Recruiter, referral, interview dates…"
+                  />
+                  <div class="note-actions">
+                    <button type="submit" class="primary note-save" :disabled="savingNote">
+                      {{ savingNote ? 'Saving…' : 'Save note' }}
+                    </button>
+                    <button type="button" class="ghost note-cancel" :disabled="savingNote" @click="noteFor = ''">Cancel</button>
+                  </div>
+                </form>
+                <template v-else>
+                  <p v-if="row.notes" class="notes">{{ row.notes }}</p>
+                  <button
+                    type="button"
+                    class="link note-edit"
+                    :disabled="savingNote"
+                    :aria-label="`${row.notes ? 'Edit note' : 'Add note'} on ${row.company ?? row.job_id} · ${row.role ?? ''}`"
+                    @click="editNote(row)"
+                  >
+                    {{ row.notes ? 'Edit note' : 'Add note' }}
+                  </button>
+                </template>
               </div>
               <span class="updated">{{ lastChange(row) }}</span>
               <label class="status-field">
@@ -249,8 +331,8 @@ onMounted(load)
 .stages::-webkit-scrollbar { display: none; }
 .stage {
   flex: 1 0 auto;
-  justify-content: space-between;
-  gap: var(--space-3);
+  justify-content: center;
+  gap: var(--space-2);
   min-height: 2.5rem;
   padding: 0 var(--space-3);
   background: transparent;
@@ -260,7 +342,11 @@ onMounted(load)
 }
 .stage:hover:not(:disabled) { background: var(--surface); }
 .stage.active { background: var(--surface); border-color: var(--border); box-shadow: var(--shadow); color: var(--text); font-weight: 650; }
-.stage-n { font-size: var(--text-xs); color: var(--muted); }
+.stage-n {
+  min-width: 1.6em; padding: 0 0.35em; border-radius: 999px; text-align: center;
+  font-size: var(--text-xs); line-height: 1.6; color: var(--muted); background: var(--surface-3);
+}
+.stage.active .stage-n { color: var(--text-2); }
 .stage-n.zero { opacity: 0.5; }
 /* Each stage's own colour, as a bar under the active segment. */
 .stage { position: relative; }
@@ -298,7 +384,21 @@ onMounted(load)
 }
 a.role-title:hover { color: var(--accent); text-decoration: underline; }
 a.role-title .icon { color: var(--muted); }
-.notes { margin: 2px 0 0; color: var(--muted); font-size: var(--text-sm); }
+.notes { margin: 2px 0 0; color: var(--text-2); font-size: var(--text-sm); white-space: pre-line; text-wrap: pretty; }
+/* Its own line under the title and note, never beside the title. */
+.note-edit { display: flex; width: max-content; margin-top: 2px; font-size: var(--text-xs); color: var(--muted); text-decoration: none; }
+.note-edit:hover:not(:disabled) { color: var(--accent); text-decoration: underline; }
+.note-form { display: grid; gap: var(--space-2); margin-top: var(--space-2); max-width: 40rem; }
+.note-input {
+  width: 100%; resize: vertical; padding: var(--space-2) var(--space-3);
+  font: inherit; font-size: var(--text-sm); color: var(--text);
+  background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--radius);
+}
+.note-input:focus-visible {
+  outline: none; border-color: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent);
+}
+.note-actions { display: flex; gap: var(--space-2); }
 .updated { grid-area: updated; color: var(--muted); font-size: var(--text-xs); white-space: nowrap; }
 .status-field { grid-area: status; }
 
