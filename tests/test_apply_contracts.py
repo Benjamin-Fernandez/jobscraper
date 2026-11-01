@@ -160,6 +160,11 @@ def test_every_non_terminal_state_may_fail_and_terminal_states_are_final():
     for st in S:
         if st in TERMINAL_STATES:
             assert TRANSITIONS[st] == frozenset(), f"{st} is terminal: no automatic way out"
+        elif st is S.SUBMITTING:
+            # D-69 / NF-06: once Submit is clicked an attempt ends only submitted or
+            # submitted_unconfirmed, never failed.
+            assert not can_transition(st, S.FAILED), "no submitting -> failed (D-69)"
+            assert TRANSITIONS[st] <= {S.VERIFYING_EMAIL, S.SUBMITTED, S.SUBMITTED_UNCONFIRMED}
         else:
             assert can_transition(st, S.FAILED), f"{st} must be able to fail"
     assert SUCCESS_STATES <= TERMINAL_STATES
@@ -176,7 +181,13 @@ def test_only_the_review_page_leads_to_submit_and_a_dry_run_never_submits():
     assert not can_transition(S.QUEUED, S.SUBMITTED)
     for success in SUCCESS_STATES:
         sources = {src for src, dst in TRANSITIONS.items() if success in dst}
-        assert sources == {S.SUBMITTING}, f"{success} only after a Submit click"
+        allowed = {S.SUBMITTING} | ({S.VERIFYING_EMAIL} if success is S.SUBMITTED_UNCONFIRMED else set())
+        assert sources == allowed, f"{success} only after a Submit click"
+    assert not can_transition(S.VERIFYING_EMAIL, S.SUBMITTED), "a code page cannot prove success"
+    # NF-06 with the click flag: after the click, failed is rejected; before it, no success state.
+    assert not can_transition(S.VERIFYING_EMAIL, S.FAILED, clicked=True)
+    assert not can_transition(S.VERIFYING_EMAIL, S.SUBMITTED_UNCONFIRMED, clicked=False)
+    assert can_transition(S.VERIFYING_EMAIL, S.SUBMITTED_UNCONFIRMED, clicked=True)
 
 
 def test_every_reason_code_has_owner_copy_and_detail_fills_cleanly():
@@ -365,7 +376,7 @@ def test_computed_facts_from_experience_and_education():
 def test_norm_label_rules():
     norm = importlib.import_module("jobscraper.apply.plan").norm_label
     assert norm("1. What is your <b>Email</b> Address? *") == "what is your email address"
-    assert norm("Don’t you (required)") == "dont you"
+    assert norm("Don’t you (required)") == "don't you"   # D-69: apostrophes kept
     assert norm("C++ / C# experience (optional)") == "c++ c# experience"
 
 

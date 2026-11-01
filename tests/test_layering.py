@@ -222,3 +222,53 @@ def test_every_v2_module_is_classified():
         f"modules {sorted(unclassified)} belong to no layer. Add them to STAGES, "
         "PUBLISHER, FOUNDATION or LEGACY in this file and to PRD section 8.2 - "
         "an unclassified module is one no boundary rule protects.")
+
+
+def test_foundation_modules_import_no_stage_or_orchestrator():
+    """applicant.py and vault.py (M20) sit beside store.py at the bottom: they
+    may use each other and the rest of the foundation, never a stage."""
+    offenders = []
+    for owner, path in _all_v2_files():
+        if owner not in FOUNDATION:
+            continue
+        crossed = {_top(n) for n in _local_imports(path)} & (STAGES | ORCHESTRATOR | PUBLISHER)
+        if crossed:
+            offenders.append(f"{path.relative_to(SRC)} -> {sorted(crossed)}")
+    assert not offenders, f"foundation must not reach upwards: {offenders}"
+
+
+def test_apply_and_tailor_meet_only_through_their_flows():
+    """The stage packages never import each other or an orchestrator; only
+    apply_flow may import tailor_flow (apply design section 2.3, rule 4)."""
+    offenders = []
+    for owner, path in _all_v2_files():
+        if owner not in DOTTED_PACKAGES:
+            continue
+        other = (DOTTED_PACKAGES - {owner}) | ORCHESTRATOR
+        crossed = {_top(n) for n in _local_imports(path)} & other
+        if crossed:
+            offenders.append(f"{path.relative_to(SRC)} -> {sorted(crossed)}")
+    assert not offenders, offenders
+
+
+def test_the_layering_guard_catches_what_it_claims_to():
+    """Self-check on synthetic sources (the guard itself must not rot): the
+    import reader reports the stage packages' modules dotted, and only
+    apply_flow -> tailor_flow is an exempt orchestrator edge."""
+    import tempfile
+    d = Path(tempfile.mkdtemp())
+    f = d / "m.py"
+    f.write_text("from jobscraper.apply.contracts import A\n"
+                 "from jobscraper.tailor import contracts\n"
+                 "from jobscraper.apply import flowy\n"
+                 "from jobscraper.store import Store\n", encoding="utf-8")
+    global SRC
+    real, SRC = SRC, d                  # _local_imports resolves paths against SRC
+    try:
+        got = _local_imports(f)
+    finally:
+        SRC = real
+    assert {"apply.contracts", "tailor.contracts", "apply.flowy", "store"} <= got
+    assert ("apply_flow", "tailor_flow") in ORCHESTRATOR_EDGES
+    assert ("tailor_flow", "apply_flow") not in ORCHESTRATOR_EDGES
+    assert ("pipeline", "tailor_flow") not in ORCHESTRATOR_EDGES
