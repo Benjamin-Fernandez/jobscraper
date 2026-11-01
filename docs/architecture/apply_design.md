@@ -115,7 +115,7 @@ States and the allowed automatic transitions are `AttemptState` and `TRANSITIONS
 | From | To | Trigger |
 |---|---|---|
 | (new) | queued | `apply_flow` creates the row for a job id |
-| queued | tailoring | guards passed and no current tailored file for the job (tailor design §"current") |
+| queued | tailoring | guards passed and no current tailored file for the job (tailor design §11.2) |
 | queued | planning | guards passed and a current tailored file exists, or `tailor.enabled: false` |
 | tailoring | planning | tailor returned (success → tailored file; failure → original resume, `resume_source='original'`, note logged) |
 | planning | opening | adapter found; schema plan (if any) fully resolved with no required field `unknown`/`ungrounded` |
