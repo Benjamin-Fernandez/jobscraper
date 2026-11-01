@@ -80,3 +80,19 @@ def delete_files(directory: str | Path, names: Iterable[Optional[str]]) -> int:
     except OSError:
         pass
     return n
+
+
+def purge(store: Any, tailored_dir: str | Path, now: str, draft_days: float,
+          sent_days: float, closed_statuses: Iterable[str]) -> int:
+    """D-59 retention. Delete the files of drafts older than `draft_days` and of
+    sent rows whose application closed more than `sent_days` ago; the rows stay
+    (scores, terms and hashes are kept, F-24) with `files_deleted_at` set and
+    the bullet diff cleared. Returns the number of rows purged."""
+    n = 0
+    for row in store.tailored_to_purge(now, draft_days, sent_days, list(closed_statuses)):
+        delete_files(job_dir(tailored_dir, row["job_id"]), (row.get("docx_name"), row.get("pdf_name")))
+        store.mark_tailored_purged(row["id"], now)
+        n += 1
+    if n:
+        log.info("tailored files purged: %d", n)
+    return n
