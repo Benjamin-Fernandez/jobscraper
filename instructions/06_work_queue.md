@@ -33,6 +33,7 @@ The handover note lives in `handover.md`. This file holds only the queue and sho
 | Q-15 | Docs: OVERVIEW/README/DESIGN updated for tailor and auto-apply ("never logs in anywhere" changes) | planner | M20 | P1 | BACKLOG | 0 | docs match the app |
 
 ## Notes
+- 2026-11-02: lane T merged (CLI `tailor <job_id> [--report] [--force]`; `tailor_flow.tailor_for_apply` for B9); 440/442, the 2 = D-69 oracles (Q-21 running). Lane T reads `data/applicant.yaml` directly until P2 lands: swap to `applicant.load` in B9.
 - 2026-11-02: designs on `arch/Q-04-designs` (ec5a471, 718b40e); merged into personal via int/M19 with the tester's layering update (Q-07 add-on). Q-06/Q-08/Q-09 branch from it.
 - 2026-11-02: `int/M19` (worktree `.claude/worktrees/int-M19`) = personal + Q-02 (faddaa2) + Q-03 (eddc704); baseline 299/323 Python, 179/180 web, all known. Tester works on `test/Q-07-m19-tests` there; merge int → personal after green + a dry run on a copied DB. Known: Cancel on a stuck run can take ~30 s to answer (D-64 trade-off).
 - 2026-11-01: Q-03 is done on `eng/Q-03-ui-port` (eddc704); held for an M19 integration branch with Q-02 so the tester (Q-07) fixes `web/tests/m16.test.js:278` (JD now renders blocks) and ports cloud tests before merging.
