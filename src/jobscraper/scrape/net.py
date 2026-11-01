@@ -29,14 +29,93 @@ ATS_API_HOSTS = {
 
 
 class FetchError(Exception):
-    def __init__(self, kind: str, message: str, status: Optional[int] = None):
+    def __init__(self, kind: str, message: str, status: Optional[int] = None,
+                 signature: str = ""):
         super().__init__(message)
         self.kind = kind
         self.message = message
         self.status = status
+        # A bot-wall signature (C-8), set only when `detect_block` recognised
+        # one; "" for an ordinary HTTP error. It is also written into the
+        # message ("HTTP 403 (cloudflare) for ..."), which is what the
+        # companies table keeps as `last_error`.
+        self.signature = signature
 
     def __str__(self) -> str:
         return f"[{self.kind}] {self.message}"
+
+
+# ---------------------------------------------------------------- block signatures
+#
+# A board that bot-walls us must be told apart from a real 403 or a board that
+# moved. These markers are the small, well-known tells of the vendors that do it
+# at scale; anything else is reported as a plain HTTP error with no signature.
+
+_CAPTCHA_MARKERS = ("captcha",)                      # covers recaptcha, hcaptcha
+_CLOUDFLARE_BODY_MARKERS = (
+    "just a moment", "attention required! | cloudflare", "cf-chl")
+_AKAMAI_CONFIRM_MARKERS = ("reference #", "errors.edgesuite.net")
+
+# `cf-ray` and `server: ...` are present on almost every response a CDN
+# proxies, blocked or not - a plain 404, a real app 401, or an unrelated 500
+# on a Cloudflare- or Akamai-fronted site all carry them. Trusting them alone
+# would call ordinary errors blocks, so they only count on a status that is
+# itself block-shaped. `cf-mitigated: challenge` is different: Cloudflare sets
+# it specifically when it challenged the request, so it needs no status gate,
+# like a body marker.
+_HEADER_TRUSTED_STATUSES = {403, 429, 503}
+
+BLOCK_SIGNATURES = ("cloudflare", "akamai", "captcha", "rate_limited", "forbidden")
+
+
+def _lower_headers(headers: Any) -> dict[str, str]:
+    """`headers` as a plain lowercase dict - accepts httpx.Headers or any plain
+    dict a test hands in, so `detect_block` needs no particular header type."""
+    try:
+        items = headers.items()
+    except AttributeError:
+        return {}
+    return {str(k).lower(): str(v).lower() for k, v in items}
+
+
+def detect_block(status: int, headers: Any, body_head: str) -> str:
+    """One of `cloudflare`, `akamai`, `captcha`, `rate_limited`, `forbidden`,
+    or "" for a response that carries none of those vendors' tells.
+
+    `body_head` is at most the first ~2 KB of the body - enough for every
+    marker here without holding a whole challenge page in memory. Body
+    markers (challenge page text) decide on any status, including a 200 that
+    is really a challenge page. Header-only markers (`cf-ray`, `server:
+    cloudflare`, `server: AkamaiGHost`) only decide on a status that is
+    itself block-shaped (`_HEADER_TRUSTED_STATUSES`) - see the note above. A
+    bare 401/403 with none of the vendor markers falls through to
+    "forbidden" last, after rate limiting (429).
+    """
+    h = _lower_headers(headers)
+    body = (body_head or "").lower()
+
+    if any(m in body for m in _CAPTCHA_MARKERS):
+        return "captcha"
+    if any(m in body for m in _CLOUDFLARE_BODY_MARKERS):
+        return "cloudflare"
+    if "access denied" in body and any(m in body for m in _AKAMAI_CONFIRM_MARKERS):
+        return "akamai"
+
+    if "challenge" in h.get("cf-mitigated", ""):
+        return "cloudflare"
+
+    if status in _HEADER_TRUSTED_STATUSES:
+        server = h.get("server", "")
+        if "cf-ray" in h or server == "cloudflare":
+            return "cloudflare"
+        if "akamaighost" in server:
+            return "akamai"
+
+    if status == 429:
+        return "rate_limited"
+    if status in (401, 403):
+        return "forbidden"
+    return ""
 
 
 def classify_status(status: int) -> str:
@@ -66,7 +145,8 @@ class HttpClient:
 
     def __init__(self, user_agent: str, timeout: float = 25.0,
                  delay: float = 0.7, max_retries: int = 3,
-                 respect_robots: bool = True):
+                 respect_robots: bool = True,
+                 transport: Optional[httpx.BaseTransport] = None):
         self.delay = delay
         self.max_retries = max_retries
         self.respect_robots = respect_robots
@@ -74,6 +154,10 @@ class HttpClient:
         self._client = httpx.Client(
             timeout=timeout,
             follow_redirects=True,
+            # None (the default) is exactly what httpx.Client does without this
+            # argument; it exists so tests can swap in httpx.MockTransport
+            # without a live network.
+            transport=transport,
             headers={
                 "User-Agent": user_agent,
                 "Accept": "application/json, text/html;q=0.9, */*;q=0.8",
@@ -136,6 +220,16 @@ class HttpClient:
 
     # -------- requests --------
 
+    @staticmethod
+    def _body_head(resp: httpx.Response) -> str:
+        """The first ~2 KB of a response body, for `detect_block`. A body that
+        fails to decode (binary, truncated) contributes no signal - never a
+        reason to fail the request harder than the status already does."""
+        try:
+            return resp.text[:2048]
+        except Exception:
+            return ""
+
     def request(self, method: str, url: str, *, expect: str = "any",
                 check_robots: bool = True, **kw: Any) -> httpx.Response:
         """Perform a request with pacing and bounded retry.
@@ -163,8 +257,12 @@ class HttpClient:
 
             if resp.status_code >= 400:
                 kind = classify_status(resp.status_code)
-                last = FetchError(kind, f"HTTP {resp.status_code} for {url}",
-                                  resp.status_code)
+                # The retry policy is unchanged (still driven by `kind` alone);
+                # the signature only says who refused, for the Companies tab.
+                sig = detect_block(resp.status_code, resp.headers, self._body_head(resp))
+                tag = f" ({sig})" if sig else ""
+                last = FetchError(kind, f"HTTP {resp.status_code}{tag} for {url}",
+                                  resp.status_code, signature=sig)
                 retriable = kind in RETRYABLE and attempt < self.max_retries - 1
                 if retriable:
                     backoff = min(2 ** attempt, 8)
@@ -185,6 +283,15 @@ class HttpClient:
                     try:
                         resp.json()
                     except Exception:
+                        # A 200 that is really a Cloudflare (or similar)
+                        # challenge page must not look like a malformed-payload
+                        # bug in the adapter - it is a block.
+                        sig = detect_block(resp.status_code, resp.headers,
+                                           self._body_head(resp))
+                        if sig:
+                            raise FetchError(
+                                BLOCKED, f"blocked ({sig}) for {url}",
+                                resp.status_code, signature=sig)
                         raise FetchError(
                             SCHEMA,
                             f"expected JSON, got {ctype or 'unknown'} for {url}",
