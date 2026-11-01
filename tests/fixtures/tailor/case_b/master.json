@@ -1,0 +1,58 @@
+{
+  "resume_hash": "golden-case-b",
+  "source_name": "resume.docx",
+  "contact": {
+    "name": "Wei Ling Lim",
+    "email": "",
+    "phone": "",
+    "location": "Singapore",
+    "links": []
+  },
+  "summary": "",
+  "sections": [
+    {
+      "heading": "Experience",
+      "kind": "experience",
+      "entries": [
+        {
+          "id": "e1",
+          "title": "Business Analyst Intern",
+          "organisation": "Example Bank",
+          "location": "",
+          "dates": "Jan 2025 – Jun 2025",
+          "subtitle": "",
+          "bullets": [
+            {
+              "id": 1,
+              "text": "Automated 40 weekly reports with SQL and Python (pandas)."
+            },
+            {
+              "id": 2,
+              "text": "Built Tableau dashboards tracking S$1.2M in card spend."
+            },
+            {
+              "id": 3,
+              "text": "Analysed pivot tables in Microsoft Excel for the ops team."
+            }
+          ]
+        }
+      ],
+      "items": []
+    },
+    {
+      "heading": "Skills",
+      "kind": "skills",
+      "entries": [],
+      "items": [
+        "SQL",
+        "Python",
+        "pandas",
+        "Tableau",
+        "Excel"
+      ]
+    }
+  ],
+  "page_count": 1,
+  "parsed_by": "fixture",
+  "parsed_at": "2026-11-02 00:00:00"
+}

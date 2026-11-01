@@ -1,0 +1,120 @@
+# SYNTHETIC applicant profile for tests. An invented person: no real name, email,
+# phone, address or ID. Same keys as the template in docs/architecture/apply_design.md
+# §5.4 (tests/test_apply_contracts.py checks that), and valid under §5.2.
+version: 1
+
+identity:
+  legal_first_name: "Alex"
+  legal_last_name: "Testcase"
+  preferred_name: ""
+  name_order: western
+  pronouns: ""
+  date_of_birth: "2002-03-14"        # S
+  gender: decline                    # S
+
+contact:
+  email: "alex.testcase@example.com"
+  phone_country_code: "+65"
+  phone_number: "91234567"
+  address_line1: "1 Example Road"
+  address_line2: ""
+  postal_code: "000001"
+  city: "Singapore"
+  country: SG
+
+singapore_status:
+  nationality: SG
+  residency_status: citizen          # S
+  work_pass: none_required
+  authorised_to_work: {SG: true, US: false}
+  requires_sponsorship: {SG: false}
+  ns_status: completed               # S
+  ord_date: "2022-06"                # S
+  race: decline                      # S
+  race_other: ""
+  religion: decline
+  marital_status: decline
+  nric_last4: ""
+
+us_self_id:
+  eeo_gender: decline
+  eeo_race_ethnicity: decline
+  veteran_status: decline
+  disability_status: decline
+
+availability:
+  notice_period_days: 0
+  earliest_start_date: "2026-01-05"
+  willing_to_relocate: false
+  willing_to_travel_pct: 10
+
+pay:
+  expected_salary: {amount: 5000, currency: SGD, period: monthly, negotiable: true}
+  current_salary: null
+  months_per_year: 13
+
+education:
+  - institution: "Nanyang Example University"
+    degree: "Bachelor of Engineering"
+    major: "Computer Engineering"
+    minor: ""
+    start: "2021-08"
+    end: "2025-06"
+    grade_type: cap
+    grade: "4.20"
+    grade_scale: "5.00"
+    from_resume: false
+
+experience:
+  - employer: "Example Logistics Pte Ltd"
+    title: "Software Engineering Intern"
+    start: "2024-05"
+    end: "2024-08"
+    location: "Singapore"
+    description: "Built REST APIs in Python and Postgres for shipment tracking."
+    from_resume: false
+  - employer: "Sample Analytics"
+    title: "Data Intern"
+    start: "2025-01"
+    end: "2025-06"
+    location: "Singapore"
+    description: "Automated weekly reports with SQL and Python."
+    from_resume: false
+
+skills: ["Python", "SQL", "PostgreSQL", "Git"]
+attested_skills: []
+languages:
+  - {language: English, spoken: native, written: native}
+  - {language: Mandarin, spoken: professional, written: basic}
+
+links:
+  linkedin: "https://www.linkedin.com/in/example-alex-testcase"
+  github: "https://github.com/example-alex-testcase"
+  portfolio: ""
+  other: []
+
+documents:
+  resume: ""
+  transcript: ""
+
+sourcing:
+  how_heard_default: "Company careers website"
+
+consents:
+  privacy_consent: true
+  data_retention_consent: true
+  talent_pool_opt_in: false
+  certify_true: true
+
+declarations:
+  pep: false
+  conflict_audit_independence: false
+  shareholding_in_company: false
+  holdings: ["Shareco Ltd"]
+  relatives_at_company: false
+  relatives_employers: ["Kinfolk Pte Ltd"]
+  criminal_record: false
+  bankruptcy: false
+  regulatory_disciplinary: false
+  non_compete: false
+  health_disclosure: decline

@@ -1,0 +1,10 @@
+Backend Engineer (Graduate)
+Requirements:
+- Python and PostgreSQL
+- Kubernetes
+- REST APIs
+- CI/CD
+- Go
+Nice to have:
+- machine learning
+- Kafka

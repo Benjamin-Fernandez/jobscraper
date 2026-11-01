@@ -1,0 +1,62 @@
+{
+  "resume_hash": "golden-case-c",
+  "source_name": "resume.docx",
+  "contact": {
+    "name": "Arjun Nair",
+    "email": "",
+    "phone": "",
+    "location": "Singapore",
+    "links": []
+  },
+  "summary": "",
+  "sections": [
+    {
+      "heading": "Experience",
+      "kind": "experience",
+      "entries": [
+        {
+          "id": "e1",
+          "title": "Software Engineer",
+          "organisation": "Example Pay Pte Ltd",
+          "location": "",
+          "dates": "Jul 2023 – present",
+          "subtitle": "",
+          "bullets": [
+            {
+              "id": 1,
+              "text": "Developed payment microservices in Java and Spring, exposing REST endpoints."
+            },
+            {
+              "id": 2,
+              "text": "Integrated RabbitMQ message queues; processed 2M transactions/day."
+            },
+            {
+              "id": 3,
+              "text": "Wrote KYC document checks reducing manual review by 30%."
+            }
+          ]
+        }
+      ],
+      "items": []
+    },
+    {
+      "heading": "Education",
+      "kind": "education",
+      "entries": [
+        {
+          "id": "e2",
+          "title": "BSc Computer Science",
+          "organisation": "",
+          "location": "",
+          "dates": "2023",
+          "subtitle": "",
+          "bullets": []
+        }
+      ],
+      "items": []
+    }
+  ],
+  "page_count": 1,
+  "parsed_by": "fixture",
+  "parsed_at": "2026-11-02 00:00:00"
+}

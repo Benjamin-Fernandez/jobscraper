@@ -1,0 +1,75 @@
+{
+  "resume_hash": "golden-case-a",
+  "source_name": "resume.docx",
+  "contact": {
+    "name": "Jane Tan",
+    "email": "",
+    "phone": "",
+    "location": "Singapore",
+    "links": []
+  },
+  "summary": "",
+  "sections": [
+    {
+      "heading": "Education",
+      "kind": "education",
+      "entries": [
+        {
+          "id": "e1",
+          "title": "B.Eng. Computer Engineering",
+          "organisation": "Nanyang Example University",
+          "location": "",
+          "dates": "2025",
+          "subtitle": "",
+          "bullets": []
+        }
+      ],
+      "items": []
+    },
+    {
+      "heading": "Experience",
+      "kind": "experience",
+      "entries": [
+        {
+          "id": "e2",
+          "title": "Software Engineering Intern",
+          "organisation": "Acme Logistics Pte Ltd",
+          "location": "",
+          "dates": "May 2024 – Aug 2024",
+          "subtitle": "",
+          "bullets": [
+            {
+              "id": 1,
+              "text": "Built REST APIs in Python and Postgres for shipment tracking."
+            },
+            {
+              "id": 2,
+              "text": "Deployed services on k8s with GitHub Actions; cut p95 latency 35%."
+            },
+            {
+              "id": 3,
+              "text": "Trained an ML model to predict delivery delays (82% accuracy)."
+            }
+          ]
+        }
+      ],
+      "items": []
+    },
+    {
+      "heading": "Skills",
+      "kind": "skills",
+      "entries": [],
+      "items": [
+        "Python",
+        "Postgres",
+        "k8s",
+        "GitHub Actions",
+        "ML",
+        "Git"
+      ]
+    }
+  ],
+  "page_count": 1,
+  "parsed_by": "fixture",
+  "parsed_at": "2026-11-02 00:00:00"
+}

@@ -1,0 +1,166 @@
+{
+  "_source": "docs/architecture/tailor_design.md §15 (synthetic person)",
+  "job_title": "Backend Engineer, Payments",
+  "terms": [
+    {
+      "term": "Java",
+      "required": true,
+      "status": "present_exact",
+      "variant": "",
+      "via": "",
+      "related": ""
+    },
+    {
+      "term": "Spring Boot",
+      "required": true,
+      "status": "missing",
+      "variant": "",
+      "via": "",
+      "related": "Spring"
+    },
+    {
+      "term": "REST APIs",
+      "required": true,
+      "status": "present_variant",
+      "variant": "REST endpoints",
+      "via": "alias",
+      "related": ""
+    },
+    {
+      "term": "Kafka",
+      "required": true,
+      "status": "missing",
+      "variant": "",
+      "via": "",
+      "related": ""
+    },
+    {
+      "term": "microservices",
+      "required": true,
+      "status": "present_exact",
+      "variant": "",
+      "via": "",
+      "related": ""
+    },
+    {
+      "term": "AML",
+      "required": false,
+      "status": "missing",
+      "variant": "",
+      "via": "",
+      "related": ""
+    },
+    {
+      "term": "KYC",
+      "required": false,
+      "status": "present_exact",
+      "variant": "",
+      "via": "",
+      "related": ""
+    },
+    {
+      "term": "Docker",
+      "required": false,
+      "status": "missing",
+      "variant": "",
+      "via": "",
+      "related": ""
+    }
+  ],
+  "coverage_before": [
+    5,
+    13
+  ],
+  "coverage_after": [
+    7,
+    13
+  ],
+  "title_match": true,
+  "bullets_after": {
+    "1": "Developed payment microservices in Java and Spring, exposing REST APIs.",
+    "2": "Integrated RabbitMQ message queues; processed 2M transactions/day.",
+    "3": "Wrote KYC document checks reducing manual review by 30%."
+  },
+  "bullet_scores": {
+    "1": 6,
+    "2": 0,
+    "3": 1
+  },
+  "bullet_order": {
+    "e1": [
+      1,
+      3,
+      2
+    ],
+    "e2": []
+  },
+  "skills_after": [],
+  "absent": [
+    "Spring Boot",
+    "Kafka",
+    "Docker",
+    "AML"
+  ],
+  "knockouts": [
+    "- Must be a Singapore Citizen/PR"
+  ],
+  "numbers_per_bullet": {
+    "1": [],
+    "2": [
+      "2M"
+    ],
+    "3": [
+      "30%"
+    ]
+  },
+  "rejections": [
+    {
+      "bullet": 1,
+      "out": "Developed 5 payment microservices in Java and Spring, exposing REST APIs.",
+      "issues": [
+        [
+          "number_added",
+          "5"
+        ]
+      ]
+    },
+    {
+      "bullet": 2,
+      "out": "Integrated RabbitMQ message queues processing transactions daily.",
+      "issues": [
+        [
+          "number_dropped",
+          "2M"
+        ]
+      ]
+    },
+    {
+      "bullet": 2,
+      "out": "Integrated Kafka message queues; processed 2M transactions/day.",
+      "issues": [
+        [
+          "fact_added",
+          "kafka"
+        ],
+        [
+          "fact_dropped",
+          "rabbitmq"
+        ]
+      ]
+    },
+    {
+      "bullet": 1,
+      "out": "Developed payment microservices in Java and Spring Boot, exposing REST APIs.",
+      "issues": [
+        [
+          "fact_added",
+          "spring boot"
+        ],
+        [
+          "fact_dropped",
+          "spring"
+        ]
+      ]
+    }
+  ]
+}
