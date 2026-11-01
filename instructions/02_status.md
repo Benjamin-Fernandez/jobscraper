@@ -30,7 +30,7 @@
 | F-05 | Grace, logging, block reasons (C-6–C-8) | P1 | DONE | M19 engine lane |
 | F-06 | UI/UX ports (C-10, C-12–C-18) | P1 | DONE | M19 UI lane |
 | F-07 | Hardening (C-22, C-23) | P2 | DONE | M19 |
-| F-10 | Applicant profile (data/applicant.yaml) | P0 | TODO | M20 |
+| F-10 | Applicant profile (data/applicant.yaml) | P0 | DONE | M20 lane P merged |
 | F-11 | Profile form in the Profile tab | P0 | TODO | M21 |
 | F-12 | Answer memory | P1 | TODO | M22 |
 | F-20 | Master resume | P0 | DONE | M20 lane T merged |
@@ -41,8 +41,8 @@
 | F-25 | Tailor from the UI | P0 | TODO | M21 |
 | F-30 | Start an application, duplicates, caps | P0 | TODO | M20 CLI, M21 UI |
 | F-31 | Detect ATS and plan | P0 | TODO | M20 |
-| F-32 | Resolve every answer | P0 | TODO | M20 |
-| F-33 | Declarations | P0 | TODO | M20 |
+| F-32 | Resolve every answer | P0 | DONE | M20 lane P merged |
+| F-33 | Declarations | P0 | DONE | M20 lane P merged |
 | F-34 | Drive the browser | P0 | TODO | M20 |
 | F-35 | Accounts and passwords | P0 | TODO | M21 |
 | F-36 | Email verification (IMAP) | P0 | TODO | M21 |
@@ -81,6 +81,7 @@ Decided items aren't reopened. If facts change, raise a new decision that refere
 | D-60 | Tailor output | Clean template; DOCX + PDF via Word; page ceiling; temp 0.25 | Coordinator | DECIDED |
 | D-61 | Caps | 10/day, 2/employer/day, 1 in flight | Coordinator | DECIDED |
 | D-62 | Team and git | Standard team, no security reviewer; merge and push allowed | owner | DECIDED |
+| D-71 | Lane P open points | Accept the engineer's stricter choices (fixed-mapping fields never reach tiers 2/4/5; checkbox/email/phone/date/URL/typeahead never reach the model; required cover letter may); `backup_email` added to the template (architect to fold into §5.4); `ResolveContext.job_title` additive field → architect (Q-27) | Coordinator, 2026-11-02 | DECIDED |
 | D-70 | Workday first; MyGreenhouse autofill | Owner 2026-11-02: Workday is the biggest problem and must work; Greenhouse uses "Autofill with MyGreenhouse" (owner signs in once in the JobScraper Edge profile) then fills the empty fields; the tailored resume always replaces an autofilled one. Lane V (vault, accounts, IMAP, Workday wizard) moves from M21 into M20; spike S-5 = real Workday flow at 2 employers with the owner's email (owner allowed real accounts AND automatic submission there); a backup email is used when the primary is already registered | owner, 2026-11-02 | DECIDED |
 | D-69 | Tester's testability items | Clicked Submit ends only submitted/submitted_unconfirmed (NF-06); apostrophes kept in labels; `current_employee_at_company` deduced; validator counts standalone numbers only; tester's assumed signatures adopted; fixture paths per tests/fixtures | Coordinator, 2026-11-02 | DECIDED |
 | D-68 | Planner gaps A-1..A-5 | A-1 resolver gets the alias dictionary for grounding; A-2 apply_flow passes resume text (extract_text or tailor master) in the resolver context; A-3 CLI `apply show`; A-4 experience months = merged intervals, internships count, whole months; A-5 `tailor.llm_terms` (default on, M21) separate from `tailor.llm` (off, M22) | Coordinator, 2026-11-02 | DECIDED |
