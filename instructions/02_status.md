@@ -81,6 +81,7 @@ Decided items aren't reopened. If facts change, raise a new decision that refere
 | D-60 | Tailor output | Clean template; DOCX + PDF via Word; page ceiling; temp 0.25 | Coordinator | DECIDED |
 | D-61 | Caps | 10/day, 2/employer/day, 1 in flight | Coordinator | DECIDED |
 | D-62 | Team and git | Standard team, no security reviewer; merge and push allowed | owner | DECIDED |
+| D-64 | Cancelling a run | 30 s grace for runs (5 s other jobs); after a hard kill the web app marks the run row failed "cancelled (killed)" | Coordinator, 2026-11-02 | DECIDED |
 | D-63 | Cloud UI ports vs M18 | Port to `personal` now; M18 rebases later; skip C-11 | Coordinator | DECIDED |
 
 ## 5. Known issues and verification items
