@@ -60,6 +60,26 @@ PLANS: dict[str, Plan] = {
 CYCLE_DAYS_KEY = "cycle_days"               # the settings-table key (M15)
 
 
+@dataclass(frozen=True)
+class TailorConfig:
+    """The `tailor:` block (tailor_design.md section 14), defaults included so a
+    config.yaml without the block still works. `llm` is the M22 rewrite layer
+    and stays False (D-67)."""
+    enabled: bool = True
+    llm: bool = False
+    llm_terms: bool = True
+    temperature: float = 0.25
+    top_k: int = 20
+    seed: int = 7
+    headline: bool = True
+    pdf: bool = True
+    page_ceiling: Any = "auto"              # "auto" = the master's page count, or a number
+    max_jd_chars: int = 12000
+    draft_days: float = 7
+    sent_days_after_close: float = 30
+    closed_statuses: tuple[str, ...] = ("rejected", "withdrawn")
+
+
 @dataclass
 class Config:
     raw: dict[str, Any]
@@ -203,6 +223,32 @@ class Config:
         return list(statuses) if statuses else [
             "to_apply", "applied", "interviewing", "offer", "rejected",
             "withdrawn"]
+
+    # ---------------- tailor (M20) ----------------
+
+    @property
+    def tailor(self) -> TailorConfig:
+        """The resume tailor's settings; unknown keys are ignored."""
+        block = self.raw.get("tailor") or {}
+        known = {k: block[k] for k in TailorConfig.__dataclass_fields__ if k in block}
+        if "closed_statuses" in known:
+            known["closed_statuses"] = tuple(str(s) for s in known["closed_statuses"] or ())
+        return TailorConfig(**known)
+
+    @property
+    def aliases_path(self) -> Path:
+        """Term variants for the tailor. Hand-edited; public data."""
+        return self._path("aliases", "config/aliases.yaml")
+
+    @property
+    def master_resume_path(self) -> Path:
+        """The resume parsed once into fields (gitignored)."""
+        return self._path("master_resume", "data/master_resume.json")
+
+    @property
+    def tailored_dir(self) -> Path:
+        """Per-job tailored resumes (gitignored; deleted per D-59)."""
+        return self._path("tailored_dir", "data/tailored")
 
 
 def load_config(path: str | os.PathLike | None = None) -> Config:

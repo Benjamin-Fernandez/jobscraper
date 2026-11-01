@@ -25,9 +25,10 @@ from pathlib import Path
 from . import backends
 from . import pipeline
 from . import scheduler
+from . import tailor_flow
 from .config import CYCLE_DAYS_KEY, load_config
 from . import watchlist
-from .store import Store as StoreV2
+from .store import Store as StoreV2, utcnow
 
 BAR = "-" * 66
 EXIT_CANCELLED = 143        # 128 + SIGTERM: the job was cancelled (C-4)
@@ -538,6 +539,52 @@ def cmd_purge(args) -> int:
         note = "" if compacted or not purged else \
             " (not compacted: the database is in use - the next run retries)"
         print(f"database file: {before / 1e6:.1f} MB -> {after / 1e6:.1f} MB{note}")
+        print(f"tailored files deleted: {tailor_flow.purge(cfg, store, utcnow())}")
+        return 0
+    finally:
+        store.close()
+
+
+def cmd_tailor(args) -> int:
+    """M20: tailor the resume to one job (docs/architecture/tailor_design.md 13.1).
+
+    `--report` stops after "JD keyword coverage" before tailoring: it prints
+    each job term and whether the resume has it, and writes no file and no row.
+    Without it the resume is tailored (swaps to the job's own spelling of terms
+    the resume already has, most relevant bullets first), rendered to DOCX and
+    PDF under data/tailored/<job_id>/, and coverage before -> after is printed.
+    Exit 1 on failure. Never prints resume text.
+    """
+    cfg, store = _boot_v2(args)
+    try:
+        backend = backends.build(cfg.budget)
+        res = tailor_flow.tailor(cfg, store, args.job_id, backend=backend,
+                                 report_only=args.report, force=args.force, say=print)
+        if not res.ok:
+            print(f"tailor failed: {res.error}", file=sys.stderr)
+            return 1
+        if args.report:
+            print(f"{'term':<28} {'need':<10} {'status':<16} variant / related")
+            for t in res.terms:
+                extra = t.variant or (f"related: {t.related}" if t.related else "")
+                print(f"{t.term[:28]:<28} {'required' if t.required else 'preferred':<10} "
+                      f"{t.status.value:<16} {extra}")
+            print(f"JD keyword coverage: {res.coverage_before:.0%}")
+            for k in res.knockouts:
+                print(f"application question to expect: {k[:120]}")
+            return 0
+        print(f"JD keyword coverage: {res.coverage_before:.0%} -> {res.coverage_after:.0%}")
+        n = lambda src: sum(1 for c in res.changes if c.source == src)      # noqa: E731
+        print(f"bullets changed {n('swap')}, kept original {n('fallback')}, trimmed {n('trimmed')}")
+        missing = [t.term for t in res.terms if t.status.value == "missing"]
+        if missing:
+            print("missing terms (not on your resume, not added): " + ", ".join(missing))
+        d = f"data/tailored/{args.job_id}"
+        for p in (res.docx_path, res.pdf_path):
+            if p:
+                print(f"file: {d}/{Path(p).name}")
+        for i in res.issues:
+            print(f"note: {i.code.value} {i.detail}".rstrip())
         return 0
     finally:
         store.close()
@@ -688,6 +735,15 @@ def build_parser() -> argparse.ArgumentParser:
                             help="set enabled: false on one entry")
     wld.add_argument("key", help="the entry's key, or its exact name")
     wl.set_defaults(fn=cmd_watchlist)
+
+    # --- tailor (M20 lane T)
+    tl_p = sub.add_parser("tailor", help="tailor your resume to one job (DOCX + PDF)")
+    tl_p.add_argument("job_id", help="the job's id (as in the Inbox / jobs table)")
+    tl_p.add_argument("--report", action="store_true",
+                      help="print JD keyword coverage and each term's status; write nothing")
+    tl_p.add_argument("--force", action="store_true",
+                      help="tailor again even if a current file exists")
+    tl_p.set_defaults(fn=cmd_tailor)
     return p
 
 
