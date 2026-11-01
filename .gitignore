@@ -57,3 +57,19 @@ npm-debug.log*
 *.swp
 .DS_Store
 Thumbs.db
+
+# --- auto-apply and resume tailor (docs/prd.md NF-01) ------------------------
+# The repo is public. Everything below holds the owner's personal data.
+data/applicant*.yaml
+data/master_resume.json
+data/tailored/
+data/apply/
+data/*.csv
+
+# --- agent harness ---------------------------------------------------------
+.env
+.env.local
+.claude/hooks/logs/
+.claude/settings.local.json
+.claude/worktrees/
+CLAUDE.local.md
