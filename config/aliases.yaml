@@ -1,0 +1,129 @@
+# JobScraper term-variant dictionary (M20 tailor). Public, generic data: no personal content.
+# Format: docs/architecture/tailor_design.md section 6.1.
+# Rules (loader-enforced): a string appears in at most one entry; canonicals unique by token key;
+# kind in tool | language | framework | platform | practice | domain | soft.
+# Every `variants` item is a STRICT synonym: swapping it for the canonical (or back) never changes
+# the claim. Deliberately NOT variants (different claims): JavaScript vs TypeScript, Angular vs
+# AngularJS, "continuous integration" vs CI/CD (CI alone is only half), "data analysis" vs "data
+# science", "SQL" vs "MySQL", "Java" vs "JavaScript", "AWS" vs any single AWS service.
+# `instances` stay empty: no "instance-of" claim is made here (those are the owner's to curate).
+# Provenance: spelling, acronym and vendor-name facts are common knowledge of public product names
+# (not individually web-verified, 2026-11-02); the golden terms are copied from TD section 15.
+version: 1
+ambiguous: [go, c, r]
+terms:
+  # ---- golden terms (TD section 15; minimum set) ----
+  - {canonical: PostgreSQL, variants: [Postgres], kind: tool}
+  - {canonical: Kubernetes, variants: [k8s], kind: platform}
+  - {canonical: machine learning, variants: [ML], kind: domain}
+  - {canonical: REST APIs, variants: [REST API, RESTful APIs, RESTful API, REST endpoints], kind: practice}
+  - {canonical: CI/CD, variants: [CICD, "continuous integration and continuous delivery", "continuous integration and continuous deployment", "continuous integration/continuous delivery"], kind: practice, instances: []}
+  - {canonical: Go, variants: [Golang], kind: language}
+  - {canonical: Kafka, variants: [Apache Kafka], kind: tool}
+  - {canonical: Python, variants: [], kind: language}
+  - {canonical: Git, variants: [], kind: tool}
+  - {canonical: GitHub Actions, variants: [GH Actions], kind: tool}
+  - {canonical: SQL, variants: [Structured Query Language], kind: language}
+  - {canonical: Power BI, variants: [PowerBI, Microsoft Power BI], kind: tool}
+  - {canonical: Excel, variants: [MS Excel, Microsoft Excel], kind: tool}
+  - {canonical: Tableau, variants: [], kind: tool}
+  - {canonical: pandas, variants: [], kind: tool}
+  - {canonical: A/B testing, variants: [AB testing, A/B tests, split testing], kind: practice}
+  - {canonical: stakeholder management, variants: [managing stakeholders], kind: soft}
+  - {canonical: Java, variants: [], kind: language}
+  - {canonical: Spring, variants: [Spring Framework], kind: framework}
+  - {canonical: Spring Boot, variants: [SpringBoot], kind: framework}
+  - {canonical: microservices, variants: [microservice, micro-services, microservice architecture], kind: practice}
+  - {canonical: RabbitMQ, variants: [Rabbit MQ], kind: tool}
+  - {canonical: AML, variants: [anti-money laundering], kind: domain}
+  - {canonical: KYC, variants: [know your customer], kind: domain}
+  - {canonical: Docker, variants: [], kind: tool}
+
+  # ---- languages ----
+  - {canonical: JavaScript, variants: [JS, ECMAScript], kind: language}
+  - {canonical: TypeScript, variants: [TS], kind: language}
+  - {canonical: C++, variants: [cpp], kind: language}
+  - {canonical: C#, variants: [csharp, C Sharp], kind: language}
+  - {canonical: Kotlin, variants: [], kind: language}
+  - {canonical: Rust, variants: [], kind: language}
+  - {canonical: Bash, variants: [Bash scripting], kind: language}
+  - {canonical: VBA, variants: [Visual Basic for Applications], kind: language}
+  - {canonical: HTML, variants: [HTML5], kind: language}
+  - {canonical: CSS, variants: [CSS3], kind: language}
+
+  # ---- frameworks and libraries ----
+  - {canonical: React, variants: [React.js, ReactJS, React JS], kind: framework}
+  - {canonical: Vue.js, variants: [Vue, VueJS], kind: framework}
+  - {canonical: Next.js, variants: [NextJS], kind: framework}
+  - {canonical: Node.js, variants: [NodeJS, Node JS], kind: framework}
+  - {canonical: Express.js, variants: [ExpressJS], kind: framework}
+  - {canonical: Django, variants: [], kind: framework}
+  - {canonical: Flask, variants: [], kind: framework}
+  - {canonical: FastAPI, variants: [Fast API], kind: framework}
+  - {canonical: NumPy, variants: [], kind: framework}
+  - {canonical: scikit-learn, variants: [sklearn, scikit learn], kind: framework}
+  - {canonical: PyTorch, variants: [], kind: framework}
+  - {canonical: TensorFlow, variants: [], kind: framework}
+  - {canonical: GraphQL, variants: [], kind: tool}
+  - {canonical: gRPC, variants: [], kind: tool}
+
+  # ---- data stores and data tools ----
+  - {canonical: MongoDB, variants: [Mongo], kind: tool}
+  - {canonical: MySQL, variants: [], kind: tool}
+  - {canonical: SQL Server, variants: [MSSQL, Microsoft SQL Server, MS SQL Server], kind: tool}
+  - {canonical: Redis, variants: [], kind: tool}
+  - {canonical: Elasticsearch, variants: [Elastic Search], kind: tool}
+  - {canonical: DynamoDB, variants: [Dynamo DB, Amazon DynamoDB], kind: tool}
+  - {canonical: NoSQL, variants: [non-relational databases], kind: domain}
+  - {canonical: Jupyter, variants: [Jupyter Notebook, Jupyter Notebooks], kind: tool}
+  - {canonical: ETL, variants: [extract transform load], kind: practice}
+  - {canonical: Looker, variants: [Looker Studio], kind: tool}
+  - {canonical: Bloomberg, variants: [Bloomberg Terminal], kind: tool}
+
+  # ---- cloud and devops ----
+  - {canonical: AWS, variants: [Amazon Web Services], kind: platform}
+  - {canonical: GCP, variants: [Google Cloud, Google Cloud Platform], kind: platform}
+  - {canonical: Azure, variants: [Microsoft Azure], kind: platform}
+  - {canonical: Amazon S3, variants: [AWS S3], kind: tool}
+  - {canonical: Amazon EC2, variants: [AWS EC2], kind: tool}
+  - {canonical: Terraform, variants: [], kind: tool}
+  - {canonical: Ansible, variants: [], kind: tool}
+  - {canonical: Jenkins, variants: [], kind: tool}
+  - {canonical: GitLab CI, variants: [GitLab CI/CD], kind: tool}
+  - {canonical: Linux, variants: [], kind: platform}
+  - {canonical: DevOps, variants: [Dev Ops], kind: practice}
+  - {canonical: SRE, variants: [site reliability engineering], kind: practice}
+  - {canonical: infrastructure as code, variants: [IaC], kind: practice}
+
+  # ---- engineering practices ----
+  - {canonical: API, variants: [application programming interface], kind: practice}
+  - {canonical: OOP, variants: [object-oriented programming, object oriented programming], kind: practice}
+  - {canonical: TDD, variants: [test-driven development, test driven development], kind: practice}
+  - {canonical: SDLC, variants: [software development life cycle, software development lifecycle], kind: practice}
+  - {canonical: data structures and algorithms, variants: [DSA], kind: domain}
+  - {canonical: UAT, variants: [user acceptance testing], kind: practice}
+  - {canonical: SaaS, variants: [software as a service], kind: domain}
+  - {canonical: Agile, variants: [], kind: practice}
+  - {canonical: Scrum, variants: [], kind: practice}
+  - {canonical: Jira, variants: [], kind: tool}
+  - {canonical: data modelling, variants: [data modeling], kind: practice}
+
+  # ---- AI / data science ----
+  - {canonical: artificial intelligence, variants: [AI], kind: domain}
+  - {canonical: natural language processing, variants: [NLP], kind: domain}
+  - {canonical: large language models, variants: [LLMs, LLM], kind: domain}
+  - {canonical: generative AI, variants: [GenAI, Gen AI, generative artificial intelligence], kind: domain}
+  - {canonical: retrieval-augmented generation, variants: [RAG, retrieval augmented generation], kind: practice}
+  - {canonical: deep learning, variants: [], kind: domain}
+  - {canonical: business intelligence, variants: [BI], kind: domain}
+  - {canonical: KPIs, variants: [key performance indicators], kind: practice}
+
+  # ---- finance ----
+  - {canonical: financial modelling, variants: [financial modeling], kind: domain}
+  - {canonical: DCF, variants: [discounted cash flow], kind: domain}
+  - {canonical: P&L, variants: [profit and loss], kind: domain}
+  - {canonical: M&A, variants: [mergers and acquisitions], kind: domain}
+  - {canonical: FP&A, variants: [financial planning and analysis], kind: domain}
+  - {canonical: CDD, variants: [customer due diligence], kind: domain}
+  - {canonical: IFRS, variants: [International Financial Reporting Standards], kind: domain}
+  - {canonical: project management, variants: [], kind: soft}
