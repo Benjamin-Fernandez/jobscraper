@@ -22,6 +22,7 @@ import { requestPicker, runLabel } from '../runs.js'
 import CompanyMark from '../components/CompanyMark.vue'
 import Icon from '../components/Icon.vue'
 import RunSelector from '../components/RunSelector.vue'
+import SetupChecklist from '../components/SetupChecklist.vue'
 import TabLoading from '../components/TabLoading.vue'
 
 const props = defineProps(tabProps)
@@ -364,11 +365,13 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onShortcut))
       <button type="button" @click="emit('changed')">Try again</button>
     </div>
     <TabLoading v-else-if="firstLoad" :rows="3" />
-    <div v-else-if="!jobs.length" class="empty">
-      <Icon name="inbox" :size="28" />
-      <p class="empty-title">No roles in {{ scope }}.</p>
-      <p class="muted">Show other runs above, or start a new one from the Runs tab.</p>
-    </div>
+    <SetupChecklist v-else-if="!jobs.length" :runs="runs">
+      <div class="empty">
+        <Icon name="inbox" :size="28" />
+        <p class="empty-title">No roles in {{ scope }}.</p>
+        <p class="muted">Show other runs above, or start a new one from the <a href="#/runs">Runs tab</a>.</p>
+      </div>
+    </SetupChecklist>
     <div v-else-if="!untracked.length" class="empty caught-up">
       <Icon name="check" :size="28" />
       <p class="empty-title">You're all caught up.</p>
