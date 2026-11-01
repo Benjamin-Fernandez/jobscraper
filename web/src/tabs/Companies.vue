@@ -14,7 +14,7 @@
 // The tab has two views: Watched companies - every company a run checks, A-Z
 // and searchable, with why any of them failed (WatchedCompanies.vue) - and
 // Your list. The view last used is remembered in this browser.
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import {
   ApiError, LIST_TYPES, clearCompanyList, describeError, getCompanyHealth,
   getCompanyList, startCompanySearch, uploadCompanyList,
@@ -182,32 +182,62 @@ async function search() {
   }
 }
 
-async function take(file) {
+// Store a list file and search its new names. `source` names it in the note.
+// True once the list is stored (whether or not the search could start).
+async function take(file, source = file?.name) {
   problem.value = ''
   note.value = ''
-  if (!file) return
+  if (!file) return false
   const why = refusal(file)
   if (why) {
     problem.value = why
-    return
+    return false
   }
   uploading.value = true
   try {
     const saved = await uploadCompanyList(file)
     data.value = saved
     const u = saved.upload ?? {}
-    const parts = [`Read ${u.read} ${u.read === 1 ? 'company' : 'companies'} from ${file.name}`]
+    const parts = [`Read ${u.read} ${u.read === 1 ? 'company' : 'companies'} from ${source}`]
     if (u.kept) parts.push(`${u.kept} searched before`)
     if (u.capped) parts.push('only the first 2,000 lines were read')
     note.value = parts.join(' · ') + '.'
   } catch (e) {
     problem.value = serverRefusal(e)
-    return
+    return false
   } finally {
     uploading.value = false
   }
   emit('changed', {})
   if (waiting.value.length) await search()
+  return true
+}
+
+// ---- type or paste names (UX-1): no file needed ----
+// The editor starts from the current list, in order, so adding, removing and
+// reordering are all just editing. Saving sends it as a TXT list through the
+// same upload, so companies searched before keep their result.
+
+const editing = ref(false)
+const draft = ref('')
+const draftEl = ref(null)
+const draftNames = computed(() => draft.value.split(/\r?\n/).map(l => l.trim()).filter(Boolean))
+
+async function editList() {
+  draft.value = items.value.map(i => i.name).join('\n')
+  problem.value = ''
+  editing.value = true
+  await nextTick()
+  draftEl.value?.focus()
+}
+
+async function saveTyped() {
+  if (!draftNames.value.length) {
+    problem.value = 'Write at least one company name, one per line.'
+    return
+  }
+  const file = new File([`${draftNames.value.join('\n')}\n`], 'companies.txt', { type: 'text/plain' })
+  if (await take(file, 'your list')) editing.value = false
 }
 
 function onPick(event) {
@@ -311,14 +341,43 @@ onMounted(() => Promise.all([loadList(), loadHealth(), refresh()]))
     />
 
     <template v-else>
-      <div v-if="items.length" class="list-controls">
-        <button v-if="waiting.length && !searching" type="button" class="primary search-now" :disabled="busy" @click="search">
+      <div v-if="items.length || !editing" class="list-controls">
+        <button v-if="items.length && waiting.length && !searching" type="button" class="primary search-now" :disabled="busy" @click="search">
           <Icon name="search" /> Search now
         </button>
-        <button type="button" class="clear" :disabled="busy" @click="clear">Clear list</button>
+        <button v-if="!editing" type="button" class="edit-list" :disabled="busy" @click="editList">
+          {{ items.length ? 'Edit list' : 'Type or paste names' }}
+        </button>
+        <button v-if="items.length" type="button" class="clear" :disabled="busy" @click="clear">Clear list</button>
       </div>
 
+      <form v-if="editing" class="list-editor surface" novalidate @submit.prevent="saveTyped">
+        <label for="list-text" class="list-editor-label">Your companies, one per line, most wanted first</label>
+        <textarea
+          id="list-text"
+          ref="draftEl"
+          v-model="draft"
+          class="list-text"
+          rows="10"
+          spellcheck="false"
+          autocomplete="off"
+          aria-describedby="list-text-hint"
+          placeholder="Grab&#10;Shopee&#10;GovTech"
+        />
+        <p id="list-text-hint" class="muted list-editor-hint">
+          Add, remove or reorder names. New names are searched when you save; companies searched before keep their result.
+        </p>
+        <div class="list-editor-actions">
+          <button type="submit" class="primary save-list" :disabled="busy">
+            {{ uploading ? 'Saving…' : 'Save list' }}
+          </button>
+          <button type="button" class="cancel-list" :disabled="uploading" @click="editing = false">Cancel</button>
+          <span class="muted num list-editor-count">{{ draftNames.length }} {{ draftNames.length === 1 ? 'company' : 'companies' }}</span>
+        </div>
+      </form>
+
       <label
+        v-else
         class="drop"
         :class="{ dragging, disabled: busy, compact: items.length }"
         @dragenter.prevent="dragging = !busy"
@@ -357,11 +416,15 @@ onMounted(() => Promise.all([loadList(), loadHealth(), refresh()]))
         <p>Could not load your list: {{ loadError }}</p>
         <button type="button" @click="loadList">Try again</button>
       </div>
-      <div v-else-if="!items.length" class="empty">
+      <div v-else-if="!items.length && !editing" class="empty">
         <Icon name="layers" :size="28" />
         <p class="empty-title">No list yet.</p>
-        <p class="muted">Write the companies you want to work for, one per line, and drop the file above.</p>
+        <p class="muted">Type the companies you want to work for, or drop a file with one per line above.</p>
+        <p><button type="button" class="link" :disabled="busy" @click="editList">Type or paste names</button></p>
       </div>
+      <!-- While the editor is open it is the empty state. -->
+      <template v-else-if="!items.length" />
+
 
       <template v-else>
         <div class="summary surface">
@@ -485,6 +548,24 @@ onMounted(() => Promise.all([loadList(), loadHealth(), refresh()]))
 .drop .muted { font-size: var(--text-sm); }
 .notice { margin-top: var(--space-3); }
 .drop + .empty, .drop ~ .skeleton { margin-top: var(--space-4); }
+.list-editor ~ .skeleton { margin-top: var(--space-4); }
+
+/* Type or paste names (UX-1). */
+.list-editor { display: grid; gap: var(--space-2); padding: var(--space-4); }
+.list-editor-label { font-weight: 600; font-size: var(--text-sm); }
+.list-text {
+  width: 100%; min-height: 12rem; resize: vertical; padding: var(--space-2) var(--space-3);
+  font: inherit; font-size: var(--text-sm); line-height: 1.6; color: var(--text);
+  background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--radius);
+  transition: border-color 0.12s, box-shadow 0.12s;
+}
+.list-text:focus-visible {
+  outline: none; border-color: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent);
+}
+.list-editor-hint { margin: 0; font-size: var(--text-sm); }
+.list-editor-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
+.list-editor-count { font-size: var(--text-sm); margin-left: auto; }
 .clear { color: var(--danger); }
 .search-now { display: inline-flex; align-items: center; gap: var(--space-1); }
 
