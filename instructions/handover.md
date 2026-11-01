@@ -1,27 +1,28 @@
 # Handover note (rewrite every session; ≤ 40 lines; history goes to `docs/planning/session_log.md`)
 
-**Last session:** 2026-11-02, session 1 (continued). **Branch/commit:** `personal` (see `git log -1`), pushed.
+**Last session:** 2026-11-02, session 1 (stopped by the owner: "stop here for now"). **Branch/commit:** `personal`, pushed (`git log -1`). Suite 469/469.
 
 ## Where we are
-- M19 (cloud port) DONE and pushed. M20 dossier (designs, plans, test plans, seeds) merged into `personal`.
-- D-70 (owner): Workday is the priority; M20 now = Workday end to end + Greenhouse with MyGreenhouse autofill; tailored resume always replaces an autofilled one.
-- Full suite on personal: 425/427; the 2 failures are D-69 state-machine oracles awaiting the tester (Q-21).
+- M19 DONE. M20 (re-scoped D-70: Workday first, Greenhouse with MyGreenhouse autofill) in build.
+- Merged into personal: dossier (designs, plans, tests, seeds), D-70 design delta (contracts v3), lane T (tailor, CLI `tailor`), lane P (profile + resolver, CLI `applicant check`), Q-21 oracles.
 
-## Running (background worktree agents, branched from personal)
-- Q-22 architect `arch/Q-22-workday-first`: Workday adapter spec, MyGreenhouse path, `apply open-profile`, backup email, `yes_if`, lane V into M20.
-- Lane P `eng/M20-P-profile-resolver` (WP-P1..P6), lane B `eng/M20-B-browser-greenhouse` (WP-B1..B8), lane T `eng/M20-T-tailor` (WP-T1..T8).
+## Paused lanes (worktrees kept under `.claude/worktrees/`; resume each on its branch)
+- Lane B `eng/M20-B-browser-greenhouse` (agent-ac5b…): B1–B6 committed (incl. MyGreenhouse prefill). Next: `git merge personal` (conflict in `config.py`: keep both append blocks; earlier attempt aborted), then B7 orchestrator, B8 CLI, B10 `apply open-profile`, B9 swap real resolver/tailor (`tailor_flow.tailor_for_apply`, `applicant.load`), B11, B12.
+- Lane V `eng/M20-V-vault-mail` (agent-a379…): V1 vault committed; V3 `apply/mail.py` is a WIP commit (unverified). Next: finish V3 (+ V2 mail half), verify with the tester's fake IMAP.
+- Tester `test/Q-26-d70-oracles` (agent-a0b5…): WIP commit (fake IMAP fixtures, MyGreenhouse fixtures, `tests/test_apply_mail.py`, `tests/apply_support.py`), not yet run. Next: finish D-70 oracles, run suite.
+- Not started: WP-A03 `yes_if` rows (researcher; Q-26), Q-27 architect small items (`ResolveContext.job_title`, §5.4 `backup_email`).
 
 ## Waiting on the owner
-- Application email (primary) in chat; confirm the backup `benjaminwrka@gmail.cm` (likely `.com`).
-- Gmail app password into Credential Manager: target `jobscraper:imap:imap.gmail.com`, user = the Gmail address (command given in chat). A second one if the backup address is also used for verification.
-- MyGreenhouse sign-in once in the JobScraper Edge profile (`%LOCALAPPDATA%\JobScraper\apply-profile`).
-- Later: `data/applicant.yaml` from the template lane P ships.
+- Real Gmail app password for the application address (the stored entry `jobscraper:imap:imap.gmail.com` is the normal password: Google rejects it). Check: IMAP login test.
+- MyGreenhouse sign-in inside the JobScraper Edge profile (`%LOCALAPPDATA%\JobScraper\apply-profile` does not exist yet).
+- Backup email spelling (`…@gmail.cm` → `.com`?).
+- Fill `data/applicant.yaml` from `config/applicant.example.yaml`; `applicant check` passes.
 
 ## Next 1–3 actions
-1. Q-21 tester (D-69 oracles + 3 dropped layering guards) once an agent slot frees.
-2. On Q-22: merge it; spike S-5 (Q-23) on 2 owner-approved Workday employers — real sign-up + IMAP verify, record every step; stop at Review. Real submissions there happen through the built product at the M20 gate (owner allowed them, D-70).
-3. Merge lanes P → T → B (B9 swap), then lane V (Workday), M20 gate.
+1. Resume lanes B, V and the tester (≤ 4 agents); researcher A03.
+2. When the app password works: spike S-5 (Q-23) on 2 owner-approved Workday employers, stop at Review; tester records WP-F1 fixtures; lane V V4–V7.
+3. M20 gate: Greenhouse dry runs + the 2 real Workday submissions (owner-allowed, D-70).
 
 ## Watch out
-- Agent worktrees start from master: every brief says `git switch -c <branch> personal`.
+- Agent worktrees start from master: briefs say `git switch -c <branch> personal` (resumed lanes: just continue on their branch).
 - Live app on 8765 runs from this checkout; dev instances use 8768 with a copied DB.

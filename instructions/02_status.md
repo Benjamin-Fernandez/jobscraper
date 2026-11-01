@@ -1,12 +1,12 @@
 # 02: Status (live)
 
-**Last updated:** 2026-11-01 by Coordinator
+**Last updated:** 2026-11-02 by Coordinator
 **States:** `TODO` · `IN PROGRESS` · `DONE` · `BLOCKED` · `AWAITING APPROVAL` · `DEFERRED`
 **Priority:** P0 = MVP-critical · P1 = important · P2 = nice to have
 
 ## Now / Next (≤ 10 lines; history goes to `docs/planning/session_log.md`)
 
-- **Now:** M20 dossier merged (designs, plans, tests, seeds). Lanes P, B, T building; architect adding the D-70 delta (Workday first, MyGreenhouse).
+- **Now:** paused by the owner. Merged: M19, M20 dossier + D-70 delta, lanes T and P (469/469). Paused: lane B (B1–B6 done), lane V (V1 done), tester Q-26 (WIP).
 - **Next:** spike S-5 (real Workday flow) once the owner gives the email + app password; then lane V (Workday).
 - **Blocked on the owner:** application email (and confirm backup), Gmail app password via the command, MyGreenhouse sign-in in the JobScraper Edge profile, then `data/applicant.yaml`.
 
