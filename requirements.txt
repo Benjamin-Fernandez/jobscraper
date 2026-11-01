@@ -12,3 +12,7 @@ fastapi>=0.110
 uvicorn>=0.29
 
 # The model (Qwen3) is reached over HTTP through Ollama - httpx above; no SDK.
+
+# M20 auto-apply (apply_design)
+playwright>=1.64     # drives Microsoft Edge (channel msedge; no `playwright install`)
+keyring>=25.7        # ATS passwords in Windows Credential Manager (M21)

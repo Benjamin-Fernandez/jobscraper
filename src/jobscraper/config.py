@@ -60,6 +60,71 @@ PLANS: dict[str, Plan] = {
 CYCLE_DAYS_KEY = "cycle_days"               # the settings-table key (M15)
 
 
+# ---------------- auto-apply (M20, apply_design §16) ----------------
+#
+# The `apply:` block of config.yaml. Every field has the design's default, used
+# when the block (or a key) is absent. Settings → Apply (the `settings` table,
+# keys `apply.<field>`) overrides some of these at run time; the CLI builds that
+# effective copy with dataclasses.replace (apply_design §14.3).
+
+@dataclass(frozen=True)
+class ApplyMailConfig:
+    host: str = "imap.gmail.com"
+    port: int = 993
+    username: str = ""          # never written to config.yaml (public repo): settings only
+    wait_s: int = 300           # F-36
+    poll_s: int = 10
+
+
+@dataclass(frozen=True)
+class ApplyConfig:
+    mode: str = "dry_run"                   # auto | dry_run
+    daily_cap: int = 10                     # D-61
+    per_employer_daily_cap: int = 2         # D-61
+    headed: bool = True                     # D-53
+    captcha_wait_s: int = 0                 # F-38
+    profile_dir: str = r"%LOCALAPPDATA%\JobScraper\apply-profile"
+    edge_sync: bool = False                 # S-1: true drops --disable-sync
+    edge_save_bubble: bool = False
+    type_delay_ms: int = 60
+    action_pause_ms: int = 250              # NF-05
+    step_timeout_s: int = 45
+    confirm_timeout_s: int = 60             # F-37
+    attempt_timeout_s: int = 420            # NF-07
+    dry_run_hold_s: int = 600               # F-37
+    resume_format: str = "pdf"              # pdf | docx
+    llm_text_temperature: float = 0.3
+    mail: ApplyMailConfig = ApplyMailConfig()
+
+    @classmethod
+    def from_raw(cls, raw: Any) -> "ApplyConfig":
+        """Build from the yaml block; missing keys keep the defaults and values
+        are coerced to each field's type (a quoted number still works)."""
+        raw = raw if isinstance(raw, dict) else {}
+        mail_raw = raw.get("mail") if isinstance(raw.get("mail"), dict) else {}
+        return cls(**_coerce(cls, raw, skip={"mail"}),
+                   mail=ApplyMailConfig(**_coerce(ApplyMailConfig, mail_raw)))
+
+
+def _coerce(klass: type, raw: dict[str, Any], skip: frozenset | set = frozenset()) -> dict[str, Any]:
+    """The keys of `raw` that are fields of the dataclass `klass`, cast to the
+    type of that field's default. Unknown keys are ignored."""
+    out: dict[str, Any] = {}
+    for name, f in klass.__dataclass_fields__.items():
+        if name in skip or name not in raw or raw[name] is None:
+            continue
+        default, v = f.default, raw[name]
+        if isinstance(default, bool):
+            out[name] = v if isinstance(v, bool) else str(v).strip().lower() in ("1", "true", "yes", "on")
+        elif isinstance(default, int):
+            out[name] = int(v)
+        elif isinstance(default, float):
+            out[name] = float(v)
+        else:
+            out[name] = str(v)
+    return out
+
+
 @dataclass
 class Config:
     raw: dict[str, Any]
@@ -203,6 +268,13 @@ class Config:
         return list(statuses) if statuses else [
             "to_apply", "applied", "interviewing", "offer", "rejected",
             "withdrawn"]
+
+    # ---------------- apply (M20) ----------------
+
+    @property
+    def apply(self) -> ApplyConfig:
+        """The `apply:` block with the design's defaults (apply_design §16)."""
+        return ApplyConfig.from_raw(self.raw.get("apply"))
 
 
 def load_config(path: str | os.PathLike | None = None) -> Config:
