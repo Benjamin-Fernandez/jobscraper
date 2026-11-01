@@ -42,4 +42,7 @@ BODY: Branch `eng/Q-03-ui-port` (from `personal`), one commit per item, `web/src
 - C-18 `detailText` + 413/415/422 in `describeError`, `failureText` (used in TitleEditor, Profile, Companies), JobStatus says "cancelled" when `job.reason === 'cancelled'` (needs the C-4 engine half to set `reason`), boot screen with Retry in App.vue (network error only; an ApiError still goes to the tabs), `sgtClock()` in format.js.
 EVIDENCE: `cd web; npx vitest run` -> 1 failed | 179 passed (180). The failure is intended: `web/tests/m16.test.js:278` expects `.jd-text` text to equal the raw description; it is now heading/list/paragraph elements (tester to update with the h1/ux1 ports). Scratch build (`vite build --outDir <scratch> --emptyOutDir`) succeeded.
 KNOWN LIMITS: not exercised in a browser.
+
+RE: Q-06 / S-2 / F-22, NF-07; docs/architecture/spikes/S-2_tailor_llm.md
+BODY: Spike done on branch spike/Q-06-tailor-llm. Qwen3-14B (qwen3:14b, Ollama 0.40.13, RTX 5080): 1.5 s per entry, about 6 s per resume, 177/177 calls valid JSON. 78-79% of bullets returned unchanged; real-JD resumes 0-2% changed; coverage after LLM == after swaps in 54/54 runs. Hard validator rejections 4.8% (all correct); keywords_used check gave 7-11% false positives; retry rescued 0/59. Validator misses verb upgrades, direction flips, number words, unknown lowercase tools. Recommend tailor.llm stays false; fixes listed in the report. Design gap: a "- Kafka" list line is read as a heading (§4.3 step 4); golden oracles need "bullet-marker lines are never headings".
 STATUS: open

@@ -20,7 +20,7 @@ from dataclasses import dataclass, field
 from enum import Enum, IntEnum
 from typing import Any, Callable, Optional, Protocol, Sequence, Union, runtime_checkable
 
-CONTRACT_VERSION = 1
+CONTRACT_VERSION = 2   # 2: D-69 (no FAILED after the Submit click, ADR-0004), D-68 context fields
 
 
 # --------------------------------------------------------------------------
@@ -52,10 +52,17 @@ TERMINAL_STATES = frozenset({
 # States that block a new attempt for the same posting (F-30, NF-06).
 SUCCESS_STATES = frozenset({AttemptState.SUBMITTED, AttemptState.SUBMITTED_UNCONFIRMED})
 
+# States an attempt can be in once `submit_clicked_at` is set (NF-06, D-69):
+# after the click it ends only SUBMITTED or SUBMITTED_UNCONFIRMED, never FAILED.
+POST_CLICK_STATES = frozenset({
+    AttemptState.SUBMITTING, AttemptState.VERIFYING_EMAIL,
+    AttemptState.SUBMITTED, AttemptState.SUBMITTED_UNCONFIRMED,
+})
+
 _S = AttemptState
 # Allowed automatic transitions. FAILED is reachable from every non-terminal
-# state and is added below. Owner actions on terminal states (design §4.3) are
-# not in this table: they go through dedicated store methods.
+# state except SUBMITTING (it is added below). Owner actions on terminal states
+# (design §4.3) are not in this table: they go through dedicated store methods.
 TRANSITIONS: dict[AttemptState, frozenset[AttemptState]] = {
     _S.QUEUED: frozenset({_S.TAILORING, _S.PLANNING}),
     _S.TAILORING: frozenset({_S.PLANNING}),
@@ -63,18 +70,30 @@ TRANSITIONS: dict[AttemptState, frozenset[AttemptState]] = {
     _S.OPENING: frozenset({_S.SIGNING_IN, _S.SIGNING_UP, _S.FILLING}),
     _S.SIGNING_IN: frozenset({_S.VERIFYING_EMAIL, _S.FILLING}),
     _S.SIGNING_UP: frozenset({_S.VERIFYING_EMAIL, _S.SIGNING_IN, _S.FILLING}),
-    _S.VERIFYING_EMAIL: frozenset({_S.SIGNING_IN, _S.FILLING, _S.SUBMITTING}),
+    # after a click (Greenhouse emailed code, §4.2): SUBMITTING or SUBMITTED_UNCONFIRMED only
+    _S.VERIFYING_EMAIL: frozenset({_S.SIGNING_IN, _S.FILLING, _S.SUBMITTING,
+                                   _S.SUBMITTED_UNCONFIRMED}),
     _S.FILLING: frozenset({_S.FILLING, _S.SUBMITTING, _S.READY_TO_SUBMIT}),
     _S.SUBMITTING: frozenset({_S.VERIFYING_EMAIL, _S.SUBMITTED,
                               _S.SUBMITTED_UNCONFIRMED}),
 }
-TRANSITIONS = {k: v | {_S.FAILED} for k, v in TRANSITIONS.items()}
+TRANSITIONS = {k: (v if k is _S.SUBMITTING else v | {_S.FAILED}) for k, v in TRANSITIONS.items()}
 for _t in TERMINAL_STATES:
     TRANSITIONS[_t] = frozenset()
 
 
-def can_transition(src: AttemptState, dst: AttemptState) -> bool:
-    return dst in TRANSITIONS.get(src, frozenset())
+def can_transition(src: AttemptState, dst: AttemptState, *,
+                   clicked: Optional[bool] = None) -> bool:
+    """Table check; with `clicked` (is `submit_clicked_at` set?) also the NF-06
+    rule: after the click only POST_CLICK_STATES, and SUBMITTING /
+    SUBMITTED_UNCONFIRMED only after a click. `store.set_attempt_state` passes it."""
+    if dst not in TRANSITIONS.get(src, frozenset()):
+        return False
+    if clicked is None:
+        return True
+    if clicked:
+        return dst in POST_CLICK_STATES
+    return dst not in (_S.SUBMITTING, _S.SUBMITTED, _S.SUBMITTED_UNCONFIRMED)
 
 
 class ReasonCode(str, Enum):
@@ -348,6 +367,7 @@ class DeclarationLabel(str, Enum):
     NON_COMPETE = "non_compete"
     HEALTH = "health"
     PRIOR_EMPLOYMENT = "prior_employment_at_company"
+    CURRENT_EMPLOYEE = "current_employee_at_company"   # D-69: deduced from experience[] with no end date
     PREVIOUSLY_APPLIED = "previously_applied"
 
 
@@ -360,9 +380,12 @@ class ResolveContext:
     employer_aliases: tuple[str, ...] = ()  # other names (watchlist key, ATS board name)
     previously_applied: bool = False        # from Applications + attempts (F-33)
     jd_text: str = ""
-    resume_text: str = ""                   # master resume text (grounding corpus)
+    resume_text: str = ""                   # grounding corpus: tailor master text, else the extracted resume (design §7.7, D-68)
     resume_path: str = ""                   # the file to upload
     ats: str = ""
+    # aliases.yaml, loaded by apply_flow via tailor_flow.alias_groups (design §7.7, D-68):
+    alias_groups: tuple[tuple[str, ...], ...] = ()   # one (canonical, *variants) per entry; no instances
+    alias_ambiguous: tuple[str, ...] = ()            # tokens that match only when not all-lowercase
 
 
 # --------------------------------------------------------------------------

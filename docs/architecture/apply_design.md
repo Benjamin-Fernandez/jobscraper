@@ -90,7 +90,7 @@ apply_flow.run():
   reap stale attempts (§4.3) ─► for each job_id, in order:
     create attempt (queued) ─► guards: duplicate · caps · profile (§12) ─► fail early or continue
     tailoring: tailor_flow.tailor_for_apply()  (no current file) ─► resume path (tailored PDF/DOCX or original)
-    planning: detect adapter + tenant ─► plan_from_schema (Greenhouse) ─► resolve all ─► fail before the browser if a required field is unknown
+    planning: detect adapter + tenant ─► build ResolveContext (resume text + alias groups, §7.7) ─► plan_from_schema (Greenhouse) ─► resolve all ─► fail before the browser if a required field is unknown
     opening: browser session (one per job run) ─► new tab ─► adapter.open ─► classify page
     [signing_in | signing_up ─► verifying_email]           (Workday; §10, §11)
     filling (per step): read_step ─► resolve (DOM adapters) ─► fill ─► read back ─► screenshot ─► classify ─► next_step
@@ -102,7 +102,7 @@ apply_flow.run():
   after the last job: if any tab is ready_to_submit, hold the browser for apply.dry_run_hold_s, then close
 ```
 
-`apply_flow.run(cfg, store, job_ids: list[str], *, dry_run: bool, backend) -> list[AttemptResult]` is the orchestrator's only public function; `cmd_apply` calls it and exits 0 if every attempt ended `submitted` or `ready_to_submit`, else 1.
+`apply_flow.run(cfg, store, job_ids: list[str], *, dry_run: bool, backend, http=None, browser_factory=None) -> list[AttemptResult]` is the orchestrator's only public function (D-69: `http` = an object with `get_json(url, **kw)`, default `net.HttpClient` from config, handed to adapters as `AttemptContext.http`; `browser_factory` = a callable returning the §8.1 session, default Playwright Edge; both exist so tests inject fakes, e.g. a schema with an unanswerable required field fails before any browser is created); `cmd_apply` calls it and exits 0 if every attempt ended `submitted` or `ready_to_submit`, else 1.
 
 ---
 
@@ -110,7 +110,7 @@ apply_flow.run():
 
 ### 4.1 States and transitions
 
-States and the allowed automatic transitions are `AttemptState` and `TRANSITIONS` in the contracts. Every non-terminal state may go to `failed`. The store method `set_attempt_state` MUST refuse a transition not in `TRANSITIONS` (raise `ValueError`); this is the guard against a coding error re-entering `submitting`.
+States and the allowed automatic transitions are `AttemptState` and `TRANSITIONS` in the contracts. Every non-terminal state **except `submitting`** may go to `failed` (D-69, ADR-0004). The store method `set_attempt_state` MUST refuse a transition for which `can_transition(src, dst, clicked=<submit_clicked_at is set>)` is false (raise `ValueError`); this is the guard against a coding error re-entering `submitting` or failing a clicked attempt. With `clicked=True` only `POST_CLICK_STATES` are reachable, so `verifying_email` after a click can go only to `submitting` or `submitted_unconfirmed`.
 
 | From | To | Trigger |
 |---|---|---|
@@ -130,15 +130,16 @@ States and the allowed automatic transitions are `AttemptState` and `TRANSITIONS
 | verifying_email | signing_in | link opened; the site now shows sign-in |
 | verifying_email | filling | link opened or code entered; form visible |
 | verifying_email | submitting | emailed security code entered after Submit (§4.2) |
+| verifying_email | submitted_unconfirmed | after a click only: no code within the timeout, no mail set up, or any exception/challenge (§4.2) |
 | filling | filling | `next_step()` moved to another step (step id changes; `step` column updated) |
 | filling | ready_to_submit | review page reached and `mode = dry_run` |
 | filling | submitting | review page reached and `mode = auto`; `submit_clicked_at` written and committed **before** the click |
 | submitting | submitted | `after_submit()` → `confirmed:<signal>` within `confirm_timeout_s` (60) |
-| submitting | submitted_unconfirmed | no confirmation within 60 s, or any exception after the click |
+| submitting | submitted_unconfirmed | no confirmation within 60 s, or any exception, captcha, bot challenge or error page after the click (`reason_detail` = a note such as "captcha after submit"; never retried) |
 | submitting | verifying_email | `after_submit()` → `code_required` (Greenhouse security code) |
-| any non-terminal | failed(reason) | `ApplyFailure`, any other exception (`error`), deadline passed (`error`, detail "timed out"), cancel (`cancelled`) |
+| any non-terminal except submitting, before the click | failed(reason) | `ApplyFailure`, any other exception (`error`), deadline passed (`error`, detail "timed out"), cancel (`cancelled`) |
 
-Rule NF-06: once `submit_clicked_at` is set, the attempt can only end `submitted` or `submitted_unconfirmed` — never `failed`, never another automatic Submit (except the single code re-submit in §4.2). `apply_flow` enforces this by catching every exception after the click and mapping it to `submitted_unconfirmed`.
+Rule NF-06 (wins over every reason code, D-69): once `submit_clicked_at` is set, the attempt can only end `submitted` or `submitted_unconfirmed` — never `failed`, never another automatic Submit (except the single code re-submit in §4.2). A challenge, error or exception after the click → `submitted_unconfirmed` with a note in `reason_detail` (e.g. "captcha after submit", "error page after submit", "timed out"); it is never retried. `apply_flow` enforces this by catching every exception after the click; the contract (`TRANSITIONS` without `submitting → failed`, `can_transition(..., clicked=True)`) and the store guard enforce it again. Only the owner's "It didn't go through" (§4.3, a dedicated store method outside `TRANSITIONS`) can turn such an attempt into `failed`.
 
 ### 4.2 The emailed security code at Submit (Greenhouse)
 
@@ -152,7 +153,7 @@ Greenhouse may answer Submit with "enter the security code we emailed you" when 
 | "It didn't go through" on `submitted_unconfirmed` | state → `failed`, reason `error`, detail `owner: not submitted`; this frees the posting for a new attempt |
 | Cancel the running apply job | JobManager kills the tree; the reaper below closes the row |
 
-**Reaper** (`store.reap_attempts(now, job_running: bool)`), run at the start of `apply_flow.run` and by `GET /api/apply/attempts` when no `apply` job is running: every attempt in a non-terminal state becomes `submitted_unconfirmed` if `submit_clicked_at` is set, else `failed(cancelled)` (detail `interrupted`). Never resubmits.
+**Reaper** (`store.reap_attempts(now) -> int`, D-69: the caller decides whether a job is running, so there is no `job_running` argument), run at the start of `apply_flow.run` and by `GET /api/apply/attempts` when no `apply` job is running: every attempt in a non-terminal state becomes `submitted_unconfirmed` if `submit_clicked_at` is set, else `failed(cancelled)` (detail `interrupted`). Never resubmits.
 
 ### 4.4 Reason codes
 
@@ -160,7 +161,7 @@ Owner-facing copy lives in `REASON_TEXTS` (contracts) and is written in one voic
 
 | Code | Trigger (exact) | Owner text (summary) | Recovery hint |
 |---|---|---|---|
-| `captcha` | `classify` sees a visible challenge widget (§8.4) at any point, including after Submit before a confirmation | CAPTCHA, stopped, nothing sent | Apply by hand. If `captcha_wait_s` > 0 the tab stays open that long and a confirmation seen meanwhile turns it into `submitted` |
+| `captcha` | `classify` sees a visible challenge widget (§8.4) **before** the Submit click (after the click it is `submitted_unconfirmed` with the note "captcha after submit", §4.1, D-69) | CAPTCHA, stopped, nothing sent | Apply by hand. If `captcha_wait_s` > 0 the tab stays open that long and a confirmation seen meanwhile turns it into `submitted` |
 | `bot_challenge` | Cloudflare/Akamai/PerimeterX interstitial or block page (§8.4), or HTTP 403/429 on the apply page | bot check blocked | Apply by hand |
 | `sms_or_2fa` | classify `two_factor` (phone/SMS/authenticator prompt) | phone or two-step code | Apply by hand |
 | `login_failed` | sign-in error shown; or sign-up says the email already has an account and the vault has no entry (detail: "An account exists for your email but JobScraper has no password for it.") | can't sign in | Check by hand; add the password in Settings → Accounts → "Add an existing account" |
@@ -204,9 +205,15 @@ def completeness(profile) -> tuple[int, int]       # (filled, needed) over REQUI
 def llm_extract(profile) -> dict                   # non-sensitive allow-list only (§5.3)
 def grounding_text(profile) -> str                 # flattened non-sensitive values + computed facts (§7.7)
 def redaction_values(profile) -> list[str]         # every string value ≥ 3 chars + digits-only phone/postal, for log scrubbing
-def computed_facts(profile, today) -> dict         # {"experience_months": int, "experience_years": int, "graduation_year": int|None}
+def computed_facts(profile, today: datetime.date) -> dict   # {"experience_months": int, "experience_years": int, "graduation_year": int|None}
 def from_resume(profile_derived: dict, master: dict|None) -> dict   # M21 prefill (§5.5)
 ```
+
+**`computed_facts` (D-68 A-4).** `experience_months` = the length of the **union** of the intervals of every `experience[]` entry (internships included; `education[]` never counts), whole months rounded down:
+- Month position of a date: `YYYY-MM` → `12·Y + (M−1)` (start of that month); `YYYY-MM-DD` → `12·Y + (M−1) + (D−1)/days_in_month`.
+- Interval of an entry = `[pos(start), pos_end)`, where `pos_end` = `pos(end) + 1` for a `YYYY-MM` end (the end month counts in full), `pos(end) + 1/days_in_month` for a `YYYY-MM-DD` end (the end day counts), and `pos(today) + 1/days_in_month(today)` when `end` is null (present); every `pos_end` is clipped to that "today" value. An entry with no `start`, or with `start` after today, contributes nothing.
+- Overlapping or touching intervals are merged; `experience_months = floor(Σ merged lengths)`; `experience_years = experience_months // 12`. Example: 2024-05 → 2024-08 plus 2024-07 → 2024-12 = one interval 2024-05 → 2024-12 = 8 months.
+- `graduation_year` = the year of the latest `education[].end`, else None.
 
 Saving drops YAML comments; the Profile form is the editor (the template's comments exist for the first hand-fill in M20).
 
@@ -390,9 +397,10 @@ After the tiers: required + no answer → `unknown` (attempt fails, §4.4); opti
 
 ```
 1  text = html_to_text(label) (strip tags), unicodedata NFKC, lowercase
-2  replace ’ ‘ with '
+2  replace ’ ‘ ʼ ` with ' (curly → straight first)
 3  delete "(required)", "(optional)", "*"
-4  replace every run of chars not in [a-z0-9+#'] with one space; then delete "'" 
+4  replace every run of chars not in [a-z0-9+#'] with one space; keep "'" inside words (D-69:
+   "don't" stays "don't"); drop a "'" at a token's start or end and a trailing "'s" ("company's" → "company")
 5  drop a leading list number ("1 ", "12 ")
 6  collapse spaces, strip
 ```
@@ -431,6 +439,8 @@ Adapters tag fields with a `Canonical`. The resolver maps them:
 
 #### 7.3.1 `config/questions.yaml` format (researcher fills the content)
 
+Loader (D-69): `resolve.load_rules(path) -> QuestionRules` (raises `ValueError` naming the bad key on an invalid file; a missing file → empty rules).
+
 ```yaml
 version: 1
 questions:
@@ -455,9 +465,9 @@ Selection: for each entry, score = token count of its longest matching synonym, 
 
 Normalise every option label with §7.1.
 
-- **bool:** yes-labels = label equals or starts with one of `yes`, `y`, `true`, `i am`, `i do`, `i have`, `i will`, `i can`, `authorised`, `authorized`; no-labels = equals or starts with `no`, `n`, `false`, `i am not`, `i do not`, `i don t`, `i have not`, `i will not`, `not`. No-prefixes are tested first (so "i am not" never counts as yes). Exactly one option of the right polarity → answer; else no answer. Text inputs get "Yes"/"No". Single checkbox: tick for true.
+- **bool:** yes-labels = label equals or starts with one of `yes`, `y`, `true`, `i am`, `i do`, `i have`, `i will`, `i can`, `authorised`, `authorized`; no-labels = equals or starts with `no`, `n`, `false`, `i am not`, `i do not`, `i don't`, `i dont`, `i have not`, `i will not`, `not`. No-prefixes are tested first (so "i am not" never counts as yes). Exactly one option of the right polarity → answer; else no answer. Text inputs get "Yes"/"No". Single checkbox: tick for true.
 - **enum:** candidates = options whose label equals a `value_map` phrase, else whose label contains one as a phrase; then the enum value itself with `_`→space. Exactly one candidate → answer.
-- **decline values:** an option whose label contains any of: `decline`, `prefer not`, `not wish`, `don t wish`, `do not wish`, `rather not`, `not to disclose`, `not to answer`, `not to say`, `i don t want to answer`. None offered and the field is required → `unknown`; optional → `blank_optional`.
+- **decline values:** an option whose label contains (phrase match, §7.1) any of: `decline`, `prefer not`, `choose not`, `not wish`, `don't wish`, `dont wish`, `do not wish`, `rather not`, `not to disclose`, `not to answer`, `not to say`, `don't want to answer`, `do not want to answer` (D-69; "I don't wish to answer" → `i don't wish to answer` matches `don't wish`). None offered and the field is required → `unknown`; optional → `blank_optional`.
 - **number:** text inputs get the integer. Range options (`"0-1 years"`, `"S$3,000 - S$4,000"`, `"Below 3000"`, `"5000 and above"`, `"3k–4k"`): parse with `(\d[\d,]*(?:\.\d+)?)\s*(k)?` pairs; `below|under|less than` → (−∞, x); `above|over|more than|and above|\+` → (x, ∞). Pick the unique range containing the value (inclusive).
 - **salary:** period from the label: `annual|annum|yearly|per year|p a` → annual; `month|monthly|per month` → monthly; else the profile's period. annual = monthly × `pay.months_per_year`. A currency named in the label or options that is not the profile's currency → no answer. Text input value: digits only (e.g. `5000`). `current_salary: null` → text "0" if the label says "current" and the field is required, else blank.
 - **date:** ISO from the profile; the adapter formats it.
@@ -484,7 +494,10 @@ Lookup `(label_norm, field_type, ats)` then `(label_norm, field_type, '*')`. The
 | `non_compete` | non compete, restrictive covenant, non solicitation, bound by any agreement, restraint of trade |
 | `health` | medical condition, health condition, mental health, medical history, illness |
 | `prior_employment_at_company` | previously worked, previously employed, previously been employed, worked for us, worked for, employed by, former employee, ex employee, have you worked, currently or previously employed |
+| `current_employee_at_company` (D-69) | currently an employee, current employee, currently employed, currently work for, currently working for, currently work at, currently working at, employee at, employee of |
 | `previously_applied` | previously applied, applied before, have you applied, applied to this, applied for a position |
+
+**Precedence (D-69):** when both `current_employee_at_company` and `prior_employment_at_company` match, the label is `prior_employment_at_company` if the text contains `previously`, `ever`, `before`, `former` or `ex` (as tokens), else `current_employee_at_company`; this pair alone never yields `AMBIGUOUS`. `AMBIGUOUS` is a module-level sentinel `declarations.AMBIGUOUS` (not a `DeclarationLabel` member).
 
 **Rules:**
 
@@ -493,6 +506,7 @@ Lookup `(label_norm, field_type, ats)` then `(label_norm, field_type, '*')`. The
 - `shareholding_in_company`: true if `declarations.shareholding_in_company` or `company_match(employer, h)` for any `h` in `holdings`.
 - `relatives_at_company`: true if `declarations.relatives_at_company` or any `relatives_employers` entry company-matches.
 - `prior_employment_at_company`: true if any `experience[].employer` company-matches the employer or one of `ctx.employer_aliases` (internships count).
+- `current_employee_at_company` (D-69): true only if an `experience[]` entry whose `employer` company-matches the employer or one of `ctx.employer_aliases` (the same matching as prior employment) has no end date (`end` null or absent); else false. ("Are you currently an employee at <company>?" in the Dataiku schema.)
 - `previously_applied`: `ctx.previously_applied` (computed by apply_flow, §12.3).
 - `health`: optional → `blank_optional`; required → decline option if offered, else `unknown`.
 - **Company match** `company_match(a, b)`: normalise both: §7.1, then drop tokens `pte`, `ltd`, `limited`, `inc`, `llc`, `corp`, `corporation`, `co`, `plc`, `group`, `holdings`, `the`, `singapore`, `sg`, `bank` (only when other tokens remain); match if equal or one token list is a prefix of the other. ("DBS Bank Ltd" ~ "DBS"; "Grab" ~ "Grab Financial Group" → match: on a declaration, a truthful Yes beats a wrong No.)
@@ -520,7 +534,7 @@ Rules:
    character limit. Mention only skills and experience present in APPLICANT or RESUME.
 Return JSON only, matching the schema.
 ```
-**User prompt:** `QUESTION: <label>\nHELP: <description>\nTYPE: <choice|multi|text|number>\nREQUIRED: yes|no\nLIMIT: <n> characters\nOPTIONS:\n0. <label>\n1. <label>…\n\nAPPLICANT (JSON):\n<llm_extract + computed_facts>\n\nRESUME:\n<master resume text, first 6000 chars>\n\nJOB: <company> — <title>\n<jd_text, first 6000 chars>`.
+**User prompt:** `QUESTION: <label>\nHELP: <description>\nTYPE: <choice|multi|text|number>\nREQUIRED: yes|no\nLIMIT: <n> characters\nOPTIONS:\n0. <label>\n1. <label>…\n\nAPPLICANT (JSON):\n<llm_extract + computed_facts>\n\nRESUME:\n<ctx.resume_text, first 6000 chars>\n\nJOB: <company> — <title>\n<jd_text, first 6000 chars>`.
 
 **Schemas (`format`):**
 - choice: `{"type":"object","properties":{"choice":{"type":"integer","minimum":-1,"maximum":N-1},"evidence":{"type":"string","maxLength":200}},"required":["choice","evidence"]}`
@@ -534,14 +548,18 @@ Return JSON only, matching the schema.
 
 ### 7.7 Grounding check (`resolve.grounded`)
 
-**Corpus** = `applicant.grounding_text(profile)` (non-sensitive values, one per line, plus computed facts as sentences, e.g. "Total professional experience: 14 months (1 years).") + master resume text + JD text + employer name. `corpus_norm` = lowercase, whitespace collapsed, `,` removed inside digit groups.
+**Corpus** = `applicant.grounding_text(profile)` (non-sensitive values, one per line, plus computed facts as sentences, e.g. "Total professional experience: 14 months (1 years).") + `ctx.resume_text` + JD text + employer name.
+
+**Resume text (D-68 A-2).** `apply_flow` (the orchestrator; stages never import each other) fills `ResolveContext.resume_text` once per attempt: the tailor master's text from `tailor_flow.master_text(cfg)` when a master cache valid for the current resume hash exists (tailor design §2), else `resume_ingest.extract_text(find_resume(<resume dir>))` (the profile stage's existing functions; the same file that is uploaded on the original-resume path). Either fails or no resume → `""` and the job-log line "resume text unavailable" (grounding then relies on profile + JD only, which only makes it stricter). `resume_text` never reaches a log.
+
+**Alias groups (D-68 A-1).** `apply_flow` also fills `ResolveContext.alias_groups` and `alias_ambiguous` from `config/aliases.yaml` through `tailor_flow.alias_groups(cfg) -> tuple[tuple[tuple[str, ...], ...], tuple[str, ...]]` (the tailor's loader, tailor design §6.1; `apply/` does not import `tailor/`). One group per aliases entry = `(canonical, *variants)`; `instances` are not included (an instance is a one-way claim, not a synonym). A missing or invalid `aliases.yaml` → empty groups and the log line "aliases unavailable" (rule 3 then uses profile and attested skills only). `corpus_norm` = lowercase, whitespace collapsed, `,` removed inside digit groups.
 
 - **choice / multi:** chosen index in range (schema); `evidence` normalised has ≥ 3 chars and is a substring of `corpus_norm`.
 - **number:** the value formatted as an integer (or as given if fractional) occurs as a whole number in `corpus_norm`.
 - **text:** fails on any of:
   1. a number token (`\d[\d,.]*%?`, normalised) not occurring as a whole token in the corpus;
   2. a month-name or year (`19xx|20xx`) not in the corpus;
-  3. a dictionary term (aliases.yaml canonical terms and variants ∪ profile skills ∪ attested skills) present in the text but absent from the corpus;
+  3. a dictionary term (every string in `ctx.alias_groups` ∪ profile skills ∪ attested skills) present in the text but **not grounded**: a term is grounded when it, or any other member of its alias group, occurs in the corpus (so "Postgres" in the text is grounded by a profile skill "PostgreSQL", and "k8s" by "Kubernetes"). Matching is case-insensitive on whole tokens, except tokens in `ctx.alias_ambiguous` (`go`, `c`, `r`), which match only when not all-lowercase (tailor design §4.1);
   4. a capitalised word not at sentence start, not in the allow-list (`I`, `I'm`, `I've`, `Singapore`, weekday and month names, `English`) and not occurring (case-insensitive) in the corpus;
   5. length > L, or empty when `unknown` is false.
   The violations list (no values beyond the offending tokens) goes into `Answer.note` and the retry prompt.
@@ -605,7 +623,7 @@ Pace (NF-05): a fixed `action_pause_ms` (250) after each field; no random jitter
 
 Adapters may add markers (Workday `errorMessage`, Greenhouse `?error=true` redirect).
 
-On `captcha`: if `captcha_wait_s` > 0 the tab is brought to front (`page.bring_to_front()`) and the flow polls `after_submit` every 2 s for that long; a confirmation turns the attempt `submitted`; otherwise `failed(captcha)`. No input is sent meanwhile.
+On `captcha`: if `captcha_wait_s` > 0 the tab is brought to front (`page.bring_to_front()`) and the flow polls `after_submit` every 2 s for that long; a confirmation turns the attempt `submitted`; otherwise `failed(captcha)` before the click, `submitted_unconfirmed` (note "captcha after submit") after it (§4.1). No input is sent meanwhile.
 
 ---
 
@@ -635,7 +653,7 @@ On `captcha`: if `captcha_wait_s` > 0 the tab is brought to front (`page.bring_t
 | Errors | visible `[aria-invalid="true"]` field labels, `.helper-text--error`, text "This field is required" → `errors`; one re-fill of those fields, then `validation_error` |
 | Account | none (`needs_account = False`) |
 
-Recorded schemas for fixtures: the spike's `gh_vercel.json`, `gh_dataiku.json` (scratch; the tester copies them, scrubbed of nothing personal since they are public schemas, into `tests/fixtures/greenhouse/`).
+Recorded schemas for fixtures: the spike's `gh_vercel.json`, `gh_dataiku.json` (scratch; the tester copies them, scrubbed of nothing personal since they are public schemas, into `tests/fixtures/apply/greenhouse/` as `gh_vercel.json` and `gh_dataiku.json`, beside the recorded pages `form.html`, `form_challenge.html`, `bot_check.html`, `closed.html`, `confirm.html` and `recaptcha/`; sample inputs `tests/fixtures/apply/applicant.sample.yaml` and `questions.sample.yaml`).
 
 ### 9.2 Lever (M21)
 
@@ -895,6 +913,7 @@ Deleting: an application deleted via Undo does not delete attempts (the audit ou
 | `accounts export-edge` | §10.3; prints the CSV path and the import steps; `--confirm` deletes the newest export and stamps rows | 0 |
 | `mail set-password` | `getpass`, `vault.put(IMAP_SERVICE…)`; host/username from settings or `--host/--user` | 0 |
 | `mail test [--find-from DOMAIN]` | `test_connection`; with `--find-from`, reports the newest message from that domain (time only) | 0 ok / 1 |
+| `apply show <job_id\|attempt_id>` (D-68 A-3; M20, lane B) | All digits → that attempt (`store.attempt`); otherwise the job's newest attempt (`store.attempts_for_job`, last). Prints a header (attempt id, job id, company — title, ATS, mode, state, reason code + detail, resume file + source, queued/started/submit-clicked/finished times), then one line per `store.answers(attempt_id)` row in id order: step, verbatim label, value (the exact value sent, **S-fields included**: this is the owner's own terminal; file fields as file name + SHA-256), tier, confidence, source (+ `rule_id`), status, and the note when present; then the evidence paths `data/apply/<attempt_id>/*.png` (and `failed.html`). This is how the owner reads the audit at the M20 gate. Nothing goes to a job log | 0; 1 unknown id / no attempt |
 
 ### 14.2 Job kinds (`web/jobs.py`)
 
@@ -944,7 +963,7 @@ Example: SmartRecruiters (M22).
 3. `plan_from_schema` returns None unless the ATS publishes a form schema; `read_step` maps DOM controls to `FormField`s, tagging standard fields with `Canonical` values (add none: if a new standard field is needed, that is a contract change → architect).
 4. `submit` / `after_submit`: the confirmation signal and the error markers.
 5. Register: one line in `apply/ats/__init__.py` `REGISTRY`.
-6. Fixture + tests (tester): a recorded HTML page in `tests/fixtures/<ats>/`, served by a local `http.server` in the test, filled in dry-run mode; assert the plan, the answers and `ready_to_submit`.
+6. Fixture + tests (tester): a recorded HTML page in `tests/fixtures/apply/<ats>/`, served by a local `http.server` in the test, filled in dry-run mode; assert the plan, the answers and `ready_to_submit`.
 
 Nothing in `apply_flow.py`, `resolve.py`, `store.py` or the web layer changes. Questions specific to the ATS go into `config/questions.yaml` (researcher).
 
@@ -1030,7 +1049,7 @@ paths:
 | Lane | Branch | Files (only these) | Delivers |
 |---|---|---|---|
 | **P: profile + resolver** | `eng/M20-P-resolver` | `src/jobscraper/applicant.py`, `src/jobscraper/apply/resolve.py`, `src/jobscraper/apply/declarations.py`, `src/jobscraper/apply/__init__.py` (exact content §2.1), `src/jobscraper/backends.py`, `config/applicant.example.yaml`, `cli.py` (one new block: `applicant` verb) | §5.1–§5.4, §7 complete (tiers 1–5 incl. memory lookup through an injected callable), backend `format`/`temperature`/`seed`/`top_k` |
-| **B: browser + Greenhouse + flow** | `eng/M20-B-greenhouse` | `src/jobscraper/apply/{__init__.py, detect.py, plan.py, classify.py, browser.py}`, `src/jobscraper/apply/ats/{__init__.py, greenhouse.py}`, `src/jobscraper/apply_flow.py`, `src/jobscraper/models.py` (+`posting_key`), `src/jobscraper/web/data.py` (import moved), `src/jobscraper/store.py` (one appended block: §13 tables + methods + `app_events.by`), `src/jobscraper/config.py` (ApplyConfig), `config/config.yaml` (`apply:` block), `requirements.txt` (`playwright`, `keyring`), `cli.py` (one new block: `apply` verb), `web/jobs.py` (kind `apply`) | §3, §4, §6, §8, §9.0–§9.1, §12, §13, §16, §17 |
+| **B: browser + Greenhouse + flow** | `eng/M20-B-greenhouse` | `src/jobscraper/apply/{__init__.py, detect.py, plan.py, classify.py, browser.py}`, `src/jobscraper/apply/ats/{__init__.py, greenhouse.py}`, `src/jobscraper/apply_flow.py`, `src/jobscraper/models.py` (+`posting_key`), `src/jobscraper/web/data.py` (import moved), `src/jobscraper/store.py` (one appended block: §13 tables + methods + `app_events.by`), `src/jobscraper/config.py` (ApplyConfig), `config/config.yaml` (`apply:` block), `requirements.txt` (`playwright`, `keyring`), `cli.py` (one new block: `apply` verb incl. `apply show`), `web/jobs.py` (kind `apply`) | §3, §4, §6, §7.7 context building (resume text, alias groups), §8, §9.0–§9.1, §12, §13, §14.1 `apply show`, §16, §17 |
 | **T: deterministic tailor** | per `tailor_design.md` | per tailor design | the tailored DOCX/PDF for `tailor_for_apply` |
 
 Disjointness: lanes P and B both create `apply/__init__.py` with the identical one-line content (git merges identical adds cleanly); `cli.py` gets one self-contained block per lane (Coordinator resolves the textual merge, `04_team.md` §2); `store.py` is touched by B and T, each appending its own block.
@@ -1063,6 +1082,8 @@ Lane V: `vault.py`, `apply/mail.py`, `apply/edge_save.ps1`, CLI `accounts`/`mail
 - `vault.py` in the foundation instead of `apply/` (web needs it).
 - `apply_flow` imports `tailor_flow` (one orchestrator→orchestrator edge).
 - `app_events.by` column for "Applied by JobScraper".
+- D-69 (tester testability items): no `submitting → failed` and no `failed` after the click (ADR-0004, contract v2: `POST_CLICK_STATES`, `can_transition(..., clicked=)`, `verifying_email → submitted_unconfirmed`); apostrophes kept in `norm_label`, wider decline phrases; declaration `current_employee_at_company`; signatures `resolve.load_rules(path)`, `declarations.AMBIGUOUS`, `store.reap_attempts(now)`, `apply_flow.run(..., http=None, browser_factory=None)`, `computed_facts(profile, today: date)`; fixture paths `tests/fixtures/apply/...`.
+- D-68 (planner gaps A-1..A-4): alias groups in `ResolveContext` for grounding rule 3; resume-text source decided by `apply_flow`; CLI `apply show`; `experience_months` defined as a merged-interval union (§5.1). Contract change is additive (two new `ResolveContext` fields with defaults).
 - Tier-5 choice answers need two agreeing runs and a verbatim evidence quote (stricter than F-32's "one of the offered options").
 - Attestation-like questions the classifier can't label never reach the LLM (fail closed).
 

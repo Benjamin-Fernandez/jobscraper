@@ -3,14 +3,15 @@
 **Stage B dossier** for PRD F-20–F-25 (`docs/prd.md` r1). Queue Q-05. Author: architect, 2026-11-02.
 **Status:** DRAFT for stage E cross-review. Contracts: `src/jobscraper/tailor/contracts.py` (CONTRACT_VERSION 1). Related: `apply_design.md` (the hand-off in §12), ADR-0003 (fail-closed principle).
 **Inputs:** `docs/research/resume_tailor_brief.md` §4, §5, §7, §8 and "Recommended design".
+**Patched (Q-19, 2026-11-02)** per spike S-2 (`spikes/S-2_tailor_llm.md`) and D-67: §4.3 step 4 list-item rule; the M21 tailor is deterministic (swaps, relevance reordering §6.3, render, storage/TTL, UI) with `tailor.llm: false`; the per-entry LLM bullet rewrite, the LLM summary rewrite and the validator additions S-2 found necessary are in **§7 "M22: LLM layer"**. **D-68 (A-5):** LLM JD term extraction (§4.4) has its own flag `tailor.llm_terms`, default true in M21, independent of `tailor.llm`; D-68 also adds `tailor_flow.master_text` and `tailor_flow.alias_groups` for auto-apply (§2).
 
-Truthfulness rule for the whole feature: **code decides facts, the model only rewords.** Employers, titles, dates, degrees, institutions and locations are copied by code and never sent for rewriting; every rewritten bullet passes a deterministic validator or the original text is kept.
+Truthfulness rule for the whole feature: **code decides facts, the model only rewords.** Employers, titles, dates, degrees, institutions and locations are copied by code and never sent for rewriting; every rewritten bullet passes a deterministic validator or the original text is kept. In M21 the model never writes resume text: the only model calls are the cached master parse (§3.2) and, with `tailor.llm_terms: true`, one JD term-extraction call per job (§4.4), whose output is kept only where it occurs in the JD.
 
 ---
 
 ## 1. Responsibilities and boundaries
 
-The tailor: parses the owner's resume once into a structured master; extracts a job's key terms; maps them to the master; computes "JD keyword coverage"; rewrites truthfully (variant spellings first, then the model per entry); validates; renders a parse-safe DOCX (and PDF through Word); stores it temporarily; reports missing terms; hands the file to auto-apply.
+The tailor: parses the owner's resume once into a structured master; extracts a job's key terms; maps them to the master; computes "JD keyword coverage"; rewrites truthfully (variant spellings, then a deterministic relevance order; the model per entry only in M22 with `tailor.llm: true`); validates; renders a parse-safe DOCX (and PDF through Word); stores it temporarily; reports missing terms; hands the file to auto-apply.
 
 It does not: add any skill, tool, employer, title, date, degree or number; generate cover letters; judge fit; call a cloud model; keep files beyond D-59.
 
@@ -25,10 +26,10 @@ src/jobscraper/
     __init__.py         engineer; exact content: """Resume tailor stage package (docs/architecture/tailor_design.md)."""
     contracts.py        architect (done)
     master.py           master parse (LLM + leaf check), cache load/save                 §3
-    terms.py            matcher, dictionary (aliases.yaml), JD extraction, required/preferred, knockouts   §4
+    terms.py            matcher, dictionary (aliases.yaml), JD extraction (§4.4 under tailor.llm_terms), required/preferred, knockouts   §4
     mapping.py          classify terms against the master; coverage                      §5
-    rewrite.py          deterministic swaps, reorder, LLM entry rewrite, summary rewrite  §6, §7, §9
-    validate.py         bullet + summary validator, resume-wide invariants               §8
+    rewrite.py          deterministic swaps, skills order, relevance reorder              §6 (§7 LLM entry + summary rewrite: M22)
+    validate.py         bullet validator, resume-wide invariants                         §8 (§7.4, §7.5 additions: M22)
     render.py           DOCX template, Word-COM PDF, page ceiling, round-trip check       §10
     storage.py          paths, file naming, retention purge                              §11
 config/aliases.yaml     researcher-owned data (format §6.1)
@@ -37,6 +38,8 @@ data/ (gitignored)      master_resume.json · tailored/<job_id>/<First>_<Last>_R
 
 **Layering:** `tailor/` imports only `tailor.contracts`, foundation (`store` is not needed by the stage; `backends` objects are passed in), stdlib, `python-docx`, `pypdf`, `yaml`, and `pywin32` (optional, render only). Functions the stage needs from other stages are injected by `tailor_flow`: `extract_text(path) -> str` and `find_resume(dir) -> Path` and `file_hash(path) -> str` from `profile/resume_ingest.py`, `html_to_text(s) -> str` from `scrape/adapters.py` (the same pattern as `keywords.overlap` being handed to the filter). `tests/test_layering.py` changes are in `apply_design.md` §2.3 (STAGES += tailor; ORCHESTRATOR += tailor_flow; `apply_flow → tailor_flow` allowed; web may import `tailor.contracts`).
 
+**Stage call shapes (D-69, adopted from the tester's golden tests):** `terms.load_dictionary(aliases_path, extra: Iterable[str] = ()) -> Dictionary` (extra = applicant skills + attested + master skills items, §4.2), `terms.find(text, term)`, `terms.extract(jd_text, dictionary) -> list[JdTerm]` (§4.3, JD order, status unset), `terms.knockouts(jd_text) -> list[str]`, `terms.llm_extract(jd_text, title, backend, dictionary) -> list[JdTerm]` and `terms.merge(det, llm) -> list[JdTerm]` (§4.4), `mapping.classify(terms, master, dictionary, attested=()) -> list[JdTerm]`, `mapping.resume_text(master) -> str` (§5.1, contact excluded), `mapping.coverage(terms, text) -> float`, `rewrite.swap(master, terms, dictionary) -> tuple[MasterResume, list[BulletChange]]` (a new object; the input is not mutated), `rewrite.reorder(master, terms, attested=()) -> MasterResume` (§6.3 bullet order and skills order), `validate.bullet(src, out, ctx: validate.BulletContext) -> list[ValidationIssue]` with `BulletContext(dictionary, allowed_terms=())` (a dataclass in `validate.py`), `validate.invariants(master, tailored) -> list[str]` (violations; empty = ok).
+
 **Orchestrator API:**
 
 ```python
@@ -44,9 +47,13 @@ def tailor(cfg, store, job_id: str, *, backend, report_only: bool = False,
            force: bool = False) -> TailorResult
 def tailor_for_apply(cfg, store, job_id: str, *, backend) -> TailorResult   # returns the current file if any (§11.2), else tailor()
 def purge(cfg, store, now: str) -> int                                        # called by cmd_purge and the end-of-run purge
+def master_text(cfg) -> Optional[str]                                        # D-68 A-2, for apply_flow
+def alias_groups(cfg) -> tuple[tuple[tuple[str, ...], ...], tuple[str, ...]] # D-68 A-1, for apply_flow
 ```
 
-`tailor()` steps: load applicant + master (parse if the resume hash changed) → JD text (fetch if missing) → terms → mapping → coverage before → swaps → [LLM rewrite + validate, summary] → reorder → page ceiling + render → round trip → coverage after → store row + files. Any exception → `TailorResult(ok=False, status=failed, error=<class: message without resume text>)` and a `failed` row; `tailor_for_apply` then hands back the original resume path (apply design §4.1).
+`master_text(cfg)`: the cached master's resume text (§5.1 "resume text for mapping": summary, entry fields, bullets, items joined by newlines; contact excluded) when `data/master_resume.json` exists and `master.load` accepts it for the current resume file's hash (§3.1); else `None`. It never parses (no model call) and never raises (any error → `None`). `alias_groups(cfg)`: loads `config/aliases.yaml` with the §6.1 loader and returns `(groups, ambiguous)`, one group `(canonical, *variants)` per entry (instances excluded); a missing or invalid file → `((), ())`. Both exist so `apply_flow` can build `ResolveContext` without importing the stage (`apply_design.md` §7.7).
+
+`tailor()` steps: load applicant + master (parse if the resume hash changed) → JD text (fetch if missing) → terms (dictionary, + §4.4 when `tailor.llm_terms`) → mapping → coverage before → swaps → validate (§8.1, guards the swaps) → [M22, `tailor.llm: true` only: LLM entry rewrite + validate, summary rewrite, §7] → relevance reorder (§6.3) → page ceiling + render → round trip → coverage after → store row + files. Any exception → `TailorResult(ok=False, status=failed, error=<class: message without resume text>)` and a `failed` row; `tailor_for_apply` then hands back the original resume path (apply design §4.1).
 
 ---
 
@@ -112,10 +119,17 @@ Code then assigns entry ids `e1…` and bullet ids `1…` in reading order. A `s
 1. JD text = `jobs.jd_text`; if it looks like HTML (`<[a-z][a-z0-9]*[\s>/]`) the orchestrator converts it with `html_to_text`. Truncated to `tailor.max_jd_chars` (12000).
 2. Find every dictionary string in the JD. **Overlap rule:** when spans overlap, keep the longest (token count), then the earliest; so "Spring Boot" suppresses "Spring", and "REST APIs" vs its variant "REST API" collapse to one hit.
 3. Group hits by canonical; the term's spelling is the surface of its **first** hit.
-4. **Required vs preferred:** split the JD into lines; a heading line is ≤ 8 words and either ends with `:` or is in title case with no sentence punctuation. Lines under a heading matching `/nice to have|preferred|bonus|desirable|good to have|a plus|advantage|optional/i`, or lines that themselves contain one of `is a plus|preferred|nice to have|bonus|advantageous`, are *preferred*; everything else is *required*. A term with any required hit is required.
+4. **Required vs preferred:** split the JD text on `\r?\n`, strip each line, skip empty lines, and walk the lines top to bottom with a *current block*, initially *required*. Each line is exactly one of:
+   - **Item line** (checked first): the line starts with a list marker, `^(?:[-*•▪◦‣●]|\d{1,3}[.)](?=\s))` — a `-`, `*`, `•`, `▪`, `◦`, `‣` or `●` glyph, or a number followed by `.` or `)` and a space. An item line is **never a heading**, whatever its case, length or punctuation ("- Kafka", "• Python", "1) Docker" are items of the current block). Without this rule "- Kafka" passes the title-case test, closes a "Nice to have" block and turns preferred terms into required ones (found by S-2).
+   - **Heading line:** any other line with ≤ 8 whitespace-separated words that either ends with `:` or is in title case with no sentence punctuation. *Title case*: every word whose first character is a letter starts with an uppercase letter, except the small words `a an and as at by for in of on or the to with` when not the first word; words starting with a non-letter (`(Graduate)`, `2025`) are ignored. *Sentence punctuation*: any of `. ! ? ;` (a comma is not). A heading sets the current block: *preferred* if it matches `/nice to have|preferred|bonus|desirable|good to have|a plus|advantage|optional/i`, else *required*; hits in the heading line itself take the block it opens.
+   - **Body line:** anything else; it belongs to the current block.
+
+   Override: an item or body line that itself contains one of `is a plus|preferred|nice to have|bonus|advantageous` (case-insensitive) is *preferred* regardless of the block. A hit's label is its line's label; a term with any required hit is required.
 5. **Knockouts:** JD lines matching `/citizen|permanent resident|\bPR\b|work pass|employment pass|visa|sponsorship|right to work|must be (based|located) in|security clearance/i` (trimmed, ≤ 200 chars, at most 5) go to `TailorResult.knockouts` (shown as "Application questions to expect"; never resume content).
 
-### 4.4 LLM extraction (M21; one call, temperature 0)
+### 4.4 LLM extraction (M21, `tailor.llm_terms`; one call, temperature 0)
+
+**Switch (D-68 A-5):** `tailor.llm_terms` (default `true`), independent of `tailor.llm` (the M22 rewrite layer, default `false`). It is safe in M21 because a model term is kept only if it occurs in the JD (filter below), so the model can add a term to the *list* but never text to the resume. `false` → dictionary-only terms (every `JdTerm.source = "dictionary"`), the same as a `BackendError`. Golden cases A–C run with the backend mocked to return no terms (dictionary oracle); the filter oracle is in §15 "Also".
 
 System: `List the skills, tools, technologies, qualifications and practices this job asks for, copying each term exactly as the job description spells it. Put must-haves in "required" and nice-to-haves in "preferred". Use at most 4 words per term. List acronym pairs written in the text, like "machine learning (ML)", as [short, long].` User: `JOB TITLE: <title>\n\n<jd text>`. Schema: `{"type":"object","required":["required","preferred","acronym_pairs"],"properties":{"required":{"type":"array","items":{"type":"string","maxLength":60},"maxItems":25},"preferred":{"type":"array","items":{"type":"string","maxLength":60},"maxItems":15},"acronym_pairs":{"type":"array","items":{"type":"array","items":{"type":"string"},"minItems":2,"maxItems":2},"maxItems":10}}}`.
 
@@ -144,7 +158,7 @@ The model never decides that the resume "implies" a term (brief §5B).
 
 ---
 
-## 6. Deterministic rewrite (M20)
+## 6. Deterministic rewrite (built in M20, the whole M21 rewrite per D-67)
 
 ### 6.1 `config/aliases.yaml` format (researcher fills content; public, generic)
 
@@ -185,12 +199,22 @@ Each changed bullet records a `BulletChange(source="swap")`.
 ### 6.3 Skills list and reorder
 
 - **Skills order:** required terms present after swaps in JD order, then preferred present in JD order, then the remaining items in master order; then attested missing JD terms (JD spelling) appended. Items only ever come from the master items (after swaps) and attested skills (validator §8.3).
-- **Bullet order (deterministic, M20):** within each entry, stable sort by descending score = Σ weights of JD terms whose spelling hits the bullet after swaps. Entries and sections keep master order. (M21: the model's order for rewritable entries, §7.)
+- **Bullet order: relevance reordering** (`rewrite.reorder(master_after_swaps, terms, attested=()) -> MasterResume`; deterministic, the only ordering in M21 and also in M22, where the model's order is ignored, §7.3):
+  1. *Score* of a bullet = Σ `weight(t)` (2 required, 1 preferred) over the distinct JD terms `t` (one per canonical, §4.3 step 3) for which `find(bullet_text, t.term)` is non-empty, where `bullet_text` is the bullet's final text (post-swap in M21; the accepted or fallback text in M22). Only the JD spelling counts (the same rule as coverage, §5.2), each term counts once per bullet however often it occurs, and attested-but-missing terms count nothing (they are never in bullets).
+  2. Within each entry, in every section kind, bullets are ordered by **descending score; ties keep master order** (a stable sort keyed on `(-score, master position)`). An entry with 0 or 1 bullet is unchanged.
+  3. Entries within a section, sections, protected fields and non-skills `items` lists keep master order; a bullet never moves to another entry (§8.3).
+  4. No randomness, no model input, no dependence on dictionary iteration order: the same master, JD, `aliases.yaml` and attested skills always give the same order (it is covered by `inputs_hash`, §11.2).
+  5. The scores are kept (per bullet id) for the page-ceiling trim (§10.2), which drops the lowest-score bullet.
+  Examples: §15 case A [1, 2, 3] (scores 6, 2, 1), B [1, 3, 2], C [1, 3, 2].
 - **Headline** (D-60, `tailor.headline: true`): `jobs.title` verbatim, as a line under the name.
 
 ---
 
-## 7. LLM entry rewrite (M21; after spike S-2)
+## 7. M22: LLM layer (moved out of M21 by D-67; spike S-2)
+
+**Status.** Not built in M21. `tailor.llm` defaults to `false` (§14) and M21 ships with it off: S-2 measured 0 coverage gain over the deterministic swaps in 54 of 54 runs, 0 to 2 % of real-resume bullets changed (all cosmetic), about 6 s per resume, and found the validator gaps listed in §7.4. M22 may build this layer, but `tailor.llm: true` is allowed only once **every** §7.4 check and the §7.3 handling are in place and tested. When on, `mode = "llm"` (§11.1) and the inputs hash changes (§11.2). The layer has three parts: the per-entry bullet rewrite (§7.1–7.3), the validator additions (§7.4) and the summary rewrite (§7.5); LLM JD term extraction is not part of it (§7.6, D-68). Everything below runs after the M21 swaps and before the §6.3 reorder, and none of it may change §6, §8 or the M21 golden outputs (§15).
+
+Revisit the value question before building: as defined, ALLOWED TERMS are terms the entry already contains in JD spelling after the swaps, so the rewrite cannot raise coverage (S-2 recommendation 4a). Value appears only if §7.6 surfaces terms the dictionary misses and ALLOWED TERMS is redefined; that is a design change (architect), not a prompt tweak.
 
 ### 7.1 Scope
 
@@ -201,24 +225,54 @@ One call per entry in a section of kind `experience`, `projects` or `leadership`
 System (`rewrite.ENTRY_SYSTEM`):
 ```
 You improve the bullet points of ONE resume entry for a specific job, without changing what they claim.
-Allowed: reword a bullet to surface one of the ALLOWED TERMS that the bullet already supports; tighten wording;
-reorder the bullets so the most relevant to the job comes first.
+Allowed: reword a bullet to surface one of the ALLOWED TERMS that the bullet already supports; tighten wording.
 Not allowed: adding or removing any number; adding any tool, technology, skill, company, product or
 certification that is not already in that same bullet; moving content between bullets; upgrading a claim
 ("used" -> "led", "Spring" -> "Spring Boot"); dropping a bullet; merging bullets.
+Keep the first word's meaning; do not replace the verb with a stronger one.
 Example of a violation: "Built dashboards in Tableau" -> "Built dashboards in Power BI and Tableau" (adds a tool).
 Correct: "Built dashboards in Tableau" -> "Built Tableau dashboards" .
-Return every id exactly once, most relevant first. "keywords_used" lists the ALLOWED TERMS you used.
+Return every id exactly once.
 ```
+Changes from the M21 draft (S-2): reordering is no longer asked of the model (the order is always §6.3's); the verb sentence is added (the model changed "Wrote" to "Implemented" unprompted); `keywords_used` is removed.
+
 User: `JOB: <title>\nALLOWED TERMS (this entry already supports them): <comma list>\nBULLETS:\n[{"id": 3, "text": "…"}, …]`. ALLOWED TERMS = JD terms (present_exact/variant, JD spelling) whose spelling or variant hits this entry's bullets — computed by code.
 
-Schema: `{"type":"object","required":["bullets"],"properties":{"bullets":{"type":"array","minItems":n,"maxItems":n,"items":{"type":"object","required":["id","text","keywords_used"],"properties":{"id":{"type":"integer","enum":[<ids>]},"text":{"type":"string","minLength":1,"maxLength":<ceil(1.4 × longest)>},"keywords_used":{"type":"array","items":{"type":"string"},"maxItems":5}}}}}}`.
+Schema: `{"type":"object","required":["bullets"],"properties":{"bullets":{"type":"array","minItems":n,"maxItems":n,"items":{"type":"object","required":["id","text"],"properties":{"id":{"type":"integer","enum":[<ids>]},"text":{"type":"string","minLength":1,"maxLength":<ceil(1.4 × longest)>}}}}}}`.
 
-Options: `temperature=0.25` (D-60), `top_k=20`, `seed=7`, `max_tokens = 120 × n + 200`. Backend change: `format`/`temperature`/`seed`/`top_k` per call (`apply_design.md` §7.6).
+**`keywords_used` is dropped from the schema** (S-2: the rule rejected 7 to 11 % of bullets for harmless phrases and never caught a fabrication; the fact check already covers it; fewer tokens). `BulletChange.keywords_used` is filled by code instead: the ALLOWED TERMS whose JD spelling hits the accepted text. If a later prompt version brings the field back, each entry is checked **only against the ALLOWED TERMS list passed in that call** (an entry that is an ALLOWED TERM must hit `out`, else `KEYWORD_UNSUPPORTED`); any other string is ignored and dropped, never a rejection reason.
 
-### 7.3 Handling
+Options: `temperature=0.25` (D-60; S-2 found no difference between 0, 0.25 and 0.5, and `seed` makes 0.25 repeatable), `top_k=20`, `seed=7`, `think=false`, `max_tokens = 120 × n + 200`. Backend change: `format`/`temperature`/`seed`/`top_k` per call (`apply_design.md` §7.6).
 
-Per bullet: validator §8.1. Failing bullets get **one** retry: a second call with only the failing bullets and the user prompt extended by `THESE REWRITES BROKE THE RULES: [{"id": 3, "problems": ["added number 12"]}]` (problems from the issue codes; no other text). A bullet failing again → the post-swap text (`source = "fallback"`, issues kept). Id-level failures (missing/unknown/duplicate ids, unreadable JSON, `BackendError`) → the whole entry falls back (`MODEL_ERROR`), no retry beyond one. The model's order is used for bullets that passed; fallback bullets keep their deterministic position relative to each other and are placed after passing bullets of equal deterministic score.
+### 7.3 Handling (no retry)
+
+Per bullet: validator §8.1 (minus the M21-only notes) plus every §7.4 check. A failing bullet **falls back directly** to the post-swap text (`source = "fallback"`, issues kept). **There is no retry** (S-2: 0 of 59 retries rescued a bullet, they added 31 % more calls and sometimes introduced a new fact). Id-level failures (missing/unknown/duplicate ids, unreadable JSON, `BackendError`) → the whole entry falls back (`MODEL_ERROR`). The model's output order is ignored: after validation every entry's bullets are ordered by §6.3 on their final texts.
+
+### 7.4 Validator additions (required before `tailor.llm: true`)
+
+Each closes a gap S-2 probed by hand ("Validator gaps"). All are deterministic code in `validate.py`, run on every LLM-rewritten bullet in addition to §8.1, and do **not** run in M21 (the swaps need none of them, and the §15 oracle rows are defined without them). Word lists are code constants (`validate.VERB_SYNONYMS`, `UPGRADE_WORDS`, `POLARITY`, `NUMBER_WORDS`, `FUNCTION_WORDS`), lowercase, reviewed by the tester. Tokens here are `[A-Za-z]+` runs, lowercased, unless stated.
+
+1. **Verb and seniority upgrades** → `VERB_UPGRADE` (detail `"wrote -> led"`).
+   - *Leading verb:* let `v_src`, `v_out` = the first token of each text. If `v_out ≠ v_src`, both must be in the same `VERB_SYNONYMS` set, else `VERB_UPGRADE`. Initial sets: {built, developed, created}; {wrote, authored}; {cut, reduced, decreased, lowered}; {improved, increased}; {analysed, analyzed}; {used, utilised, utilized}. "Wrote" → "Implemented" fails (S-2's one questionable accepted rewrite).
+   - *Anywhere:* any token of `out` in `UPGRADE_WORDS` = {led, lead, leading, owned, own, owning, managed, manage, managing, architected, spearheaded, directed, drove, headed, oversaw, supervised, mentored, championed, pioneered} that is not a token of `src` → `VERB_UPGRADE`. Catches "Wrote → Led / Owned / Spearheaded / Architected", "Developed → Led development of", "Contributed to → Owned".
+2. **Direction flips** → `DIRECTION_FLIP`. `POLARITY` maps words to `down` {cut, cuts, cutting, reduced, reduce, reducing, decreased, decrease, lowered, lower, shrank, saved, eliminated, fewer} or `up` {increased, increase, increasing, improved, grew, grow, raised, boosted, doubled, tripled, more}. `P(text)` = the set of polarities whose words occur. `P(out) ≠ P(src)` → `DIRECTION_FLIP` ("Cut p95 latency 35%" → "Increased p95 latency 35%"). Fail-closed: a rewrite that merely adds a polarity word is rejected too.
+3. **Number words count as numbers.** The §8.1 numbers multiset also contains every token in `NUMBER_WORDS` = {zero … twenty, thirty, forty, fifty, sixty, seventy, eighty, ninety, hundred, thousand, million, billion, dozen, half, twice, single, double, triple}, as the word itself (no conversion: "2M" → "2 million" still fails, as today). "team of three" → "team of four" → `NUMBER_ADDED four`, `NUMBER_DROPPED three`; "Mentored interns" → "Mentored five interns" → `NUMBER_ADDED five`. The strict digit rule is unchanged (it never misfired on model output).
+4. **Unknown words, including unknown lowercase tools** → `WORD_ADDED` (detail: up to 5 words). A token of `out` fails when it is **not** a token of `src`, not a token of any ALLOWED TERM, not inside a dictionary-hit span (judged by the fact rule), not a capitalised fact token (judged by the fact rule), not in `NUMBER_WORDS` (judged by rule 3), not in `FUNCTION_WORDS` (about 150 stop and function words incl. using, with, by, and, for, of, the, a, an, to, in, on, via, through, across, while, which, that, its, their), and not in a `VERB_SYNONYMS` set that contains a token of `src`. No stemming. Catches "behind nginx", "scalable", "significantly improving decision making". Expected cost: most purely stylistic rewrites ("results" → "findings", "Java-based") now fall back, which S-2 showed loses nothing measurable.
+5. **Capitalised first word.** In `facts(out)` the sentence-start exemption for capitalised words applies **only** to a word equal (case-insensitively) to `src`'s first word or in its `VERB_SYNONYMS` set; any other capitalised word at a sentence start is a fact candidate. "Built dashboards…" → "Grafana dashboards built…" → `FACT_ADDED grafana` (and `VERB_UPGRADE`).
+6. **Keywords:** as §7.2 (field dropped; if present, checked only against ALLOWED TERMS).
+
+New issue codes `VERB_UPGRADE`, `DIRECTION_FLIP`, `WORD_ADDED` (UI texts §13.4) are an **additive** contract change made by the architect when M22 starts (`IssueCode` members, `CONTRACT_VERSION` 2); M21's `tailor/contracts.py` does not carry them. M22's golden tests add one rejection row per probe in S-2's "Validator gaps" table and must keep every §15 row's listed issues (rows B1 and C2 additionally raise `WORD_ADDED`: "saving", "hours"; "processing", "daily").
+
+### 7.5 Summary rewrite and summary check
+
+Only when the master has a summary. One call, `temperature=0.25`, `top_k=20`, `seed=7`, `max_tokens=300`.
+System: `Rewrite this resume summary for the job below in at most 60 words, first person implied (no "I"). Use only skills and facts present in SKILLS and the ORIGINAL summary. Prefer the job's spelling of terms in TERMS. Add no numbers, employers or skills. Do not make any claim stronger.` User: `JOB: <title>\nTERMS: <JD spellings of present terms, required first>\nSKILLS: <skills after swaps + attested>\nORIGINAL: <post-swap summary>`. Schema `{"type":"object","required":["summary"],"properties":{"summary":{"type":"string","minLength":20,"maxLength":600}}}`.
+
+Check (`validate.summary`, deterministic): numbers (digits and `NUMBER_WORDS`) in the new summary ⊆ numbers anywhere in the master; facts (with rule 5's first-word handling) ⊆ facts(master) ∪ attested canonicals; no organisation, title or institution string that isn't in the master; no `UPGRADE_WORDS` token absent from the master; `P(new) ⊆ P(original summary)`; length ≤ max(1.4 × original, 80 words). Fail → the post-swap summary, **no retry**. Not measured by S-2: M22 measures it on A–C before turning it on.
+
+### 7.6 LLM JD term extraction (not part of this layer after D-68)
+
+§4.4 runs in M21 under its own flag `tailor.llm_terms` (D-68 A-5). It is the one model step that could raise coverage (terms the dictionary misses); M22 uses its measured effect to decide whether ALLOWED TERMS should be redefined (see the value note above).
 
 ---
 
@@ -226,18 +280,17 @@ Per bullet: validator §8.1. Failing bullets get **one** retry: a second call wi
 
 ### 8.1 Bullet check `validate.bullet(src, out, ctx) -> list[ValidationIssue]` (all deterministic)
 
-- **Ids** (entry level): output ids = input ids, each once (`ID_MISSING`, `ID_UNKNOWN`, `ID_DUPLICATE`).
+- **Ids** (entry level, M22 model output only): output ids = input ids, each once (`ID_MISSING`, `ID_UNKNOWN`, `ID_DUPLICATE`).
 - **Empty:** stripped output empty → `EMPTY`.
-- **Numbers:** multiset of `\d+(?:[.,]\d+)*(?:%|[kKmMbB]\b|x\b)?` (commas inside digit groups removed; no left boundary, so "p95" yields 95; "S$1.2M" yields "1.2M") must be equal: extra → `NUMBER_ADDED`, missing → `NUMBER_DROPPED`.
-- **Fact tokens** `facts(text)` = canonicals of dictionary hits (§4.1/§4.2, longest-match) ∪ acronyms (tokens of ≥ 2 chars, not starting with a digit, with no lowercase letters and at least one letter) ∪ capitalised words not at sentence start (lowercased), minus a stop list (`I`, month and weekday names). Acronyms and capitalised words are taken **only from tokens outside every dictionary-hit span** (so "ML" counts once, as "machine learning", and "REST" inside "REST APIs" is not a second fact). Compare after mapping each through the alias table (so "Postgres" ≡ "PostgreSQL"): `facts(out) − facts(src)` non-empty → `FACT_ADDED` (attested terms are **not** exempt in bullets: an attested skill goes only into the skills list and summary); `facts(src) − facts(out)` non-empty → `FACT_DROPPED`.
-- **Keywords:** each `keywords_used` entry must hit `out` and its canonical must be in `facts(src)` → else `KEYWORD_UNSUPPORTED`.
+- **Numbers (D-69: standalone numeric tokens only):** multiset of matches of `(?<![A-Za-z0-9])\d+(?:[.,]\d+)*(?:%|[kKmMbB]|x)?(?![A-Za-z0-9])` (commas inside digit groups removed), taken **only outside every dictionary-hit span** (alias-dictionary terms are exempt, so the swap "k8s" → "Kubernetes" drops no number). Digits inside an alphanumeric token are not numbers: "k8s", "S3", "EC2", "Python3", "p95" yield nothing; "S$1.2M" yields "1.2M" (`$` is not alphanumeric); "35%", "2M", "(82%" yield "35%", "2M", "82%". Must be equal: extra → `NUMBER_ADDED`, missing → `NUMBER_DROPPED`. Alphanumeric tokens with both a letter and a digit that are not dictionary hits ("p95", "Python3") are fact tokens instead (next rule), so "p95" → "p99" is still caught.
+- **Fact tokens** `facts(text)` = canonicals of dictionary hits (§4.1/§4.2, longest-match) ∪ acronyms (tokens of ≥ 2 chars, not starting with a digit, with no lowercase letters and at least one letter) ∪ capitalised words of ≥ 2 letters not at sentence start (lowercased; so the "S" of "S$1.2M" is not a fact) ∪ alphanumeric tokens containing both a letter and a digit (lowercased, e.g. "p95"), minus a stop list (`I`, month and weekday names). Acronyms, capitalised words and letter-digit tokens are taken **only from tokens outside every dictionary-hit span** (so "ML" counts once, as "machine learning", and "REST" inside "REST APIs" is not a second fact). Compare after mapping each through the alias table (so "Postgres" ≡ "PostgreSQL"): `facts(out) − facts(src)` non-empty → `FACT_ADDED` (attested terms are **not** exempt in bullets: an attested skill goes only into the skills list and summary); `facts(src) − facts(out)` non-empty → `FACT_DROPPED`.
 - **Length:** `0.6 × len(src) ≤ len(out) ≤ 1.4 × len(src)` → else `LENGTH`.
 
-The deterministic swap output is validated the same way (it passes by construction; this guards bugs).
+In M21 the only rewriter is the deterministic swap; its output is validated this way (it passes by construction; this guards bugs). The `keywords_used` rule of the first draft is gone (§7.2); M22 adds the §7.4 checks for model output.
 
-### 8.2 Summary check (§9)
+### 8.2 Summary check
 
-Numbers in the new summary ⊆ numbers anywhere in the master; facts ⊆ facts(master) ∪ attested canonicals; no organisation, title or institution string that isn't in the master; length ≤ max(1.4 × original, 80 words). Fail (after one retry) → the post-swap original summary.
+M21: the summary is the post-swap master summary (§9) and is covered by §8.3's invariants like any swapped text. The model-summary check is M22, §7.5.
 
 ### 8.3 Resume-wide invariants (run on the final document model before rendering, and the oracle for golden tests)
 
@@ -250,10 +303,9 @@ Violation → tailoring fails (`error = "invariant: <which>"`), never a silent f
 
 ---
 
-## 9. Summary rewrite (M21)
+## 9. Summary (M21: swaps only)
 
-Only when the master has a summary. One call, temperature 0.25, `top_k=20`, `seed=7`, `max_tokens=300`.
-System: `Rewrite this resume summary for the job below in at most 60 words, first person implied (no "I"). Use only skills and facts present in SKILLS and the ORIGINAL summary. Prefer the job's spelling of terms in TERMS. Add no numbers, employers or skills.` User: `JOB: <title>\nTERMS: <JD spellings of present terms, required first>\nSKILLS: <skills after swaps + attested>\nORIGINAL: <post-swap summary>`. Schema `{"type":"object","required":["summary"],"properties":{"summary":{"type":"string","minLength":20,"maxLength":600}}}`. Validator §8.2, one retry, then fallback.
+Only when the master has a summary. M21 renders the master summary after the §6.2 swaps (variant → JD spelling, acronym direction, article fix) and nothing else; `summary_before` = master text, `summary_after` = post-swap text. The LLM summary rewrite is M22 (§7.5).
 
 ---
 
@@ -315,7 +367,7 @@ Store methods: `add_tailored(row) -> int`, `latest_tailored(job_id)`, `current_t
 
 ### 11.2 "Current" tailored file
 
-`inputs_hash = sha256(json.dumps([resume_hash, jd_hash, aliases_hash, sorted(attested canonicals), render.TEMPLATE_VERSION, mode, headline flag]))`, `jd_hash = sha256(jd text used)`. Current = the newest row for the job with that `inputs_hash`, status `draft` or `sent`, `files_deleted_at IS NULL`, and its DOCX on disk with a matching SHA-256. `tailor_for_apply` reuses it; `tailor` creates a new row unless `force` is false and a current one exists (then it returns it).
+`inputs_hash = sha256(json.dumps([resume_hash, jd_hash, aliases_hash, sorted(attested canonicals), render.TEMPLATE_VERSION, mode, headline flag, llm_terms flag]))`, `jd_hash = sha256(jd text used)`. Current = the newest row for the job with that `inputs_hash`, status `draft` or `sent`, `files_deleted_at IS NULL`, and its DOCX on disk with a matching SHA-256. `tailor_for_apply` reuses it; `tailor` creates a new row unless `force` is false and a current one exists (then it returns it).
 
 ### 11.3 Retention (`storage.purge`, run from `cmd_purge` and where the run calls `purge_descriptions`)
 
@@ -370,7 +422,7 @@ Store methods: `add_tailored(row) -> int`, `latest_tailored(job_id)`, `current_t
   - **Missing terms** chips; each has "I have this" → confirm "Add "<term>" to your skills? It will appear in your skills list on future resumes. Only add it if it's true." [Add to my skills] [Cancel] → POST attest → prompt "Tailor again" button.
   - **Possibly related:** "You have Spring. The job says Spring Boot." with "I have Spring Boot" (same attest flow).
   - **Application questions to expect:** knockout lines.
-  - **Changes:** per entry, two columns Before / After with changed words highlighted (word-level diff in the browser); trimmed bullets struck through; fallback bullets labelled "Kept original: <issue text>" (issue code → short text: number_added "it added a number", number_dropped "it dropped a number", fact_added "it added a tool or skill", fact_dropped "it dropped a tool or skill", keyword_unsupported "it used a term the bullet doesn't support", length "it changed the length too much", model_error "the AI step failed").
+  - **Changes:** per entry, two columns Before / After with changed words highlighted (word-level diff in the browser); the After column lists the bullets in output order (`changes` holds every kept bullet, `unchanged` included, in output order, so the §6.3 relevance order is visible), with a note "Most relevant to this job first"; trimmed bullets struck through. M22 only (`tailor.llm: true`): fallback bullets labelled "Kept original: <issue text>" (issue code → short text: number_added "it added a number", number_dropped "it dropped a number", fact_added "it added a tool or skill", fact_dropped "it dropped a tool or skill", keyword_unsupported "it used a term the bullet doesn't support", length "it changed the length too much", verb_upgrade "it made the claim stronger", direction_flip "it changed the direction of a result", word_added "it added words the original doesn't have", model_error "the AI step failed").
   - **Download** DOCX / PDF; status line "Draft, deleted after 7 days" / "Sent with your application on <date>" / "Files deleted on <date>".
 
 ---
@@ -380,8 +432,9 @@ Store methods: `add_tailored(row) -> int`, `latest_tailored(job_id)`, `current_t
 ```yaml
 tailor:
   enabled: true
-  llm: false                 # M20: deterministic only. M21: true after spike S-2
-  temperature: 0.25          # D-60
+  llm: false                 # D-67: bullet + summary rewrite (M22 layer, §7); true only once §7.4 is built
+  llm_terms: true            # D-68: LLM JD term extraction (§4.4); terms kept only if they occur in the JD
+  temperature: 0.25          # D-60; used only when llm is true (M22)
   top_k: 20
   seed: 7
   headline: true             # D-60: the job title as a headline under your name
@@ -402,7 +455,7 @@ paths:
 
 ## 15. Golden cases (oracles for the tester; synthetic, no real person)
 
-Fixtures (tester writes them from this section): `tests/fixtures/tailor/aliases_golden.yaml`, three masters as JSON (`master_a.json` …), three JD texts, and the expected outputs below. Golden tests use these fixtures, **not** `config/aliases.yaml`, and mock the backend (deterministic mode needs none).
+Fixtures (tester, from this section): `tests/fixtures/tailor/aliases_golden.yaml` and `tests/fixtures/tailor/case_{a,b,c}/` each with `master.json` (the master), `resume.txt` (its source text, for the leaf check), `jd.txt` and `expected.json` (the oracles below). Golden tests use these fixtures, **not** `config/aliases.yaml`, and mock the backend (deterministic mode needs none).
 
 `aliases_golden.yaml`:
 ```yaml
@@ -457,9 +510,9 @@ Expected:
 - Terms (JD order): required Python, PostgreSQL, Kubernetes, REST APIs, CI/CD, Go; preferred machine learning, Kafka.
 - present_exact {Python, REST APIs}; present_variant {PostgreSQL←Postgres, Kubernetes←k8s, machine learning←ML} (via alias); missing {CI/CD, Go, Kafka}, all with `related = ""`.
 - Coverage before 4/14 = 0.2857 (29%); after 9/14 = 0.6429 (64%); `title_match` true.
-- After (deterministic): bullet 1 "Built REST APIs in Python and PostgreSQL for shipment tracking."; bullet 2 "Deployed services on Kubernetes with GitHub Actions; cut p95 latency 35%."; bullet 3 "Trained a machine learning model to predict delivery delays (82% accuracy)." (article fix). Bullet order unchanged (scores 6, 2, 1). Skills [Python, PostgreSQL, Kubernetes, machine learning, GitHub Actions, Git].
+- After (deterministic): bullet 1 "Built REST APIs in Python and PostgreSQL for shipment tracking."; bullet 2 "Deployed services on Kubernetes with GitHub Actions; cut p95 latency 35%."; bullet 3 "Trained a machine learning model to predict delivery delays (82% accuracy)." (article fix). Bullet order unchanged (scores 6, 2, 1; §6.3). Skills [Python, PostgreSQL, Kubernetes, machine learning, GitHub Actions, Git].
 - Absent everywhere in the output text: "Go", "Kafka", "CI/CD".
-- Invariants: e1/e2 protected fields byte-equal; numbers per bullet {95, 35%} and {82%} unchanged.
+- Invariants: e1/e2 protected fields byte-equal; numbers per bullet (§8.1, D-69 standalone rule) {} / {35%} / {82%} unchanged ("p95" is a fact token, not a number; "k8s" is a dictionary hit).
 
 ### Case B — data analyst (no tool swapping)
 
@@ -507,6 +560,10 @@ Expected:
 - Absent everywhere: "Spring Boot", "Kafka", "Docker", "AML". "RabbitMQ" stays; "present" stays.
 - Invariants: Example Pay Pte Ltd; Software Engineer; Jul 2023 – present; BSc Computer Science; 2023; numbers {2M}, {30%}.
 
+### Re-derivation after Q-19 (§4.3 step 4 list-item rule): outputs unchanged
+
+All three JDs put their terms on `- ` list lines, so under the patched step 4 every such line is an item of the block opened by the last real heading ("Requirements:" → required, "Nice to have:" → preferred); the title lines ("Backend Engineer (Graduate)", "Data Analyst", "Backend Engineer, Payments") are headings that open a required block and hold no terms. Re-derived: A required {Python, PostgreSQL, Kubernetes, REST APIs, CI/CD, Go}, preferred {machine learning, Kafka}, total weight 14, before 4/14 (29%), after 9/14 (64%); B required {SQL, Power BI, Excel, stakeholder management}, preferred {A/B testing, Python}, total 10, 5/10 → 5/10 (50%); C required {Java, Spring Boot, REST APIs, Kafka, microservices}, preferred {AML, KYC, Docker}, total 13, 5/13 (38%) → 7/13 (54%). Bullet scores and orders above are unchanged (§6.3: A 6/2/1, B 3/0/2 → [1, 3, 2], C 6/0/1 → [1, 3, 2]); skills orders, knockouts and validator rows are unaffected (they do not depend on step 4). These are exactly the oracles S-2 reproduced with the rule. Without it, "- Kafka", "- Python", "- AML/KYC" and "- Docker" pass the title-case test, read as headings and close the "Nice to have" block: A would be 4/16 (25%), B 6/11 (55%), C 6/16 → 8/16, so the expected outputs were always written assuming this rule; the patch makes it explicit rather than changing them.
+
 ### Validator rejections (4 per case; each must yield exactly the listed issues, and the output keeps the post-swap bullet)
 
 | Case | Bullet | Bad rewrite | Issues |
@@ -524,7 +581,7 @@ Expected:
 | C | 2 | "Integrated Kafka message queues; processed 2M transactions/day." | FACT_ADDED "kafka", FACT_DROPPED "rabbitmq" |
 | C | 1 | "Developed payment microservices in Java and Spring Boot, exposing REST APIs." | FACT_ADDED "spring boot", FACT_DROPPED "spring" |
 
-(Fact details are canonicals lowercased. "REST APIs" vs "REST endpoints" is alias-equal and raises nothing. Length issues are not expected in these rows.)
+(Fact details are canonicals lowercased. "REST APIs" vs "REST endpoints" is alias-equal and raises nothing. Length issues are not expected in these rows. These rows are the oracle for the M21 §8.1 validator; with M22's §7.4 checks rows B1 and C2 additionally raise `WORD_ADDED`.)
 
 ### Also
 
@@ -539,14 +596,15 @@ Expected:
 |---|---|
 | F-20 | §3 (parse, leaf check, cache by hash) |
 | F-21 | §4 (dictionary + LLM with occurs-in-JD filter), §5 (classification, coverage, naming) |
-| F-22 | §6 (swaps, aliases.yaml), §7 (per-entry LLM, temperature 0.25, schema), §8 (validator, fallback), §9 (summary), §5.1 + §13.3 attest ("I have this"); protected fields §3, §8.3 |
+| F-22 | M21 (D-67): §6.2 (swaps, aliases.yaml §6.1), §6.3 (deterministic relevance reordering), §8.1 + §8.3 (validator guarding swaps, invariants), §9 (summary: swaps only), §5.1 + §13.3 attest ("I have this"); protected fields §3, §8.3. M22: §7 (per-entry LLM rewrite, temperature 0.25, no retry, §7.4 validator additions, §7.5 summary rewrite + check) |
+| F-21 (LLM part) | M21: §4.4 LLM JD term extraction under `tailor.llm_terms` (D-68), occurs-in-JD filter |
 | F-23 | §10 (template, Word PDF, page ceiling, round trip, file naming) |
 | F-24 | §11 (table, paths, D-59 retention in purge, privacy), §19 |
 | F-25 | §12 (auto-tailor on apply), §13 (CLI, job, API, UI panel) |
 | NF-01 | §11.4 (paths gitignored; tester's check-ignore test lists them) |
-| NF-03 | §7, §9 (Ollama only) |
+| NF-03 | §3.2 master parse; M22 §7 (Ollama only) |
 | NF-04 | §2 |
-| NF-07 | §18 note: deterministic ≤ 10 s; LLM mode budget ≤ 90 s measured in S-2 |
+| NF-07 | M21 deterministic ≤ 10 s (§18); M22 LLM mode measured by S-2 at about 1.5 s per entry, 5 to 8 s per resume warm (+10 to 20 s cold load), inside 90 s |
 
 ---
 
@@ -565,7 +623,7 @@ Expected:
 **M20 lane T (deterministic tailor)** — branch `eng/M20-T-tailor`, files: `src/jobscraper/tailor/{__init__.py, master.py, terms.py, mapping.py, rewrite.py (swaps, skills/bullet order only), validate.py (§8.1 + §8.3; it guards the swaps), render.py, storage.py}`, `src/jobscraper/tailor_flow.py`, `src/jobscraper/store.py` (one appended block: `tailored` + methods), `src/jobscraper/config.py` (TailorConfig block), `config/config.yaml` (`tailor:` block), `requirements.txt` (`pywin32` marked optional), `cli.py` (one `tailor` verb block + one line in `cmd_purge`), `src/jobscraper/pipeline.py` (one call to `tailor.storage.purge` beside `purge_descriptions`), `web/jobs.py` (kind `tailor` — shared with lane B's `apply` kind: each adds one `elif`; Coordinator merges).
 Includes the master parse (one cached LLM call per resume hash; the per-job tailoring itself makes no model call). Verify: golden cases A–C deterministic outputs and validator rows (§15) pass; `tailor <job_id> --report` on a real job; a full `tailor <job_id>` produces a DOCX + PDF that pass the round trip in ≤ 10 s.
 
-**M21 lane LLM (after spike S-2):** `tailor/terms.py` (§4.4), `tailor/rewrite.py` (§7, §9), `tailor/validate.py` (§8.2); flips `tailor.llm: true` after S-2's numbers. **M21 lane UI** (shared with the apply UI lane): `web/routers/tailor.py`, Vue panel §13.4, "Mark applied" → `mark_tailored_sent`.
+**M21 tailor scope (D-67):** deterministic swaps + relevance reordering (§6), render (§10), storage/TTL (§11), UI (§13.3, §13.4), with `tailor.llm: false`; the core is lane T above (M20), M21 finishes it with the golden cases A–C gate. M21 also adds §4.4 (`tailor/terms.py`, switch `tailor.llm_terms`, D-68) and `tailor_flow.master_text` / `alias_groups` (§2; needed by auto-apply lane B's context building, so they land with lane T in M20). **M22 lane LLM** (not M21): `tailor/rewrite.py` (§7.1–7.3, §7.5), `tailor/validate.py` (§7.4, §7.5 check); `tailor.llm: true` only after §7.4 passes its tests. **M21 lane UI** (shared with the apply UI lane): `web/routers/tailor.py`, Vue panel §13.4, "Mark applied" → `mark_tailored_sent`.
 
 Shared-file protocol as in `apply_design.md` §19.1 (store.py, cli.py, config.py, config.yaml, requirements.txt, web/jobs.py: each lane appends a self-contained block).
 
@@ -580,7 +638,7 @@ Job log lines: `tailor <job_id>: terms=8 (required 6) exact=2 variant=3 missing=
 ## 20. Pending items and PRD conflicts
 
 **Pending spikes**
-- **S-2** (Qwen3-14B rewrite at 0.25 on A–C + 3 real JDs): until it reports, `tailor.llm: false` (M20 behaviour). If S-2 shows high validator rejection, the fix is prompt wording or retries, never relaxing §8.
+- **S-2: reported** (`spikes/S-2_tailor_llm.md`). Outcome D-67: `tailor.llm: false` by default; the LLM layer moves to M22 (§7) with the validator additions and without retries. The rule stands: a weak model result is answered by prompt wording or by falling back, never by relaxing §8 or §7.4.
 - Word on the owner's PC is assumed (PRD constraints); without it the PDF and the page ceiling are skipped with an issue, not an error.
 
 **PRD conflicts raised (not resolved here)**
@@ -588,6 +646,7 @@ Job log lines: `tailor <job_id>: terms=8 (required 6) exact=2 variant=3 missing=
 2. **Golden case B:** the brief lists Excel as `present_variant`; this design's matcher makes it `present_exact` (the JD spelling occurs inside "Microsoft Excel"). A deliberate oracle change; the reasoning is in §15.
 3. **Weights:** the brief multiplied by a multi-word weight; F-21 states required 2 / preferred 1 only. This design follows F-21.
 4. **Review gate:** the brief recommended a human diff review before use; D-58 (decided) removed it. Followed D-58.
+5. **Tailor LLM layer milestone (D-67):** PRD §7 M21 says "tailor with the LLM layer" and R-2 "before the M21 tailor LLM layer"; D-67 moves the LLM bullet and summary rewrite to M22; LLM JD extraction stays M21 under `tailor.llm_terms` (D-68). Planner to fold into the PRD.
 
 **Requests**
 - Researcher: `config/aliases.yaml` per §6.1 (true synonyms only; instances only as deliberate claims; include the golden terms at minimum).
