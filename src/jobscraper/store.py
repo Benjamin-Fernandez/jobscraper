@@ -25,6 +25,9 @@ from .models import RawJob, WatchedCompany
 
 SCHEMA_VERSION = 2
 
+# A posting closes after this many successful fetches in a row leave it out (H1-1).
+CLOSE_AFTER_MISSES = 2
+
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS meta (
     key TEXT PRIMARY KEY,
@@ -53,7 +56,8 @@ CREATE TABLE IF NOT EXISTS jobs (
     external_id TEXT, title TEXT, location TEXT, url TEXT, posted_at TEXT,
     jd_hash TEXT, jd_text TEXT, vital_text TEXT,
     jd_fetched_at TEXT,                    -- when jd_text was stored; it expires (M17)
-    first_seen_run INTEGER, last_seen_run INTEGER, closed_at TEXT
+    first_seen_run INTEGER, last_seen_run INTEGER, closed_at TEXT,
+    missed_runs INTEGER NOT NULL DEFAULT 0 -- fetches in a row that left it out (H1-1)
 );
 CREATE INDEX IF NOT EXISTS idx_jobs_company ON jobs(company_id);
 CREATE INDEX IF NOT EXISTS idx_jobs_url ON jobs(url);
@@ -215,6 +219,10 @@ class Store:
                 """UPDATE jobs SET jd_fetched_at = COALESCE(
                        (SELECT started_at FROM runs WHERE runs.run_no = jobs.first_seen_run), ?)
                     WHERE jd_text IS NOT NULL""", (utcnow(),))
+        if "missed_runs" not in cols:
+            # H1-1: every open posting starts from zero misses.
+            self.conn.execute(
+                "ALTER TABLE jobs ADD COLUMN missed_runs INTEGER NOT NULL DEFAULT 0")
 
     def close(self) -> None:
         self.conn.close()
@@ -504,29 +512,46 @@ class Store:
                    jd_fetched_at, first_seen_run, last_seen_run, closed_at)
                    VALUES (?,?,?,?,?,?,?,?,?,NULL,?,?,?,NULL)
                    ON CONFLICT (job_id) DO UPDATE SET
-                       last_seen_run = excluded.last_seen_run, closed_at = NULL""",
+                       last_seen_run = excluded.last_seen_run, closed_at = NULL,
+                       missed_runs = 0""",
                 (job_id, company_id, raw.external_id, raw.title, raw.location,
                  raw.url, raw.posted_at, raw.jd_hash(), raw.description,
                  utcnow() if raw.description else None, run_no, run_no))
         else:
             self.conn.execute(
-                "UPDATE jobs SET last_seen_run = ?, closed_at = NULL WHERE job_id = ?",
+                """UPDATE jobs SET last_seen_run = ?, closed_at = NULL, missed_runs = 0
+                   WHERE job_id = ?""",
                 (run_no, job_id))
 
-    def close_missing(self, company_id: int, seen: set[str]) -> int:
-        """Mark jobs absent from a SUCCESSFUL fetch as closed.
+    def close_missing(self, company_id: int, seen: set[str], *,
+                      after: int = CLOSE_AFTER_MISSES) -> int:
+        """Count a miss for each open job absent from a SUCCESSFUL fetch, and
+        close the ones missed `after` fetches in a row. Returns how many closed.
 
-        Never call this after a failed or skipped fetch: a single timeout would
-        otherwise mass-close a company's postings and corrupt the next delta.
+        One miss is not enough (H1-1): a board can leave a posting out of one
+        answer - a paging blip, a facet edge - without taking it down. Never
+        call this after a failed, skipped, empty or capped fetch: those say
+        nothing about what was taken down, and would otherwise mass-close a
+        company's postings and corrupt the next delta. Seeing a job again
+        (upsert_job) resets its count. "In a row" means successful fetches in a
+        row: a failed fetch between two misses neither counts nor resets, since
+        it says nothing either way.
         """
-        stale = [r[0] for r in self.conn.execute(
-            "SELECT job_id FROM jobs WHERE company_id = ? AND closed_at IS NULL",
+        rows = [(r[0], r[1]) for r in self.conn.execute(
+            "SELECT job_id, missed_runs FROM jobs WHERE company_id = ? AND closed_at IS NULL",
             (company_id,)) if r[0] not in seen]
         now = utcnow()
-        for jid in stale:
-            self.conn.execute("UPDATE jobs SET closed_at = ? WHERE job_id = ?", (now, jid))
+        closed = 0
+        for jid, missed in rows:
+            missed = (missed or 0) + 1
+            if missed >= after:
+                self.conn.execute("UPDATE jobs SET missed_runs = ?, closed_at = ? WHERE job_id = ?",
+                                  (missed, now, jid))
+                closed += 1
+            else:
+                self.conn.execute("UPDATE jobs SET missed_runs = ? WHERE job_id = ?", (missed, jid))
         self.conn.commit()
-        return len(stale)
+        return closed
 
     def get_job(self, job_id: str) -> Optional[dict[str, Any]]:
         r = self.conn.execute(

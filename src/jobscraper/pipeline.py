@@ -23,6 +23,7 @@ See PRD sections 8.2 and 8.3.
 """
 from __future__ import annotations
 
+import logging
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
@@ -34,9 +35,11 @@ from .config import CYCLE_DAYS_KEY, Config
 from .models import FetchOutcome, RawJob, WatchedCompany
 from .profile import keywords, resume_ingest, titles
 from .scrape import discovery
-from .scrape.adapters import get_adapter
+from .scrape.adapters import MAX_JOBS, get_adapter
 from .scrape.net import FetchError, HttpClient
 from .store import Store
+
+log = logging.getLogger(__name__)
 
 Fetcher = Callable[[HttpClient, WatchedCompany], FetchOutcome]
 Resolver = Callable[[HttpClient, WatchedCompany], "discovery.Resolution"]
@@ -174,6 +177,12 @@ def run(cfg: Config, store: Store, *, dry_run: bool = False,
                     outcomes[c.id] = FetchOutcome(c.id, False, error_class="transient",
                                                   error=f"worker error: {exc}")
 
+        # Whether the board hit the posting cap is read from the raw answer,
+        # BEFORE de-duplication: a capped board that listed one posting twice
+        # is still capped (H1-1).
+        capped = {c.id for c in resolved
+                  if outcomes[c.id].ok and len(outcomes[c.id].jobs) >= MAX_JOBS}
+
         # One posting listed twice (overlapping pages) is one posting.
         for c in resolved:
             out = outcomes[c.id]
@@ -253,7 +262,8 @@ def run(cfg: Config, store: Store, *, dry_run: bool = False,
             if c.id in probation_ids:
                 say(f"  ** {c.name} recovered from quarantine")
             # close_missing runs ONLY after a successful fetch: a timeout must
-            # never mass-close a company's postings.
+            # never mass-close a company's postings. A posting closes only when
+            # 2 such fetches in a row leave it out (store.CLOSE_AFTER_MISSES).
             known = store.known_job_ids(c.id)
             seen: set[str] = set()
             for raw in out.jobs:
@@ -261,7 +271,19 @@ def run(cfg: Config, store: Store, *, dry_run: bool = False,
                 seen.add(jid)
                 store.upsert_job(jid, c.id, raw, rep.run_no, jid not in known)
             store.commit()
-            store.close_missing(c.id, seen)
+            # Nor after an empty or capped one (H1-1): an empty 200 is what a
+            # soft block looks like, and a capped list stops before the rest.
+            # Neither says a posting was taken down, so neither counts a miss.
+            # Logged, not only said: a quiet run drops `say`, and a board that
+            # stays empty is otherwise indistinguishable from a healthy one.
+            if not out.jobs:
+                say(f"  {c.name}: an empty answer - no posting counted as missing")
+                log.warning("%s: an empty answer - no posting counted as missing", c.name)
+            elif c.id in capped:
+                say(f"  {c.name}: a capped answer - no posting counted as missing")
+                log.warning("%s: a capped answer - no posting counted as missing", c.name)
+            else:
+                store.close_missing(c.id, seen)
 
         rep.relinked = store.relink_orphan_applications()
         if rep.relinked:
