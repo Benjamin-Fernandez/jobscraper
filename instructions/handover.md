@@ -1,23 +1,27 @@
 # Handover note (rewrite every session; ≤ 40 lines; history goes to `docs/planning/session_log.md`)
 
-**Last session:** 2026-11-01, session 1 (kickoff). **Branch/commit:** `personal`, kickoff commit (see `git log -1`).
+**Last session:** 2026-11-02, session 1 (continued). **Branch/commit:** `personal` (see `git log -1`), pushed.
 
 ## Where we are
-- Kickoff done: research (cloud port, tailor, auto-apply) in `docs/research/`, PRD r1 `docs/prd.md` (approved under the owner's delegation), harness (instructions, agents, hooks, scopes).
-- M19 (cloud port) and M20 design start now. Nothing built yet.
-- Open worktrees not ours: `../JobScraper-frontend` (M18, paused, branch `frontend-ux`, don't touch).
+- M19 (cloud port) DONE and pushed. M20 dossier (designs, plans, test plans, seeds) merged into `personal`.
+- D-70 (owner): Workday is the priority; M20 now = Workday end to end + Greenhouse with MyGreenhouse autofill; tailored resume always replaces an autofilled one.
+- Full suite on personal: 425/427; the 2 failures are D-69 state-machine oracles awaiting the tester (Q-21).
 
-## Running or awaiting review
-- See `06_work_queue.md` rows marked IN PROGRESS (Q-01 to Q-04 once started).
+## Running (background worktree agents, branched from personal)
+- Q-22 architect `arch/Q-22-workday-first`: Workday adapter spec, MyGreenhouse path, `apply open-profile`, backup email, `yes_if`, lane V into M20.
+- Lane P `eng/M20-P-profile-resolver` (WP-P1..P6), lane B `eng/M20-B-browser-greenhouse` (WP-B1..B8), lane T `eng/M20-T-tailor` (WP-T1..T8).
 
 ## Waiting on the owner
-- Nothing blocking yet. Coming: `data/applicant.yaml` values + the application email (Q-13, after the design ships the template); a Gmail app password (Q-14).
+- Application email (primary) in chat; confirm the backup `benjaminwrka@gmail.cm` (likely `.com`).
+- Gmail app password into Credential Manager: target `jobscraper:imap:imap.gmail.com`, user = the Gmail address (command given in chat). A second one if the backup address is also used for verification.
+- MyGreenhouse sign-in once in the JobScraper Edge profile (`%LOCALAPPDATA%\JobScraper\apply-profile`).
+- Later: `data/applicant.yaml` from the template lane P ships.
 
 ## Next 1–3 actions
-1. Start Q-01 (browser spike), Q-02 (engine port), Q-03 (UI port), Q-04 (apply design) in parallel.
-2. When Q-04 lands: Q-05 tailor design with the same architect; then Q-06, Q-08, Q-09.
-3. Merge M19 lanes (Q-12), rebuild the bundle in the main checkout, push.
+1. Q-21 tester (D-69 oracles + 3 dropped layering guards) once an agent slot frees.
+2. On Q-22: merge it; spike S-5 (Q-23) on 2 owner-approved Workday employers — real sign-up + IMAP verify, record every step; stop at Review. Real submissions there happen through the built product at the M20 gate (owner allowed them, D-70).
+3. Merge lanes P → T → B (B9 swap), then lane V (Workday), M20 gate.
 
 ## Watch out
-- The live app runs from this checkout on 8765; dev instances use 8768 with a copied DB.
-- New agent definitions load next session; until then spawn `general-purpose` with the role brief.
+- Agent worktrees start from master: every brief says `git switch -c <branch> personal`.
+- Live app on 8765 runs from this checkout; dev instances use 8768 with a copied DB.
