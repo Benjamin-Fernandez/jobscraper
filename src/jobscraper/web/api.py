@@ -11,14 +11,16 @@ the real routes with no database on disk.
 from __future__ import annotations
 
 import importlib
+import logging
 import os
 import pkgutil
+import uuid
 from pathlib import Path
 from typing import Any, Callable, Optional
 from urllib.parse import urlsplit
 
 from fastapi import FastAPI
-from fastapi.responses import PlainTextResponse
+from fastapi.responses import JSONResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
@@ -27,6 +29,8 @@ from jobscraper.web import routers
 from jobscraper.web.jobs import CommandBuilder, JobManager, cli_command
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
+
+log = logging.getLogger(__name__)
 
 
 class SpaFiles(StaticFiles):
@@ -170,6 +174,48 @@ class SecurityHeaders:
         await self.app(scope, receive, with_headers)
 
 
+class UnhandledErrors:
+    """An error no route handled: logged with a request id, answered in the
+    app's error shape (C-6).
+
+    Before, such an error was a bare 500 and nothing was recorded anywhere.
+    Now the log gets the traceback, the method, the path and an id, and the
+    browser gets `{"detail", "request_id"}` - the id to quote, never the
+    exception text. A middleware, not `add_exception_handler`: Starlette
+    re-raises after its handler answers, which would log every error twice.
+    If the response had already started, the error is logged and re-raised:
+    there is no clean answer left to give.
+    """
+
+    def __init__(self, app: Any):
+        self.app = app
+
+    async def __call__(self, scope: dict, receive: Any, send: Any) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+        started = False
+
+        async def watch(message: dict) -> None:
+            nonlocal started
+            if message["type"] == "http.response.start":
+                started = True
+            await send(message)
+
+        try:
+            await self.app(scope, receive, watch)
+        except Exception:
+            request_id = uuid.uuid4().hex[:12]
+            log.exception("unhandled error on %s %s [request %s]",
+                          scope.get("method"), scope.get("path"), request_id)
+            if started:
+                raise
+            response = JSONResponse(
+                {"detail": "Something went wrong on the server. It has been logged.",
+                 "request_id": request_id}, status_code=500)
+            await response(scope, receive, send)
+
+
 def create_app(cfg: Optional[Config] = None,
                store_factory: Optional[Callable[[], Any]] = None,
                static_dir: Path = STATIC_DIR,
@@ -193,11 +239,13 @@ def create_app(cfg: Optional[Config] = None,
     # Added last runs first: the Host check wraps the cross-site check.
     app.add_middleware(CrossSiteWriteGuard, hosts=hosts)
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=hosts)
+    app.add_middleware(UnhandledErrors)          # its 500 still gets the headers below
     app.add_middleware(SecurityHeaders)          # outermost: every response
     app.state.cfg = cfg
     app.state.store_factory = store_factory or _default_store_factory(cfg)
     app.state.jobs = JobManager(cfg.db_path.parent / "jobs",
-                                job_command or cli_command(config_path))
+                                job_command or cli_command(config_path),
+                                store_factory=app.state.store_factory)
 
     # API first: the static mount below catches every path it is given, so
     # anything registered after it would be unreachable.

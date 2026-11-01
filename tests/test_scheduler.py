@@ -46,7 +46,7 @@ def test_scheduler_nothing_rescraped_inside_the_cycle():
     for d in (0, 1, 1):
         _run(st, shift(T0, days=d))
     assert _run(st, shift(T0, days=2)) == []
-    assert _run(st, shift(T0, days=13, seconds=23 * 3600)) == []
+    assert _run(st, shift(T0, days=13, seconds=11 * 3600)) == []     # inside cycle less the 12 h grace (C-7)
 
 
 def test_scheduler_loops_back_to_company_one():
@@ -88,7 +88,7 @@ def test_scheduler_all_fresh_reports_next_due_date():
         _run(st, shift(T0, seconds=d * 60))
     p = S.plan(st, 10, 14, now=shift(T0, days=1))
     assert not p.due
-    assert p.next_due_at == shift(T0, days=14)        # the oldest stamp + 14 days
+    assert p.next_due_at == shift(T0, days=14, seconds=-12 * 3600)   # oldest stamp + 14 days - 12 h grace (C-7)
 
 
 def test_scheduler_skips_disabled_and_quarantined():

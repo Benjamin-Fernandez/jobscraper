@@ -35,13 +35,32 @@ function sendJson(path, method, body) {
   })
 }
 
+// FastAPI's own 422 is a list of {msg}; ours is a string. Either way, words.
+function detailText(detail) {
+  if (typeof detail === 'string') return detail
+  if (Array.isArray(detail) && detail.length) {
+    return detail.map(d => String(d?.msg ?? d).replace(/^Value error, /, '')).join('; ')
+  }
+  return ''
+}
+
 // A sentence for the page, not a stack trace. A 404 on a route this bundle
 // expects means the server is older than the UI, which is worth saying plainly.
 export function describeError(e) {
   if (e instanceof ApiError && e.status === 404) {
     return `${e.message}. This server does not offer that yet - update JobScraper and restart the web app.`
   }
+  if (e instanceof ApiError && [413, 415, 422].includes(e.status)) {
+    const text = detailText(e.detail)
+    if (text) return text
+  }
   return String(e?.message || e)
+}
+
+// Why a finished job did not succeed, in words: cancelled, else `fallback`.
+export function failureText(job, fallback) {
+  if (job?.reason === 'cancelled') return 'The job was cancelled.'
+  return fallback
 }
 
 export function getRuns() {

@@ -133,7 +133,7 @@ class _StubBackend(Backend):
     def available(self):
         return True
 
-    def complete(self, system, user, max_tokens=4096):
+    def complete(self, system, user, max_tokens=4096, schema=None, timeout=None):
         self.calls += 1
         if self.fail:
             raise BackendError("transport down")

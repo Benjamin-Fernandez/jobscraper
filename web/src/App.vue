@@ -9,7 +9,7 @@
 // hands it to every tab (see shell.js). Choosing a run fetches that run's
 // shortlist and swaps it in place: one request, no navigation (M7-T2).
 import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { describeError, getRuns, getShortlist, getStats } from './api.js'
+import { ApiError, describeError, getRuns, getShortlist, getStats } from './api.js'
 import { TABS } from './tabs.js'
 import { runQuery, sameRun } from './runs.js'
 import { hashFor, tabFromHash } from './route.js'
@@ -161,15 +161,34 @@ function onSlash(event) {
   box.select?.()
 }
 
-onMounted(async () => {
-  window.addEventListener('hashchange', onHashChange)
-  window.addEventListener('keydown', onSlash)
+// The first load. A network failure (not an ApiError: the server answered
+// nothing at all) means every tab would show the same error, so one screen
+// says so, with a Retry. A server that answers with an error is left to the
+// tabs, as before.
+const bootError = ref(false)
+const retrying = ref(false)
+
+async function boot() {
+  retrying.value = true
+  bootError.value = false
   try {
     await loadRuns()
   } catch (e) {
+    if (!(e instanceof ApiError)) {
+      bootError.value = true
+      retrying.value = false
+      return
+    }
     error.value = describeError(e)
   }
+  retrying.value = false
   await Promise.all([loadJobs(), loadStats()])
+}
+
+onMounted(() => {
+  window.addEventListener('hashchange', onHashChange)
+  window.addEventListener('keydown', onSlash)
+  return boot()
 })
 onBeforeUnmount(() => {
   window.removeEventListener('hashchange', onHashChange)
@@ -207,10 +226,10 @@ onBeforeUnmount(() => {
               @keydown="onTabKey($event, i)"
             >
               <span class="tab-label">{{ tab.label }}</span>
-              <!-- A tab that can carry a badge keeps its slot even while the
-                   count is loading or zero, so the bar never shifts. -->
-              <span v-if="tab.badge" class="badge-slot">
-                <span v-if="badgeOf(tab) !== null" class="badge">
+              <!-- Only a count takes space (UX-1): an empty reserved slot left
+                   uneven gaps between the tabs. -->
+              <span v-if="badgeOf(tab) !== null" class="badge-slot">
+                <span class="badge">
                   {{ badgeOf(tab) }}<span class="visually-hidden"> {{ tab.badgeLabel || '' }}</span>
                 </span>
               </span>
@@ -220,8 +239,17 @@ onBeforeUnmount(() => {
       </div>
     </header>
 
+    <main v-if="bootError" class="panel boot-error" role="alert">
+      <h2 class="page-title">Could not reach JobScraper</h2>
+      <p class="notice error">
+        Could not reach JobScraper – is <code>run.ps1 web</code> running? Start it, then try again.
+      </p>
+      <p><button type="button" class="primary boot-retry" :disabled="retrying" @click="boot">
+        {{ retrying ? 'Trying…' : 'Retry' }}
+      </button></p>
+    </main>
     <main
-      v-if="active"
+      v-else-if="active"
       :id="`panel-${active.id}`"
       class="panel"
       role="tabpanel"
@@ -314,7 +342,7 @@ onBeforeUnmount(() => {
 .tab.current { color: var(--text); font-weight: 650; }
 .tab.current::after { background: var(--accent); }
 .tab:focus-visible { outline-offset: -4px; }
-.badge-slot { display: inline-flex; min-width: 2.4em; }
+.badge-slot { display: inline-flex; }
 .badge {
   font-family: var(--mono);
   font-size: var(--text-xs);
@@ -332,6 +360,7 @@ onBeforeUnmount(() => {
   padding: var(--space-5) var(--gutter) calc(var(--space-7) + var(--space-6));
 }
 .panel:focus-visible { outline-offset: -2px; }
+.boot-error .notice { margin: var(--space-3) 0; }
 @media (max-width: 640px) {
   .masthead-inner { flex-direction: column; gap: 0; }
   .brand { min-height: 2.5rem; font-size: var(--text-md); }

@@ -312,7 +312,7 @@ input:disabled, select:disabled { opacity: 0.6; }
   color: var(--muted);
   margin: var(--space-6) 0 var(--space-3);
 }
-.section-title:first-child { margin-top: 0; }
+.section-title:first-child, .page-head + .section-title { margin-top: 0; }
 
 /* A white work surface. Never nested inside another. */
 .surface {

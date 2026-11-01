@@ -89,8 +89,8 @@ def test_new_and_hydrated_descriptions_are_dated():
 
 
 class _RejectAll(P._AcceptSingapore):
-    def complete(self, system, user, max_tokens=4096):
-        return Completion(super().complete(system, user, max_tokens).text
+    def complete(self, system, user, max_tokens=4096, schema=None, timeout=None):
+        return Completion(super().complete(system, user, max_tokens, schema, timeout).text
                           .replace('"accept"', '"reject"'))
 
 
@@ -176,7 +176,7 @@ class _Answers(Backend):
     def available(self):
         return True
 
-    def complete(self, system, user, max_tokens=4096):
+    def complete(self, system, user, max_tokens=4096, schema=None, timeout=None):
         self.seen.append(user)
         titles = self.answers.pop(0) if self.answers else []
         return Completion(json.dumps({"field_of_study": "BEng", "experience": [],

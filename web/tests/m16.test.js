@@ -275,7 +275,13 @@ describe('Inbox: the job description', () => {
     const wrapper = await mountInbox()
     const first = FIXTURE.jobs.find(j => j.id === 'g7h8i9')           // Shopee, newest
     expect(api.calls.filter(c => c.url.startsWith('api/postings/')).map(c => c.url)).toEqual(['api/postings/g7h8i9'])
-    expect(wrapper.find('.jd-text').text()).toBe(descriptionOf(first))
+    // UX-1: the text is drawn as heading / list / paragraph elements, never
+    // HTML; every line the employer wrote is still there, in order, none added.
+    const lines = descriptionOf(first).split('\n').map(l => l.trim().replace(/^[-*]\s+/, '')).filter(Boolean)
+    const drawn = wrapper.findAll('.jd-text > :not(ul):not(ol), .jd-text li')
+      .flatMap(el => el.text().split('\n').map(l => l.trim()).filter(Boolean))
+    expect(drawn.join('\n')).toBe(lines.join('\n'))
+    expect(wrapper.find('.jd-text').find('script').exists()).toBe(false)
     expect(wrapper.find('.jd').text()).toContain('About the job')
   })
 
