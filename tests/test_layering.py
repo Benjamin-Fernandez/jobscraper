@@ -34,18 +34,27 @@ sys.path.insert(0, str(ROOT / "src"))
 
 # The orchestrator. The one module allowed to import every stage - composing them
 # is its whole job. Nothing may import it back.
-ORCHESTRATOR = {"pipeline", "company_search"}
+ORCHESTRATOR = {"pipeline", "company_search", "apply_flow", "tailor_flow"}
 # company_search.py (M16) composes discovery, the adapters and the model to find
 # careers sites for the user's own list - an orchestrator for the same reason.
 
+# The one orchestrator -> orchestrator edge (apply design section 2.3): applying
+# may ask for a tailored resume. Nothing else may import an orchestrator.
+ALLOWED_ORCHESTRATOR_EDGES = {("apply_flow", "tailor_flow")}
+
 # Stage modules: each does one step of the pipeline and knows nothing of the others.
-STAGES = {"scheduler", "filter", "decide", "scrape", "profile"}
+STAGES = {"scheduler", "filter", "decide", "scrape", "profile", "apply", "tailor"}
 
 # Not a stage. shortlist.py only turns stored decisions into a file, which is why
 # both pipeline.py and web/ are allowed to import it (PRD section 8.2).
 PUBLISHER = {"shortlist"}
 
-FOUNDATION = {"store", "config", "models", "net", "backends", "watchlist"}
+FOUNDATION = {"store", "config", "models", "net", "backends", "watchlist",
+              "applicant", "vault"}
+
+# web/ may import exactly these two modules out of the apply/tailor stage
+# packages: their contracts (plain data types), nothing else (section 2.3).
+WEB_MAY_IMPORT_DOTTED = {"apply.contracts", "tailor.contracts"}
 
 WEB_MAY_IMPORT = FOUNDATION | PUBLISHER
 
@@ -76,6 +85,33 @@ def _local_imports(path: Path) -> set[str]:
             for a in node.names:
                 if a.name.startswith("jobscraper."):
                     found.add(a.name.split(".")[1])
+    return found
+
+
+def _dotted_imports(path: Path) -> set[str]:
+    """Like `_local_imports`, but keeps the submodule for package imports:
+    `from jobscraper.apply.contracts import X` -> "apply.contracts",
+    `from jobscraper.apply import contracts` -> "apply.contracts",
+    `import jobscraper.apply` -> "apply"."""
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    found: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom):
+            mod = node.module or ""
+            if not node.level and not mod.startswith("jobscraper"):
+                continue
+            parts = [x for x in mod.split(".") if x and not (x == "jobscraper" and not node.level)]
+            if not parts:                         # `from . import x`
+                found.update(a.name for a in node.names)
+            elif len(parts) == 1:
+                found.update(f"{parts[0]}.{a.name}" if parts[0] in STAGES else parts[0]
+                             for a in node.names)
+            else:
+                found.add(".".join(parts[:2]))
+        elif isinstance(node, ast.Import):
+            for a in node.names:
+                if a.name.startswith("jobscraper."):
+                    found.add(".".join(a.name.split(".")[1:3]))
     return found
 
 
@@ -119,12 +155,15 @@ def test_web_never_imports_a_stage():
     for owner, path in _all_v2_files():
         if owner != "web":
             continue
-        crossed = _local_imports(path) - WEB_MAY_IMPORT - {"web"}
+        crossed = {d for d in _dotted_imports(path)
+                   if d.split(".")[0] not in WEB_MAY_IMPORT | {"web"}
+                   and d not in WEB_MAY_IMPORT_DOTTED}
         if crossed:
             offenders.append(f"{path.relative_to(SRC)} -> {sorted(crossed)}")
     assert not offenders, (
         "web/ may import only "
-        f"{sorted(WEB_MAY_IMPORT)} (PRD 8.2 rule 3): {offenders}")
+        f"{sorted(WEB_MAY_IMPORT)} and {sorted(WEB_MAY_IMPORT_DOTTED)} "
+        f"(PRD 8.2 rule 3): {offenders}")
 
 
 def test_only_store_contains_sql():
@@ -162,6 +201,8 @@ def test_nothing_imports_the_orchestrator():
         if path.stem in ORCHESTRATOR:
             continue
         crossed = _local_imports(path) & ORCHESTRATOR
+        crossed = {c for c in crossed
+                   if (path.stem, c) not in ALLOWED_ORCHESTRATOR_EDGES}
         if crossed:
             offenders.append(f"{path.relative_to(SRC)} -> {sorted(crossed)}")
     assert not offenders, (
@@ -180,3 +221,45 @@ def test_every_v2_module_is_classified():
         f"modules {sorted(unclassified)} belong to no layer. Add them to STAGES, "
         "PUBLISHER, FOUNDATION or LEGACY in this file and to PRD section 8.2 - "
         "an unclassified module is one no boundary rule protects.")
+
+
+def test_foundation_modules_import_no_stage_or_orchestrator():
+    """applicant.py and vault.py (M20) sit beside store.py at the bottom: they
+    may use each other and the rest of the foundation, never a stage."""
+    offenders = []
+    for owner, path in _all_v2_files():
+        if owner not in FOUNDATION:
+            continue
+        crossed = _local_imports(path) & (STAGES | ORCHESTRATOR | PUBLISHER)
+        if crossed:
+            offenders.append(f"{path.relative_to(SRC)} -> {sorted(crossed)}")
+    assert not offenders, f"foundation must not reach upwards: {offenders}"
+
+
+def test_apply_and_tailor_meet_only_through_their_flows():
+    """The stage packages never import each other or an orchestrator; only
+    apply_flow may import tailor_flow (apply design section 2.3, rule 4)."""
+    offenders = []
+    for owner, path in _all_v2_files():
+        if owner not in {"apply", "tailor"}:
+            continue
+        other = ({"apply", "tailor"} - {owner}) | ORCHESTRATOR
+        crossed = _local_imports(path) & other
+        if crossed:
+            offenders.append(f"{path.relative_to(SRC)} -> {sorted(crossed)}")
+    assert not offenders, offenders
+
+
+def test_the_layering_guard_catches_what_it_claims_to(tmp_path=None):
+    """Self-check on synthetic sources (the guard itself must not rot): the
+    dotted import reader sees the contracts, and an orchestrator edge other
+    than apply_flow -> tailor_flow is not exempt."""
+    import tempfile
+    d = Path(tempfile.mkdtemp())
+    f = d / "m.py"
+    f.write_text("from jobscraper.apply.contracts import A\nfrom jobscraper.tailor import contracts\nfrom jobscraper.apply import flowy\nfrom jobscraper.store import Store\n", encoding="utf-8")
+    got = _dotted_imports(f)
+    assert {"apply.contracts", "tailor.contracts", "apply.flowy", "store"} <= got
+    assert ("apply_flow", "tailor_flow") in ALLOWED_ORCHESTRATOR_EDGES
+    assert ("tailor_flow", "apply_flow") not in ALLOWED_ORCHESTRATOR_EDGES
+    assert ("pipeline", "tailor_flow") not in ALLOWED_ORCHESTRATOR_EDGES
