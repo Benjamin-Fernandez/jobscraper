@@ -22,6 +22,7 @@ const summary = computed(() => {
   const what = KIND[j.kind] ?? 'Job'
   if (state.value === 'running') return `${what} running since ${when(j.started_at)}`
   if (state.value === 'succeeded') return `${what} finished ${when(j.finished_at)}`
+  if (j.reason === 'cancelled') return `${what} cancelled ${when(j.finished_at)}`.trim()
   const code = j.exit_code === null || j.exit_code === undefined ? '' : ` (exit ${j.exit_code})`
   return `${what} failed${code} ${when(j.finished_at)}`.trim()
 })

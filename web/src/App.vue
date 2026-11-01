@@ -9,7 +9,7 @@
 // hands it to every tab (see shell.js). Choosing a run fetches that run's
 // shortlist and swaps it in place: one request, no navigation (M7-T2).
 import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { describeError, getRuns, getShortlist, getStats } from './api.js'
+import { ApiError, describeError, getRuns, getShortlist, getStats } from './api.js'
 import { TABS } from './tabs.js'
 import { runQuery, sameRun } from './runs.js'
 import { hashFor, tabFromHash } from './route.js'
@@ -161,15 +161,34 @@ function onSlash(event) {
   box.select?.()
 }
 
-onMounted(async () => {
-  window.addEventListener('hashchange', onHashChange)
-  window.addEventListener('keydown', onSlash)
+// The first load. A network failure (not an ApiError: the server answered
+// nothing at all) means every tab would show the same error, so one screen
+// says so, with a Retry. A server that answers with an error is left to the
+// tabs, as before.
+const bootError = ref(false)
+const retrying = ref(false)
+
+async function boot() {
+  retrying.value = true
+  bootError.value = false
   try {
     await loadRuns()
   } catch (e) {
+    if (!(e instanceof ApiError)) {
+      bootError.value = true
+      retrying.value = false
+      return
+    }
     error.value = describeError(e)
   }
+  retrying.value = false
   await Promise.all([loadJobs(), loadStats()])
+}
+
+onMounted(() => {
+  window.addEventListener('hashchange', onHashChange)
+  window.addEventListener('keydown', onSlash)
+  return boot()
 })
 onBeforeUnmount(() => {
   window.removeEventListener('hashchange', onHashChange)
@@ -220,8 +239,17 @@ onBeforeUnmount(() => {
       </div>
     </header>
 
+    <main v-if="bootError" class="panel boot-error" role="alert">
+      <h2 class="page-title">Could not reach JobScraper</h2>
+      <p class="notice error">
+        Could not reach JobScraper – is <code>run.ps1 web</code> running? Start it, then try again.
+      </p>
+      <p><button type="button" class="primary boot-retry" :disabled="retrying" @click="boot">
+        {{ retrying ? 'Trying…' : 'Retry' }}
+      </button></p>
+    </main>
     <main
-      v-if="active"
+      v-else-if="active"
       :id="`panel-${active.id}`"
       class="panel"
       role="tabpanel"
@@ -332,6 +360,7 @@ onBeforeUnmount(() => {
   padding: var(--space-5) var(--gutter) calc(var(--space-7) + var(--space-6));
 }
 .panel:focus-visible { outline-offset: -2px; }
+.boot-error .notice { margin: var(--space-3) 0; }
 @media (max-width: 640px) {
   .masthead-inner { flex-direction: column; gap: 0; }
   .brand { min-height: 2.5rem; font-size: var(--text-md); }

@@ -10,7 +10,7 @@
 // recommendations then appear as one-click adds.
 import { computed, onMounted, ref } from 'vue'
 import {
-  ApiError, describeError, getTitles, resetTitles, saveTitles, startTitleSuggestions,
+  ApiError, describeError, failureText, getTitles, resetTitles, saveTitles, startTitleSuggestions,
 } from '../api.js'
 import { useJob } from '../composables/useJob.js'
 import { plural, when } from '../format.js'
@@ -28,7 +28,7 @@ const draft = ref('')
 const { job, running, refresh, track } = useJob({
   kind: 'titles',
   onFinish: finished => {
-    if (finished.state === 'failed') error.value = 'Qwen could not recommend titles - the log below says why.'
+    if (finished.state === 'failed') error.value = failureText(finished, 'Qwen could not recommend titles - the log below says why.')
     load()
   },
 })

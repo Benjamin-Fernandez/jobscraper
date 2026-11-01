@@ -16,7 +16,7 @@
 // Your list. The view last used is remembered in this browser.
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import {
-  ApiError, LIST_TYPES, clearCompanyList, describeError, getCompanyHealth,
+  ApiError, LIST_TYPES, clearCompanyList, describeError, failureText, getCompanyHealth,
   getCompanyList, startCompanySearch, uploadCompanyList,
 } from '../api.js'
 import { useJob } from '../composables/useJob.js'
@@ -84,7 +84,7 @@ const { job, running, refresh, track } = useJob({
     loadHealth()
     emit('changed', {})
     if (finished.state === 'succeeded') note.value = 'The search has finished.'
-    else problem.value = 'The company search stopped early - its log is on the Developer tab.'
+    else problem.value = failureText(finished, 'The company search stopped early - its log is on the Developer tab.')
   },
 })
 

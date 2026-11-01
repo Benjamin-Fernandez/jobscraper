@@ -9,7 +9,7 @@
 // answer is shown in words, not as a status code alone.
 import { computed, onMounted, ref } from 'vue'
 import {
-  ApiError, RESUME_TYPES, describeError, getProfile, startProfileRefresh, uploadResume,
+  ApiError, RESUME_TYPES, describeError, failureText, getProfile, startProfileRefresh, uploadResume,
 } from '../api.js'
 import { useJob } from '../composables/useJob.js'
 import { when } from '../format.js'
@@ -37,7 +37,7 @@ const { job, error: jobError, running, refresh, track } = useJob({
   kind: 'profile',
   onFinish: finished => {
     if (finished.state === 'succeeded') note.value = 'Profile refreshed.'
-    else problem.value = 'The profile refresh failed - its log is below.'
+    else problem.value = failureText(finished, 'The profile refresh failed - its log is below.')
     loadProfile()
   },
 })
