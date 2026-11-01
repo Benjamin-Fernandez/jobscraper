@@ -207,6 +207,13 @@ onMounted(async () => {
 
 <template>
   <section class="runs">
+    <header class="page-head">
+      <div>
+        <h2 class="page-title">Runs</h2>
+        <p class="page-sub">A run checks your companies' job boards and puts the roles that fit you in your Inbox.</p>
+      </div>
+    </header>
+
     <h2 class="section-title">Start a run</h2>
     <form class="start" novalidate @submit.prevent="start">
       <div class="field">

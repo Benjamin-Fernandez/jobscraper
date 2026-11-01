@@ -207,10 +207,10 @@ onBeforeUnmount(() => {
               @keydown="onTabKey($event, i)"
             >
               <span class="tab-label">{{ tab.label }}</span>
-              <!-- A tab that can carry a badge keeps its slot even while the
-                   count is loading or zero, so the bar never shifts. -->
-              <span v-if="tab.badge" class="badge-slot">
-                <span v-if="badgeOf(tab) !== null" class="badge">
+              <!-- Only a count takes space (UX-1): an empty reserved slot left
+                   uneven gaps between the tabs. -->
+              <span v-if="badgeOf(tab) !== null" class="badge-slot">
+                <span class="badge">
                   {{ badgeOf(tab) }}<span class="visually-hidden"> {{ tab.badgeLabel || '' }}</span>
                 </span>
               </span>
@@ -314,7 +314,7 @@ onBeforeUnmount(() => {
 .tab.current { color: var(--text); font-weight: 650; }
 .tab.current::after { background: var(--accent); }
 .tab:focus-visible { outline-offset: -4px; }
-.badge-slot { display: inline-flex; min-width: 2.4em; }
+.badge-slot { display: inline-flex; }
 .badge {
   font-family: var(--mono);
   font-size: var(--text-xs);

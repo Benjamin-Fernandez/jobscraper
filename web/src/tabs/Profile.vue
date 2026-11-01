@@ -139,6 +139,13 @@ onMounted(() => Promise.all([loadProfile(), refresh()]))
 
 <template>
   <section class="profile-tab">
+    <header class="page-head">
+      <div>
+        <h2 class="page-title">Profile</h2>
+        <p class="page-sub">Your resume, and the job titles each run searches for.</p>
+      </div>
+    </header>
+
     <h2 class="section-title">Resume</h2>
     <label
       class="drop"
