@@ -71,3 +71,15 @@ export function ago(iso, now = Date.now()) {
   const d = Math.floor(s / 86400)
   return d === 1 ? 'yesterday' : `${d} days ago`
 }
+
+// "2026-10-22T03:45:00+00:00" -> "11:45" in Singapore time (a timestamp with no
+// zone is read as UTC); empty string when it is not a time.
+export function sgtClock(iso) {
+  const s = String(iso || '')
+  if (!/\d{2}:\d{2}/.test(s)) return ''
+  const d = new Date(/[zZ]$|[+-]\d{2}:?\d{2}$/.test(s) ? s : `${s.replace(' ', 'T')}Z`)
+  if (Number.isNaN(d.getTime())) return ''
+  return new Intl.DateTimeFormat('en-GB', {
+    hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'Asia/Singapore',
+  }).format(d)
+}

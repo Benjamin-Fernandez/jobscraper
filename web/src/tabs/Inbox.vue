@@ -11,16 +11,18 @@
 // the same posting under another id - is left out (M17). Opening the
 // posting on the company's site asks afterwards whether you applied, the way
 // LinkedIn does, so the record is one click away.
-import { computed, nextTick, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { describeError, getPosting, setApplicationStatus, untrackApplication } from '../api.js'
 import { dismiss, dismissedAt, isDismissed, migrateSessionDismissals, restore } from '../dismissed.js'
 import { cleanLocation, plural, safeUrl, shortDate } from '../format.js'
+import { parseDescription, previewBlocks } from '../jd.js'
 import { tabEmits, tabProps } from '../shell.js'
 import { showToast } from '../toast.js'
 import { requestPicker, runLabel } from '../runs.js'
 import CompanyMark from '../components/CompanyMark.vue'
 import Icon from '../components/Icon.vue'
 import RunSelector from '../components/RunSelector.vue'
+import SetupChecklist from '../components/SetupChecklist.vue'
 import TabLoading from '../components/TabLoading.vue'
 
 const props = defineProps(tabProps)
@@ -132,11 +134,10 @@ async function loadDescription(id) {
 }
 
 const description = computed(() => (selected.value ? descriptions.value[selected.value.id] ?? null : null))
-const descriptionShown = computed(() => {
-  const text = description.value?.text || ''
-  if (expanded.value || text.length <= PREVIEW_CHARS) return text
-  return `${text.slice(0, PREVIEW_CHARS).replace(/\s+\S*$/, '')}…`
-})
+// Headings, lists and paragraphs, cut to a preview at a block boundary until Show more.
+const descriptionBlocks = computed(() => parseDescription(description.value?.text))
+const descriptionPreview = computed(() => previewBlocks(descriptionBlocks.value, PREVIEW_CHARS))
+const descriptionShown = computed(() => (expanded.value ? descriptionBlocks.value : descriptionPreview.value.blocks))
 
 watch(() => selected.value?.id, id => {
   expanded.value = false
@@ -256,6 +257,63 @@ function chooseRuns() {
 function markOpened(job) {
   opened.value = new Set(opened.value).add(job.id)
 }
+
+// ---- triage shortcuts (UX-1), the way Gmail's and LinkedIn's lists work ----
+// Never while typing in a field, never with a modifier (Ctrl+S stays the
+// browser's), and never twice: the list's own J/K handling marks its event.
+// They can be turned off (WCAG 2.1.4 - single-key shortcuts misfire under
+// speech input); the choice is remembered on this device. The `/` search key
+// is the shell's own and is not affected.
+
+const SHORTCUTS_KEY = 'jobscraper.inbox.shortcuts'
+function readShortcuts() {
+  try { return window.localStorage.getItem(SHORTCUTS_KEY) !== '0' } catch { return true }
+}
+const shortcutsOn = ref(readShortcuts())
+watch(shortcutsOn, on => {
+  try { window.localStorage.setItem(SHORTCUTS_KEY, on ? '1' : '0') } catch { /* blocked */ }
+})
+const keyOf = key => (shortcutsOn.value ? key : undefined)
+
+function typing(target) {
+  return Boolean(target?.closest?.('input, textarea, select, [contenteditable="true"]'))
+}
+
+function openPosting(job) {
+  const url = safeUrl(job.url)
+  if (!url) return
+  window.open(url, '_blank', 'noopener,noreferrer')
+  markOpened(job)
+}
+
+async function step(by) {
+  const list = listed.value
+  if (!list.length) return
+  const i = Math.max(0, list.findIndex(j => j.id === selected.value?.id))
+  const next = list[Math.min(list.length - 1, Math.max(0, i + by))]
+  select(next, { open: false })
+  await nextTick()
+  itemEls[next.id]?.scrollIntoView?.({ block: 'nearest' })
+}
+
+function onShortcut(event) {
+  if (!shortcutsOn.value || event.defaultPrevented || event.ctrlKey || event.metaKey || event.altKey || typing(event.target)) return
+  const job = selected.value
+  const act = {
+    s: () => track(job, 'to_apply'),
+    a: () => track(job, 'applied'),
+    x: () => (isDismissed(job) ? moveBack(job) : markNotInterested(job)),
+    o: () => openPosting(job),
+    j: () => step(1),
+    k: () => step(-1),
+  }[String(event.key).toLowerCase()]
+  if (!act || !job || busy.value) return
+  event.preventDefault()
+  act()
+}
+
+onMounted(() => window.addEventListener('keydown', onShortcut))
+onBeforeUnmount(() => window.removeEventListener('keydown', onShortcut))
 </script>
 
 <template>
@@ -307,11 +365,13 @@ function markOpened(job) {
       <button type="button" @click="emit('changed')">Try again</button>
     </div>
     <TabLoading v-else-if="firstLoad" :rows="3" />
-    <div v-else-if="!jobs.length" class="empty">
-      <Icon name="inbox" :size="28" />
-      <p class="empty-title">No roles in {{ scope }}.</p>
-      <p class="muted">Show other runs above, or start a new one from the Runs tab.</p>
-    </div>
+    <SetupChecklist v-else-if="!jobs.length" :runs="runs">
+      <div class="empty">
+        <Icon name="inbox" :size="28" />
+        <p class="empty-title">No roles in {{ scope }}.</p>
+        <p class="muted">Show other runs above, or start a new one from the <a href="#/runs">Runs tab</a>.</p>
+      </div>
+    </SetupChecklist>
     <div v-else-if="!untracked.length" class="empty caught-up">
       <Icon name="check" :size="28" />
       <p class="empty-title">You're all caught up.</p>
@@ -392,6 +452,7 @@ function markOpened(job) {
           This posting has been taken down on the company's site.
         </p>
 
+        <div class="action-bar">
         <div class="actions">
           <a
             v-if="safeUrl(selected.url)"
@@ -399,20 +460,36 @@ function markOpened(job) {
             :href="safeUrl(selected.url)"
             target="_blank"
             rel="noopener noreferrer"
+            :aria-keyshortcuts="keyOf('O')"
             @click="markOpened(selected)"
           >Apply on company site <Icon name="external" /><span class="visually-hidden"> (opens {{ selected.company }} in a new tab)</span></a>
-          <button type="button" class="apply" :disabled="busy" @click="track(selected, 'applied')">
+          <button type="button" class="apply" :disabled="busy" :aria-keyshortcuts="keyOf('A')" @click="track(selected, 'applied')">
             <Icon name="check" /> Mark applied
           </button>
-          <button type="button" class="save" :disabled="busy" @click="track(selected, 'to_apply')">
+          <button type="button" class="save" :disabled="busy" :aria-keyshortcuts="keyOf('S')" @click="track(selected, 'to_apply')">
             <Icon name="bookmark" /> Save
           </button>
-          <button v-if="isDismissed(selected)" type="button" class="ghost undismiss" @click="moveBack(selected)">
+          <button v-if="isDismissed(selected)" type="button" class="ghost undismiss" :aria-keyshortcuts="keyOf('X')" @click="moveBack(selected)">
             <Icon name="undo" /> Move back to new roles
           </button>
-          <button v-else type="button" class="ghost dismiss" @click="markNotInterested(selected)">
+          <button v-else type="button" class="ghost dismiss" :aria-keyshortcuts="keyOf('X')" @click="markNotInterested(selected)">
             <Icon name="x" /> Not interested
           </button>
+        </div>
+        <p class="shortcuts muted">
+          <template v-if="shortcutsOn">
+            Keys: <kbd>S</kbd> save · <kbd>A</kbd> applied · <kbd>X</kbd> not interested · <kbd>O</kbd> open ·
+            <kbd>J</kbd> <kbd>K</kbd> next, previous ·
+          </template>
+          <button
+            type="button"
+            class="link shortcuts-toggle"
+            :aria-label="shortcutsOn ? 'Turn off keyboard shortcuts' : undefined"
+            @click="shortcutsOn = !shortcutsOn"
+          >
+            {{ shortcutsOn ? 'Turn off' : 'Turn on keyboard shortcuts' }}
+          </button>
+        </p>
         </div>
         <p v-if="isDismissed(selected)" class="muted small ni-note">
           You marked this Not interested{{ dismissedAt(selected) ? ` on ${shortDate(dismissedAt(selected))}` : '' }}.
@@ -445,9 +522,17 @@ function markOpened(job) {
             The job board gave no description for this role - read it on the company site.
           </p>
           <template v-else>
-            <div class="jd-text">{{ descriptionShown }}</div>
+            <div class="jd-text">
+              <template v-for="(block, i) in descriptionShown" :key="i">
+                <h5 v-if="block.type === 'heading'" class="jd-h">{{ block.text }}</h5>
+                <ul v-else-if="block.type === 'list'" class="jd-list">
+                  <li v-for="(item, k) in block.items" :key="k">{{ item }}</li>
+                </ul>
+                <p v-else class="jd-p">{{ block.text }}</p>
+              </template>
+            </div>
             <button
-              v-if="description.text.length > PREVIEW_CHARS"
+              v-if="descriptionPreview.cut"
               type="button"
               class="link jd-more"
               @click="expanded = !expanded"
@@ -559,6 +644,9 @@ function markOpened(job) {
   flex-wrap: wrap;
   align-items: center;
   gap: var(--space-2);
+}
+/* The actions and their key hints, with the rule below both. */
+.action-bar {
   margin-top: var(--space-5);
   padding-bottom: var(--space-5);
   border-bottom: 1px solid var(--border);
@@ -594,9 +682,26 @@ function markOpened(job) {
 /* The description as the employer wrote it: its own line breaks, readable width. */
 .jd { padding-top: var(--space-4); border-top: 1px solid var(--border); }
 .jd-text {
-  white-space: pre-line; overflow-wrap: anywhere; max-width: 72ch;
+  overflow-wrap: anywhere; max-width: 72ch;
   font-size: var(--text-sm); line-height: 1.65; color: var(--text);
 }
+.jd-text > :first-child { margin-top: 0; }
+.jd-h { margin: var(--space-4) 0 var(--space-1); font-size: var(--text-sm); font-weight: 650; text-wrap: balance; }
+.jd-p { margin: 0 0 var(--space-2); white-space: pre-line; text-wrap: pretty; }
+.jd-list { margin: 0 0 var(--space-2); padding-left: 1.25rem; }
+.jd-list li + li { margin-top: 2px; }
+.jd-list li::marker { color: var(--muted); }
+/* Keyboard hints: for a keyboard, not a touch screen. */
+.shortcuts { margin: var(--space-2) 0 0; font-size: var(--text-xs); }
+.shortcuts kbd {
+  display: inline-block; min-width: 1.4em; padding: 0 0.3em; text-align: center;
+  font-family: var(--mono); font-size: 0.7rem; line-height: 1.5;
+  color: var(--text-2); background: var(--surface-2);
+  border: 1px solid var(--border-strong); border-bottom-width: 2px; border-radius: 4px;
+}
+.shortcuts-toggle { font-size: inherit; color: var(--muted); }
+.shortcuts-toggle:hover:not(:disabled) { color: var(--accent); }
+@media (hover: none) { .shortcuts { display: none; } }
 .jd-status { margin: 0; font-size: var(--text-sm); }
 .jd-more { margin-top: var(--space-2); font-size: var(--text-sm); }
 

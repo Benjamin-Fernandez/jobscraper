@@ -135,6 +135,13 @@ onMounted(load)
 
 <template>
   <section class="settings">
+    <header class="page-head">
+      <div>
+        <h2 class="page-title">Settings</h2>
+        <p class="page-sub">How often your companies are checked, and how many each run takes on.</p>
+      </div>
+    </header>
+
     <h2 class="section-title">Cycle</h2>
     <TabLoading v-if="loading" :rows="1" />
     <div v-else-if="settings" class="panel-box cycle">

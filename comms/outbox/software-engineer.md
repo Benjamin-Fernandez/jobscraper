@@ -27,4 +27,19 @@ BODY: Ready for review. Branch `eng/Q-02-engine-port` (9 commits on `personal`, 
   test_layering 7/7; `import jobscraper.web.api` OK; `doctor` exit 0 and `run --dry-run --batch-size 2` exit 0 on a scratch DB copy (migration added missed_runs + decision_failures; log shows "HTTP 403 (cloudflare)" / "(akamai)"). Cloud's test_net.py 6/6 and test_small_model.py 33/36 against this src (3 = env overrides / MU-4 API, not ported).
   Windows cancel checked by hand: a CLI-style child got CTRL_BREAK, ran its cleanup, exit 143 in 0.1 s; a child that ignores the break was killed after the grace period; the parent console was unaffected. Pipeline: cancel -> run `failed`, reason `cancelled`; crash -> reason `ZeroDivisionError: ...`; nothing stamped.
 - Known limits: CTRL_BREAK only reaches the child while Python runs bytecode. A run blocked in a long Ollama call ignores it and is hard-killed after `grace_seconds` (5 s), so the run row stays `running` until per_run_timeout reaps it. A longer grace for `run` jobs would fix that (needs a decision). CTRL_BREAK needs the web server to have a console (run.ps1 gives it one). Without one, the kill path is used. The SPA half of C-4 (Runs/JobStatus wording, `job.reason`, `stats.reason`/`stats.message`) is left to M18. Watch `rejected_by_postcondition` on the first real run (C-3 location-evidence guard).
+
+### 2026-11-01 software-engineer → coordinator
+TYPE: handoff
+RE: Q-03, F-06, D-56; cloud_port_report C-10, C-12 to C-18
+BODY: Branch `eng/Q-03-ui-port` (from `personal`), one commit per item, `web/src/**` only.
+- C-10 toast.js + ToastHost.vue copied from cloud 6be6e46 (personal had no own lines).
+- C-13 jd.js + Inbox `descriptionBlocks`/`descriptionPreview` (no v-html). The `aria-live` on the whole description (audit G22) is left as is.
+- C-12 Inbox keys s/a/x/o/j/k (cloud `onShortcut` guard), "Turn off" toggle in localStorage (try/catch), `aria-keyshortcuts`. Personal `/` search focus, its `aria-keyshortcuts="/"` and `<kbd class="key-hint">` kept.
+- C-14 Applications: inline notes via `setApplicationStatus(job_id, row.status, {notes})`, sort Company A-Z / Recent activity, stage-count pills. No follow-up chip.
+- C-15 Companies: "Edit list" / "Type or paste names" before "Clear list", textarea saved as companies.txt via the existing upload (`PUT /api/companies/list`). WatchedCompanies, CountPicker and the view switch untouched.
+- C-16 setup.js + SetupChecklist.vue wrap the empty-Inbox state.
+- C-17 page heads on Runs, Profile, Settings; `.badge-slot` only with a count; `.page-head + .section-title` CSS. "Read my resume again" wording not applied (personal Profile has no such button).
+- C-18 `detailText` + 413/415/422 in `describeError`, `failureText` (used in TitleEditor, Profile, Companies), JobStatus says "cancelled" when `job.reason === 'cancelled'` (needs the C-4 engine half to set `reason`), boot screen with Retry in App.vue (network error only; an ApiError still goes to the tabs), `sgtClock()` in format.js.
+EVIDENCE: `cd web; npx vitest run` -> 1 failed | 179 passed (180). The failure is intended: `web/tests/m16.test.js:278` expects `.jd-text` text to equal the raw description; it is now heading/list/paragraph elements (tester to update with the h1/ux1 ports). Scratch build (`vite build --outDir <scratch> --emptyOutDir`) succeeded.
+KNOWN LIMITS: not exercised in a browser.
 STATUS: open

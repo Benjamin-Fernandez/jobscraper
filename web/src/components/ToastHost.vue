@@ -1,19 +1,45 @@
 <script setup>
 // Where the toast appears (M13-T2): bottom centre, over the page. The region is
 // always in the DOM so screen readers hear each new message (aria-live).
-import { dismissToast, toast } from '../toast.js'
+// H1-4: hover or focus inside it pauses its timer; "Undo previous" runs the
+// Undo of the toast it replaced, and leaves this one up.
+import { nextTick, ref } from 'vue'
+import { dismissToast, dropPrevious, pauseToast, resumeToast, toast } from '../toast.js'
 import Icon from './Icon.vue'
+
+const box = ref(null)
 
 async function act(t) {
   dismissToast(t.id)
   await t.action.run()
+}
+
+// Runs once however fast it is pressed: a second click before the re-render
+// finds `previous` already gone. Focus moves to the toast's own Undo, rather
+// than falling to the page when this button disappears.
+async function actPrevious(t) {
+  if (!t?.previous) return
+  const { action } = t.previous
+  dropPrevious(t.id)
+  await nextTick()
+  box.value?.querySelector('.toast-action, .toast-close')?.focus()
+  await action.run()
 }
 </script>
 
 <template>
   <div class="toast-region" role="status" aria-live="polite">
     <Transition name="toast">
-      <div v-if="toast.current" :key="toast.current.id" class="toast">
+      <div
+        v-if="toast.current"
+        :key="toast.current.id"
+        ref="box"
+        class="toast"
+        @mouseenter="pauseToast('hover')"
+        @mouseleave="resumeToast('hover')"
+        @focusin="pauseToast('focus')"
+        @focusout="resumeToast('focus')"
+      >
         <span class="message">{{ toast.current.message }}</span>
         <button
           v-if="toast.current.action"
@@ -23,6 +49,13 @@ async function act(t) {
         >
           <Icon name="undo" :size="15" />{{ toast.current.action.label }}
         </button>
+        <button
+          v-if="toast.current.previous"
+          type="button"
+          class="toast-previous"
+          :aria-label="`Undo previous: ${toast.current.previous.message}`"
+          @click="actPrevious(toast.current)"
+        >Undo previous</button>
         <a
           v-if="toast.current.link"
           class="toast-link"
@@ -59,7 +92,7 @@ async function act(t) {
   font-size: var(--text-sm);
 }
 .message { min-width: 0; overflow-wrap: anywhere; }
-.toast-action, .toast-close {
+.toast-action, .toast-close, .toast-previous {
   min-height: 2rem;
   padding: 0 var(--space-2);
   background: transparent;
@@ -69,7 +102,8 @@ async function act(t) {
   font-weight: 650;
 }
 .toast-action { color: color-mix(in srgb, var(--accent) 55%, var(--bg)); }
-.toast-action:hover:not(:disabled), .toast-close:hover:not(:disabled) {
+.toast-previous { font-weight: 500; opacity: 0.85; white-space: nowrap; }
+.toast-action:hover:not(:disabled), .toast-close:hover:not(:disabled), .toast-previous:hover:not(:disabled) {
   background: color-mix(in srgb, var(--bg) 14%, transparent);
   color: var(--bg);
 }
