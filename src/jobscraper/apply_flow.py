@@ -213,7 +213,7 @@ class _Attempt:
         self.store.set_attempt_state(self.id, state.value, step=step,
                                      reason=reason.value if reason else None,
                                      detail=detail, **cols)
-        self.store.conn.commit()
+        self.store.commit()
         self.state = self.result.state = state
         if step is not None:
             self.result.step = step
@@ -268,7 +268,7 @@ class _Attempt:
             rows.append(audit_row(step, f, a))
         if rows:
             self.store.add_answers(self.id, rows)
-            self.store.conn.commit()
+            self.store.commit()
 
     def record_all(self) -> None:
         """Every resolved field not recorded yet (an attempt that ends early)."""
@@ -710,7 +710,7 @@ class _Run:
         now = utcnow()
         attempt_id = self.store.create_attempt(job_id, job.get("company_id") if job else None,
                                                self.mode, now)
-        self.store.conn.commit()
+        self.store.commit()
         at = _Attempt(self.store, self.log, attempt_id, job_id, self.evidence)
         self.log(f"[attempt {attempt_id}] queued job={job_id} mode={self.mode}")
         adapter = ctx = None
