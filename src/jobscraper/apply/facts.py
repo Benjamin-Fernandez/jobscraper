@@ -511,6 +511,40 @@ def about_other_person(field: FieldLike) -> bool:
     return bool(_phrases_in(OTHER_PERSON, toks))
 
 
+OWN_DETAIL_PATHS = ("identity.legal_first_name", "identity.legal_last_name",
+                    "identity.preferred_name", "contact.city")
+
+
+def own_details(rctx: ResolveContext) -> tuple[list[list[str]], list[str]]:
+    """D-84 R4 on every route (review F2): the applicant's own name parts, full name and
+    home city as token runs, plus the free-text S values (email, phone, address, ...)."""
+    p = applicant.normalise(rctx.profile or {})
+    runs: list[list[str]] = []
+    for path in OWN_DETAIL_PATHS:
+        v = resolve.profile_value(p, path)
+        if isinstance(v, str) and tokens(v):
+            runs.append(tokens(v))
+    full = _standing_values(p, rctx, "1970-01-01").get("full_name")
+    if isinstance(full, str) and tokens(full):
+        runs.append(tokens(full))
+    return runs, s_values(p, rctx.account_email or "")
+
+
+def names_own_detail(text: str, rctx: ResolveContext,
+                     details: Optional[tuple[list[list[str]], list[str]]] = None) -> bool:
+    """True when `text` carries one of the applicant's own details (`own_details`)."""
+    runs, svals = details if details is not None else own_details(rctx)
+    toks = tokens(text or "")
+    if any(contains_run(toks, r) for r in runs):
+        return True
+    low, digits = (text or "").lower(), re.sub(r"\D", "", text or "")
+    for v in svals:
+        d = re.sub(r"\D", "", v)
+        if v.lower() in low or (len(d) >= 6 and d == re.sub(r"[\s+\-().]", "", v) and d in digits):
+            return True
+    return False
+
+
 def _title_words(title: str, ref: str) -> set[str]:
     if re.match(r"^profile:(experience|education|languages)\[\d+\]\.", ref):
         title = title.split(":", 1)[-1]            # the entry's own word is not the question

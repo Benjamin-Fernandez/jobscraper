@@ -418,6 +418,7 @@ class _Ctx:
                                            rctx.jd_text or ""]))
         self.facts_corpus = cnorm(F.facts_text([f for f in facts if not f.private]))
         self.names = _group_names(fields)
+        self.own = F.own_details(rctx)
 
 
 def _answer_unknown(pf: PageField, note: str, *, ungrounded: bool = False, rule_id: str = "",
@@ -603,6 +604,16 @@ def _grounded(c: _Ctx, pf: PageField, value: Any, d: ModelDecision) -> Optional[
     return None
 
 
+R4_NOTE = "R4: applicant's own detail"
+
+
+def _own_detail_for_other(c: _Ctx, pf: PageField, value: Any) -> bool:
+    """D-84 R4 on the resume/job/keep routes (review F2): a field about another person
+    (emergency contact, referee, next of kin, ...) never takes the applicant's own name,
+    city or contact detail, whatever the source says."""
+    return F.about_other_person(pf) and F.names_own_detail(_text_of(value), c.rctx, c.own)
+
+
 def _model_field(c: _Ctx, pf: PageField, d: ModelDecision) -> Answer:
     """resume / job: the model's own value, used only after G1, G3/G6, G4, G5, G7, G11."""
     value = d.value
@@ -610,6 +621,8 @@ def _model_field(c: _Ctx, pf: PageField, d: ModelDecision) -> Answer:
         return _answer_unknown(pf, "G1: empty value")
     if "[private]" in _text_of(value):
         return _answer_unknown(pf, "G3: value carries a withheld value", ungrounded=True)
+    if _own_detail_for_other(c, pf, value):
+        return _answer_unknown(pf, R4_NOTE)
     if sensitive_label(pf):
         return _answer_unknown(pf, "G7: sensitive question", sensitive=True)
     if is_choice(pf):
@@ -651,6 +664,8 @@ def _keep_field(c: _Ctx, pf: PageField, d: ModelDecision) -> Answer:
         return _answer_unknown(pf, "G1: keep with nothing shown")
     if pf.origin not in SITE_ORIGINS:
         return _answer_unknown(pf, "G8: keep of a value the model did not see")
+    if _own_detail_for_other(c, pf, pf.shown):
+        return _answer_unknown(pf, R4_NOTE)
     src = pf.origin.value
     if sensitive_label(pf):
         ref = d.ref or ""
