@@ -37,6 +37,9 @@ CONTRACT_VERSION = 5   # 2: D-69 (no FAILED after the Submit click, ADR-0004), D
                        #    methods (plan_from_schema, read_step, fill, prefill, read_values),
                        #    PrefillPolicy/PREFILL_POLICY. WorkdayEntry.AUTOFILL_WITH_RESUME is now
                        #    chosen first (D-78 reverses D-70's rule).
+                       #    Amended after stage E (still v5, additive only): ResolveContext
+                       #    .resume_entries/.other_employers, AttemptContext.pre_import/.uploaded,
+                       #    PageOutcome.transport_failed, FillServices (incl. the clock).
 
 
 # --------------------------------------------------------------------------
@@ -486,6 +489,14 @@ class ResolveContext:
     # ("the country where this job is located"); JobScraper's roles are in Singapore
     # (questions_design §8.2).
     job_country: str = "SG"
+    # D-78 (llm_fill_design §5.2, §10 E2): the master resume's entries as (id, kind, text),
+    # id like "experience[0]", kind "experience"|"education"|"language"|"link"|"other".
+    # Filled by apply_flow from tailor_flow.resume_entries(cfg) (owner: WP-N6b); () = none,
+    # and then the profile's own entries are the only entry blocks.
+    resume_entries: tuple[tuple[str, str, str], ...] = ()
+    # D-78 (§7 G12): employers other than this one (watchlist names, sightings' employers) whose
+    # names must not appear in a kept or cited free-text answer here. Names only.
+    other_employers: tuple[str, ...] = ()
 
 
 # --------------------------------------------------------------------------
@@ -650,6 +661,12 @@ class AttemptContext:
     applied_on_tenant: bool = False           # D-70: a Submit was clicked on this tenant before (§12.4)
     prefill: str = ""                         # AnswerSource value that open()/prefill() put on the page, or "";
                                               # D-78: the ValueOrigin value SiteNavigator.choose_entry returned
+    # D-78 (llm_fill_design §3.3): what the form showed before the site's import, keyed by the
+    # audit key; choose_entry fills it (Greenhouse), pagefill reads it. Never logged or stored.
+    pre_import: dict[str, str] = field(default_factory=dict)
+    # D-78 (§4 L1): files this attempt uploaded, file name -> SHA-256 hex. An attachment not in
+    # here is never kept, even with the same name.
+    uploaded: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass
@@ -847,7 +864,8 @@ class ModelDecision:
     ref: str = ""
     value: Value = None
     evidence: str = ""
-    via: str = "page"       # page | entry:<group> | pick | second | recheck: which call produced it
+    via: str = "page"       # page | entry:<group> | pick | second | recheck | corrective | cache:
+                            # which call produced it (every decision sets it; tests route on it)
 
 
 @dataclass
@@ -860,6 +878,51 @@ class PageOutcome:
     fill_failed: tuple[str, ...] = ()        # field keys the page would not take after the corrective pass
     model_calls: int = 0
     model_seconds: float = 0.0
+    # True when a model call failed in transport (BackendError, timeout, a reply still cut or
+    # malformed after its one retry): the flow ends FAILED/model_unavailable, nothing captured (§11).
+    transport_failed: bool = False
+
+
+@runtime_checkable
+class FillServices(Protocol):
+    """What `apply.pagefill.fill_page` needs from outside the page (llm_fill_design §8).
+    apply_flow builds the real one (the backends.py object, the store-backed cache, the
+    browser classifier, the clock); tests pass fakes. The pure steps (apply.locks, apply.llm_fill,
+    apply.guards, apply.facts, apply.page) are module functions, not services."""
+
+    backend: Any              # the backends.py backend; llm_fill calls backend.complete(...)
+    model: str                # model name, for the audit rows and the cache key
+    rules: Any                # resolve.load_rules() result (tier-2 rows, declarations)
+    cfg: dict[str, Any]       # the `apply.llm_fill` config block (design §13.4)
+
+    def today(self) -> str:
+        """Today in Asia/Singapore as YYYY-MM-DD (`facts.today_sg(now())`)."""
+        ...
+
+    def now(self) -> float:
+        """UTC epoch seconds (cache rows, purge). Tests pin it."""
+        ...
+
+    def deadline_left(self) -> float:
+        """Seconds before the attempt deadline (excludes the IMAP wait, D-81); <= 0 stops before typing."""
+        ...
+
+    def classify(self, page: BrowserPage) -> None:
+        """Raise ApplyFailure on a CAPTCHA, bot check or blocked page (apply_design §8.4). Never solves it."""
+        ...
+
+    def cache_get(self, job_id: str, sigs: Sequence[str], prompt_version: str, model: str,
+                  inputs_hash: str) -> dict[str, dict[str, Any]]:
+        """field_sig -> {"decision": ModelDecision fields, "facts_used_hash": str} (design §13.3)."""
+        ...
+
+    def cache_put(self, job_id: str, rows: Sequence[dict[str, Any]]) -> None:
+        """Rows with field_sig, prompt_version, model, inputs_hash, facts_used_hash, decision (no private value)."""
+        ...
+
+    def log(self, line: str) -> None:
+        """One line to the job log; no personal values."""
+        ...
 
 
 @runtime_checkable

@@ -1,6 +1,6 @@
 # ADR-0006: The local model fills every application page; site modules only navigate; deterministic locks and guards keep it fail-closed
 
-**Status:** Proposed (D-78, Q-35)
+**Status:** Proposed (D-78, Q-35); amended after stage E (review `docs/reviews/Q-35-design.md`; D-81, D-82, D-83), see "Amendment" below
 **Date:** 2026-11-03
 **Deciders:** owner (D-78: direction), Coordinator (acceptance), architect (shape)
 **Relates to:** PRD F-31–F-34, F-12, F-13, F-37–F-39, NF-02–NF-07; `llm_fill_design.md`; `apply_design.md` §6–§9; ADR-0003 (fail-closed), ADR-0004 (no failure after the click), ADR-0005 (answers in the profile); contracts v5
@@ -19,7 +19,7 @@ Forces: the model is local and free but small (14B) and slow on long pages (~50 
 ## Decision
 
 1. **Per page, the model decides the source of every open field** (`profile` / `extra` / `standing` fact by exact ref, `resume` or `job` with a verbatim quote, `keep` the shown value, or `unknown`), in one schema-constrained call per chunk (an entry group = one chunk).
-2. **The program writes every fact-sourced value** with the existing deterministic mappers (`resolve.fit_*`); the model's own text is used only for resume/job values, and only after guards (grounding, choice-vs-source, entry scope, second opinion on risky required answers, prefill trust, sensitive). Sensitive facts are shown to the model as "private, set/empty" only.
+2. **The program writes every fact-sourced value** with the existing deterministic mappers (`resolve.fit_*`); the model's own text is used only for resume/job values, and only after guards (grounding, choice-vs-source, entry scope, a second agreeing run for every model-chosen Yes/No and required choice, prefill trust, sensitive). A fact the model cites is used only when it is relevant to the question and belongs to the field's entry. Sensitive facts are shown to the model as "private, set/empty" only, and S values are redacted from every prompt.
 3. **Deterministic locks run first and the model can't override them:** the resume file, the account email, declarations (tier 4), D-75 work rights, sensitive tier-2 keys, consents, and the owner's own answers (`extra`, with the generic-label guard). They are shown to the model as context.
 4. **Site modules implement `SiteNavigator` only** (open, take the resume import, account wall, step id, entry sections, Next, Submit, confirmation). Field reading and filling are generic (`page.py`, `widgets.py`, `pagefill.py`).
 5. **Resume import is always taken**; the imported file is the tailored resume; every imported value is checked like any other (entries matched, junk deleted, descriptions rechecked).
@@ -69,14 +69,27 @@ B keeps the parts where a mistake is irreversible or private (navigation, Submit
 - Easier: a new ATS is navigation only (5 steps, `llm_fill_design.md` §9.4); tenant-specific questions and new layouts need no code; the Questions inbox still catches what can't be backed.
 - Harder: correctness depends on guard quality; regressions need recorded pages plus fake model replies; a model change (version, quantisation) needs a re-run of the fixture suite and a dry run.
 - Contracts v5 add types and `SiteNavigator`; `AtsAdapter`'s fill-side methods, `PrefillPolicy`/`PREFILL_POLICY` and tier-1 site tagging are removed by the cleanup WP (WP-C1) once both ATSs run on the new path. Lane B's Greenhouse fill code and WP-B11's prefill tables retire then.
-- Revisit: the confidence of `keep` on resume-import values after the first real runs; whether the owner wants locks to move to the model (needs an ADR-0003 change and the owner); `max_fields_per_call` and `long_list` after measuring; a bigger model if the guards reject too much.
+- Revisit: the confidence of `keep` on resume-import values after the first real runs; whether the owner wants locks to move to the model (D-82 keeps them deterministic; a change needs an ADR-0003 change and the owner); `max_fields_per_call` and `long_list` after measuring; a bigger model if the guards reject too much.
+
+## Amendment (stage E, 2026-11-03)
+
+The decision stands; the review tightened how it is kept safe. Details: `llm_fill_design.md` (amended) and the change log in `comms/outbox/architect.md`.
+
+- **Locks stay deterministic (D-82, answers O-1).** The owner may revisit.
+- **ADR-0003 §3 holds unchanged:** every model-chosen Yes/No (required or optional) and every required choice or number whose value is the model's needs two agreeing runs (G5); with the second opinion switched off those answers end unknown.
+- **Audit:** an answer whose fact the model chose (value written by the program) is recorded as tier LLM with source `profile:<path>` / `standing:<id>` / `memory:extra.<key>`, rule id `fill:v2`, the model and the prompt hash; a lock keeps its old tier. So F-39's audit always tells a model choice from a deterministic one.
+- **Untrusted site values never stay by default:** an imported or site-default value the model didn't back with evidence is cleared, reset or flagged "unverified" (G9); only non-free-text MyGreenhouse values are trusted without a quote; a required resume-import value is kept only when grounded (D-83).
+- **Revealed and required fields are re-scanned** before Next and before Submit, deterministically.
+- **NF-07 (D-81):** Greenhouse ≤ 4 min (420 s deadline), Workday 900 s; both exclude the IMAP wait and are measured at the gate.
+- **Gate (D-83):** 5 Greenhouse dry runs; each dry-run audit read row by row before a real submission; gate Workday postings need fresh owner approval.
+- Contracts stay v5 (additive): `ResolveContext.resume_entries`/`other_employers`, `AttemptContext.pre_import`/`uploaded`, `PageOutcome.transport_failed`, `FillServices`.
 
 ## Action items
 
 1. [ ] Build per `llm_fill_build_plan.md` (lanes M, R, N; tester T1–T4).
 2. [ ] Stage-E pointers in `apply_design.md` to the superseded sections (architect/planner).
 3. [ ] PRD: D-78 sentence under F-32/F-34, NF-07 Workday deviation, reason code `model_unavailable` (planner).
-4. [ ] M20 gate: Greenhouse dry runs and the two owner-approved Workday submissions on the new path.
+4. [ ] M20 gate (D-83): 5 Greenhouse dry runs, audits read row by row, and the two Workday submissions on postings the owner approves afresh, on the new path.
 
 ## Sources
 
