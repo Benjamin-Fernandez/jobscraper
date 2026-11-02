@@ -168,16 +168,81 @@ ATTESTATION_MARKERS = frozenset({"declare", "declaration", "attest", "politicall
                                  "bankrupt", "conflict", "disciplinary", "charged"})
 # Tokens that make "current or prior employee" mean prior (D-69 precedence).
 _PRIOR_HINTS = frozenset({"previously", "ever", "before", "former", "ex"})
-# A single checkbox whose label has one of these is a "tick = I am clear" box.
-_NEGATIONS = (("not",), ("never",), ("no",), ("none", "of"), ("neither",))
-# D-87 / LF L7: a Yes/No question with one of these cannot be mapped to a bool
-# safely ("Are you free of any non-compete?" - the answer is the opposite of the
-# fact). The checkbox rule above ticks by the statement instead.
-_QUESTION_NEGATIONS = (("not",), ("never",), ("no",), ("none",), ("neither",),
-                       ("free", "of"), ("without",))
+# --- the question frame (D-90; review Q-48 F1-F5, F7) ------------------------
+# A declaration class answers only when the question is a STATUS question about the
+# applicant ("Are you bound by ...?", "Have you ever been convicted ...?"), its
+# polarity is known, and the field can carry a Yes/No. The owner's standing "No"
+# is only the right answer to that frame; a willingness, consent or
+# acknowledgement question mentioning the same noun needs the owner (ADR-0003).
+#
+# One negation list, here (D-90 (3), F3, F10): a Yes/No question holding one of
+# these is not mapped to a bool (it ends unknown, never inverted).
+NEGATIONS = (
+    ("not",), ("never",), ("no",), ("none",), ("neither",), ("nor",), ("without",),
+    ("nothing",), ("nobody",), ("cannot",), ("unable",), ("lack",), ("devoid",),
+    ("absent",), ("exempt",), ("unrestricted",), ("unencumbered",), ("unrestrained",),
+    ("free", "of"), ("free", "from"), ("clear", "of"), ("clear", "from"),
+    ("absence", "of"),
+    ("don't",), ("doesn't",), ("didn't",), ("haven't",), ("hasn't",), ("hadn't",),
+    ("isn't",), ("aren't",), ("wasn't",), ("weren't",), ("can't",), ("won't",),
+    ("wouldn't",), ("couldn't",), ("shouldn't",), ("cant",), ("dont",),
+)
 # A trailing answer hint ("... convicted? (Yes/No)") is not a negation (LF review F6).
-_ANSWER_HINTS = (("yes", "no"), ("yes", "or", "no"), ("y", "n"), ("no", "yes"),
-                 ("no", "or", "yes"))
+ANSWER_HINTS = (("yes", "no"), ("yes", "or", "no"), ("y", "n"), ("no", "yes"),
+                ("no", "or", "yes"))
+# Willingness / consent / acknowledgement frames: never a declaration status.
+_WILLINGNESS = frozenset({
+    "willing", "willingness", "agree", "agrees", "consent", "consents", "accept", "accepts",
+    "acknowledge", "acknowledges", "acknowledgement", "acknowledgment", "comply", "abide",
+    "understand", "understood", "read", "prepared", "sign", "signing", "object", "objection",
+    "objections", "wish", "want", "prefer", "familiar", "comfortable", "interested", "keen",
+    "knowledge", "experience"})
+# Deliberately NOT here: "know" (the relatives class: "know anyone who works") and
+# "aware" ("Are you aware of any conflict of interest?" is a status question) - D-90a.
+_WILLINGNESS_RUNS = (("able", "to", "sign"), ("will", "you", "sign"), ("would", "you", "sign"),
+                     ("can", "you", "sign"), ("able", "to", "agree"), ("open", "to"),
+                     ("happy", "to"))
+# A question starts with one of these (§5.4 + did). A TEXT / TYPEAHEAD field is
+# answered only when the label does (never a TEXTAREA): "Why do you want to join
+# the public service?" is not a Yes/No question.
+QUESTION_STARTERS = frozenset({"are", "is", "do", "does", "did", "have", "has", "had", "was",
+                               "were", "will", "would", "can", "could"})
+# The positive STATUS frame a Yes/No bool needs: the label starts with a status
+# verb, or holds a status run (D-90 (2)).
+_STATUS_STARTERS = frozenset({"are", "is", "do", "does", "did", "have", "has", "had", "was",
+                              "were"})
+_STATUS_RUNS = (("bound", "by"), ("subject", "to"), ("party", "to"), ("signed",), ("convicted",),
+                ("charged",), ("hold",), ("holds",), ("held",), ("status",))
+# A single checkbox is ticked only by a recognised attestation of the right
+# polarity: "I am not bound by ..." / "I do not have ..." for a false profile
+# value, "I am ..." / "I have ..." for a true one - never by a stray "no".
+_ATTEST_LEADS = (("i", "confirm", "that"), ("i", "confirm"), ("i", "declare", "that"),
+                 ("i", "declare"), ("i", "certify", "that"), ("i", "certify"),
+                 ("i", "hereby", "confirm", "that"), ("i", "hereby", "declare", "that"),
+                 ("i", "hereby", "confirm"), ("i", "hereby", "declare"),
+                 ("i", "can", "confirm", "that"), ("i", "can", "confirm"), ("i", "attest"),
+                 ("i", "attest", "that"))
+_NEGATIVE_ATTESTATIONS = (
+    ("i", "am", "not"), ("i", "am", "neither"), ("i", "am", "free", "of"),
+    ("i", "am", "free", "from"), ("i", "do", "not", "have"), ("i", "don't", "have"),
+    ("i", "have", "not"), ("i", "haven't"), ("i", "have", "never"), ("i", "have", "no"),
+    ("i", "was", "not"), ("i", "wasn't"), ("i", "had", "no"), ("i", "hold", "no"))
+# (a bare "I do not ..." is not one: "I do not wish to disclose ..." is no statement
+# about the profile value, D-90a)
+_POSITIVE_ATTESTATIONS = (("i", "am"), ("i", "have"), ("i", "hold"), ("i", "was"), ("i", "had"))
+# A disability question about accommodation, adjustment or job performance is not
+# "do you have a disability" (D-90 (5)): not answered from the owner's status.
+_DISABILITY_OFF_FRAME = frozenset({
+    "accommodation", "accommodations", "accommodate", "adjustment", "adjustments", "adjust",
+    "prevent", "prevents", "limit", "limits", "affect", "affects", "perform", "performing",
+    "comfortable", "require", "requires", "need", "needs", "assistance", "support",
+    "wish", "disclose"})
+# This employer (D-90 (4), Q-46c): a prior / current employment class applies only
+# to a label that names it. Lower-case "us", never the country "US".
+THIS_EMPLOYER_RUNS = (("us",), ("our",), ("we",), ("here",), ("this", "company"),
+                      ("this", "employer"), ("this", "organisation"),
+                      ("this", "organization"), ("this", "firm"), ("this", "bank"),
+                      ("this", "group"), ("the", "company"))
 
 # The employer-independent classes (D-87 agreement rule): each is a plain
 # `declarations.<label>` fact, so several of them on one question can be
@@ -257,33 +322,54 @@ def _ns_exclusion_spans(toks: list[str]) -> list[tuple[int, int]]:
     return out
 
 
-def _strip_ns_exclusions(toks: list[str]) -> list[str]:
+def strip_ns_exclusions(toks: list[str]) -> list[str]:
     """`toks` without its NS-exclusion runs: "not including national service" is
-    not a negation of the question."""
+    not a negation of the question. The one implementation (review F10): the
+    classifier, `negated_question` and lock L3/L7 all use it."""
     dropped = {i for a, b in _ns_exclusion_spans(toks) for i in range(a, b)}
     return [t for i, t in enumerate(toks) if i not in dropped]
 
 
-def _names_employer(label_toks: list[str], employer_names: Iterable[str]) -> bool:
-    """D-89: the label names THIS employer: the token "us" or "our", or a run of
-    label tokens that `company_match`es the employer or one of its aliases."""
-    if "us" in label_toks or "our" in label_toks:
-        return True
+def names_employer(toks: list[str], employer_names: Iterable[str] = (), raw: str = "") -> bool:
+    """D-90 (4), Q-46c, D-89: the text names THIS employer: us / our / we / here /
+    this or the company (see THIS_EMPLOYER_RUNS), or a run of tokens that
+    `company_match`es the employer or one of its aliases (`employer_names`).
+    `raw` is the unnormalised text: an upper-case "US" there is the country, not
+    "us". The one implementation (facts.names_this_employer uses it too)."""
+    for run in THIS_EMPLOYER_RUNS:
+        if _has_run(toks, run):
+            if run == ("us",) and raw and not re.search(r"\b[Uu]s\b", raw):
+                continue
+            return True
     for name in employer_names:
         width = len(_company_tokens(name or ""))
-        for i in range(len(label_toks) if width else 0):
-            for j in range(i + 1, min(len(label_toks), i + width + 2) + 1):
-                if company_match(" ".join(label_toks[i:j]), name):
+        for i in range(len(toks) if width else 0):
+            for j in range(i + 1, min(len(toks), i + width + 2) + 1):
+                if company_match(" ".join(toks[i:j]), name):
                     return True
     return False
 
 
+def employer_names_of(ctx: Optional[ResolveContext]) -> tuple[str, ...]:
+    """The employer and its aliases, the `employer_names` of every caller."""
+    if ctx is None:
+        return ()
+    return tuple(n for n in (ctx.employer_name, *(ctx.employer_aliases or ())) if n)
+
+
+def _willing(label_toks: list[str]) -> bool:
+    return bool(_WILLINGNESS & set(label_toks)) or any(_has_run(label_toks, r)
+                                                       for r in _WILLINGNESS_RUNS)
+
+
 def classify_all(label_norm: str, description_norm: str = "",
-                 employer_names: Iterable[str] = ()
+                 employer_names: Iterable[str] = (), *, raw_label: str = ""
                  ) -> tuple[frozenset[DeclarationLabel], bool]:
     """(classes, unsure): every declaration class a question matches (§7.5,
-    D-87), and whether it is a government-employment question that cannot be
-    pinned down (it includes the military, or says government-linked).
+    D-87), and whether it is a question that cannot be pinned down (a
+    government question that includes the military or says government-linked;
+    a willingness question; an employer-class question that does not name this
+    employer; a disability question about accommodation).
 
     1. A class matches when one of its phrases occurs as a contiguous token run
        in label + description (`disability`: in the label only).
@@ -292,14 +378,19 @@ def classify_all(label_norm: str, description_norm: str = "",
        government" beats prior employment's "worked for"; "senior government
        official" is a PEP question, not a government-employment one). D-89:
        prior / current employment also lose to a government span they share a
-       token with, unless the label names this employer (the token "us" or
-       "our", or a run that company-matches one of `employer_names`: the
-       employer and its aliases). Callers that pass no names get the drop
-       without the exception.
-    3. "Current" and "prior" employee together resolve by D-69 precedence.
-    4. The government/NS rule on `government_employment` (see _MILITARY).
-    5. A disability label that is also about veterans, gender, race, religion
-       or marital status is unsure."""
+       token with.
+    3. D-90 (4): prior / current employment apply only to a label that names
+       THIS employer (`names_employer`; `employer_names` = the employer and its
+       aliases; `raw_label` lets an upper-case "US" be the country). Without
+       that reference the class does not match and the question is unsure
+       (callers that pass no names never get an employer class: fail closed).
+    4. "Current" and "prior" employee together resolve by D-69 precedence.
+    5. The government/NS rule on `government_employment` (see _MILITARY).
+    6. D-90 (2): a willingness / consent / acknowledgement label is unsure for
+       every class.
+    7. A disability label that is also about veterans, gender, race, religion
+       or marital status, or about accommodation / adjustment / performing the
+       job (D-90 (5)), is unsure and not the disability class."""
     label_toks = label_norm.split()
     text = f"{label_norm} {description_norm}".split()
     found: dict[DeclarationLabel, list[tuple[int, int]]] = {}
@@ -307,9 +398,8 @@ def classify_all(label_norm: str, description_norm: str = "",
         spans = _spans(label_toks if lab is L.DISABILITY else text, phrases)
         if spans:
             found[lab] = spans
-    # D-89: the overlap drop is off when the label names this employer.
-    gov_spans = [] if _names_employer(label_toks, tuple(employer_names)) \
-        else found.get(L.GOVERNMENT_EMPLOYMENT, [])
+    employer_ref = names_employer(label_toks, tuple(employer_names), raw_label)
+    gov_spans = found.get(L.GOVERNMENT_EMPLOYMENT, [])
 
     def covered(lab: DeclarationLabel, a1: int, b1: int) -> bool:
         # R1: inside a longer span of another class. D-89: for the two employer
@@ -319,17 +409,20 @@ def classify_all(label_norm: str, description_norm: str = "",
         if any(other is not lab and b2 - a2 > b1 - a1 and a2 <= a1 and b1 <= b2
                for other, others in found.items() for a2, b2 in others):
             return True
-        return lab in (L.PRIOR_EMPLOYMENT, L.CURRENT_EMPLOYEE) \
+        return lab in (L.PRIOR_EMPLOYMENT, L.CURRENT_EMPLOYEE) and not employer_ref \
             and any(a1 < b2 and a2 < b1 for a2, b2 in gov_spans)
 
     dropped = {lab for lab, spans in found.items()
                if all(covered(lab, a1, b1) for a1, b1 in spans)}
     hits = set(found) - dropped
+    unsure = False
+    if not employer_ref and hits & {L.PRIOR_EMPLOYMENT, L.CURRENT_EMPLOYEE}:
+        hits -= {L.PRIOR_EMPLOYMENT, L.CURRENT_EMPLOYEE}
+        unsure = True
     if {L.CURRENT_EMPLOYEE, L.PRIOR_EMPLOYMENT} <= hits:
         hits -= {L.CURRENT_EMPLOYEE, L.PRIOR_EMPLOYMENT}
         hits.add(L.PRIOR_EMPLOYMENT if _PRIOR_HINTS & set(text) else L.CURRENT_EMPLOYEE)
 
-    unsure = False
     gov = L.GOVERNMENT_EMPLOYMENT in hits
     govlike = bool(_spans(text, _UNSURE_TOKENS))
     mil = bool(_spans(text, _MILITARY_TOKENS))
@@ -341,13 +434,20 @@ def classify_all(label_norm: str, description_norm: str = "",
         hits.add(L.GOVERNMENT_EMPLOYMENT)
     if L.DISABILITY in hits and _DISABILITY_COMPANIONS & set(label_toks):
         unsure = True
+    if L.DISABILITY in hits and _DISABILITY_OFF_FRAME & set(label_toks):
+        hits.discard(L.DISABILITY)
+        unsure = True
+    if hits and _willing(label_toks):
+        unsure = True
     return frozenset(hits), unsure
 
 
-def classify(label_norm: str, description_norm: str = "", employer_names: Iterable[str] = ()):
+def classify(label_norm: str, description_norm: str = "", employer_names: Iterable[str] = (),
+             *, raw_label: str = ""):
     """The declaration class of a question (§7.5), AMBIGUOUS, or None.
-    `employer_names` (the employer and its aliases) is the D-89 exception; see
-    `classify_all`.
+    `employer_names` (the employer and its aliases) and `raw_label` feed the
+    D-90 (4) employer condition; see `classify_all`. Callers with a field use
+    `classify_field`.
 
     Built on `classify_all`. (The tier-2 rule that a one-word phrase needs a
     label of 4 tokens or fewer is not applied here: attestations are long
@@ -355,7 +455,8 @@ def classify(label_norm: str, description_norm: str = "", employer_names: Iterab
     Unsure -> AMBIGUOUS; exactly one class -> it; several -> AMBIGUOUS (the
     agreement rule in `answer` may still settle it); none -> AMBIGUOUS when
     the label carries an attestation marker, else None."""
-    hits, unsure = classify_all(label_norm, description_norm, employer_names)
+    hits, unsure = classify_all(label_norm, description_norm, employer_names,
+                                raw_label=raw_label)
     if unsure:
         return AMBIGUOUS
     if len(hits) == 1:
@@ -367,25 +468,68 @@ def classify(label_norm: str, description_norm: str = "", employer_names: Iterab
     return None
 
 
-def is_negated(label_norm: str) -> bool:
-    """A "tick = I am clear" checkbox: the label says not / never / no /
-    none of / neither (NS-exclusion runs such as "not including National
-    Service" do not count, D-87)."""
-    toks = _strip_ns_exclusions(label_norm.split())
-    return any(_has_run(toks, n) for n in _NEGATIONS)
+def classify_field(f: FormField, ctx: Optional[ResolveContext] = None):
+    """`classify` for a form field: the one entry point every tier uses (tier 4,
+    lock L3, the D-70 / L6 / capture checks), so the employer condition and the
+    "US is the country" test see the field's real label and employer (D-90)."""
+    return classify(norm_label(f.label), norm_label(f.description), employer_names_of(ctx),
+                    raw_label=f.label or "")
 
 
 def negated_question(label_norm: str) -> bool:
-    """LF L7 / D-87: a Yes/No (non-checkbox) question whose label says not /
-    never / no / none / neither / free of / without cannot be mapped to a bool
-    safely. A trailing "(Yes/No)" hint and NS-exclusion runs are not negations."""
+    """LF L7 / D-90 (3): a Yes/No (non-checkbox) question whose label holds a
+    negation (NEGATIONS: not, never, no, none, neither, free of / from, clear of /
+    from, unrestricted, unencumbered, absence of, cannot, unable ...) cannot be
+    mapped to a bool safely: it ends unknown, never inverted. A trailing
+    "(Yes/No)" hint and NS-exclusion runs are not negations."""
     toks = label_norm.split()
-    for hint in _ANSWER_HINTS:
+    for hint in ANSWER_HINTS:
         if len(toks) > len(hint) and tuple(toks[-len(hint):]) == hint:
             toks = toks[:-len(hint)]
             break
-    toks = _strip_ns_exclusions(toks)
-    return any(_has_run(toks, n) for n in _QUESTION_NEGATIONS)
+    toks = strip_ns_exclusions(toks)
+    return any(_has_run(toks, n) for n in NEGATIONS)
+
+
+def is_negated(label_norm: str) -> bool:
+    """The label holds a negation (NEGATIONS), NS-exclusion runs aside. For a
+    single checkbox the polarity itself comes from `attestation_polarity`."""
+    toks = strip_ns_exclusions(label_norm.split())
+    return any(_has_run(toks, n) for n in NEGATIONS)
+
+
+def attestation_polarity(label_norm: str) -> Optional[bool]:
+    """Polarity of a single checkbox's statement (D-90 (3)): False = a recognised
+    NEGATIVE attestation ("I am not bound by ...", "I do not have ..."), True = a
+    recognised positive one ("I am a ...", "I have ..." with no negation in it),
+    None = anything else. A stray "no" ("I have read it and have no questions")
+    is not a negative attestation."""
+    toks = strip_ns_exclusions(label_norm.split())
+    for lead in sorted(_ATTEST_LEADS, key=len, reverse=True):
+        if tuple(toks[:len(lead)]) == lead:
+            toks = toks[len(lead):]
+            break
+    for run in _NEGATIVE_ATTESTATIONS:
+        if tuple(toks[:len(run)]) == run:
+            return False
+    if any(tuple(toks[:len(run)]) == run for run in _POSITIVE_ATTESTATIONS) \
+            and not any(_has_run(toks, n) for n in NEGATIONS):
+        return True
+    return None
+
+
+def _status_frame(label_toks: list[str]) -> bool:
+    """The label asks the applicant's STATUS (D-90 (2)): it starts with have / has /
+    are / is / do / did / ..., or holds bound by / subject to / party to / signed /
+    convicted / hold ..."""
+    toks = label_toks[1:] if label_toks[:1] in (["please"], ["kindly"]) else label_toks
+    return bool(toks) and (toks[0] in _STATUS_STARTERS
+                           or any(_has_run(toks, r) for r in _STATUS_RUNS))
+
+
+def _starts_as_question(label_toks: list[str]) -> bool:
+    toks = label_toks[1:] if label_toks[:1] in (["please"], ["kindly"]) else label_toks
+    return bool(toks) and toks[0] in QUESTION_STARTERS
 
 
 # --------------------------------------------------------------------------
