@@ -36,16 +36,16 @@ About 83 final answers at tenant A; **9 wrong on the first pass, all caught befo
 
 | # | Error | Fix found in the spike | Design answer (`llm_fill_design.md`) |
 |---|---|---|---|
-| 1 | Hierarchical "How did you hear" list: the model saw only the top-level categories and picked a wrong leaf | the reader expands chevron categories one level ("Category > Leaf"); lists > 15 get a free-text answer + a one-field pick call | §3.1 L1, §6.4 `pick_option` |
+| 1 | Hierarchical "How did you hear" list: the model saw only the top-level categories and picked a wrong leaf | the reader expands chevron categories one level ("Category > Leaf"); lists > 15 get a free-text answer + a one-field pick call | §3.1 LL1, §6.4 LL2 `pick_option` |
 | 2 | A job title kept the company name the parser put in it | prompt rule "only the part that belongs in each field" | §6.2 rule 5 |
 | 3 | Every job's location taken from the resume header (the applicant's home) | prompt rule about per-entry facts; value cleared by hand | §6.2 rule 6, guard G6 (entry scope) |
 | 4 | A language proficiency invented for a language the profile does not list (the enum allowed any level) | entry deleted by hand | guard G4 (choice vs source), rule E6 (delete an ungroundable optional entry) |
 | 5 | Workday's parser put a whole projects section into one role description; the model kept it | one-field per-entry recheck (`recheck.py`) returned only that role's lines | §6.4 entry recheck, rule E4 |
 | 6 | A listbox read back as filled but Workday held no value (error shown after Next) | read the field's error, one corrective pass | §3.2 strict listbox read-back, §8 step 8 |
 | — | Dates: a prefilled "3/2026" vs the model's "2026-03" treated as different; the reader first returned the date placeholder as the value | date equivalence check; read section values, not `aria-valuetext` | §3.1, §3.2 |
-| — | Skills: one of two searched skills found no option (optional) | — | §6.4 / L3: optional search miss is left empty |
+| — | Skills: one of two searched skills found no option (optional) | — | §6.4 LL3: an optional search miss clears the typed text |
 
-The "Are you a Singapore Citizen?" question was answered from the profile's (non-sensitive) nationality, because residency status was redacted. The design does not send nationality to the model and answers this with the deterministic `yes_if` lock instead (`llm_fill_design.md` §4 L5, §15).
+The "Are you a Singapore Citizen?" question was answered from the profile's (non-sensitive) nationality, because residency status was redacted. The design does not send nationality to the model and answers this with the deterministic `yes_if` lock instead (`llm_fill_design.md` §4 L5, §15); G7 now also keeps citizenship/residency labels off resume and job text.
 
 Gender was filled by the program from the profile through the sensitive path (the model returned only the key). Declarations were answered from standing facts written into the prompt; the design instead locks them deterministically (tier 4) and shows them to the model only as private facts.
 
