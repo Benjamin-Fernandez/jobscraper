@@ -57,6 +57,7 @@ from .contracts import (
 
 L1_KEPT_NOTE = "L1: kept, uploaded in this attempt"     # locks: the file on the page is ours
 TIMED_OUT_NOTE = "transport: timed out"
+G9_FAILED_NOTE = "G9: cleared after failed fill"
 UNAVAILABLE_NOTE = "transport: model unavailable"
 DEFAULT_REVEAL_ROUNDS = 2
 DEFAULT_FOLLOWUPS = 25
@@ -142,8 +143,9 @@ def fill_page(page: Any, nav: Any, ctx: AttemptContext, rctx: ResolveContext, se
         stop = _reveal_rounds(run, int(run.cfg.get("max_reveal_rounds", DEFAULT_REVEAL_ROUNDS)))
         if stop:
             return _outcome(run, unknown=stop)
-        # 11. corrective pass
+        # 11. corrective pass, then G9 on optional fields we couldn't fill (review F1)
         _corrective(run)
+        _clear_failed_optional(run)
         # 12. the required scan
         stop = _required_scan(run)
         if stop:
@@ -487,6 +489,30 @@ def _required_scan(run: _Run) -> tuple[str, ...]:
             run.failed.setdefault(key, "required_scan")
     order = {k: i for i, k in enumerate(run.order)}
     return tuple(sorted(unknown, key=lambda k: order.get(k, len(order))))
+
+
+def _clear_failed_optional(run: _Run) -> None:
+    """Review F1 (G9, LL3, LF §11): an OPTIONAL field whose fill still failed after the
+    corrective pass must not keep a value nobody backed. It is reset (BLANK_OPTIONAL,
+    "G9: cleared after failed fill"); a widget with no empty state, or a reset the site
+    ignores, leaves the row PREFILLED and unverified (`guards.UNVERIFIED_NOTE`) so the
+    flow treats it as untrusted. Required fields stay in `failed` (the flow stops)."""
+    for key in [k for k in run.order if k in run.failed]:
+        pf = run.fields.get(key)
+        if pf is None or pf.field.required:
+            continue
+        r = W.reset_field(run.page, pf)
+        base = run.answers.get(key) or Answer(field_key=key, value=None, tier=AnswerTier.NONE, source="",
+                                              confidence=0.0)
+        if r.ok:
+            _mark(run, key, ValueOrigin.EMPTY)
+            run.answers[key] = _replace(base, value=None, option_labels=(), status=AnswerStatus.BLANK_OPTIONAL,
+                                        confidence=0.0, note=f"{G9_FAILED_NOTE} ({run.failed[key]})")
+        else:
+            run.answers[key] = _replace(base, value=r.shown, option_labels=(), tier=AnswerTier.NONE,
+                                        source=pf.origin.value, status=AnswerStatus.PREFILLED,
+                                        confidence=G.CONF_UNVERIFIED, note=G.UNVERIFIED_NOTE)
+        del run.failed[key]
 
 
 # ------------------------------------------------------------------ step 13 and the outcome
