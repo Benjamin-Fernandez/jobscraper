@@ -37,17 +37,35 @@ def _ticked(label, prof=None):
 
 # ------------------------------------------------------------------ F1 willingness / consent
 
-WILLING = ("Are you willing to sign a non-disclosure agreement?",
-           "Do you agree to sign our confidentiality agreement?",
-           "Will you be able to comply with our confidentiality obligations?")
+WILLING = ("Are you willing to sign an NDA?", "Do you agree to sign our confidentiality agreement?",
+           "Will you comply with our confidentiality obligations?")
 
 
-def test_f1_pin_willingness_to_sign_an_nda_is_never_answered_from_non_compete():
-    for nc in (False, True):
-        prof = Q._prof(non_compete=nc)
-        for label in WILLING:
-            _not_answered(label, prof=prof)
-            _not_answered(label, required=False, prof=prof)
+def _cls(label):
+    lab = Q._D().classify(Q._n(label), "")
+    return getattr(lab, "value", lab)
+
+
+def test_d91_pin_nda_willingness_answers_from_its_own_switch():
+    """D-91: class nda_willingness reads declarations.willing_to_sign_nda (default false)."""
+    for willing, want in ((True, "Yes"), (False, "No")):
+        prof = Q._prof(willing_to_sign_nda=willing)
+        for nc in (False, True):
+            prof["declarations"]["non_compete"] = nc
+            for label in WILLING:
+                assert _cls(label) == "nda_willingness", (label, _cls(label))
+                _lab, a = Q._ans(label, prof=prof)
+                Q._filled(a, want)
+        assert _ticked("I agree to sign the NDA", prof=prof) is willing
+
+
+def test_d91_pin_other_willingness_and_acknowledgements_stay_unanswered():
+    for prof in (Q._prof(willing_to_sign_nda=True), Q._prof(willing_to_sign_nda=False)):
+        _not_answered("Are you willing to sign a non-compete?", prof=prof)
+        _not_answered("Are you comfortable signing an NDA?", prof=prof)
+        for label in ("I have no objection to signing the NDA",
+                      "I have read the confidentiality agreement and have no questions"):
+            assert not _ticked(label, prof=prof), label
 
 
 def test_f1_pin_an_acknowledgement_checkbox_is_never_ticked_on_a_stray_no():
@@ -91,15 +109,23 @@ def test_f2_a_status_question_in_a_text_box_is_still_no():
 
 # ------------------------------------------------------------------ F3 negations the list missed
 
-INVERTED = ("Are you free from any restrictive covenants?",
-            "Can you confirm you are clear of any conflict of interest?",
-            "Are you unrestricted by any non-compete or non-solicitation obligations?",
-            "Are you unencumbered by any NDA?")
+FREEDOM = ("Are you free from any restrictive covenants?",
+           "Can you confirm you are clear of any conflict of interest?",
+           "Are you unrestricted by any non-compete or non-solicitation obligations?",
+           "Are you unencumbered by any NDA?")
 
 
-def test_f3_pin_an_unlisted_negation_is_unknown_never_inverted():
-    for label in INVERTED:
-        _not_answered(label)
+def test_d91_pin_a_freedom_form_answers_the_inverted_value():
+    """D-91 (owner): "free from / clear of / unrestricted / unencumbered" is the inverse of the
+    declaration: Yes under the example profile (all false)."""
+    for label in FREEDOM:
+        _lab, a = Q._ans(label)
+        Q._filled(a, "Yes")
+
+
+def test_d91_pin_a_double_or_other_negation_stays_unknown():
+    _not_answered("Are you not free from any restrictive covenants?")
+    _not_answered("Are you without any non-compete obligations?")
 
 
 def test_f3_a_plain_status_question_is_still_no():

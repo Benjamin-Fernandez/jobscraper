@@ -118,4 +118,5 @@ declarations:
   regulatory_disciplinary: false
   non_compete: false
   government_employment: false
+  willing_to_sign_nda: false
   health_disclosure: decline
