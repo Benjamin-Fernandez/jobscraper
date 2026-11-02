@@ -1,12 +1,19 @@
 """Read-only IMAP: find an ATS verification link or code (apply_design.md §11).
 
-Stage module (apply/). Imports only the contracts and the vault (foundation).
+Stage module (apply/). Imports only the contracts and two foundation modules:
+the vault, and `imapread` (Q-60), which now holds the message and domain
+helpers this module and F-50's mail status share (mail_status_design.md §5.7).
+The old names (`_body`, `_sender_domain`, `domain_matches`, `employer_domain`,
+`_host`, ...) stay importable here as aliases of the `imapread` functions.
 
 What it may do to the mailbox (F-36, NF-02):
-  - log in, open INBOX and `[Gmail]/Spam` with `select(folder, readonly=True)`
-    (imaplib then sends EXAMINE), SEARCH, and FETCH with `BODY.PEEK[]` (PEEK:
-    never sets \\Seen), then log out;
+  - log in, list the folders, open INBOX and the Spam folder with
+    `select(folder, readonly=True)` (imaplib then sends EXAMINE), SEARCH, and
+    FETCH with `BODY.PEEK[]` (PEEK: never sets \\Seen), then log out;
   - never STORE, COPY, MOVE, EXPUNGE, APPEND, and never SMTP.
+The Spam folder is the one LIST flags `\\Junk` (its name is localised on some
+accounts, `[Google Mail]/Spam`, MB §2); `[Gmail]/Spam` when LIST flags none
+(a non-Gmail host).
 What it may log: "verification mail found (link|code) from <sender domain>".
 Never the URL, the code, a subject, an address or the password.
 
@@ -28,28 +35,23 @@ import ssl
 import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from email.utils import getaddresses, parseaddr, parsedate_to_datetime
-from html.parser import HTMLParser
-from typing import Any, Callable, Iterable, Mapping, NamedTuple, Optional, Sequence
-from urllib.parse import urlsplit
+from email.utils import getaddresses, parsedate_to_datetime
+from typing import Any, Callable, Mapping, NamedTuple, Optional, Sequence
 
-from .. import vault
+from .. import imapread, vault
 from .contracts import ApplyFailure, ReasonCode, Secret, Verification
 
 log = logging.getLogger(__name__)
 
-FOLDERS = ("INBOX", "[Gmail]/Spam")
+FOLDERS = ("INBOX", "[Gmail]/Spam")             # [1]: the Spam fallback when LIST flags no \Junk
 TIME_FMT = "%Y-%m-%dT%H:%M:%S"                  # store.TIME_FMT
 DEFAULT_OTP = r"\b(\d{6})\b"
 VERIFY_WORDS = re.compile(r"verify|verification|activate|confirm|validate", re.I)
 CODE_LINE = re.compile(r"code", re.I)
-URL_RE = re.compile(r"https?://[^\s<>\"'()\[\]{}]+", re.I)
+URL_RE = imapread.URL_RE
 RECIPIENT_HEADERS = ("To", "Cc", "Delivered-To", "X-Original-To", "X-Forwarded-To")
 SLACK_S = 60                                    # keep mail received ≥ since − 60 s
-ATS_DOMAINS = ("myworkdayjobs.com", "greenhouse.io", "lever.co", "ashbyhq.com")
-_SLD = {"com", "co", "edu", "gov", "org", "net", "ac"}
-_MONTHS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun",
-           "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
+ATS_DOMAINS = imapread.ATS_DOMAINS
 
 DEFAULT_HOST = "imap.gmail.com"
 DEFAULT_PORT = 993
@@ -186,130 +188,18 @@ def watcher_for(address: str, profile: Any, settings: Mapping[str, Any],
     return MailWatcher(box.host, box.port, box.username, pw, **kw)
 
 
-# ---------------------------------------------------------------- domains (§11.3)
+# ---------------------------------------------------------------- domains and parsing (§11.3)
+# Moved to imapread.py (Q-60, MS §5.7); the names stay importable from here.
 
-def _host(url_or_host: str) -> str:
-    s = (url_or_host or "").strip()
-    if "//" not in s:
-        s = "//" + s
-    try:
-        return (urlsplit(s).hostname or "").lower().rstrip(".")
-    except ValueError:
-        return ""
-
-
-def domain_matches(host: str, domains: Iterable[str]) -> bool:
-    """`host == d` or `host` ends with `.d` for any non-empty `d`."""
-    h = (host or "").lower().rstrip(".")
-    if not h:
-        return False
-    for d in domains:
-        d = (d or "").strip().lower().lstrip(".")
-        if d and (h == d or h.endswith("." + d)):
-            return True
-    return False
-
-
-def employer_domain(careers_url: str) -> str:
-    """The employer's registrable domain from its careers URL (§11.3); "" for an
-    ATS host or an unparsable URL. `careers.dbs.com` → `dbs.com`;
-    `www.dbs.com.sg` → `dbs.com.sg`."""
-    host = _host(careers_url)
-    if not host or domain_matches(host, ATS_DOMAINS):
-        return ""
-    labels = host.split(".")
-    if len(labels) < 2:
-        return ""
-    if (len(labels) >= 3 and labels[-2] in _SLD and len(labels[-1]) == 2
-            and labels[-1].isalpha()):
-        return ".".join(labels[-3:])
-    return ".".join(labels[-2:])
-
-
-# ---------------------------------------------------------------- message parsing
-
-class _HtmlText(HTMLParser):
-    """HTML → text lines plus (href, anchor text) pairs."""
-    _BLOCK = {"p", "div", "br", "tr", "li", "h1", "h2", "h3", "h4", "h5", "h6",
-              "table", "td", "th", "section", "article", "header", "footer"}
-
-    def __init__(self) -> None:
-        super().__init__(convert_charrefs=True)
-        self.parts: list[str] = []
-        self.links: list[tuple[str, str]] = []
-        self._href: Optional[str] = None
-        self._anchor: list[str] = []
-        self._skip = 0
-
-    def handle_starttag(self, tag, attrs):
-        if tag in ("script", "style"):
-            self._skip += 1
-        if tag in self._BLOCK:
-            self.parts.append("\n")
-        if tag == "a":
-            self._href = dict(attrs).get("href") or None
-            self._anchor = []
-
-    def handle_endtag(self, tag):
-        if tag in ("script", "style") and self._skip:
-            self._skip -= 1
-        if tag == "a" and self._href is not None:
-            self.links.append((self._href.strip(), " ".join("".join(self._anchor).split())))
-            self._href = None
-        if tag in self._BLOCK:
-            self.parts.append("\n")
-
-    def handle_data(self, data):
-        if self._skip:
-            return
-        self.parts.append(data)
-        if self._href is not None:
-            self._anchor.append(data)
-
-    def text(self) -> str:
-        lines = (" ".join(l.split()) for l in "".join(self.parts).splitlines())
-        return "\n".join(l for l in lines if l)
-
-
-def _body(msg: email.message.EmailMessage) -> tuple[str, list[tuple[str, str]]]:
-    """(text, [(url, anchor text)]): text/plain when present, else HTML as text."""
-    plain = html = None
-    for part in msg.walk():
-        if part.is_multipart() or part.get_content_disposition() == "attachment":
-            continue
-        ctype = part.get_content_type()
-        if ctype not in ("text/plain", "text/html"):
-            continue
-        try:
-            content = part.get_content()
-        except (LookupError, ValueError, AssertionError):
-            payload = part.get_payload(decode=True) or b""
-            content = payload.decode("utf-8", "replace")
-        if ctype == "text/plain" and plain is None:
-            plain = content
-        elif ctype == "text/html" and html is None:
-            html = content
-    links: list[tuple[str, str]] = []
-    text = ""
-    if html is not None:
-        p = _HtmlText()
-        try:
-            p.feed(html)
-            p.close()
-        except Exception:                               # malformed HTML: keep what parsed
-            pass
-        links = list(p.links)
-        text = p.text()
-    if plain is not None:
-        text = plain
-    for m in URL_RE.finditer(text):
-        links.append((m.group(0).rstrip(".,;:!?"), ""))
-    return text, links
-
-
-def _sender_domain(msg) -> str:
-    addr = parseaddr(str(msg.get("From", "")))[1]
-    return addr.rpartition("@")[2].strip().lower().rstrip(">") if "@" in addr else ""
+_host = imapread.host_of
+domain_matches = imapread.domain_matches
+employer_domain = imapread.employer_domain
+_HtmlText = imapread._HtmlText
+_body = imapread.body_text                      # (text, [(url, anchor text)]); links kept
+_sender_domain = imapread.sender_domain
+_quote_folder = imapread.quote_folder
+_internaldate = imapread.internaldate
+_imap_date = imapread.imap_date
 
 
 def _addressed_to(msg, to_addr: str) -> bool:
@@ -364,13 +254,6 @@ def find_code(text: str, otp_pattern: Optional[str]) -> Optional[str]:
     return None
 
 
-def _internaldate(meta: bytes) -> Optional[datetime]:
-    t = imaplib.Internaldate2tuple(meta) if meta else None
-    if t is None:
-        return None
-    return datetime.fromtimestamp(time.mktime(t), tz=timezone.utc)
-
-
 def _date_header(msg) -> Optional[datetime]:
     try:
         d = parsedate_to_datetime(str(msg.get("Date", "")))
@@ -391,16 +274,22 @@ def _fetched(data: Any) -> tuple[bytes, bytes]:
     return b"", b""
 
 
-def _imap_date(d: datetime) -> str:
-    return f"{d.day:02d}-{_MONTHS[d.month - 1]}-{d.year}"
+def _folders(conn) -> tuple[str, str]:
+    """INBOX and the Spam folder: the one LIST flags `\\Junk`, else FOLDERS[1]
+    (MS §5.7). A LIST the server refuses also falls back; a dropped connection
+    propagates, as any other command's would.
 
-
-def _quote_folder(name: str) -> str:
-    """imaplib sends the name as given; quote only names with a space or quote
-    (`[Gmail]/Spam` goes bare, as Gmail and the design §11.1 call expect)."""
-    if any(c in name for c in ' "'):
-        return '"' + name.replace("\\", "\\\\").replace('"', '\\"') + '"'
-    return name
+    `special_use_folders` keys on `MailboxRole`, a str enum: its JUNK member
+    equals (and hashes as) "junk". This stage reads it by that value, because a
+    stage may not import another stage's contracts (`mailstatus.contracts`).
+    """
+    try:
+        junk = imapread.special_use_folders(conn).get("junk")
+    except imaplib.IMAP4.abort:
+        raise
+    except (imaplib.IMAP4.error, ValueError):
+        junk = None
+    return FOLDERS[0], junk or FOLDERS[1]
 
 
 def _classify_login_error(exc: Exception) -> str:
@@ -478,7 +367,7 @@ class MailWatcher:
     def _scan(self, conn, since_utc: datetime, seen: set) -> list[_Candidate]:
         out: list[_Candidate] = []
         floor = since_utc - timedelta(seconds=SLACK_S)
-        for folder in FOLDERS:
+        for folder in _folders(conn):
             if not self._open(conn, folder):
                 continue
             typ, data = conn.search(None, "SINCE", _imap_date(since_utc - timedelta(days=1)))
@@ -500,7 +389,7 @@ class MailWatcher:
                 when = _internaldate(meta) or _date_header(msg)
                 if when is None or when < floor:
                     continue
-                out.append(_Candidate(when, msg))
+                out += [_Candidate(when, msg)]
         return out
 
     # -- the wait
@@ -620,7 +509,7 @@ def newest_from(host: str, port: int, username: str, password: Secret, domain: s
     conn = w._connect()
     best: Optional[datetime] = None
     try:
-        for folder in FOLDERS:
+        for folder in _folders(conn):
             if not w._open(conn, folder):
                 continue
             typ, data = conn.search(None, "FROM", f'"{domain}"')
