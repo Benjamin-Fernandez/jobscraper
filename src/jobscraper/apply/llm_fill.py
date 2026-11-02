@@ -574,7 +574,18 @@ def pick_option(backend, field: PageField, wanted: str, options: Sequence[str], 
     reply = _one_shot(backend, PICK_SYSTEM, user, fmt, cfg=cfg, stats=stats,
                       keys=[field.field.key], max_tokens=TOKENS_BASE)
     choice = reply.get("choice")
-    return choice if isinstance(choice, str) and choice in opts else None
+    if not (isinstance(choice, str) and choice in opts):
+        return None
+    if guards.skill_list(field) and not names_wanted(choice, wanted):
+        return None                                  # Q-46(b): "PyTorch" is not "Python"
+    return choice
+
+
+def names_wanted(choice: str, wanted: str) -> bool:
+    """Q-46(b): a suggestion names the wanted skill when every word of `wanted` occurs as
+    a whole word in it ("Python (Programming Language)" names "Python"; "PyTorch" not)."""
+    want = set(tokens(wanted))
+    return bool(want) and want <= set(tokens(choice.split(" > ")[-1]))
 
 
 def recheck_entry(backend, field: PageField, block: str, *, s_values: Sequence[str],

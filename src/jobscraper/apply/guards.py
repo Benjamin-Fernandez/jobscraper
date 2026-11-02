@@ -453,6 +453,8 @@ def _second_agrees(c: _Ctx, pf: PageField, value: Any) -> Optional[bool]:
     if d2 is None or d2.source is FillSource.UNKNOWN:
         return False
     v2 = _decision_value(c, pf, d2)
+    if v2 is not None and skill_list(pf) and d2.source in (FillSource.RESUME, FillSource.JOB):
+        v2 = ground_items(c.rctx, v2 if isinstance(v2, list) else [v2], d2.evidence)
     return v2 is not None and same_value(v2, value, pf)
 
 
@@ -623,6 +625,41 @@ def _own_detail_for_other(c: _Ctx, pf: PageField, value: Any) -> bool:
     return F.about_other_person(pf) and F.names_own_detail(_text_of(value), c.rctx, c.own)
 
 
+SKILL_WORDS = ("skill", "skills")
+
+
+def skill_list(pf: PageField) -> bool:
+    """Q-46(b): a multi-select of skills (or any search-driven multi-select), whose items
+    are grounded one by one (`ground_items`), not by the quote as a whole."""
+    return pf.field.type is FieldType.MULTI_CHOICE and (
+        not pf.options_complete or bool(set(tokens(pf.field.label)) & set(SKILL_WORDS)))
+
+
+def ground_items(rctx: ResolveContext, items: Sequence[Any], evidence: str) -> list[Any]:
+    """Q-46(b): the listed items that stand on their own, in order. An item is kept when
+    it (or a member of its alias group) is a profile skill or attested skill, or occurs
+    as whole words in the quote; an item whose words contain a kept item's words ("HTML
+    Design" after "HTML") is a duplicate and dropped."""
+    p = rctx.profile or {}
+    known = {norm_label(t) for t in list(p.get("skills") or []) + list(p.get("attested_skills") or [])
+             if isinstance(t, str) and t.strip()}
+    ev = tokens(evidence or "")
+    kept: list[Any] = []
+    kept_toks: list[set[str]] = []
+    for item in items:
+        name = norm_label(str(item).split(" > ")[-1])
+        if not name:
+            continue
+        names = next(({norm_label(t) for t in g} for g in rctx.alias_groups
+                      if any(norm_label(t) == name for t in g)), {name})
+        ok = bool(names & known) or any(n and contains_run(ev, n.split()) for n in names)
+        toks = set(name.split())
+        if ok and not any(k <= toks for k in kept_toks):
+            kept.append(item)
+            kept_toks.append(toks)
+    return kept
+
+
 def _model_field(c: _Ctx, pf: PageField, d: ModelDecision) -> Answer:
     """resume / job: the model's own value, used only after G1, G3/G6, G4, G5, G7, G11."""
     value = d.value
@@ -639,6 +676,12 @@ def _model_field(c: _Ctx, pf: PageField, d: ModelDecision) -> Answer:
         if opt in (None, "", []):
             return _answer_unknown(pf, "G1: not an offered option")
         value = opt
+        if skill_list(pf):                           # Q-46(b): drop, don't reject the field
+            value = ground_items(c.rctx, value if isinstance(value, list) else [value],
+                                 d.evidence)
+            if not value:
+                return _answer_unknown(pf, "G3: no listed item grounded", ungrounded=True,
+                                       evidence=d.evidence)
     why = _grounded(c, pf, value, d)
     if why:
         return _answer_unknown(pf, why, ungrounded=True, evidence=d.evidence)
