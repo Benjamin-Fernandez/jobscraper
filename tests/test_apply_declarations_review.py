@@ -164,3 +164,30 @@ def test_f10_pin_the_ns_exclusion_rule_is_one_implementation():
         assert locks.strip_ns_exclusion(list(toks)) == D._strip_ns_exclusions(list(toks)), label
     own = getattr(locks, "NS_TERMS", None)
     assert own is None or own is getattr(D, "NS_TERMS", object()), "locks keeps its own NS term list"
+
+
+# ------------------------------------------------------------------ D-90a additions (02_status §4)
+
+def test_d90a_pin_comfort_and_familiarity_questions_are_not_answered():
+    for label in ("Are you comfortable signing an NDA?", "Are you familiar with MAS regulations?"):
+        _not_answered(label)
+        _not_answered(label, required=False)
+
+
+def test_d90a_pin_objection_and_disclosure_checkboxes_are_never_ticked():
+    assert not _ticked("I have no objection to signing the NDA")
+    for prof in (Q._prof(), Q._prof(disability="no")):
+        assert not _ticked("I do not wish to disclose a disability", prof=prof)
+
+
+def test_d90a_pin_a_multi_select_declaration_is_unknown():
+    _not_answered("Have you been convicted of a crime?", type=FT.MULTI_CHOICE,
+                  options=("Yes, a criminal offence", "Yes, a traffic offence", "None of the above"))
+
+
+def test_d90a_negative_controls_still_answer_from_data():
+    lab, a = Q._ans("Do you know anyone who works at Acme?")
+    assert lab is DL.RELATIVES, lab
+    Q._filled(a, "No")
+    _lab, a = Q._ans("Are you aware of any conflict of interest with Acme?")
+    Q._filled(a, "No")
