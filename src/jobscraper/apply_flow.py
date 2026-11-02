@@ -204,6 +204,8 @@ class _Attempt:
            reason: Optional[ReasonCode] = None, detail: Optional[str] = None, **cols: Any) -> None:
         if step is not None:
             self.step = step
+        if detail:                     # the row, the result and the CLI table carry no profile value
+            detail = redact(detail, self.log.values)
         self.store.set_attempt_state(self.id, state.value, step=step,
                                      reason=reason.value if reason else None,
                                      detail=detail, **cols)
