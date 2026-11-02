@@ -8,7 +8,7 @@
 
 ## Running / ready to merge (worktrees under `.claude/worktrees/`)
 - int/Q-30 MERGED + bundle built + pushed (70169be; 752/752, web 253+1; smoke 8768 OK). Review `docs/reviews/Q-30.md`: APPROVE WITH FIXES; F1–F7 routed (Q-39, Q-40).
-- S-5b DONE + merged (e79745c): tenant A submitted + confirmed; tenant B account made, stopped at a required "Additional Address" (profile `address_line2` empty) → Q-41/D-80 after the owner fills it. Recordings (personal) in the session scratchpad `s5b/`. Q-35 architect running in worktree `arch-Q-35` (no shell: Coordinator commits).
+- S-5b DONE + merged (e79745c): tenant A submitted + confirmed; tenant B account made, stopped at a required "Additional Address" (profile `address_line2` empty) → Q-41/D-80 after the owner fills it. Recordings (personal) in the session scratchpad `s5b/`. Q-35 design committed on `arch/Q-35-llm-fill` (63c62b3, worktree `arch-Q-35`); stage C (tester plan) + stage E (reviewer) running there, uncommitted by design: the Coordinator commits, marks READY, merges, then starts lanes M1/R1/T0–T1 in parallel (D-81, D-82).
 - int/Q-36 MERGED + pushed (5ef94a6; 789/789; owner profile errors 0).
 - `int/Q-39` (worktree `int-Q-39`, 6665e1c = personal + Q-39 review fixes F2/F6/F7): tester Q-42 adding oracles; then merge, `npm run build` in the main checkout (web change), smoke 8768, push. Remove the worktree after (its `web/node_modules` is a real install).
 
