@@ -223,6 +223,7 @@ def _decide(run: _Run, fields: Sequence[PageField], sections: Sequence[EntrySect
         pf = by_key.get(key)
         if pf is None or not _followup_ok(run):
             continue
+        _time_left(run)                                   # review F3: one way to time out
         d = L.recheck_entry(run.services.backend, pf, run.blocks.get(matches.get(pf.group) or "", ""),
                             s_values=run.sv, cfg=run.cfg, stats=run.stats)
         decisions.append(d)
@@ -265,10 +266,13 @@ def _long_list_picks(run: _Run, fields: Sequence[PageField], decisions: list) ->
 
 
 def _second(run: _Run, pf: PageField, matches: dict) -> ModelDecision:
-    """G5's second call; past the follow-up budget or the deadline it answers unknown
-    (G5 then keeps nothing)."""
+    """G5's second call. Past the deadline the page ends `transport_failed` "transport:
+    timed out" (review F3: `decide` does not catch `_Stop`, so no question is captured for
+    a field we merely ran out of time on); past `max_followups` it answers unknown (G5
+    then keeps nothing; LF §13.1)."""
     key = pf.field.key
-    if not _followup_ok(run) or run.services.deadline_left() <= 0:
+    _time_left(run)
+    if not _followup_ok(run):
         return ModelDecision(key, FillSource.UNKNOWN, via="second")
     ch = run.chunk_of.get(key) or L.Chunk(f"one:{key}", matches.get(pf.group) if pf.group else None, (pf,))
     return L.second_opinion(run.services.backend, pf, ch, run.facts, run.rctx, step_title=run.step,
@@ -333,6 +337,8 @@ def _apply_one(run: _Run, key: str, ans: Answer, reset: bool) -> None:
         return
     value = _fill_value(pf, ans)
     r = W.fill_field(run.page, pf, value, pick=_picker(run, pf, ans))
+    if run.transport:                                     # a pick timed out or lost the model
+        raise _Stop(run.transport)
     if r.ok:
         _mark(run, key, ValueOrigin.OURS)
         run.failed.pop(key, None)
@@ -359,7 +365,9 @@ def _picker(run: _Run, pf: PageField, ans: Answer):
     quote = ans.evidence or _text(ans.value)
 
     def pick(want: str, options: Sequence[str]) -> str:
-        if run.transport or not _followup_ok(run) or run.services.deadline_left() <= 0:
+        if run.services.deadline_left() <= 0:
+            run.transport = run.transport or TIMED_OUT_NOTE  # review F3: ends the page, never fill_failed
+        if run.transport or not _followup_ok(run):
             return ""
         try:
             got = L.pick_option(run.services.backend, pf, want, list(options), s_values=run.sv,
