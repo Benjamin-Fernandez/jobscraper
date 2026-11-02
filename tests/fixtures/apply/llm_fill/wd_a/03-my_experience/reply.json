@@ -49,6 +49,17 @@
   },
   {
    "kind": "recheck",
+   "reply": {
+    "Work Experience 1|Job Title": {
+     "source": "resume",
+     "ref": "",
+     "value": "Software Engineering Intern",
+     "evidence": "Software Engineering Intern"
+    }
+   }
+  },
+  {
+   "kind": "recheck",
    "match": "Work Experience 1",
    "raw": {
     "source": "resume",
