@@ -39,9 +39,10 @@ from .apply import browser as B
 from .apply import resolve as R
 from .apply.classify import PageSignal, classify
 from .apply.contracts import (
-    POST_CLICK_STATES, REASON_TEXTS, STATE_TEXTS, TERMINAL_STATES, TRANSITIONS, Answer,
-    AnswerStatus, AnswerTier, ApplyFailure, AttemptContext, AttemptResult, AttemptState,
-    Canonical, FieldType, FormField, ReasonCode, ResolveContext,
+    ALWAYS_OURS, CHOICE_TYPES, EMPLOYER_SPECIFIC_DECLARATIONS, POST_CLICK_STATES, PREFILL_POLICY,
+    REASON_TEXTS, STATE_TEXTS, TERMINAL_STATES, TRANSITIONS, Answer, AnswerSource, AnswerStatus,
+    AnswerTier, ApplyFailure, AttemptContext, AttemptResult, AttemptState, Canonical, FieldType,
+    FormField, PrefillPolicy, ReasonCode, ResolveContext,
 )
 from .apply.detect import detect
 from .apply.plan import norm_label
@@ -308,6 +309,146 @@ def _unanswerable(fields: Sequence[FormField], answers: dict[str, Answer]) -> Op
     return None
 
 
+# ---------------------------------------------------------------- prefill policies (D-70)
+#
+# A site may put values on the form before we type (MyGreenhouse autofill,
+# Workday "Use My Last Application", a site default). Per field the flow then
+# decides: "fill" (the field is empty: the planned answer as usual), "keep"
+# (leave the site's value; audit row `prefilled`) or "overwrite" (our answer
+# replaces it). KEEP = apply_design §9.1.1, OVERWRITE = §9.4.6.
+
+KEEP, OVERWRITE, FILL = "keep", "overwrite", "fill"
+_EMPLOYER_SPECIFIC = frozenset(d.value for d in EMPLOYER_SPECIFIC_DECLARATIONS)
+
+
+def _is_empty(shown: Any) -> bool:
+    return shown is None or (isinstance(shown, str) and not shown.strip()) or shown == []
+
+
+def _employer_specific(a: Optional[Answer]) -> bool:
+    """A tier-4 answer about THIS employer (prior/current employment, applied
+    before, relatives, shareholding): a saved answer from elsewhere never stands."""
+    if a is None or a.tier is not AnswerTier.DECLARATION:
+        return False
+    label = a.rule_id or a.source.split(":", 1)[-1]
+    return label in _EMPLOYER_SPECIFIC
+
+
+def keep_decision(field: FormField, answer: Optional[Answer], shown: Any, ctx_email: str) -> str:
+    """PrefillPolicy.KEEP (MyGreenhouse, §9.1.1): keep every non-empty field
+    except the always-ours ones - the resume, the email (it must be the
+    watched mailbox), a single checkbox (unticked can't be told from "not
+    answered") - and an employer-specific declaration. Empty fields are filled.
+    `ctx_email` is the identity in use; an equal email needs no input (the
+    flow notes "already on page")."""
+    if field.type is FieldType.CHECKBOX:
+        return OVERWRITE
+    if field.canonical in ALWAYS_OURS or _employer_specific(answer):
+        return FILL if _is_empty(shown) else OVERWRITE
+    return FILL if _is_empty(shown) else KEEP
+
+
+def overwrite_decision(field: FormField, answer: Optional[Answer], shown: Any) -> str:
+    """PrefillPolicy.OVERWRITE (Workday, §9.4.6): our answer wins; a site
+    value is kept only on an optional field we cannot answer. A required field
+    with no answer stays `unknown` (fails closed: a value we cannot back up is
+    not kept, even our own from a last application)."""
+    if answer is not None and answer.fills:
+        return OVERWRITE
+    if field.required or _is_empty(shown):
+        return FILL
+    return KEEP
+
+
+def _shown_form(f: FormField, a: Answer) -> Any:
+    """How our answer reads back on the page (option labels, a file name)."""
+    if f.type is FieldType.FILE:
+        return Path(str(a.value)).name
+    if f.type in CHOICE_TYPES and a.option_labels:
+        return list(a.option_labels) if f.type is FieldType.MULTI_CHOICE else a.option_labels[0]
+    if f.type is FieldType.CHECKBOX:
+        return str(a.value).strip().lower()
+    return a.value
+
+
+def same_value(f: FormField, a: Answer, shown: Any) -> bool:
+    """Does the page already show our answer? Text by §7.1 normalisation,
+    multi-choice as sets, files by name."""
+    ours = _shown_form(f, a)
+    if isinstance(ours, list) or isinstance(shown, list):
+        mine = {norm_label(str(x)) for x in (ours if isinstance(ours, list) else [ours])}
+        theirs = {norm_label(str(x)) for x in (shown if isinstance(shown, list) else [shown])}
+        return mine == theirs
+    if f.type is FieldType.FILE:
+        return str(ours) == str(shown)
+    return norm_label(str(ours or "")) == norm_label(str(shown or ""))
+
+
+def _prefilled(f: FormField, planned: Optional[Answer], shown: Any, source: str,
+               confidence: float) -> Answer:
+    """The audit answer for a site value that was kept: tier 0, the prefill
+    source, the shown value; a note when the profile would have said otherwise."""
+    note = ""
+    if planned is not None and planned.fills and planned.tier in (
+            AnswerTier.FIELD_MAP, AnswerTier.PROFILE_RULE, AnswerTier.MEMORY,
+            AnswerTier.DECLARATION) and not same_value(f, planned, shown):
+        note = f"differs from profile ({planned.source})"
+    return Answer(field_key=f.key, value=shown, tier=AnswerTier.NONE, source=source,
+                  confidence=confidence, status=AnswerStatus.PREFILLED,
+                  sensitive=bool(planned and planned.sensitive)
+                  or f.section in ("compliance", "demographic"), note=note)
+
+
+def apply_prefill_policy(source: str, fields: Sequence[FormField], answers: dict[str, Answer],
+                         shown: dict[str, Any], ctx_email: str
+                         ) -> tuple[dict[str, Answer], dict[str, Answer]]:
+    """(audit answers, answers to fill) for one step under the policy of
+    `source`. A field whose page value already equals our answer is recorded
+    `filled` with the note "already on page" and gets no input."""
+    policy = PREFILL_POLICY[AnswerSource(source)]
+    audit: dict[str, Answer] = {}
+    to_fill: dict[str, Answer] = {}
+    for f in fields:
+        a = answers.get(f.key)
+        if a is None or f.type is FieldType.HIDDEN:
+            if a is not None:
+                audit[f.key] = a
+            continue
+        val = shown.get(f.key, "")
+        if policy is PrefillPolicy.KEEP:
+            what = keep_decision(f, a, val, ctx_email)
+            conf = 0.95
+        else:
+            what = overwrite_decision(f, a, val)
+            conf = 0.9
+        if what == KEEP:
+            audit[f.key] = _prefilled(f, a, val, source, conf)
+            continue
+        if what == OVERWRITE and a.fills and same_value(f, a, val):
+            audit[f.key] = dataclasses.replace(a, note=_join(a.note, "already on page"))
+            continue
+        if what == OVERWRITE and a.fills and not _is_empty(val):
+            a = dataclasses.replace(a, note=_join(a.note, "replaced site value"))
+        audit[f.key] = to_fill[f.key] = a
+    return audit, to_fill
+
+
+def _join(*notes: str) -> str:
+    return "; ".join(n for n in notes if n)
+
+
+def _flagged(fields: Sequence[FormField], errors: Sequence[str]) -> list[FormField]:
+    """The fields an error list names (labels compared after §7.1 normalisation)."""
+    errs = [norm_label(e) for e in errors if e]
+    out = []
+    for f in fields:
+        lab = norm_label(f.label)
+        if lab and any(e == lab or (len(lab) > 3 and lab in e) or e == norm_label(f.key)
+                       for e in errs):
+            out.append(f)
+    return out
+
+
 # ---------------------------------------------------------------- the run
 
 class _Run:
@@ -561,7 +702,11 @@ class _Run:
             self.store.update_attempt(at.id, plan_source=plan.source)
             answers = self.resolve(plan.fields, rctx, at)
             bad = _unanswerable(plan.fields, answers)
-            if bad:
+            if bad and self.prefill_may_answer(adapter):
+                # D-70 §9.1.1: MyGreenhouse may hold the answer; re-checked after the prefill.
+                self.log(f"[attempt {at.id}] planning: a required question has no answer yet; "
+                         f"checked again after the {adapter.prefill_source} autofill")
+            elif bad:
                 raise bad
         else:
             self.store.update_attempt(at.id, plan_source="dom")
@@ -578,6 +723,15 @@ class _Run:
             raise ApplyFailure(ReasonCode.PAGE_UNRECOGNISED, f"{adapter.name}: account {wall}")
         at.to(S.FILLING, step="application")
 
+        # prefill (D-70): the site's own autofill, once, before the first step
+        try:
+            ctx.prefill = adapter.prefill(page, ctx) or ctx.prefill or ""
+        except Exception as exc:                          # noqa: BLE001 - fall back to the full fill
+            self.log(f"[attempt {at.id}] prefill skipped: {self.log.exc(exc)}")
+            ctx.prefill = ""
+        if ctx.prefill:
+            self.log(f"[attempt {at.id}] prefill: {ctx.prefill}")
+
         # filling, one step at a time
         for _ in range(max(1, acfg.max_wizard_steps)):
             self.check_deadline(ctx)
@@ -590,17 +744,28 @@ class _Run:
             for f in fields:
                 at.fields.setdefault(f.key, f)
             step_answers = {f.key: at.answers[f.key] for f in fields if f.key in at.answers}
-            bad = _unanswerable(fields, step_answers)
+            if ctx.prefill:
+                shown = adapter.read_values(page, ctx, fields)
+                audit, step_answers = apply_prefill_policy(ctx.prefill, fields, step_answers,
+                                                           shown, ctx.email)
+                at.answers.update(audit)
+            bad = _unanswerable(fields, {f.key: at.answers[f.key] for f in fields
+                                         if f.key in at.answers})
             if bad:
                 raise bad
             self.check_page(page, at)
             self.fill(page, ctx, adapter, at, fields, step_answers)
-            at.record(step, fields)
             at.shot(page, step)
             self.check_page(page, at)
             res = adapter.next_step(page, ctx)
-            if res.errors:
-                raise ApplyFailure(ReasonCode.VALIDATION_ERROR, ", ".join(res.errors[:3]), step=step)
+            if res.errors:                               # one corrective retry (§9.4.9)
+                self.log(f"[attempt {at.id}] errors after Next: {', '.join(res.errors[:3])}")
+                self.correct(page, ctx, adapter, at, fields, res.errors, rctx)
+                res = adapter.next_step(page, ctx)
+                if res.errors:
+                    raise ApplyFailure(ReasonCode.VALIDATION_ERROR,
+                                       ", ".join(e[:80] for e in res.errors[:3]), step=step)
+            at.record(step, fields)
             if res.is_review:
                 break
             at.to(S.FILLING, step=B.slug(res.step) or step)
@@ -615,6 +780,33 @@ class _Run:
             return adapter, ctx
         self.submit(page, ctx, adapter, at, job)
         return adapter, ctx
+
+    def prefill_may_answer(self, adapter: Any) -> bool:
+        """Is a planning-time unknown worth taking to the browser? Only when
+        the adapter's own prefill is on (Greenhouse: `apply.mygreenhouse`)."""
+        src = getattr(adapter, "prefill_source", "")
+        return src == AnswerSource.MYGREENHOUSE.value and self.acfg.mygreenhouse
+
+    def correct(self, page: Any, ctx: AttemptContext, adapter: Any, at: _Attempt,
+                fields: Sequence[FormField], errors: Sequence[str], rctx: ResolveContext) -> None:
+        """The flow's half of the corrective retry (§9.4.9 steps 2-3): re-fill a
+        flagged field we answered; re-resolve one the site wants after all
+        (blank or prefilled) as required; no answer -> unanswerable_required."""
+        redo: dict[str, Answer] = {}
+        for f in _flagged(fields, errors):
+            a = at.answers.get(f.key)
+            if a is not None and a.status is AnswerStatus.FILL_FAILED:
+                a = dataclasses.replace(a, status=AnswerStatus.FILLED)
+            if a is not None and a.fills:
+                redo[f.key] = dataclasses.replace(a, note=_join(a.note, "re-filled after an error"))
+                continue
+            again = self.resolve([dataclasses.replace(f, required=True)], rctx, at)[f.key]
+            if not again.fills:
+                raise ApplyFailure(ReasonCode.UNANSWERABLE_REQUIRED, f.label[:120], step=at.step)
+            redo[f.key] = dataclasses.replace(again, note=_join(again.note, "the site required it"))
+        at.answers.update(redo)
+        if redo:
+            self.fill(page, ctx, adapter, at, [f for f in fields if f.key in redo], redo)
 
     def fill(self, page: Any, ctx: AttemptContext, adapter: Any, at: _Attempt,
              fields: Sequence[FormField], answers: dict[str, Answer]) -> None:
