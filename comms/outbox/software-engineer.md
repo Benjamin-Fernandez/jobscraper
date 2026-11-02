@@ -318,3 +318,26 @@ TYPE: request
 RE: D-86 F9 interim; `src/jobscraper/apply/contracts.py` (QuestionReason)
 BODY: Please add `QuestionReason.COMPOSE_NEEDED = "compose_needed"` (additive, contracts v5; "a cover letter or motivation text the program can't write yet"). `questions.COMPOSE_NEEDED` picks it up with no code change (it falls back to `no_rule` until then); the QuestionCard chip text already exists. Also for Q-45: widen D-84 R4's text to "any source" (built in F2) and record D-86 F7 in LF §7 G2(e)/G4 (built: no model option on the fact route; hierarchical lists mapped by the program's leaf fit).
 STATUS: open
+
+### 2026-11-03 software-engineer (lane M) → coordinator
+TYPE: handoff
+RE: Q-46 a/b/c, G2d leaf, G3 C++, D-88, Q-48 E5 (L3/L7), LF G2(d) restated fact, COMPOSE_NEEDED; branch `eng/Q-35-M-llmfill` (merged int/Q-35-M at 1b58acb, then cbe7de4)
+BODY:
+- G2d leaf: `guards._fact_field`'s non-enum branch now compares `option_for(pf, mv) or mv`. G3 C++: `resolve._WORD` keeps C++ / C# / .NET whole. D-88: `guards.SENSITIVE_LABEL` gains military and armed forces (ns was already a whole token).
+- Q-46a: `facts.relevant` returns False for contact, identity and address refs when the field is in a past-entry section, with or without a group. `facts.in_entry_section` covers an entry group, or a group title or section naming work experience / employment / education.
+- Q-46b: values in a `guards.skill_list` field (a MULTI_CHOICE that is search-driven or labelled "skill") are now grounded item by item.
+  - `guards.ground_items` keeps an item only if it is a profile skill, an attested skill or an alias-group member, or appears as whole words in the quote.
+  - Duplicates (an item whose words include a kept item's words) are dropped. If nothing is left, the field ends unknown with "G3: no listed item grounded".
+  - G5 applies the same filter to the second run's value before comparing.
+  - `llm_fill.pick_option` on a skill list returns None unless the choice contains every word of `wanted` (`llm_fill.names_wanted`). No widgets.py change was needed.
+- Q-46c: `facts.relevant` is False for `standing:worked_here` and `current_employee_here` unless the label or help text refers to this employer. That means one of: us, our, we, here, "this company / employer / organisation / firm / bank / group", "the company", the employer's name or an alias.
+  - The pin still fails, but only on the L3 lock: `declarations.classify` labels the Government question `prior_employment_at_company` (result FILLED, source `declaration:prior_employment_at_company`). That is WP-Q48's to fix (declarations.py), not lane M's.
+- Q-48 E5:
+  - L3 already handed AMBIGUOUS to `declarations.answer()`; I corrected the docstring.
+  - L7 now removes NS-exclusion runs before the negation test (`locks.strip_ns_exclusion`, using the AD §7.5 rule 4 lists). When WP-Q48 adds a shared helper in declarations.py, L7 can call it instead (a one-line swap).
+- LF G2(d) restated fact: `guards._restates_fact` applies on a non-Yes/No choice when the fact is not private and the model value is not an offered option but equals `fact.value`. The program's fit is then written; if nothing fits, the field goes to G2e.
+- `questions.COMPOSE_NEEDED` is now `QuestionReason.COMPOSE_NEEDED`; the `no_rule` fallback is gone.
+KNOWN LIMITS:
+- A `keep` of a skill list the site already filled is not filtered item by item (G8/G3 work as before). Deleting ungrounded chips the site already shows would be lane R widget work, if wanted.
+- THIS_EMPLOYER_RUNS is a judgement call: "the company" counts as this employer. `previously_applied` is not restricted.
+STATUS: open
