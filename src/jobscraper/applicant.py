@@ -25,8 +25,10 @@ from __future__ import annotations
 
 import calendar
 import datetime as _dt
+import hashlib
 import os
 import re
+import shutil
 import tempfile
 from dataclasses import dataclass
 from fractions import Fraction
@@ -35,6 +37,7 @@ from typing import Any, Iterable, Optional
 
 import yaml
 
+from .apply.contracts import EXTRA_KEY_PATTERN, QuestionKind
 from .config import ROOT
 
 APPLICANT_PATH_DEFAULT = "data/applicant.yaml"          # config paths.applicant overrides
@@ -275,18 +278,54 @@ def load(path: str | os.PathLike) -> dict:
     return data
 
 
-def save(path: str | os.PathLike, profile: dict) -> None:
+COMMENTED_BACKUP_NAME = "applicant.commented-backup.yaml"   # matches data/applicant*.yaml (gitignored)
+
+
+def etag(path: str | os.PathLike) -> str:
+    """The lost-update guard (questions_design §3.1): the first 16 hex of the
+    SHA-256 of the file's bytes, "" when the file is absent. The Profile form
+    and the Questions card send it back; a mismatch is a 409, nothing saved."""
+    p = Path(path)
+    try:
+        data = p.read_bytes()
+    except FileNotFoundError:
+        return ""
+    return hashlib.sha256(data).hexdigest()[:16]
+
+
+def has_comments(path: str | os.PathLike) -> bool:
+    """True when a line of the file starts (after blanks) with "#": a save
+    would drop it, since PyYAML does not keep comments (§5.1)."""
+    try:
+        text = Path(path).read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return False
+    return any(line.lstrip().startswith("#") for line in text.splitlines())
+
+
+def commented_backup_path(path: str | os.PathLike) -> Path:
+    """Where the one-time copy with comments goes: beside the profile."""
+    return Path(path).with_name(COMMENTED_BACKUP_NAME)
+
+
+def save(path: str | os.PathLike, profile: dict, *, keep_commented_copy: bool = True) -> None:
     """Validate, then write atomically (tempfile in the same folder + os.replace).
 
     Raises ApplicantError (with `.errors`) and writes nothing when the profile
-    is invalid. YAML comments do not survive a save; the Profile form is the
-    editor once there is one (§5.1)."""
+    is invalid. Key order is kept (`sort_keys=False`); YAML comments are not.
+    So the first save over a file that has comments first copies it to
+    `applicant.commented-backup.yaml` (once: an existing copy is never
+    overwritten), and the owner keeps their notes (questions_design §3.1)."""
     errors = validate(profile)
     if errors:
         raise ApplicantError(f"{len(errors)} invalid field(s): "
                              + ", ".join(e.path for e in errors), errors)
     p = Path(path)
     p.parent.mkdir(parents=True, exist_ok=True)
+    if keep_commented_copy and p.is_file() and has_comments(p):
+        backup = commented_backup_path(p)
+        if not backup.exists():
+            shutil.copy2(p, backup)
     fd, tmp = tempfile.mkstemp(prefix=p.name + ".", suffix=".tmp", dir=str(p.parent))
     try:
         with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as fh:
@@ -487,7 +526,122 @@ def validate(profile: dict) -> list[FieldError]:
         v = profile.get(k)
         if v is not None and not (isinstance(v, list) and all(isinstance(x, str) for x in v)):
             err(k, "must be a list of words or phrases")
+
+    errs.extend(validate_extra(profile.get("extra")))
     return errs
+
+
+# --------------------------------------------------------------------------
+# `extra:` - the owner's answers to questions employers asked (F-13, §6.1)
+# --------------------------------------------------------------------------
+
+EXTRA_KEY_RE = re.compile(EXTRA_KEY_PATTERN)
+EXTRA_KINDS: tuple[str, ...] = tuple(k.value for k in QuestionKind)
+EXTRA_TEXT_MAX = 2000
+EXTRA_DATE_FORMATS = ("day", "month")
+# Question metadata (employer text, or the owner's own labels): readable in a
+# log line, unlike the answers themselves (questions_design §11).
+EXTRA_META_FIELDS = frozenset({"labels", "title", "description", "seen", "kind", "sensitive"})
+
+
+def _str_list(v: Any) -> bool:
+    return isinstance(v, list) and all(isinstance(x, str) for x in v)
+
+
+def _extra_answer_errors(kind: str, ans: dict, base: str) -> list[FieldError]:
+    """`value` / `picks` / `seen` of one answer (an entry, or one by_employer
+    override) checked for its kind. `base` is the dotted path of `ans`."""
+    out: list[FieldError] = []
+    value = ans.get("value")
+    if kind in ("choice", "multi"):
+        if value is not None:
+            out.append(FieldError(f"{base}.value",
+                                  "must be empty for a choice: the answer is in picks"))
+        picks, seen = ans.get("picks"), ans.get("seen")
+        ok = True
+        for name, lst in (("picks", picks), ("seen", seen)):
+            if lst is not None and not _str_list(lst):
+                out.append(FieldError(f"{base}.{name}", "must be a list of option labels"))
+                ok = False
+        if ok:
+            if kind == "choice" and not picks:
+                out.append(FieldError(f"{base}.picks", "must name at least one option"))
+            elif set(picks or []) - set(seen or []):
+                out.append(FieldError(f"{base}.picks", "must be options that are also in seen"))
+        return out
+    if value is None:
+        return out
+    if kind == "yes_no" and not isinstance(value, bool):
+        out.append(FieldError(f"{base}.value", "must be true or false"))
+    elif kind == "text":
+        if not isinstance(value, str):
+            out.append(FieldError(f"{base}.value", "must be text"))
+        elif len(value) > EXTRA_TEXT_MAX:
+            out.append(FieldError(f"{base}.value",
+                                  f"must be at most {EXTRA_TEXT_MAX} characters"))
+    elif kind == "date" and _parse_date(value, EXTRA_DATE_FORMATS) is None:
+        out.append(FieldError(f"{base}.value",
+                              f"must be a date as {_fmt_names(EXTRA_DATE_FORMATS)}"))
+    elif kind == "number" and (isinstance(value, bool)
+                               or not isinstance(value, (int, float))):
+        out.append(FieldError(f"{base}.value", "must be a number"))
+    return out
+
+
+def extra_entry_errors(key: Any, entry: Any) -> list[FieldError]:
+    """Every §6.1 rule for one `extra` entry. Tier 3 skips an entry with any
+    error (questions_design §11), so this is shared with the resolver."""
+    base = f"extra.{key}"
+    if not (isinstance(key, str) and EXTRA_KEY_RE.match(key)):
+        return [FieldError(base, "keys must be lowercase letters, digits and _, "
+                                 "starting with a letter (2-40 characters)")]
+    if not isinstance(entry, dict):
+        return [FieldError(base, "must be a mapping")]
+    out: list[FieldError] = []
+    kind = entry.get("kind")
+    if kind not in EXTRA_KINDS:
+        out.append(FieldError(f"{base}.kind", "must be one of: " + ", ".join(EXTRA_KINDS)))
+    for name in ("title", "description"):
+        v = entry.get(name)
+        if v is not None and not isinstance(v, str):
+            out.append(FieldError(f"{base}.{name}", "must be text"))
+    labels = entry.get("labels")
+    if not (_str_list(labels) and labels and all(x.strip() for x in labels)):
+        out.append(FieldError(f"{base}.labels", "must be a non-empty list of question labels"))
+    sens = entry.get("sensitive")
+    if sens is not None and not isinstance(sens, bool):
+        out.append(FieldError(f"{base}.sensitive", "must be true or false"))
+    if kind not in EXTRA_KINDS:
+        return out
+    out.extend(_extra_answer_errors(kind, entry, base))
+    by_emp = entry.get("by_employer")
+    if by_emp is None:
+        return out
+    if not isinstance(by_emp, dict):
+        out.append(FieldError(f"{base}.by_employer",
+                              "must map employer names to answers"))
+        return out
+    for emp, ans in by_emp.items():
+        where = f"{base}.by_employer.{emp}"
+        if not (isinstance(emp, str) and emp.strip()):
+            out.append(FieldError(f"{base}.by_employer", "employer names must not be empty"))
+        elif not isinstance(ans, dict):
+            out.append(FieldError(where, "must be a mapping with value, picks and seen"))
+        else:
+            out.extend(_extra_answer_errors(kind, ans, where))
+    return out
+
+
+def validate_extra(extra: Any) -> list[FieldError]:
+    """The `extra:` block (§6.1). Absent or empty is fine."""
+    if extra is None:
+        return []
+    if not isinstance(extra, dict):
+        return [FieldError("extra", "must be a mapping")]
+    out: list[FieldError] = []
+    for key, entry in extra.items():
+        out.extend(extra_entry_errors(key, entry))
+    return out
 
 
 # --------------------------------------------------------------------------
@@ -537,6 +691,274 @@ def completeness(profile: dict) -> tuple[int, int]:
     """(filled, needed) over REQUIRED_PATHS + RECOMMENDED_PATHS: the meter."""
     paths = REQUIRED_PATHS + RECOMMENDED_PATHS
     return sum(1 for p in paths if _filled(profile or {}, p)), len(paths)
+
+
+# --------------------------------------------------------------------------
+# The Profile form's schema (F-11, questions_design §3.2): one source of truth
+# --------------------------------------------------------------------------
+
+FORM_KINDS = frozenset({"text", "email", "phone_cc", "digits", "int", "date", "month", "bool",
+                        "enum", "country", "url", "list_text", "list_url", "entries", "salary",
+                        "country_bool_map", "fixed"})
+
+
+@dataclass(frozen=True)
+class FormItem:
+    """One widget of Profile -> Application details. `path` is the full dotted
+    path ("contact.email"); for kind "entries" it is the list ("education") and
+    `sub` holds the fields of one entry, with paths relative to it."""
+    path: str
+    label: str                                   # the exact UI text
+    kind: str                                    # one of FORM_KINDS
+    options: tuple[tuple[str, str], ...] = ()    # (value, label) for enum / fixed
+    help: str = ""
+    sub: tuple["FormItem", ...] = ()
+
+
+@dataclass(frozen=True)
+class FormGroup:
+    id: str
+    title: str
+    items: tuple[FormItem, ...]
+    note: str = ""
+
+
+def _enum_opts(path: str, labels: Optional[dict[str, str]] = None) -> tuple[tuple[str, str], ...]:
+    """(value, label) for an ENUMS path. Without `labels`: "decline" is
+    "Prefer not to say", any other value is capitalised with "_" read as a space."""
+    allowed = ENUMS.get(path) or LIST_ENUMS.get(path) or ()
+    out = []
+    for v in allowed:
+        if labels and v in labels:
+            out.append((v, labels[v]))
+        elif v == "decline":
+            out.append((v, "Prefer not to say"))
+        else:
+            out.append((v, v.replace("_", " ").capitalize()))
+    return tuple(out)
+
+
+_I = FormItem
+_COUNTRY_MAP_HELP = "Your answer for every country. Add a country only if it's different there."
+_LEVELS = {"native": "Native", "fluent": "Fluent", "professional": "Professional",
+           "basic": "Basic"}
+
+FORM: tuple[FormGroup, ...] = (
+    FormGroup("identity", "Name", (
+        _I("identity.legal_first_name", "Legal first name", "text"),
+        _I("identity.legal_last_name", "Legal last name", "text"),
+        _I("identity.preferred_name", "Preferred name", "text"),
+        _I("identity.name_order", "Name order", "enum", _enum_opts(
+            "identity.name_order", {"western": "First name first",
+                                    "surname_first": "Surname first"})),
+        _I("identity.pronouns", "Pronouns", "text"),
+        _I("identity.date_of_birth", "Date of birth", "date"),
+        _I("identity.gender", "Gender", "enum", _enum_opts(
+            "identity.gender", {"male": "Male", "female": "Female",
+                                "non_binary": "Non-binary"})),
+    )),
+    FormGroup("contact", "Contact", (
+        _I("contact.email", "Email for applications", "email",
+           help="Used for every application and site account."),
+        _I("contact.backup_email", "Backup email", "email",
+           help="Used only when a site says the main address already has an account."),
+        _I("contact.phone_country_code", "Phone country code", "phone_cc"),
+        _I("contact.phone_number", "Phone number", "digits"),
+        _I("contact.address_line1", "Address line 1", "text"),
+        _I("contact.address_line2", "Address line 2", "text"),
+        _I("contact.postal_code", "Postal code", "digits"),
+        _I("contact.city", "City", "text"),
+        _I("contact.country", "Country", "country"),
+    )),
+    FormGroup("singapore_status", "Work status", (
+        _I("singapore_status.nationality", "Nationality", "country"),
+        _I("singapore_status.residency_status", "Residency status", "enum", _enum_opts(
+            "singapore_status.residency_status",
+            {"citizen": "Singapore Citizen", "pr": "Singapore Permanent Resident",
+             "foreigner": "Foreigner"})),
+        _I("singapore_status.work_pass", "Work pass", "enum", _enum_opts(
+            "singapore_status.work_pass",
+            {"none_required": "None needed", "ep": "Employment Pass", "s_pass": "S Pass",
+             "dp": "Dependant's Pass", "ltvp_loc": "LTVP with Letter of Consent",
+             "student_pass": "Student's Pass", "other": "Other"})),
+        _I("singapore_status.authorised_to_work", "Right to work", "country_bool_map",
+           help=_COUNTRY_MAP_HELP),
+        _I("singapore_status.requires_sponsorship", "Needs visa sponsorship",
+           "country_bool_map", help=_COUNTRY_MAP_HELP),
+        _I("singapore_status.ns_status", "National Service", "enum", _enum_opts(
+            "singapore_status.ns_status",
+            {"completed": "Completed", "serving": "Serving", "exempted": "Exempted",
+             "not_applicable": "Not applicable"})),
+        _I("singapore_status.ord_date", "ORD date", "month"),
+        _I("singapore_status.race", "Race", "enum", _enum_opts(
+            "singapore_status.race",
+            {"chinese": "Chinese", "malay": "Malay", "indian": "Indian",
+             "eurasian": "Eurasian", "other": "Other"})),
+        _I("singapore_status.race_other", "Race, if other", "text"),
+        _I("singapore_status.religion", "Religion", "text", help="Or leave it as decline."),
+        _I("singapore_status.marital_status", "Marital status", "enum", _enum_opts(
+            "singapore_status.marital_status", {"single": "Single", "married": "Married"})),
+        _I("singapore_status.nric_last4", "NRIC, last 4 characters", "text",
+           help="Only the last 4, such as 123A. Never the full NRIC."),
+    )),
+    FormGroup("us_self_id", "US equal-employment questions", (
+        _I("us_self_id.eeo_gender", "Gender", "enum", _enum_opts("us_self_id.eeo_gender")),
+        _I("us_self_id.eeo_race_ethnicity", "Race or ethnicity", "enum",
+           _enum_opts("us_self_id.eeo_race_ethnicity")),
+        _I("us_self_id.veteran_status", "Veteran status", "enum",
+           _enum_opts("us_self_id.veteran_status")),
+        _I("us_self_id.disability_status", "Disability status", "enum",
+           _enum_opts("us_self_id.disability_status")),
+    )),
+    FormGroup("availability", "Availability", (
+        _I("availability.notice_period_days", "Notice period, in days", "int"),
+        _I("availability.earliest_start_date", "Earliest start date", "date"),
+        _I("availability.willing_to_relocate", "Willing to relocate", "bool"),
+        _I("availability.willing_to_travel_pct", "Willing to travel, % of the time", "int"),
+    )),
+    FormGroup("pay", "Pay", (
+        _I("pay.expected_salary", "Expected salary", "salary",
+           _enum_opts("pay.expected_salary.period",
+                      {"monthly": "per month", "annual": "per year"})),
+        _I("pay.current_salary", "Current salary", "salary",
+           _enum_opts("pay.current_salary.period",
+                      {"monthly": "per month", "annual": "per year"})),
+        _I("pay.months_per_year", "Months of pay per year", "int",
+           help="13 if you count the AWS bonus."),
+    )),
+    FormGroup("education", "Education", (
+        _I("education", "Education", "entries", sub=(
+            _I("institution", "School", "text"),
+            _I("degree", "Degree", "text"),
+            _I("major", "Major", "text"),
+            _I("minor", "Minor", "text"),
+            _I("start", "Start", "month"),
+            _I("end", "End, or expected end", "month"),
+            _I("grade_type", "Grade type", "enum", _enum_opts(
+                "education[].grade_type",
+                {"gpa": "GPA", "cap": "CAP", "honours_class": "Honours class"})),
+            _I("grade", "Grade", "text"),
+            _I("grade_scale", "Out of", "text"),
+        )),
+    )),
+    FormGroup("experience", "Experience", (
+        _I("experience", "Experience", "entries", sub=(
+            _I("employer", "Employer", "text"),
+            _I("title", "Job title", "text"),
+            _I("start", "Start", "month"),
+            _I("end", "End", "month", help="Leave it empty if you still work here."),
+            _I("location", "Location", "text"),
+            _I("description", "What you did", "text"),
+        )),
+    )),
+    FormGroup("skills_languages", "Skills and languages", (
+        _I("skills", "Skills", "list_text"),
+        _I("attested_skills", "Skills you confirmed", "list_text",
+           help="Added when you click “I have this” in the resume tailor."),
+        _I("languages", "Languages", "entries", sub=(
+            _I("language", "Language", "text"),
+            _I("spoken", "Spoken", "enum", _enum_opts("languages[].spoken", _LEVELS)),
+            _I("written", "Written", "enum", _enum_opts("languages[].written", _LEVELS)),
+        )),
+    )),
+    FormGroup("links", "Links", (
+        _I("links.linkedin", "LinkedIn", "url"),
+        _I("links.github", "GitHub", "url"),
+        _I("links.portfolio", "Portfolio", "url"),
+        _I("links.other", "Other links", "list_url"),
+    )),
+    FormGroup("documents", "Files", (
+        _I("documents.resume", "Resume file", "text",
+           help="Leave empty to use data/resume.pdf or data/resume.docx."),
+        _I("documents.transcript", "Transcript file", "text"),
+    )),
+    FormGroup("sourcing", "Sourcing", (
+        _I("sourcing.how_heard_default", "How you heard about a job", "text"),
+    )),
+    FormGroup("consents", "Consents", (
+        _I("consents.privacy_consent",
+           "I consent to employers processing my application data", "bool"),
+        _I("consents.data_retention_consent",
+           "Employers may keep my data for future roles", "bool"),
+        _I("consents.talent_pool_opt_in", "Add me to talent pools", "bool"),
+        _I("consents.certify_true",
+           "I certify the information I give is true and complete", "bool"),
+    )),
+    FormGroup("declarations", "Declarations", (
+        _I("declarations.pep", "Are you a politically exposed person, or a family member "
+                               "or close associate of one?", "bool"),
+        _I("declarations.conflict_audit_independence",
+           "Do you have an audit or independence conflict with an employer?", "bool"),
+        _I("declarations.shareholding_in_company",
+           "Do you hold shares or a financial interest in the employers you apply to?", "bool"),
+        _I("declarations.holdings", "Companies you hold shares in", "list_text"),
+        _I("declarations.relatives_at_company",
+           "Do relatives of yours work at the employers you apply to?", "bool"),
+        _I("declarations.relatives_employers", "Employers where a relative works", "list_text"),
+        _I("declarations.criminal_record",
+           "Have you ever been convicted of a criminal offence?", "bool"),
+        _I("declarations.bankruptcy", "Have you ever been bankrupt?", "bool"),
+        _I("declarations.regulatory_disciplinary",
+           "Have you ever faced regulatory or disciplinary action?", "bool"),
+        _I("declarations.non_compete",
+           "Are you bound by a non-compete or similar agreement?", "bool"),
+        _I("declarations.health_disclosure", "Health questions", "fixed",
+           (("decline", "Always “Prefer not to say”"),)),
+    ), note="Your standing answers. Change any that stop being true."),
+    # Rendered from the profile, not from items: one row per `extra` entry (§3.2
+    # group 15), then every leaf no item above covers, read-only (group 16).
+    FormGroup("extra", "Answers you gave to application questions", ()),
+    FormGroup("other", "Other keys in your file", (),
+              note="These keys aren't in the form. They're kept as they are. "
+                   "Edit them in data/applicant.yaml."),
+)
+
+
+def _under(path: str, paths: Iterable[str]) -> bool:
+    """True when one of `paths` is `path` or lies inside it ("pay.expected_salary"
+    covers "pay.expected_salary.amount")."""
+    return any(p == path or p.startswith(path + ".") for p in paths)
+
+
+def _item_json(item: FormItem, parent: str = "") -> dict:
+    full = f"{parent}[0].{item.path}" if parent else item.path
+    return {
+        "path": item.path, "label": item.label, "kind": item.kind,
+        "options": [{"value": v, "label": lab} for v, lab in item.options],
+        "help": item.help,
+        "required": not parent and _under(item.path, REQUIRED_PATHS),
+        "recommended": not parent and _under(item.path, RECOMMENDED_PATHS),
+        "sensitive": is_sensitive(full),
+        "sub": [_item_json(s, item.path) for s in item.sub],
+    }
+
+
+def form_json() -> list[dict]:
+    """FORM as JSON for the web app, with the required / recommended /
+    sensitive flags computed from REQUIRED_PATHS, RECOMMENDED_PATHS and
+    is_sensitive (never written twice by hand). A group is `sensitive`
+    ("Private") when every item in it is."""
+    out = []
+    for g in FORM:
+        items = [_item_json(i) for i in g.items]
+        out.append({"id": g.id, "title": g.title, "note": g.note, "items": items,
+                    "sensitive": bool(items) and all(i["sensitive"] for i in items)})
+    return out
+
+
+def walk_leaves(value: Any):
+    """(dotted path with [i] indices, leaf value) for every leaf of a profile."""
+    yield from _walk(value)
+
+
+def form_paths() -> list[str]:
+    """Every path FORM covers (entries and maps cover what is inside them)."""
+    return [i.path for g in FORM for i in g.items]
+
+
+def json_safe(value: Any) -> Any:
+    """A JSON-safe deep copy of a profile (YAML dates become ISO text)."""
+    return _plain(value)
 
 
 # --------------------------------------------------------------------------
@@ -594,13 +1016,28 @@ def grounding_text(profile: dict, today: Optional[_dt.date] = None) -> str:
     return "\n".join(lines)
 
 
+_EXTRA_PATH = re.compile(r"^extra\.[^.\[]+\.(?:by_employer\.[^.\[]+\.)?([^.\[]+)")
+
+
+def _is_extra_meta(path: str) -> bool:
+    """True for a leaf under `extra.<key>.<meta>` or `...by_employer.<e>.seen`."""
+    m = _EXTRA_PATH.match(path)
+    return bool(m) and m.group(1) in EXTRA_META_FIELDS
+
+
 def redaction_values(profile: dict) -> list[str]:
     """Strings a log line must never carry (NF-02, NF-09): every string value
     of 3+ characters in the profile, plus the phone and postal code as digits
     only (and the phone with its country code). Longest first, so a scrubber
-    replaces "1 Example Road" before "Example"."""
+    replaces "1 Example Road" before "Example".
+
+    `extra` answers (`value`, `picks`, `by_employer`) are walked; its question
+    metadata (`labels`, `title`, `description`, `seen`, `kind`, `sensitive`) is
+    not: that is employer text, which the job log may show (questions_design §11)."""
     vals: set[str] = set()
-    for _path, v in _walk(profile or {}):
+    for path, v in _walk(profile or {}):
+        if _is_extra_meta(path):
+            continue
         v = _date_text(v)
         if isinstance(v, str) and len(v.strip()) >= 3:
             vals.add(v.strip())
