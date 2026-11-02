@@ -1,0 +1,109 @@
+# A small questions.yaml for the D-75 work-rights oracles (questions_design.md section 8).
+# Tests use this until WP-A04 lands the same two rows in config/questions.yaml; after that
+# tests/test_apply_resolve_rules.py runs the same cases against the real file too.
+# SYNTHETIC: wording only, no personal data. Format: apply_design.md 7.3.1 plus `kind: country_bool`
+# (questions_design 8.2): `key` is one of the two work-rights maps, a match answers from
+# applicant.work_rights(profile, country).
+#
+# Rule for the two rows (questions_design 8.3): the `without ...` phrases belong ONLY to the
+# authorised row, and the sponsorship row carries `exclude: [without]`. No country excludes: the
+# country is detected from the label, not excluded.
+version: 1
+questions:
+  - key: singapore_status.authorised_to_work
+    kind: country_bool
+    sensitive: false
+    synonyms:
+      - authorised to work
+      - authorized to work
+      - legally authorised to work
+      - legally authorized to work
+      - legally entitled to work
+      - legally allowed to work
+      - legally eligible to work
+      - legally able to work
+      - eligible to work
+      - eligible for employment
+      - right to work
+      - work authorisation
+      - work authorization
+      - authorisation to work
+      - authorization to work
+      - permitted to work
+      - allowed to work
+      - entitled to work
+      - work rights
+      - working rights
+      - without sponsorship
+      - without visa sponsorship
+      - without requiring sponsorship
+    exclude: []
+
+  - key: singapore_status.requires_sponsorship
+    kind: country_bool
+    sensitive: false
+    synonyms:
+      - require sponsorship
+      - require visa sponsorship
+      - need sponsorship
+      - need visa sponsorship
+      - visa sponsorship
+      - work visa sponsorship
+      - immigration sponsorship
+      - sponsorship to work
+      - sponsorship for employment
+      - sponsorship now or in the future
+      - now or in the future require
+      - require a work permit
+      - need a work permit
+      - work permit required
+      - require a work visa
+      - need a work visa
+      - work visa required
+      - visa required
+      - require a visa
+      - need a visa
+      - require visa support
+      - visa transfer
+      - require an employment pass
+      - need an employment pass
+      - require a work pass
+      - need a work pass
+      - work pass sponsorship
+    exclude: [without]
+
+  # Unchanged by D-75 (questions_design 8.2, last paragraph): residency and work-pass questions
+  # stay on their own enum rows with `yes_if` entries. Trimmed copies of the config rows.
+  - key: singapore_status.residency_status
+    kind: enum
+    sensitive: true
+    synonyms: [residency status, citizenship status, singapore citizen or permanent resident]
+    value_map:
+      citizen: [singapore citizen, citizen]
+      pr: [permanent resident, singapore pr]
+      foreigner: [foreigner, work pass holder]
+    yes_if:
+      - id: sg_citizen
+        values: [citizen]
+        synonyms: [are you a singapore citizen, are you singapore citizen, singapore citizen]
+        exclude: [or pr, or permanent, citizen pr]
+
+  - key: singapore_status.work_pass
+    kind: enum
+    sensitive: false
+    synonyms: [type of work pass, work pass type]
+    value_map:
+      none_required: [not required, none required, none]
+      ep: [employment pass, ep]
+      s_pass: [s pass]
+    yes_if:
+      - id: holds_ep
+        values: [ep]
+        synonyms: [do you hold an employment pass, do you have an employment pass,
+                   do you hold a valid employment pass, employment pass holder]
+        exclude: [or require]
+
+  - key: availability.notice_period_days
+    kind: number
+    sensitive: false
+    synonyms: [notice period]
