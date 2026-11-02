@@ -1,0 +1,18 @@
+Authentication-Results: mx.google.com;
+       dkim=pass header.i=@greenhouse.io header.s=s1 header.b=Zm9vYmFy;
+       spf=pass (google.com: domain of no-reply@greenhouse.io designates 192.0.2.10 as permitted sender) smtp.mailfrom=no-reply@greenhouse.io;
+       dmarc=pass (p=REJECT sp=REJECT dis=NONE) header.from=greenhouse.io
+From: Northwind Traders Hiring <no-reply@greenhouse.io>
+To: Alex Applicant <alex.applicant@inbox.example>
+Subject: Graduate Data Engineer at Northwind Traders
+Date: Sun, 01 Nov 2026 09:00:00 +0000
+Message-ID: <golden-27@synthetic.test>
+MIME-Version: 1.0
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: 7bit
+
+Hi Alex,
+
+Thank you for your interest. We are no longer accepting applications for the Graduate Data Engineer role.
+
+Northwind Traders Recruiting

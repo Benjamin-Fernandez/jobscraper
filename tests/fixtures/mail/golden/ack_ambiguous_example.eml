@@ -1,0 +1,18 @@
+Authentication-Results: mx.google.com;
+       dkim=pass header.i=@myworkday.com header.s=s1 header.b=Zm9vYmFy;
+       spf=pass (google.com: domain of examplecorp@myworkday.com designates 192.0.2.10 as permitted sender) smtp.mailfrom=examplecorp@myworkday.com;
+       dmarc=pass (p=REJECT sp=REJECT dis=NONE) header.from=myworkday.com
+From: Example Corp <examplecorp@myworkday.com>
+To: Alex Applicant <alex.applicant@inbox.example>
+Subject: Thank you for applying to Example Corp
+Date: Sun, 25 Oct 2026 06:00:00 +0000
+Message-ID: <golden-06@synthetic.test>
+MIME-Version: 1.0
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: 7bit
+
+Dear Alex,
+
+Thank you for applying to Example Corp. We have received your application and will be in touch.
+
+Example Corp Talent Acquisition
