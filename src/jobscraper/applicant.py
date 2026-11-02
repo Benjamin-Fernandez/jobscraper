@@ -170,15 +170,24 @@ _PERIOD_SYNONYMS: dict[str, str] = {
     "year": "annual", "yearly": "annual", "annual": "annual",
     "per_annum": "annual", "pa": "annual",
 }
+# D-87 (A8): the owner's natural "no" for the one disability answer.
+_DISABILITY_SYNONYMS: dict[str, str] = {
+    "none": "no", "nil": "no", "no_disability": "no", "not_disabled": "no",
+}
 ENUM_SYNONYMS: dict[str, dict[str, str]] = {
     "pay.expected_salary.period": _PERIOD_SYNONYMS,
     "pay.current_salary.period": _PERIOD_SYNONYMS,
+    "us_self_id.disability_status": _DISABILITY_SYNONYMS,
 }
 # Any enum that has a "decline" value reads these as "decline" (same key form).
 _DECLINE_SYNONYMS = frozenset({"prefer_not_to_say", "rather_not_say"})
 # A quoted word for a plain boolean field (an unquoted yes/no is already a bool).
 _TRUE_WORDS = frozenset({"yes", "true"})
 _FALSE_WORDS = frozenset({"no", "false"})
+# D-87 (A8): on a standing declaration only, "nothing to declare" reads as false
+# (the owner's default answer). Key form: lower-case, spaces, hyphens, dots and
+# slashes folded ("N/A" -> "na", "not applicable" -> "not_applicable").
+_NOTHING_WORDS = frozenset({"nil", "none", "na", "n_a", "not_applicable"})
 # Month names for "Mar 2020" / "March 2020" (the first three letters, or "sept").
 _MONTH_NAMES: dict[str, int] = {
     name: i for i, names in enumerate(
@@ -197,7 +206,11 @@ BOOLS: tuple[str, ...] = (
     "declarations.shareholding_in_company", "declarations.relatives_at_company",
     "declarations.criminal_record", "declarations.bankruptcy",
     "declarations.regulatory_disciplinary", "declarations.non_compete",
+    "declarations.government_employment",
 )
+# The standing declarations (the BOOLS under `declarations.`): the switches that
+# read "nil" / "none" / "n/a" as false (D-87).
+DECLARATION_BOOLS: tuple[str, ...] = tuple(p for p in BOOLS if p.startswith("declarations."))
 
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[A-Za-z]{2,}$")
 COUNTRY_CODE_RE = re.compile(r"^\+\d{1,3}$")
@@ -333,6 +346,17 @@ def _canon_bool(v: Any) -> Any:
     return v
 
 
+def _canon_declaration_bool(v: Any) -> Any:
+    """`_canon_bool`, plus nil / none / NA / N/A / not applicable -> False: a
+    standing declaration with nothing to declare is a "No" (D-87)."""
+    v = _canon_bool(v)
+    if isinstance(v, str):
+        token = re.sub(r"[\s\-_]+", "_", v.strip().lower()).replace(".", "").replace("/", "")
+        if token.strip("_") in _NOTHING_WORDS:
+            return False
+    return v
+
+
 _YEAR_MONTH_RE = re.compile(r"^(\d{4})/(\d{1,2})$")                 # 2020/03
 _MONTH_YEAR_RE = re.compile(r"^(\d{1,2})/(\d{4})$")                 # 03/2020
 _NAME_YEAR_RE = re.compile(r"^([A-Za-z]{3,9})\.?[\s,\-]*(\d{4})$")  # Mar 2020, March 2020
@@ -415,7 +439,8 @@ def normalise(profile: Any) -> Any:
         _set_at(out, path,
                 lambda v, a=allowed, s=ENUM_SYNONYMS.get(path): _canon_enum(v, a, s))
     for path in BOOLS:
-        _set_at(out, path, _canon_bool)
+        _set_at(out, path,
+                _canon_declaration_bool if path in DECLARATION_BOOLS else _canon_bool)
     for block in ("authorised_to_work", "requires_sponsorship"):
         m = _get(out, f"singapore_status.{block}")
         if isinstance(m, dict):
@@ -1082,7 +1107,8 @@ FORM: tuple[FormGroup, ...] = (
         _I("us_self_id.veteran_status", "Veteran status", "enum",
            _enum_opts("us_self_id.veteran_status")),
         _I("us_self_id.disability_status", "Disability status", "enum",
-           _enum_opts("us_self_id.disability_status")),
+           _enum_opts("us_self_id.disability_status"),
+           help="Used for every disability question, in any country, not only US forms."),
     )),
     FormGroup("availability", "Availability", (
         _I("availability.notice_period_days", "Notice period, in days", "int"),
@@ -1175,7 +1201,13 @@ FORM: tuple[FormGroup, ...] = (
         _I("declarations.regulatory_disciplinary",
            "Have you ever faced regulatory or disciplinary action?", "bool"),
         _I("declarations.non_compete",
-           "Are you bound by a non-compete or similar agreement?", "bool"),
+           "Are you bound by any agreement that limits the work you can do, such as a "
+           "non-compete, non-solicitation, NDA or stock grant terms?", "bool"),
+        _I("declarations.government_employment",
+           "Have you ever worked for the government, public sector or military, not "
+           "counting National Service?", "bool",
+           help="Questions that include National Service use your National Service "
+                "status instead."),
         _I("declarations.health_disclosure", "Health questions", "fixed",
            (("decline", "Always “Prefer not to say”"),),
            fixed_text="Always “Prefer not to say”"),

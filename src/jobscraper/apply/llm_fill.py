@@ -561,6 +561,9 @@ def pick_option(backend, field: PageField, wanted: str, options: Sequence[str], 
     opts = [str(o) for o in options if str(o).strip()]
     if not opts or not str(wanted or "").strip():
         return None
+    det = deterministic_pick(wanted, opts)
+    if det is not None:
+        return det                       # the program's own match: no prompt, nothing sent
     if pick_refused(field, wanted, s_values=s_values, sensitive=sensitive, deny=deny):
         return None
     user = redact("\n".join([
@@ -574,7 +577,38 @@ def pick_option(backend, field: PageField, wanted: str, options: Sequence[str], 
     reply = _one_shot(backend, PICK_SYSTEM, user, fmt, cfg=cfg, stats=stats,
                       keys=[field.field.key], max_tokens=TOKENS_BASE)
     choice = reply.get("choice")
-    return choice if isinstance(choice, str) and choice in opts else None
+    if not (isinstance(choice, str) and choice in opts):
+        return None
+    if guards.skill_list(field) and not names_wanted(choice, wanted):
+        return None                                  # Q-46(b): "PyTorch" is not "Python"
+    return choice
+
+
+_PHONE_CODE = re.compile(r"^\+?\s*(\d{1,4})$")
+
+
+def deterministic_pick(wanted: str, options: Sequence[str]) -> Optional[str]:
+    """Lane R wd_a 02: the one option the program can match on its own, else None. An
+    option equal (normalised) to `wanted` or naming it as its "Category > Leaf" leaf, or
+    for a phone code ("+65") the one option showing that code ("<Country> (+65)"). No
+    model call is made, so the enum-S deny list (which keeps S values out of prompts) does
+    not apply: a country named in a phone-code option is the program's match, not a
+    model-chosen value."""
+    w = norm_label(str(wanted))
+    hits = [o for o in options if w and (norm_label(o) == w
+                                         or norm_label(o.split(" > ")[-1]) == w)]
+    m = _PHONE_CODE.match(str(wanted).strip())
+    if not hits and m:
+        code = re.compile(r"\+\s*" + m.group(1) + r"(?!\d)")
+        hits = [o for o in options if code.search(o)]
+    return hits[0] if len(hits) == 1 else None
+
+
+def names_wanted(choice: str, wanted: str) -> bool:
+    """Q-46(b): a suggestion names the wanted skill when every word of `wanted` occurs as
+    a whole word in it ("Python (Programming Language)" names "Python"; "PyTorch" not)."""
+    want = set(tokens(wanted))
+    return bool(want) and want <= set(tokens(choice.split(" > ")[-1]))
 
 
 def recheck_entry(backend, field: PageField, block: str, *, s_values: Sequence[str],

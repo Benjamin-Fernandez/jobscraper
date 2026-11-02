@@ -553,6 +553,61 @@ def about_other_person(field: FieldLike) -> bool:
     return bool(_phrases_in(OTHER_PERSON, tokens(" ".join(p for p in parts if p))))
 
 
+# Q-46(a): a field inside a past-entry section (a job, a school) is about that entry, so
+# the applicant's own contact/address facts never answer it, with or without an entry
+# group (the reader may not have grouped it).
+ENTRY_SECTION_PHRASES = ("work experience", "experience", "employment", "work history",
+                         "employment history", "education", "academic", "school")
+ADDRESS_WORDS = ("address", "city", "town", "country", "postal", "postcode", "zip",
+                 "street", "location")
+
+
+def in_entry_section(field: FieldLike) -> bool:
+    """Q-46(a): the field sits in a repeated past-entry section (its entry group, its
+    group heading or its section names work experience / education)."""
+    f = _ff(field)
+    parts = [f.section.replace("_", " ")]
+    if isinstance(field, PageField):
+        if field.group:
+            return True
+        parts.append(field.group_title)
+    return bool(_phrases_in(ENTRY_SECTION_PHRASES, tokens(" ".join(p for p in parts if p))))
+
+
+def _own_contact_ref(ref: str) -> bool:
+    """A contact/identity ref or one naming an address part (`contact.city`, ...)."""
+    if ref.startswith(CONTACT_IDENTITY_REFS):
+        return True
+    ns, _, name = ref.partition(":")
+    if ns == "profile" and ("[" in name or name.split(".", 1)[0] in PROFILE_LIST.values()):
+        return False                                 # an entry's own path (experience[1].location)
+    return bool(set(re.split(r"[._\[\]]+", name.lower())) & set(ADDRESS_WORDS))
+
+
+# Q-46(c): "worked here" / "current employee here" answer only a question about THIS
+# employer (it says us / our / here / this company, or names the employer or an alias);
+# "Have you ever worked for the Government?" is not one.
+EMPLOYER_STANDING_REFS = ("standing:worked_here", "standing:current_employee_here")
+THIS_EMPLOYER_RUNS = (("us",), ("our",), ("we",), ("here",), ("this", "company"),
+                      ("this", "employer"), ("this", "organisation"),
+                      ("this", "organization"), ("this", "firm"), ("this", "bank"),
+                      ("this", "group"), ("the", "company"))
+
+
+def names_this_employer(field: FieldLike, rctx: Optional[ResolveContext]) -> bool:
+    """Q-46(c): the label (or its help text) refers to the employer of this application."""
+    f = _ff(field)
+    toks = tokens(f"{f.label} {f.description}")
+    if any(contains_run(toks, list(r)) for r in THIS_EMPLOYER_RUNS):
+        return True
+    names = [rctx.employer_name or ""] + list(rctx.employer_aliases or ()) if rctx else []
+    for n in names:
+        emp = declarations.employer_norm(n).split()
+        if emp and contains_run(toks, emp):
+            return True
+    return False
+
+
 OWN_DETAIL_PATHS = ("identity.legal_first_name", "identity.legal_last_name",
                     "identity.preferred_name", "contact.city")
 
@@ -609,6 +664,10 @@ def relevant(ref: str, field: FieldLike, rules: Any, *, facts: Sequence[Fact] = 
     f = _ff(field)
     if ref.startswith(CONTACT_IDENTITY_REFS) and about_other_person(field):
         return False
+    if _own_contact_ref(ref) and in_entry_section(field):
+        return False                                 # Q-46(a): an entry's Location is not home
+    if ref in EMPLOYER_STANDING_REFS and not names_this_employer(field, rctx):
+        return False                                 # Q-46(c): "worked for the Government"
     ns, _, name = ref.partition(":")
     label_norm = norm_label(f.label)
     if ns == "profile" and rule_match(name, f, rules) is not None:
