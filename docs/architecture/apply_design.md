@@ -1,7 +1,7 @@
 # Auto-apply design (KA-1, KA-2, KA-3)
 
 **Stage B dossier** for PRD F-10–F-12, F-30–F-40, NF-01–NF-09 (`docs/prd.md` r1). Queue Q-04. Author: architect, 2026-11-01.
-**Status:** DRAFT for stage E cross-review; **D-70 delta (Q-22, 2026-11-02): Workday first-class in M20 (§9.4), MyGreenhouse autofill (§9.1.1), Greenhouse label rule (§9.1.2), `yes_if` (§7.3.3), backup email (§10.5, §11.5), `apply open-profile` (§14.1)**. Contracts: `src/jobscraper/apply/contracts.py` (CONTRACT_VERSION 3; v3 is additive, §20.2). ADRs: `adr/0001` (browser route), `adr/0002` (vault), `adr/0003` (automatic submission, fail-closed resolution).
+**Status:** DRAFT for stage E cross-review; **D-70 delta (Q-22, 2026-11-02): Workday first-class in M20 (§9.4), MyGreenhouse autofill (§9.1.1), Greenhouse label rule (§9.1.2), `yes_if` (§7.3.3), backup email (§10.5, §11.5), `apply open-profile` (§14.1)**. **D-74/D-75 delta (Q-30, 2026-11-03): the Profile → Application details form and the applicant API move into M20, plus "Questions from applications" (F-13): capture, `extra:` answers, tier 3 reads them; work-rights `default` keys and the tier-2 kind `country_bool`. All in `questions_design.md`; the sections below point there.** Contracts: `src/jobscraper/apply/contracts.py` (CONTRACT_VERSION 4; v3 and v4 are additive, §20.2). ADRs: `adr/0001` (browser route), `adr/0002` (vault), `adr/0003` (automatic submission, fail-closed resolution), `adr/0005` (answers in the profile file).
 **Inputs:** `docs/research/auto_apply_brief.md` §2, §4–§6, §8; spike report `docs/architecture/spikes/S-1_S-3_browser.md` (folded in below, marked **[S-1]** / **[S-3]**).
 
 Decisions D-50…D-63 are not reopened here. Where this design adds something the PRD does not name, it says so in §20.
@@ -222,7 +222,7 @@ def from_resume(profile_derived: dict, master: dict|None) -> dict   # M21 prefil
 - Overlapping or touching intervals are merged; `experience_months = floor(Σ merged lengths)`; `experience_years = experience_months // 12`. Example: 2024-05 → 2024-08 plus 2024-07 → 2024-12 = one interval 2024-05 → 2024-12 = 8 months.
 - `graduation_year` = the year of the latest `education[].end`, else None.
 
-Saving drops YAML comments; the Profile form is the editor (the template's comments exist for the first hand-fill in M20).
+Saving drops YAML comments; the Profile form is the editor (the template's comments exist for the first hand-fill in M20). Key order is kept (`sort_keys=False`). D-74: before the first save that drops comments, `save` keeps a copy as `data/applicant.commented-backup.yaml`. Saves from the web are guarded by an etag. The optional `extra:` block holds the owner's answers to questions from applications (`questions_design.md` §3.1, §6.1).
 
 ### 5.2 Validation rules (F-11)
 
@@ -244,7 +244,7 @@ Saving drops YAML comments; the Profile form is the editor (the template's comme
 | `singapore_status.nric_last4` | empty or `^\d{3}[A-Z]$` (never a full NRIC: any 9-char NRIC-shaped string anywhere in the file is an error) |
 | `education[]`, `experience[]` | `institution`/`employer` and `title`/`degree` non-empty |
 
-**REQUIRED_PATHS** (auto-apply refuses without them, F-11): `identity.legal_first_name`, `identity.legal_last_name`, `contact.email`, `contact.phone_country_code`, `contact.phone_number`, `contact.city`, `contact.country`, `singapore_status.residency_status`, `singapore_status.authorised_to_work.SG`, `singapore_status.requires_sponsorship.SG`, `availability.notice_period_days`, `availability.earliest_start_date`, `pay.expected_salary.amount`, `education` (≥ 1 entry with institution, degree, end), `consents.privacy_consent`, `consents.certify_true`. Plus a resume file (`documents.resume` or `profile.resume_ingest.find_resume`) — reported as `documents.resume`.
+**REQUIRED_PATHS** (auto-apply refuses without them, F-11): `identity.legal_first_name`, `identity.legal_last_name`, `contact.email`, `contact.phone_country_code`, `contact.phone_number`, `contact.city`, `contact.country`, `singapore_status.residency_status`, ~~`singapore_status.authorised_to_work.SG`~~, ~~`singapore_status.requires_sponsorship.SG`~~ (removed by D-75: always answerable from the country key, then `default`, then the standing answer, `questions_design.md` §8.1), `availability.notice_period_days`, `availability.earliest_start_date`, `pay.expected_salary.amount`, `education` (≥ 1 entry with institution, degree, end), `consents.privacy_consent`, `consents.certify_true`. Plus a resume file (`documents.resume` or `profile.resume_ingest.find_resume`) — reported as `documents.resume`.
 
 **RECOMMENDED_PATHS** (meter only): `contact.address_line1`, `contact.postal_code`, `singapore_status.ns_status`, `singapore_status.race`, `links.linkedin`, `experience`, `skills`, `languages`, `sourcing.how_heard_default`, `identity.date_of_birth`.
 
@@ -290,8 +290,8 @@ singapore_status:
   nationality: SG                    # ISO country code
   residency_status: citizen          # S. citizen | pr | foreigner
   work_pass: none_required           # none_required | ep | s_pass | dp | ltvp_loc | student_pass | other
-  authorised_to_work: {SG: true}     # add other countries a form may ask about, e.g. US: false
-  requires_sponsorship: {SG: false}
+  authorised_to_work: {SG: true, default: true}      # D-75. default: every country you don't list; add exceptions, e.g. US: false
+  requires_sponsorship: {SG: false, default: false}  # D-75. default: every country you don't list
   ns_status: not_applicable          # S. completed | serving | exempted | not_applicable
   ord_date: null                     # S. YYYY-MM, when ns_status is completed or serving
   race: decline                      # S. chinese | malay | indian | eurasian | other | decline
@@ -468,7 +468,7 @@ An `enum` entry may also carry `yes_if` rules for Yes/No labels (§7.3.3).
 
 Selection: for each entry, score = token count of its longest matching synonym, 0 if any `exclude` phrase matches. The highest score wins; a tie between different keys → tier 2 does not answer (note `ambiguous: k1, k2`).
 
-**Minimum content** the researcher MUST provide (keys and kinds; synonyms are theirs): `singapore_status.authorised_to_work.SG` (bool), `singapore_status.requires_sponsorship.SG` (bool), `singapore_status.residency_status` (enum, S; value_map for citizen/pr/foreigner incl. "Singapore Citizen or PR" style options), `singapore_status.nationality` (country), `singapore_status.work_pass` (enum), `singapore_status.ns_status` (enum, S), `singapore_status.race` (enum, S), `identity.gender` (enum, S), `identity.date_of_birth` (date, S), `availability.notice_period_days` (number), `availability.earliest_start_date` (date), `availability.willing_to_relocate` (bool), `availability.willing_to_travel_pct` (number), `pay.expected_salary` (salary), `pay.current_salary` (salary), `education[0].institution` / `.degree` / `.major` / `.end` / `.grade` (text/date), `computed.experience_years` (number), `computed.graduation_year` (number), `links.linkedin` / `links.github` / `links.portfolio` (url), `sourcing.how_heard_default` (text), `consents.certify_true` (bool; "information provided is true", "accurate and complete"), `consents.privacy_consent` (bool), `languages` (text: "English (native), …"), `identity.preferred_name` (text).
+**Minimum content** the researcher MUST provide (keys and kinds; synonyms are theirs): `singapore_status.authorised_to_work` and `singapore_status.requires_sponsorship` (kind `country_bool`, D-75: replace the former `.SG`/`.US` bool rows; rules and minimum synonyms in `questions_design.md` §8.2–§8.3), `singapore_status.residency_status` (enum, S; value_map for citizen/pr/foreigner incl. "Singapore Citizen or PR" style options), `singapore_status.nationality` (country), `singapore_status.work_pass` (enum), `singapore_status.ns_status` (enum, S), `singapore_status.race` (enum, S), `identity.gender` (enum, S), `identity.date_of_birth` (date, S), `availability.notice_period_days` (number), `availability.earliest_start_date` (date), `availability.willing_to_relocate` (bool), `availability.willing_to_travel_pct` (number), `pay.expected_salary` (salary), `pay.current_salary` (salary), `education[0].institution` / `.degree` / `.major` / `.end` / `.grade` (text/date), `computed.experience_years` (number), `computed.graduation_year` (number), `links.linkedin` / `links.github` / `links.portfolio` (url), `sourcing.how_heard_default` (text), `consents.certify_true` (bool; "information provided is true", "accurate and complete"), `consents.privacy_consent` (bool), `languages` (text: "English (native), …"), `identity.preferred_name` (text).
 
 #### 7.3.2 Mapping a profile value onto offered options
 
@@ -521,6 +521,8 @@ An enum key cannot answer a Yes/No question by §7.3.2 ("Are you a Singapore Cit
 **Worked examples** (residency `citizen`): "Are you a Singapore Citizen?" Yes/No → `sg_citizen` (5 tokens) → Yes. "Are you a Singapore Citizen or Permanent Resident?" Yes/No → `sg_citizen` is excluded ("or permanent resident"), `sg_citizen_or_pr` (5 tokens) → Yes; with residency `foreigner` → No. "Singapore Citizen / PR" with options "Singapore Citizen", "Singapore PR", "Foreigner" → not bool-shaped → the plain enum entry and its `value_map` (§7.3.2), unchanged. The researcher adds `yes_if` content to `config/questions.yaml` (WP-A03); `work_pass` and `ns_status` may get rules the same way (e.g. `ns_completed: values [completed]` for "Have you completed National Service?").
 
 ### 7.4 Tier 3: answer memory (confidence 0.95; F-12, M22 writes, M20 reads)
+
+**D-74 (ADR-0005):** tier 3 first reads the profile's `extra:` answers (the owner's answers to questions from applications), matched by normalised label, then by option `picks`, with employer overrides (`questions_design.md` §6.2, `source = "memory:extra.<key>"`). It is also consulted when tier 2 stops on a sensitive no-fit. After that comes the lookup below, unchanged. The `answer_memory` table is frozen: M22's corrections write `extra` instead.
 
 Lookup `(label_norm, field_type, ats)` then `(label_norm, field_type, '*')`. The stored value is JSON: a string, a list (multi), or for choice fields the option label(s); a choice value applies only if an offered option has the same normalised label. `source = "memory:<label_norm>"`. In M20/M21 the table is empty until M22's correction UI writes it; the lookup is built in M20 so the tier order is fixed from the start.
 
@@ -1171,6 +1173,8 @@ Store methods (names fixed; SQL is the engineer's): `create_attempt(job_id, comp
 
 Deleting: an application deleted via Undo does not delete attempts (the audit outlives the Undo); `answers` rows are deleted only with their attempt (no UI for it in M21).
 
+D-74 (Q-block, no `SCHEMA_VERSION` change): tables `questions` and `question_sightings` and their methods, in `questions_design.md` §7. They hold employer text only, never an answer.
+
 ---
 
 ## 14. Interfaces
@@ -1195,6 +1199,8 @@ Deleting: an application deleted via Undo does not delete attempts (the audit ou
 `KINDS += ("apply", "tailor", "mailtest")`. argv: `apply` → `["apply", *job_ids] + (["--dry-run"] if opts.get("dry_run") else [])` (job ids validated against `^[A-Za-z0-9:_-]{1,80}$`, at most 20); `mailtest` → `["mail", "test"]`; `tailor` → tailor design. One job at a time stays the rule: an apply batch blocks a scrape run started from the web until it ends (consequence accepted; caps keep a batch ≤ 10 submissions).
 
 ### 14.3 Web API (M21; routers `web/routers/applicant.py`, `web/routers/apply.py`)
+
+D-74: `GET/PUT /api/applicant` move into **M20** with the extended shape in `questions_design.md` §9.1 (`etag`, `form`, `file`; 409 on a stale etag or an unreadable file), and the new `/api/questions…` endpoints are in §9.2 there. The rows below for `/api/applicant` are superseded by that section.
 
 | Method, path | Request | Response |
 |---|---|---|
@@ -1225,7 +1231,8 @@ Deleting: an application deleted via Undo does not delete attempts (the audit ou
 - **What I told this employer** (Applications detail, F-39): outcome line; resume file sent (name, tailored or original, link to the tailor diff); table Question · Answer · Source (badge: Form field / Your profile / Remembered / Declaration / AI) · Confidence; sensitive answers first under "Personal declarations"; AI answers flagged "written by AI"; screenshots as a thumbnail strip (click to enlarge).
 - **Settings → Apply:** Mode (Automatic submit / Dry run), daily limit, per-employer limit, Show the browser window (headed), CAPTCHA wait seconds, Mailbox (host, port, username, app password field showing "Saved" when set, Test connection).
 - **Settings → Accounts:** table ATS · Site · Email · Created · Verified · In Edge (exported date) · [Copy password]; buttons "Export new passwords for Edge", "I've imported it", "Add an account you already have".
-- **Profile → Application details:** groups in §5.4 order, completeness meter "N of M needed details filled", "From resume, check" chips, sensitive groups marked "Never sent to the AI", Declarations as Yes/No switches with the plain question text, inline error per field from the 422 response.
+- **Profile → Application details** (**M20 by D-74**; the full spec and copy are in `questions_design.md` §3, §10, which supersede this bullet): groups in §5.4 order, completeness meter "N of M needed details filled", "From resume, check" chips, sensitive groups marked "Never sent to the AI", Declarations as Yes/No switches with the plain question text, inline error per field from the 422 response.
+- **Attempt panel, D-74 addition (M21, WP-W6):** on a `failed(unanswerable_required)` attempt, link "Answer it in Profile" and, once its questions are answered, **Retry** (the same `POST /api/questions/retry`).
 
 ---
 
@@ -1300,7 +1307,8 @@ paths:
 |---|---|
 | F-10 | §5.1, §5.3, §5.4 (incl. D-55 declarations), §5.5 |
 | F-11 | §5.2, §12.1 (1), §14.3 `/api/applicant`, §14.4 Profile |
-| F-12 | §7.4, §13 `answer_memory`, §14.3 correct (M22) |
+| F-12 | §7.4, §13 `answer_memory`, §14.3 correct (M22); D-74: tier 3 reads `extra` (`questions_design.md` §6, ADR-0005) |
+| F-13 (proposed, D-74) | `questions_design.md` §4–§10 |
 | F-30 | §3, §12, §14.1, §14.2, §14.3 `POST /api/apply`, §14.4 Inbox |
 | F-31 | §6, §9.0, §9.1 plan, §9.1.2, §9.4.1 |
 | F-32 | §7 (tiers, schemas, grounding, recording), §7.3.3 `yes_if` |
@@ -1343,9 +1351,11 @@ Integration order: P and T first (no browser); B builds against the contracts wi
 
 Dev rule (NF-08): every lane runs against a copied DB, web on port 8768; real Greenhouse pages only in `--dry-run` until the owner triggers the one M20 submission.
 
+**D-74/D-75 (Q-30):** two more M20 lanes. **Q** (Python: D-75 work rights, applicant API, tier-3 `extra`, capture module, store Q-block, `/api/questions`, then the `apply_flow` Q-block after lane B merges) and **U** (Vue: Application details form, Questions from applications). Lane U runs in the slot lane V frees while V waits on S-5 and lane B. WPs are in `apply_build_plan.md` §2.5; the design is in `questions_design.md`.
+
 ### 19.2 M21 (preview; the planner splits it)
 
-Lane V moved to M20 (D-70); M21 keeps only `apply/edge_save.ps1` (sync route) from it. Lane L: Lever + Ashby adapters. Lane W: web routers `applicant.py`/`apply.py` + Vue (Profile form, attempt panel, audit view, Settings → Apply/Accounts). The tailor LLM layer is its own lane per the tailor design.
+Lane V moved to M20 (D-70); M21 keeps only `apply/edge_save.ps1` (sync route) from it. Lane L: Lever + Ashby adapters. Lane W: web router `apply.py` + Vue (attempt panel, audit view, Settings → Apply/Accounts); the applicant router and the Profile form moved to M20 lanes Q and U (D-74, `apply_build_plan.md` §2.5); `applicant init` stays M21 (WP-W1b). The tailor LLM layer is its own lane per the tailor design.
 
 ---
 
@@ -1372,6 +1382,8 @@ Lane V moved to M20 (D-70); M21 keeps only `apply/edge_save.ps1` (sync route) fr
 - D-69 (tester testability items): no `submitting → failed` and no `failed` after the click (ADR-0004, contract v2: `POST_CLICK_STATES`, `can_transition(..., clicked=)`, `verifying_email → submitted_unconfirmed`); apostrophes kept in `norm_label`, wider decline phrases; declaration `current_employee_at_company`; signatures `resolve.load_rules(path)`, `declarations.AMBIGUOUS`, `store.reap_attempts(now)`, `apply_flow.run(..., http=None, browser_factory=None)`, `computed_facts(profile, today: date)`; fixture paths `tests/fixtures/apply/...`.
 - D-68 (planner gaps A-1..A-4): alias groups in `ResolveContext` for grounding rule 3; resume-text source decided by `apply_flow`; CLI `apply show`; `experience_months` defined as a merged-interval union (§5.1). Contract change is additive (two new `ResolveContext` fields with defaults).
 - D-70 (contract v3, additive: `AnswerSource`, `PrefillPolicy`, `PREFILL_POLICY`, `AnswerStatus.PREFILLED`, `AccountStatus`, `SignUpOutcome`, `WorkdayEntry`, `EMPLOYER_SPECIFIC_DECLARATIONS`, `ALWAYS_OURS`, `ResolveContext.account_email`, `AttemptContext.applied_on_tenant`/`prefill`, adapter methods `prefill` and `read_values`, transition `signing_up → signing_up`). No ADR: nothing existing changes meaning; the two new protocol methods are required of every adapter (Greenhouse implements them in WP-B11).
+- D-74 (contract v4, additive: `QuestionKind`, `QuestionReason`, `QuestionStatus`, `CapturedQuestion`, `EXTRA_KEY_PATTERN`, `ResolveContext.job_country`; new `unanswerable_required` hint copy). Answers to captured questions live in `data/applicant.yaml` `extra:` (ADR-0005); tier 3 reads them and is now also consulted when tier 2 stops on a sensitive no-fit (the owner's explicit answer); unknown answers carry the matched tier-2 key in `rule_id`. The `answer_memory` table is frozen. Applicant API and Profile form moved M21 → M20. No new reason code: a stopped attempt keeps `unanswerable_required` and is retried as a new attempt.
+- D-75: work-rights maps take a `default` key; the standing answer (authorised, no sponsorship) applies when absent; the two `.SG` paths leave `REQUIRED_PATHS`; tier-2 kind `country_bool` answers any country (no fall-through to tier 5); the tier-5 prompt and grounding corpus always carry `work_rights_text` (`questions_design.md` §8).
 - D-70 deliberate exception to "fill only the empty fields" under MyGreenhouse: the resume, the email, single checkboxes and employer-specific declarations are always JobScraper's (§9.1.1) — a saved answer from another application must not stand in for "Have you worked for <this employer>?".
 - D-70: on Workday a required field the resolver cannot answer fails the attempt even when the site (or our last application) shows a value (fail closed, ADR-0003).
 - Tier-5 choice answers need two agreeing runs and a verbatim evidence quote (stricter than F-32's "one of the offered options").
