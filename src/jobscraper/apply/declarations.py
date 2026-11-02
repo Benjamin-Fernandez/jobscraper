@@ -264,7 +264,22 @@ def _strip_ns_exclusions(toks: list[str]) -> list[str]:
     return [t for i, t in enumerate(toks) if i not in dropped]
 
 
-def classify_all(label_norm: str, description_norm: str = ""
+def _names_employer(label_toks: list[str], employer_names: Iterable[str]) -> bool:
+    """D-89: the label names THIS employer: the token "us" or "our", or a run of
+    label tokens that `company_match`es the employer or one of its aliases."""
+    if "us" in label_toks or "our" in label_toks:
+        return True
+    for name in employer_names:
+        width = len(_company_tokens(name or ""))
+        for i in range(len(label_toks) if width else 0):
+            for j in range(i + 1, min(len(label_toks), i + width + 2) + 1):
+                if company_match(" ".join(label_toks[i:j]), name):
+                    return True
+    return False
+
+
+def classify_all(label_norm: str, description_norm: str = "",
+                 employer_names: Iterable[str] = ()
                  ) -> tuple[frozenset[DeclarationLabel], bool]:
     """(classes, unsure): every declaration class a question matches (§7.5,
     D-87), and whether it is a government-employment question that cannot be
@@ -276,7 +291,11 @@ def classify_all(label_norm: str, description_norm: str = ""
        inside a longer span matched by another class ("worked for the
        government" beats prior employment's "worked for"; "senior government
        official" is a PEP question, not a government-employment one). D-89:
-       prior / current employment also lose to a government span they overlap.
+       prior / current employment also lose to a government span they share a
+       token with, unless the label names this employer (the token "us" or
+       "our", or a run that company-matches one of `employer_names`: the
+       employer and its aliases). Callers that pass no names get the drop
+       without the exception.
     3. "Current" and "prior" employee together resolve by D-69 precedence.
     4. The government/NS rule on `government_employment` (see _MILITARY).
     5. A disability label that is also about veterans, gender, race, religion
@@ -288,13 +307,15 @@ def classify_all(label_norm: str, description_norm: str = ""
         spans = _spans(label_toks if lab is L.DISABILITY else text, phrases)
         if spans:
             found[lab] = spans
-    gov_spans = found.get(L.GOVERNMENT_EMPLOYMENT, [])
+    # D-89: the overlap drop is off when the label names this employer.
+    gov_spans = [] if _names_employer(label_toks, tuple(employer_names)) \
+        else found.get(L.GOVERNMENT_EMPLOYMENT, [])
 
     def covered(lab: DeclarationLabel, a1: int, b1: int) -> bool:
         # R1: inside a longer span of another class. D-89: for the two employer
-        # classes, also overlapping a government span ("Have you worked for the
-        # government?": prior's "have you worked" sticks out of "worked for the
-        # government"); a question that names the employer has no such span.
+        # classes, also sharing a token with a government span ("Have you worked
+        # for the government?": prior's "have you worked" sticks out of "worked
+        # for the government").
         if any(other is not lab and b2 - a2 > b1 - a1 and a2 <= a1 and b1 <= b2
                for other, others in found.items() for a2, b2 in others):
             return True
@@ -323,8 +344,10 @@ def classify_all(label_norm: str, description_norm: str = ""
     return frozenset(hits), unsure
 
 
-def classify(label_norm: str, description_norm: str = ""):
+def classify(label_norm: str, description_norm: str = "", employer_names: Iterable[str] = ()):
     """The declaration class of a question (§7.5), AMBIGUOUS, or None.
+    `employer_names` (the employer and its aliases) is the D-89 exception; see
+    `classify_all`.
 
     Built on `classify_all`. (The tier-2 rule that a one-word phrase needs a
     label of 4 tokens or fewer is not applied here: attestations are long
@@ -332,7 +355,7 @@ def classify(label_norm: str, description_norm: str = ""):
     Unsure -> AMBIGUOUS; exactly one class -> it; several -> AMBIGUOUS (the
     agreement rule in `answer` may still settle it); none -> AMBIGUOUS when
     the label carries an attestation marker, else None."""
-    hits, unsure = classify_all(label_norm, description_norm)
+    hits, unsure = classify_all(label_norm, description_norm, employer_names)
     if unsure:
         return AMBIGUOUS
     if len(hits) == 1:
@@ -471,7 +494,8 @@ def _agreed(f: FormField, ctx: ResolveContext):
     `disability`."""
     if f.type is FieldType.CHECKBOX:
         return None
-    classes, unsure = classify_all(norm_label(f.label), norm_label(f.description))
+    classes, unsure = classify_all(norm_label(f.label), norm_label(f.description),
+                                   (ctx.employer_name, *ctx.employer_aliases))
     if unsure or len(classes) < 2 or not classes <= STANDING_DECLARATIONS:
         return None
     values = {truth(c, ctx.profile, ctx.employer_name, ctx.employer_aliases,

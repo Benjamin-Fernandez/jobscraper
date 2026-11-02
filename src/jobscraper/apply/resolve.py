@@ -824,7 +824,11 @@ def _field_map_value(c: Canonical, f: FormField, ctx: ResolveContext) -> Optiona
         v = pv("sourcing.how_heard_default")
         if f.type in CHOICE_TYPES:
             got = fit_text(f, v) if not _blank(v) else None
-            if got:
+            # on a listed choice the text counts only when it is an offered option (lane R
+            # wd_a 02); else the career/website match below maps it, or nothing does (G2e)
+            if got and (not f.options or any(norm_label(str(got[0])) in
+                                             (norm_label(o.label), norm_label(o.value))
+                                             for o in f.options)):
                 return got
             hits = _match_options(f, ["career", "careers", "website"])
             if not hits:
@@ -1125,7 +1129,8 @@ def _memory_answer(f: FormField, label_norm: str, ctx: ResolveContext,
 def _tier4(f: FormField, label_norm: str, ctx: ResolveContext):
     """Declarations (§7.5). Returns (Answer or None, is_attestation). A
     classified field always gets its final Answer here (never tier 5)."""
-    label = declarations.classify(label_norm, norm_label(f.description))
+    label = declarations.classify(label_norm, norm_label(f.description),
+                                  (ctx.employer_name, *ctx.employer_aliases))
     if label is None:
         return None, False
     return declarations.answer(label, f, ctx), True
@@ -1233,7 +1238,8 @@ MONTHS = ("january", "february", "march", "april", "may", "june", "july", "augus
           "september", "october", "november", "december")
 WEEKDAYS = ("monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday")
 CAPITAL_ALLOW = frozenset({"i", "i'm", "i've", "singapore", "english", *MONTHS, *WEEKDAYS})
-_WORD = re.compile(r"[A-Za-z][A-Za-z0-9]*(?:['’][A-Za-z]+)?")
+# A word, with C++ / C# / .NET-style tokens kept whole (Q-35 G3: "C++" is not "word C").
+_WORD = re.compile(r"(?:(?<![^\s(/,])\.)?[A-Za-z][A-Za-z0-9]*(?:\+\+|#)?(?:['’][A-Za-z]+)?")
 
 
 def corpus_norm(text: str) -> str:
@@ -1354,7 +1360,7 @@ def grounded(kind: str, reply: dict, ctx: ResolveContext, *, n_options: int = 0,
         if pos and re.search(r"[.!?]\s*$|[\r\n]", between):
             sentence_start = True
         w = m.group(0)
-        if w[0].isupper() and not sentence_start and w.lower().replace("’", "'") \
+        if w.lstrip(".")[0].isupper() and not sentence_start and w.lower().replace("’", "'") \
                 not in CAPITAL_ALLOW and not _has_word(cnorm, w):
             v.append(f"word {w}")
         sentence_start = False

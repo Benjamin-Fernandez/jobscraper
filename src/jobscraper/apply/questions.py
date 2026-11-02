@@ -217,13 +217,8 @@ _INDEX = re.compile(r"\[\d+\]")
 
 # D-86 interim (review F9): until a compose WP exists (Q-45), a required cover letter or
 # "why join" text the program can't fill stops the attempt and is captured per job with
-# reason `compose_needed`, so the owner sees why. contracts v5 has no such QuestionReason
-# yet (requested from the architect); until it lands the row says `no_rule` and the
-# note starts "compose_needed".
-try:
-    COMPOSE_NEEDED = QuestionReason("compose_needed")
-except ValueError:
-    COMPOSE_NEEDED = QuestionReason.NO_RULE
+# reason `compose_needed` (contracts v5, llm_fill_design §19), so the owner sees why.
+COMPOSE_NEEDED = QuestionReason.COMPOSE_NEEDED
 COMPOSE_NOTE = "compose_needed"
 _COVER = re.compile(r"\bcover\s*letter\b|\bmotivation(al)?\s+letter\b", re.I)
 _MOTIVE = re.compile(r"\bwhy\b.{0,60}\b(join|work|apply|applying|interested|want|choose|chose)\b"
