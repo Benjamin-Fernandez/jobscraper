@@ -207,10 +207,13 @@ BOOLS: tuple[str, ...] = (
     "declarations.criminal_record", "declarations.bankruptcy",
     "declarations.regulatory_disciplinary", "declarations.non_compete",
     "declarations.government_employment",
+    "declarations.willing_to_sign_nda",     # D-91: unset (null) = ask; never defaults to false
 )
 # The standing declarations (the BOOLS under `declarations.`): the switches that
-# read "nil" / "none" / "n/a" as false (D-87).
-DECLARATION_BOOLS: tuple[str, ...] = tuple(p for p in BOOLS if p.startswith("declarations."))
+# read "nil" / "none" / "n/a" as false (D-87). `willing_to_sign_nda` is a
+# willingness answer, not a "no ties" fact: "nil" is not "No" there (D-91).
+DECLARATION_BOOLS: tuple[str, ...] = tuple(
+    p for p in BOOLS if p.startswith("declarations.") and p != "declarations.willing_to_sign_nda")
 
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[A-Za-z]{2,}$")
 COUNTRY_CODE_RE = re.compile(r"^\+\d{1,3}$")
@@ -1203,6 +1206,11 @@ FORM: tuple[FormGroup, ...] = (
         _I("declarations.non_compete",
            "Are you bound by any agreement that limits the work you can do, such as a "
            "non-compete, non-solicitation, NDA or stock grant terms?", "bool"),
+        _I("declarations.willing_to_sign_nda",
+           "Are you willing to sign an employer's NDA or confidentiality agreement?", "bool",
+           nullable=True,
+           help="Leave it unset to be asked each time. Only questions about an NDA or "
+                "confidentiality agreement use this; never a non-compete."),
         _I("declarations.government_employment",
            "Have you ever worked for the government, public sector or military, not "
            "counting National Service?", "bool",

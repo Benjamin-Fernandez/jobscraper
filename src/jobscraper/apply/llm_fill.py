@@ -584,7 +584,7 @@ def pick_option(backend, field: PageField, wanted: str, options: Sequence[str], 
     return choice
 
 
-_PHONE_CODE = re.compile(r"^\+?\s*(\d{1,4})$")
+_PHONE_CODE = re.compile(r"^\+\s*(\d{1,4})$")      # the "+" is required: bare digits are not a code (review F9)
 
 
 def deterministic_pick(wanted: str, options: Sequence[str]) -> Optional[str]:

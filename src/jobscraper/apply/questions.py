@@ -184,7 +184,7 @@ def capture(fields: Sequence[FormField], answers: Mapping[str, Answer], ctx: Res
                 or f.type in NOT_CAPTURED_TYPES:
             continue
         label_norm = norm_label(f.label)
-        decl = declarations.classify(label_norm, norm_label(f.description))
+        decl = declarations.classify_field(f, ctx)
         if decl in EMPLOYER_SPECIFIC_DECLARATIONS:
             continue
         reason, target = _reason(f, a, ctx, rule_keys, decl)
@@ -335,7 +335,7 @@ def capture_page(fields: Sequence[Any], answers: Mapping[str, Answer], ctx: Reso
             continue
         if f.type in NOT_CAPTURED_TYPES:
             continue
-        decl = declarations.classify(norm_label(f.label), norm_label(f.description))
+        decl = declarations.classify_field(f, ctx)
         if decl in EMPLOYER_SPECIFIC_DECLARATIONS:
             continue
         label_norm = qualified_label(f.label, f.description, pf.context, step=f.step,

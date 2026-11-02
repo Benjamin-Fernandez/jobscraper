@@ -638,6 +638,21 @@ def skill_list(pf: PageField) -> bool:
         not pf.options_complete or bool(set(tokens(pf.field.label)) & set(SKILL_WORDS)))
 
 
+# Review F6: a 1-2 letter or common-word skill is no skill when it is just a word in prose
+# ("R&D", "Series C", "go-to-market", "excel in teamwork"). Such a name is grounded only by
+# the profile / attested skills or by a skills-list context in the quote.
+AMBIGUOUS_SKILL_WORDS = frozenset({"go", "r", "c", "word", "excel", "swift", "spark", "rust",
+                                   "scala", "office", "ruby", "flask", "dash", "pandas"})
+
+
+def _in_skill_list(evidence: str, name: str) -> bool:
+    """`name` is one element of a comma / slash / semicolon / bullet separated list of at
+    least two elements in `evidence` (a resume skills line), not a word in a sentence."""
+    parts = [norm_label(p) for p in re.split(r"[,;/|\u2022\n]+", evidence or "")]
+    parts = [p for p in parts if p]
+    return len(parts) >= 2 and name in parts
+
+
 def ground_items(rctx: ResolveContext, items: Sequence[Any], evidence: str) -> list[Any]:
     """Q-46(b): the listed items that stand on their own, in order. An item is kept when
     it (or a member of its alias group) is a profile skill or attested skill, or occurs
@@ -655,7 +670,12 @@ def ground_items(rctx: ResolveContext, items: Sequence[Any], evidence: str) -> l
             continue
         names = next(({norm_label(t) for t in g} for g in rctx.alias_groups
                       if any(norm_label(t) == name for t in g)), {name})
-        ok = bool(names & known) or any(n and contains_run(ev, n.split()) for n in names)
+        if bool(names & known):
+            ok = True
+        elif len(name) <= 2 or name in AMBIGUOUS_SKILL_WORDS:
+            ok = any(n and _in_skill_list(evidence, n) for n in names)
+        else:
+            ok = any(n and contains_run(ev, n.split()) for n in names)
         toks = set(name.split())
         if ok and not any(k <= toks for k in kept_toks):
             kept.append(item)
@@ -733,7 +753,7 @@ def _keep_field(c: _Ctx, pf: PageField, d: ModelDecision) -> Answer:
             return _answer_unknown(pf, "G7: sensitive question", sensitive=True)
         return _model_row(c, pf, pf.shown, src, conf=CONF_KEEP_GROUNDED, tier=AnswerTier.NONE,
                           status=AnswerStatus.PREFILLED, sensitive=True)
-    decl = declarations.classify(norm_label(pf.field.label), norm_label(pf.field.description))
+    decl = declarations.classify_field(pf.field, c.rctx)
     trusted = (pf.origin in TRUSTED_ORIGINS and pf.field.type is not FieldType.TEXTAREA
                and not COVER_RE.search(pf.field.label) and not _always_ours(pf)
                and decl not in EMPLOYER_SPECIFIC_DECLARATIONS

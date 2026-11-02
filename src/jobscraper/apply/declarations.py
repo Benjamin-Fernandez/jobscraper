@@ -17,6 +17,7 @@ carry the same standing answer gets that answer (the agreement rule).
 """
 from __future__ import annotations
 
+import re
 from typing import Any, Iterable, Optional
 
 from .contracts import (
@@ -226,7 +227,32 @@ _NEGATIVE_ATTESTATIONS = (
     ("i", "am", "not"), ("i", "am", "neither"), ("i", "am", "free", "of"),
     ("i", "am", "free", "from"), ("i", "do", "not", "have"), ("i", "don't", "have"),
     ("i", "have", "not"), ("i", "haven't"), ("i", "have", "never"), ("i", "have", "no"),
-    ("i", "was", "not"), ("i", "wasn't"), ("i", "had", "no"), ("i", "hold", "no"))
+    ("i", "was", "not"), ("i", "wasn't"), ("i", "had", "no"), ("i", "hold", "no"),
+    ("i'm", "not"), ("i", "do", "not", "hold"), ("i", "don't", "hold"),
+    ("i", "am", "under", "no"), ("there", "is", "no"), ("there", "are", "no"))
+# D-91: a "freedom" form answers the INVERTED value when it is the only negation and
+# directly governs the matched class phrase ("Are you free from any restrictive
+# covenants?" -> Yes when the owner is bound by none). Any other negation: unknown.
+_FREEDOM_RUNS = (("free", "from"), ("free", "of"), ("clear", "of"), ("clear", "from"),
+                 ("unrestricted", "by"), ("unencumbered", "by"), ("not", "bound", "by"),
+                 ("not", "subject", "to"), ("not", "party", "to"))
+_FREEDOM_FILLER = frozenset({"any", "a", "an", "the", "all", "such", "other", "existing",
+                             "current", "prior", "previous", "of", "or", "and", "either"})
+# D-91 nda_willingness: the only object a willingness frame may have and still be answered,
+# and the consent verbs that make it a consent question (never object / read / understand).
+_NDA_OBJECTS = (("nda",), ("ndas",), ("non", "disclosure"), ("nondisclosure",),
+                ("confidentiality", "agreement"), ("confidentiality", "agreements"),
+                ("confidentiality", "obligation"), ("confidentiality", "obligations"))
+_NDA_CONSENT = frozenset({"willing", "willingness", "agree", "agrees", "consent", "consents",
+                          "accept", "accepts", "comply", "abide", "prepared", "comfortable",
+                          "sign", "signing"})
+_NDA_CONSENT_RUNS = (("able", "to", "sign"), ("will", "you", "sign"), ("would", "you", "sign"),
+                     ("can", "you", "sign"), ("happy", "to"), ("open", "to"))
+# Disability, status frames only (D-90 (5)).
+_DISABILITY_FRAMES = (("do", "you", "have"), ("have", "you", "ever", "had"),
+                      ("are", "you", "a", "person", "with"), ("do", "you", "consider", "yourself"),
+                      ("do", "you", "identify", "as"), ("disability", "status"),
+                      ("have", "a", "disability"), ("are", "you", "disabled"))
 # (a bare "I do not ..." is not one: "I do not wish to disclose ..." is no statement
 # about the profile value, D-90a)
 _POSITIVE_ATTESTATIONS = (("i", "am"), ("i", "have"), ("i", "hold"), ("i", "was"), ("i", "had"))
@@ -236,13 +262,13 @@ _DISABILITY_OFF_FRAME = frozenset({
     "accommodation", "accommodations", "accommodate", "adjustment", "adjustments", "adjust",
     "prevent", "prevents", "limit", "limits", "affect", "affects", "perform", "performing",
     "comfortable", "require", "requires", "need", "needs", "assistance", "support",
-    "wish", "disclose"})
+    "arrangement", "arrangements", "wish", "disclose"})
 # This employer (D-90 (4), Q-46c): a prior / current employment class applies only
 # to a label that names it. Lower-case "us", never the country "US".
 THIS_EMPLOYER_RUNS = (("us",), ("our",), ("we",), ("here",), ("this", "company"),
                       ("this", "employer"), ("this", "organisation"),
                       ("this", "organization"), ("this", "firm"), ("this", "bank"),
-                      ("this", "group"), ("the", "company"))
+                      ("this", "group"), ("the", "company"), ("the", "employer"))
 
 # The employer-independent classes (D-87 agreement rule): each is a plain
 # `declarations.<label>` fact, so several of them on one question can be
@@ -350,6 +376,12 @@ def names_employer(toks: list[str], employer_names: Iterable[str] = (), raw: str
     return False
 
 
+def names_this_employer(label_raw: str, employer_names: Iterable[str] = ()) -> bool:
+    """D-90 (4): `names_employer` for raw label text (the shared Q-46c / tier-4 test).
+    An upper-case "US" is the country."""
+    return names_employer(norm_label(label_raw or "").split(), employer_names, label_raw or "")
+
+
 def employer_names_of(ctx: Optional[ResolveContext]) -> tuple[str, ...]:
     """The employer and its aliases, the `employer_names` of every caller."""
     if ctx is None:
@@ -434,12 +466,37 @@ def classify_all(label_norm: str, description_norm: str = "",
         hits.add(L.GOVERNMENT_EMPLOYMENT)
     if L.DISABILITY in hits and _DISABILITY_COMPANIONS & set(label_toks):
         unsure = True
-    if L.DISABILITY in hits and _DISABILITY_OFF_FRAME & set(label_toks):
+    if L.DISABILITY in hits and (
+            _DISABILITY_OFF_FRAME & set(label_toks) or _has_run(label_toks, ("working", "with"))
+            or not (len(label_toks) <= 3
+                    or any(_has_run(label_toks, r) for r in _DISABILITY_FRAMES))):
         hits.discard(L.DISABILITY)
         unsure = True
     if hits and _willing(label_toks):
-        unsure = True
+        if L.NON_COMPETE in hits and _nda_consent(label_toks, found.get(L.NON_COMPETE, [])):
+            hits.discard(L.NON_COMPETE)          # D-91: the one exempt object
+            hits.add(L.NDA_WILLINGNESS)
+        else:
+            unsure = True
     return frozenset(hits), unsure
+
+
+def _nda_consent(label_toks: list[str], non_compete_spans: list[tuple[int, int]]) -> bool:
+    """D-91: a consent / willingness question whose ONLY restrictive-agreement object
+    is an NDA / confidentiality agreement or obligation. Not: another object (non
+    compete, non solicit, stock terms), an objection / read / understand / acknowledge
+    frame, or any negation."""
+    nda = _spans(label_toks, _NDA_OBJECTS)
+    if not nda or any(not any(a >= s and b <= e for s, e in nda)
+                      for a, b in non_compete_spans if a < len(label_toks)):
+        return False
+    words = set(label_toks)
+    if (_WILLINGNESS & words) - _NDA_CONSENT:
+        return False
+    if not ((_NDA_CONSENT - {"sign", "signing"}) & words
+            or any(_has_run(label_toks, r) for r in _NDA_CONSENT_RUNS)):
+        return False
+    return not negated_question(" ".join(label_toks))
 
 
 def classify(label_norm: str, description_norm: str = "", employer_names: Iterable[str] = (),
@@ -572,6 +629,10 @@ def truth(label: DeclarationLabel, profile: dict, employer: str,
         return bool(decl.get(label.value, False))
     if label is L.DISABILITY:
         return _disability(profile)
+    if label is L.NDA_WILLINGNESS:
+        # D-91: a willingness ANSWER, not a "no ties" fact: unset stays None (unknown).
+        v = decl.get("willing_to_sign_nda")
+        return v if isinstance(v, bool) else None
     if label is L.SHAREHOLDING:
         return bool(decl.get("shareholding_in_company")) or any(
             _matches_employer(str(h), employer, aliases) for h in decl.get("holdings") or [])
@@ -620,13 +681,28 @@ def answer(label, f: FormField, ctx: ResolveContext) -> Answer:
         classes, value = agreed
         name = "+".join(sorted(c.value for c in classes))
         return _bool_answer(f, name, value, note=f"agreed: {name}")
+    gate = _field_gate(f)                    # D-90 gate 1: the field can carry a Yes/No
+    if gate:
+        return _ended(f, label.value, gate)
     if label is L.HEALTH:
         return _health_answer(f)
     value = truth(label, ctx.profile, ctx.employer_name, ctx.employer_aliases,
                   ctx.previously_applied)
     if label is L.DISABILITY:
         return _disability_answer(f, value)
-    return _bool_answer(f, label.value, value)
+    return _bool_answer(f, label.value, value, cls=label)
+
+
+def _field_gate(f: FormField) -> str:
+    """D-90 gate 1 (review F2): a declaration goes only onto a dropdown / radio, a
+    single checkbox, or a TEXT / TYPEAHEAD box whose label opens like a question;
+    never a TEXTAREA, a multi-select or any other type. "" = fine, else the note."""
+    if f.type in (FieldType.DROPDOWN, FieldType.RADIO, FieldType.CHECKBOX):
+        return ""
+    if f.type in (FieldType.TEXT, FieldType.TYPEAHEAD) \
+            and _starts_as_question(norm_label(f.label).split()):
+        return ""
+    return "not a yes/no question"
 
 
 def _agreed(f: FormField, ctx: ResolveContext):
@@ -639,7 +715,7 @@ def _agreed(f: FormField, ctx: ResolveContext):
     if f.type is FieldType.CHECKBOX:
         return None
     classes, unsure = classify_all(norm_label(f.label), norm_label(f.description),
-                                   (ctx.employer_name, *ctx.employer_aliases))
+                                   employer_names_of(ctx), raw_label=f.label or "")
     if unsure or len(classes) < 2 or not classes <= STANDING_DECLARATIONS:
         return None
     values = {truth(c, ctx.profile, ctx.employer_name, ctx.employer_aliases,
@@ -654,20 +730,74 @@ def _answer(f: FormField, name: str, fit, note: str = "") -> Answer:
                   option_labels=tuple(labels), rule_id=name, sensitive=True, note=note)
 
 
-def _bool_answer(f: FormField, name: str, value: Optional[bool], note: str = "") -> Answer:
+def _second_clause(gap: list[str]) -> bool:
+    """The tokens between a freedom run and a class phrase open another clause (D-91)."""
+    return bool(QUESTION_STARTERS & set(gap)) or _has_run(gap, ("i", "am")) \
+        or _has_run(gap, ("i", "have"))
+
+
+def _freedom_inverts(label_norm: str, cls: Optional[DeclarationLabel]) -> bool:
+    """D-91: the label's only negation is a freedom form ("free from", "unrestricted
+    by", "not bound by", ...) that directly governs the matched class phrase, so the
+    field takes the INVERTED truth value. Every other negation, a second one, or a
+    phrase the run does not govern: False (unknown, as D-90)."""
+    if cls is None or cls not in _PHRASE_TOKENS:
+        return False
+    toks = label_norm.split()
+    for hint in ANSWER_HINTS:
+        if len(toks) > len(hint) and tuple(toks[-len(hint):]) == hint:
+            toks = toks[:-len(hint)]
+            break
+    toks = strip_ns_exclusions(toks)
+    spans = _spans(toks, _PHRASE_TOKENS[cls])
+    for i, j in _spans(toks, _FREEDOM_RUNS):
+        rest = toks[:i] + toks[j:]
+        if any(_has_run(rest, n) for n in NEGATIONS) or not spans:
+            continue
+        # every matched phrase follows the run (or is the tail of it, "not bound by any
+        # agreement") with no second clause between them (a question starter, "i am")
+        governed = all(
+            (s >= j and not _second_clause(toks[j:s])) or (i <= s < j < e)
+            for s, e in spans)
+        if governed:
+            return True
+    return False
+
+
+def _bool_answer(f: FormField, name: str, value: Optional[bool], note: str = "",
+                 cls: Optional[DeclarationLabel] = None) -> Answer:
     """A declaration bool onto a field (§7.3.2); `name` is the class (or the
-    agreed classes joined by "+")."""
+    agreed classes joined by "+"; then `cls` is None). D-90: field type (gate 1),
+    status frame (2), known polarity (3) - otherwise unknown / blank."""
     from .resolve import fit_bool                    # resolve imports this module
 
+    gate = _field_gate(f)
+    if gate:
+        return _ended(f, name, gate)
+    if value is None:
+        return _ended(f, name, "no answer in the profile")
     label_norm = norm_label(f.label)
+    toks = label_norm.split()
     if f.type is FieldType.CHECKBOX:
-        tick = (not value) if is_negated(label_norm) else bool(value)
+        if cls is L.NDA_WILLINGNESS:                 # D-91: "I agree to sign the NDA"
+            polarity = None if is_negated(label_norm) else True
+        else:
+            polarity = attestation_polarity(label_norm)
+            if polarity is None and _freedom_inverts(label_norm, cls):
+                polarity = False
+        if polarity is None:
+            return _ended(f, name, "checkbox statement not recognised")
+        tick = (not value) if polarity is False else bool(value)
         if not tick and f.required:
-            return _ended(f, name, "required box states something untrue")
+            return _ended(f, name, "required box left unticked")
         fit = ("true" if tick else "false", ())
-    elif negated_question(label_norm):
-        return _ended(f, name, "negated declaration question")
     else:
+        if negated_question(label_norm):
+            if not _freedom_inverts(label_norm, cls):
+                return _ended(f, name, "negated declaration question")
+            value = not value
+        if cls is not L.NDA_WILLINGNESS and not _status_frame(toks):
+            return _ended(f, name, "not a status question")
         fit = fit_bool(f, value)
     if fit is None:
         return _ended(f, name, "no offered option fits the declaration")
@@ -697,11 +827,11 @@ def _disability_answer(f: FormField, value: Optional[bool]) -> Answer:
     if value is None:
         fit = fit_decline(f)
         if fit is None:
-            return _ended(f, name, "disability: declined, no decline option")
+            return _ended(f, name, "disability: no answer offered")     # never "declined" (F8)
         return _answer(f, name, fit)
     if f.type in CHOICE_TYPES and not bool_shaped(f):
         fit = fit_enum(f, "yes" if value else "no", DISABILITY_VALUE_MAP)
         if fit is None:
             return _ended(f, name, "no offered option fits the declaration")
         return _answer(f, name, fit)
-    return _bool_answer(f, name, value)
+    return _bool_answer(f, name, value, cls=L.DISABILITY)
