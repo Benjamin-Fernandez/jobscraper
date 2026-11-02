@@ -1212,13 +1212,27 @@ class Store:
                 f"UPDATE apply_attempts SET {', '.join(f'{k} = ?' for k in cols)} WHERE id = ?",
                 [*cols.values(), attempt_id])
 
-    def mark_submit_clicked(self, attempt_id: int, now: str) -> None:
+    def mark_submit_clicked(self, attempt_id: int, now: str) -> bool:
         """Record that Submit is about to be clicked. The caller commits this
         BEFORE the click (NF-06): from here the attempt can only end
-        submitted or submitted_unconfirmed, and it counts against the caps."""
-        self.conn.execute(
-            "UPDATE apply_attempts SET submit_clicked_at = COALESCE(submit_clicked_at, ?) "
-            "WHERE id = ?", (now, attempt_id))
+        submitted or submitted_unconfirmed, and it counts against the caps.
+
+        A compare-and-set (review F4): it stamps only a live `filling` attempt
+        that has no click yet, and returns whether it did. False means the row
+        was closed meanwhile (e.g. reaped) or already clicked: do not click."""
+        cur = self.conn.execute(
+            "UPDATE apply_attempts SET submit_clicked_at = ? "
+            "WHERE id = ? AND state = 'filling' AND submit_clicked_at IS NULL", (now, attempt_id))
+        return cur.rowcount == 1
+
+    def begin_immediate(self) -> None:
+        """Start a write transaction now (SQLite BEGIN IMMEDIATE), so checks
+        read in it cannot be overtaken by another writer before the commit
+        (the pre-click duplicate + cap re-check, review F4). Commits anything
+        pending first."""
+        if self.conn.in_transaction:
+            self.conn.commit()
+        self.conn.execute("BEGIN IMMEDIATE")
 
     def attempt(self, attempt_id: int) -> Optional[dict[str, Any]]:
         r = self.conn.execute("SELECT * FROM apply_attempts WHERE id = ?",
