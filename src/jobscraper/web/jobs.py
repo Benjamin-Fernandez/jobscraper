@@ -112,6 +112,8 @@ def cli_command(config_path: Optional[str | os.PathLike] = None) -> CommandBuild
             if not ids or len(ids) > 20 or not all(
                     re.fullmatch(r"[A-Za-z0-9:_-]{1,80}", j) for j in ids):
                 raise ValueError("apply needs 1-20 job_ids of letters, digits, : _ -")
+            if {"show", "open-profile"} & set(ids):     # reserved CLI words (review F11)
+                raise ValueError("apply job_ids may not be 'show' or 'open-profile'")
             argv += ["apply", *ids] + (["--dry-run"] if opts.get("dry_run") else [])
         else:
             raise ValueError(f"unknown job kind {kind!r}")
