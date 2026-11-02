@@ -336,9 +336,12 @@ class Store:
             self.conn.execute("ALTER TABLE app_events ADD COLUMN by TEXT")
         # The new tables come from SCHEMA's CREATE TABLE IF NOT EXISTS; record the
         # version they belong to (an upsert: an older database already has a row).
+        # Never downgrade: an older build opening a newer database keeps its number.
         self.conn.execute(
             "INSERT INTO meta (key, value) VALUES ('schema_version', ?) "
-            "ON CONFLICT (key) DO UPDATE SET value = excluded.value",
+            "ON CONFLICT (key) DO UPDATE SET value = "
+            "CAST(MAX(CAST(COALESCE(meta.value, '0') AS INTEGER), "
+            "CAST(excluded.value AS INTEGER)) AS TEXT)",
             (str(SCHEMA_VERSION),))
 
     def ping(self) -> None:
@@ -1212,13 +1215,27 @@ class Store:
                 f"UPDATE apply_attempts SET {', '.join(f'{k} = ?' for k in cols)} WHERE id = ?",
                 [*cols.values(), attempt_id])
 
-    def mark_submit_clicked(self, attempt_id: int, now: str) -> None:
+    def mark_submit_clicked(self, attempt_id: int, now: str) -> bool:
         """Record that Submit is about to be clicked. The caller commits this
         BEFORE the click (NF-06): from here the attempt can only end
-        submitted or submitted_unconfirmed, and it counts against the caps."""
-        self.conn.execute(
-            "UPDATE apply_attempts SET submit_clicked_at = COALESCE(submit_clicked_at, ?) "
-            "WHERE id = ?", (now, attempt_id))
+        submitted or submitted_unconfirmed, and it counts against the caps.
+
+        A compare-and-set (review F4): it stamps only a live `filling` attempt
+        that has no click yet, and returns whether it did. False means the row
+        was closed meanwhile (e.g. reaped) or already clicked: do not click."""
+        cur = self.conn.execute(
+            "UPDATE apply_attempts SET submit_clicked_at = ? "
+            "WHERE id = ? AND state = 'filling' AND submit_clicked_at IS NULL", (now, attempt_id))
+        return cur.rowcount == 1
+
+    def begin_immediate(self) -> None:
+        """Start a write transaction now (SQLite BEGIN IMMEDIATE), so checks
+        read in it cannot be overtaken by another writer before the commit
+        (the pre-click duplicate + cap re-check, review F4). Commits anything
+        pending first."""
+        if self.conn.in_transaction:
+            self.conn.commit()
+        self.conn.execute("BEGIN IMMEDIATE")
 
     def attempt(self, attempt_id: int) -> Optional[dict[str, Any]]:
         r = self.conn.execute("SELECT * FROM apply_attempts WHERE id = ?",
@@ -1243,15 +1260,17 @@ class Store:
         """Close attempts left in a non-terminal state by a run that died or was
         cancelled (apply_design §4.3). The caller makes sure no apply job is
         running. Clicked → submitted_unconfirmed (never failed, never
-        resubmitted); not clicked → failed(cancelled). Returns how many.
-        Commits."""
+        resubmitted); not clicked → failed(cancelled). An attempt in a
+        post-click-only state (`submitting`; `verifying_email` also occurs before a click) counts
+        as clicked even without a stamp (review F2: a missed stamp must never
+        free the posting). Returns how many. Commits."""
         live = sorted(set(ATTEMPT_TRANSITIONS) - TERMINAL_ATTEMPT_STATES)
         marks = ",".join("?" * len(live))
         rows = self.conn.execute(
-            f"SELECT id, submit_clicked_at FROM apply_attempts WHERE state IN ({marks})",
+            f"SELECT id, state, submit_clicked_at FROM apply_attempts WHERE state IN ({marks})",
             live).fetchall()
         for r in rows:
-            if r["submit_clicked_at"]:
+            if r["submit_clicked_at"] or r["state"] == "submitting":
                 self.conn.execute(
                     """UPDATE apply_attempts SET state = 'submitted_unconfirmed',
                        reason_detail = COALESCE(reason_detail, 'interrupted after submit'),
@@ -1565,18 +1584,17 @@ def _state(v: Any) -> str:
     return str(getattr(v, "value", v))
 
 
-def attempt_transition_allowed(src: str, dst: str, *, clicked: bool) -> bool:
-    """The contract's `can_transition(src, dst, clicked=...)`, on strings.
+# States that need a recorded Submit click (contract `can_transition`, clicked=False).
+CLICK_REQUIRED_ATTEMPT_STATES = frozenset({"submitting", "submitted", "submitted_unconfirmed"})
 
-    One deliberate difference, raised with the tester (outbox, M20-B): the half
-    of the click rule that says SUBMITTING needs a recorded click is applied
-    only by apply_flow (which records the click first), not here, because the
-    store oracle `test_a_posting_can_succeed_only_once` walks into SUBMITTING
-    without one. The half that matters for NF-06 - after the click nothing but
-    the post-click states, never `failed` - is enforced here.
-    """
+
+def attempt_transition_allowed(src: str, dst: str, *, clicked: bool) -> bool:
+    """The contract's `can_transition(src, dst, clicked=...)`, on strings,
+    both halves (apply_design §4.1, review F2): after the click only the
+    post-click states (never `failed`); without a recorded click never
+    `submitting` / `submitted` / `submitted_unconfirmed`."""
     if dst not in ATTEMPT_TRANSITIONS.get(src, frozenset()):
         return False
     if clicked:
         return dst in POST_CLICK_ATTEMPT_STATES
-    return True
+    return dst not in CLICK_REQUIRED_ATTEMPT_STATES

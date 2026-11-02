@@ -74,13 +74,17 @@ check_attempt_table()
 
 def redact(line: str, values: Sequence[str]) -> str:
     """`line` with every value replaced by "[redacted]", case-insensitive,
-    longest first (a full address before one of its words). A value matches
-    only as a whole run of characters (not inside a longer word), so a short
-    profile value such as a grade type does not eat the word "captcha"."""
+    longest first (a full address before one of its words). A purely
+    alphabetic value matches only as a whole word, so a short profile value
+    such as a grade type does not eat the word "captcha"; a value with a digit
+    or any other character (a phone, a postal code, an email) matches anywhere,
+    so 91234567 is caught inside +6591234567 (review F6)."""
     for v in sorted({str(v).strip() for v in values if v and len(str(v).strip()) >= 3},
                     key=lambda s: (-len(s), s)):
-        line = re.sub(r"(?<![0-9A-Za-z])" + re.escape(v) + r"(?![0-9A-Za-z])", REDACTED,
-                      line, flags=re.I)
+        pat = re.escape(v)
+        if re.fullmatch(r"[A-Za-z ]+", v):
+            pat = r"(?<![A-Za-z])" + pat + r"(?![A-Za-z])"
+        line = re.sub(pat, REDACTED, line, flags=re.I)
     return line
 
 
@@ -204,10 +208,12 @@ class _Attempt:
            reason: Optional[ReasonCode] = None, detail: Optional[str] = None, **cols: Any) -> None:
         if step is not None:
             self.step = step
+        if detail:                     # the row, the result and the CLI table carry no profile value
+            detail = redact(detail, self.log.values)
         self.store.set_attempt_state(self.id, state.value, step=step,
                                      reason=reason.value if reason else None,
                                      detail=detail, **cols)
-        self.store.conn.commit()
+        self.store.commit()
         self.state = self.result.state = state
         if step is not None:
             self.result.step = step
@@ -262,7 +268,7 @@ class _Attempt:
             rows.append(audit_row(step, f, a))
         if rows:
             self.store.add_answers(self.id, rows)
-            self.store.conn.commit()
+            self.store.commit()
 
     def record_all(self) -> None:
         """Every resolved field not recorded yet (an attempt that ends early)."""
@@ -404,7 +410,9 @@ def apply_prefill_policy(source: str, fields: Sequence[FormField], answers: dict
                          ) -> tuple[dict[str, Answer], dict[str, Answer]]:
     """(audit answers, answers to fill) for one step under the policy of
     `source`. A field whose page value already equals our answer is recorded
-    `filled` with the note "already on page" and gets no input."""
+    `filled` with the note "already on page" and gets no input - never a file
+    field: a same-named attached file is not proof it is ours (every tailored
+    file has the same name), so our file is always uploaded (D-70 §9.1.1)."""
     policy = PREFILL_POLICY[AnswerSource(source)]
     audit: dict[str, Answer] = {}
     to_fill: dict[str, Answer] = {}
@@ -424,7 +432,7 @@ def apply_prefill_policy(source: str, fields: Sequence[FormField], answers: dict
         if what == KEEP:
             audit[f.key] = _prefilled(f, a, val, source, conf)
             continue
-        if what == OVERWRITE and a.fills and same_value(f, a, val):
+        if what == OVERWRITE and a.fills and f.type is not FieldType.FILE                 and same_value(f, a, val):
             audit[f.key] = dataclasses.replace(a, note=_join(a.note, "already on page"))
             continue
         if what == OVERWRITE and a.fills and not _is_empty(val):
@@ -447,6 +455,54 @@ def _flagged(fields: Sequence[FormField], errors: Sequence[str]) -> list[FormFie
                        for e in errs):
             out.append(f)
     return out
+
+
+# ---------------------------------------------------------------- run lock (review F4)
+
+class RunLock:
+    """One apply run at a time per database, across processes (the web job
+    and a CLI run): an OS file lock on `<evidence root>/run.lock`. The OS
+    drops it when the process dies, so a crashed run never blocks the next
+    one, and only the lock holder may reap (§4.3: the reaper must not close
+    a live attempt of another run)."""
+
+    def __init__(self, path: Path):
+        self.path = Path(path)
+        self._fh = None
+
+    def acquire(self) -> bool:
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        fh = open(self.path, "a+b")
+        try:
+            if os.name == "nt":
+                import msvcrt
+                fh.seek(0)
+                msvcrt.locking(fh.fileno(), msvcrt.LK_NBLCK, 1)
+            else:
+                import fcntl
+                fcntl.flock(fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            fh.close()
+            return False
+        self._fh = fh
+        return True
+
+    def release(self) -> None:
+        if self._fh is None:
+            return
+        try:
+            if os.name == "nt":
+                import msvcrt
+                self._fh.seek(0)
+                msvcrt.locking(self._fh.fileno(), msvcrt.LK_UNLCK, 1)
+            else:
+                import fcntl
+                fcntl.flock(self._fh.fileno(), fcntl.LOCK_UN)
+        except OSError:
+            pass
+        finally:
+            self._fh.close()
+            self._fh = None
 
 
 # ---------------------------------------------------------------- the run
@@ -472,6 +528,8 @@ class _Run:
         except applicant.ApplicantError as exc:
             self.profile_error = str(exc)
         self.log = _Log(say, applicant.redaction_values(self.profile))
+        if self.acfg.captcha_wait_s > 0:              # review F7: accepted deferral, said out loud
+            self.log("apply: captcha_wait_s is not supported yet; a CAPTCHA ends the attempt at once")
         self.rules = None
         self.seen: set[str] = set()
         self._resume_text: Optional[str] = None
@@ -505,15 +563,43 @@ class _Run:
         if dup:
             raise ApplyFailure(ReasonCode.DUPLICATE, dup)
         if not self.dry_run:
-            total, employer = self.store.apply_counts(job.get("company_id"), day_start_utc())
-            if total >= self.acfg.daily_cap:
-                raise ApplyFailure(ReasonCode.CAP_REACHED, f"{total} of {self.acfg.daily_cap} today")
-            if employer >= self.acfg.per_employer_daily_cap:
-                raise ApplyFailure(ReasonCode.CAP_REACHED,
-                                   f"{employer} of {self.acfg.per_employer_daily_cap} today at "
-                                   f"{job.get('company') or 'this employer'}")
+            cap = self.cap_refusal(job)
+            if cap:
+                raise cap
         if self.store.attempts_in_flight(exclude_id=at.id):
             raise ApplyFailure(ReasonCode.ERROR, "another application is in progress")
+
+    def cap_refusal(self, job: dict[str, Any]) -> Optional[ApplyFailure]:
+        """§12.1 (3): today's clicks against the caps (Asia/Singapore day)."""
+        total, employer = self.store.apply_counts(job.get("company_id"), day_start_utc())
+        if total >= self.acfg.daily_cap:
+            return ApplyFailure(ReasonCode.CAP_REACHED, f"{total} of {self.acfg.daily_cap} today")
+        if employer >= self.acfg.per_employer_daily_cap:
+            return ApplyFailure(ReasonCode.CAP_REACHED,
+                                f"{employer} of {self.acfg.per_employer_daily_cap} today at "
+                                f"{job.get('company') or 'this employer'}")
+        return None
+
+    def claim_click(self, at: _Attempt, job: dict[str, Any]) -> None:
+        """The pre-click write (NF-06, review F4), in one write transaction:
+        re-run the duplicate and cap checks (state may have changed since the
+        guards), then stamp `submit_clicked_at` only if the attempt is still a
+        live, unclicked `filling` row (compare-and-set). Commits; raises
+        ApplyFailure (nothing clicked) on a refusal."""
+        st = self.store
+        st.begin_immediate()
+        try:
+            dup = st.apply_duplicate(job["job_id"])
+            refusal = ApplyFailure(ReasonCode.DUPLICATE, dup) if dup else self.cap_refusal(job)
+            if refusal is None and not st.mark_submit_clicked(at.id, utcnow()):
+                refusal = ApplyFailure(ReasonCode.ERROR, "the attempt was closed by another run")
+        except BaseException:
+            st.rollback()
+            raise
+        if refusal is not None:
+            st.rollback()
+            raise refusal
+        st.commit()
 
     # -- resume (TD §12: the tailored file, else the original)
 
@@ -624,7 +710,7 @@ class _Run:
         now = utcnow()
         attempt_id = self.store.create_attempt(job_id, job.get("company_id") if job else None,
                                                self.mode, now)
-        self.store.conn.commit()
+        self.store.commit()
         at = _Attempt(self.store, self.log, attempt_id, job_id, self.evidence)
         self.log(f"[attempt {attempt_id}] queued job={job_id} mode={self.mode}")
         adapter = ctx = None
@@ -636,7 +722,10 @@ class _Run:
             adapter, ctx = self.body(at, job)
         except ApplyFailure as exc:
             self.seen.add(job_id)
-            self.fail(at, exc.reason, exc.detail, exc.step)
+            if at.clicked:                                # NF-06: never failed after the click
+                self.unconfirmed(at, f"{exc.reason.value} after submit")
+            else:
+                self.fail(at, exc.reason, exc.detail, exc.step)
         except Exception as exc:                          # noqa: BLE001 - any bug ends the attempt
             if at.clicked:
                 self.unconfirmed(at, f"error after submit ({type(exc).__name__})")
@@ -665,7 +754,15 @@ class _Run:
         return at.result
 
     def fail(self, at: _Attempt, reason: ReasonCode, detail: str, step: str = "") -> None:
-        """End before the click: evidence, the audit so far, `failed(reason)`."""
+        """End before the click: evidence, the audit so far, `failed(reason)`.
+        A row that is already terminal (closed by another run) is left as it is."""
+        row = self.store.attempt(at.id)
+        if row is not None and row["state"] in TERMINAL_ATTEMPT_STATES:
+            self.log(f"[attempt {at.id}] stopped: {reason.value} {detail} "
+                     f"(the row was already {row['state']})")
+            at.state = at.result.state = S(row["state"])
+            at.result.reason, at.result.reason_detail = reason, detail
+            return
         if at.page is not None:
             at.shot(at.page, "failed")
             B.dump_html(at.page, at.dir)
@@ -827,9 +924,15 @@ class _Run:
     def submit(self, page: Any, ctx: AttemptContext, adapter: Any, at: _Attempt,
                job: dict[str, Any]) -> None:
         at.shot(page, "review")
-        # The click is recorded and committed BEFORE it happens (NF-06).
-        self.store.mark_submit_clicked(at.id, utcnow())
-        self.store.conn.commit()
+        # No button, no click: a missing Submit fails before anything is
+        # recorded (review F3), instead of a clicked-but-unsent attempt.
+        ready = getattr(adapter, "submit_ready", None)
+        if ready is not None and not ready(page):
+            raise ApplyFailure(ReasonCode.PAGE_UNRECOGNISED, f"{adapter.name}: submit button",
+                               step="review")
+        # The click is recorded and committed BEFORE it happens (NF-06),
+        # after a last duplicate + cap check (review F4).
+        self.claim_click(at, job)
         at.clicked = True
         at.to(S.SUBMITTING, step="submit")
         try:
@@ -877,11 +980,15 @@ class _Run:
     # -- the batch
 
     def run(self, job_ids: Sequence[str]) -> list[AttemptResult]:
-        reaped = self.store.reap_attempts(utcnow())
-        if reaped:
-            self.log(f"apply: closed {reaped} interrupted attempt(s)")
+        lock = RunLock(self.evidence / "run.lock")
+        if not lock.acquire():
+            self.log("apply: another apply run is in progress; nothing was started")
+            return []
         results = []
         try:
+            reaped = self.store.reap_attempts(utcnow())
+            if reaped:
+                self.log(f"apply: closed {reaped} interrupted attempt(s)")
             for job_id in job_ids:
                 results.append(self.attempt(job_id))
             ready = [r for r in results if r.state is S.READY_TO_SUBMIT]
@@ -890,7 +997,10 @@ class _Run:
                          f"{self.acfg.dry_run_hold_s} s; close the window to finish sooner")
                 self.session.hold(self.acfg.dry_run_hold_s)
         finally:
-            self.close()
+            try:
+                self.close()
+            finally:
+                lock.release()
         return results
 
 
