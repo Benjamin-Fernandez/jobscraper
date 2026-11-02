@@ -24,8 +24,9 @@
 #   non_compete: "non compete", "restrictive covenant", "bound by any agreement", "notice or garden leave"
 # US EEO/self-ID labels ("veteran", "disability", "racial/ethnic background", "gender identity",
 # "sexual orientation", "transgender" [gh]) are tier 1 (EEO_* canonical), so they are not repeated here.
-# Known design limits (see report): a Yes/No label for an enum key ("Are you a Singapore Citizen?")
-# cannot be answered from an enum by 7.3.2; "years of experience with <skill>" is excluded on purpose.
+# Yes/No labels for an enum key ("Are you a Singapore Citizen?") are answered by the `yes_if` rules on the enum
+# entry (residency_status, work_pass, ns_status below): apply_design 7.3.3. Known design limit:
+# "years of experience with <skill>" is excluded on purpose.
 version: 1
 questions:
   # ---------------- Singapore status ----------------
@@ -122,6 +123,172 @@ questions:
       citizen: [singapore citizen, singaporean, sg citizen, citizen, singapore citizen or permanent resident, singapore citizen or pr, singapore citizen pr, citizen or pr, citizen or permanent resident]
       pr: [singapore permanent resident, permanent resident, singapore pr, sg pr, spr, pr, singapore citizen or permanent resident, singapore citizen or pr, singapore citizen pr, citizen or pr, citizen or permanent resident]
       foreigner: [foreigner, foreign national, non singaporean, non resident, international, expatriate, work pass holder, others, other, neither]
+    # yes_if (apply_design 7.3.3): Yes/No labels answered from residency_status. Wording [common] on Singapore
+    # forms; "Are you a Singapore Citizen?" is also a Lever field under "Singapore Work Eligibility" (web-search
+    # result 2026-11-02; the page 404'd on fetch, so not re-verified). Every `exclude` below is 2+ tokens on
+    # purpose: a one-token phrase matches only labels of 4 tokens or fewer (7.1). "/" becomes a space
+    # ("Citizen/PR" -> "citizen pr"). Compound labels go to the combined rule; negations to non_citizen / foreigner.
+    yes_if:
+      - id: sg_citizen
+        values: [citizen]
+        synonyms:
+          - are you a singapore citizen
+          - are you singapore citizen
+          - are you a citizen of singapore
+          - are you a singaporean
+          - are you singaporean
+          - hold singapore citizenship
+          - singapore citizen
+          - citizen of singapore
+          - singapore citizenship
+          - sg citizen
+          - singaporean
+        exclude:
+          - or pr
+          - or spr
+          - or permanent
+          - and pr
+          - and permanent
+          - citizen pr
+          - citizen spr
+          - citizen permanent
+          - singaporean pr
+          - singaporean permanent
+          - or singapore citizen
+          - or singaporean
+          - and singapore citizen
+          - and singaporean
+          - or citizen
+          - and citizen
+          - or employment pass
+          - or work pass
+          - or s pass
+          - or foreigner
+          - non singapore
+          - not singapore
+          - not a singapore
+          - not a citizen
+          - not citizen
+          - non citizen
+
+      - id: sg_citizen_or_pr
+        values: [citizen, pr]
+        synonyms:
+          - singapore citizen or permanent resident
+          - singapore citizen or singapore permanent resident
+          - singapore citizen and permanent resident
+          - singapore citizen or singapore pr
+          - singapore citizen or spr
+          - singapore citizen or pr
+          - singapore citizen and pr
+          - singapore citizen permanent resident
+          - singapore citizen spr
+          - singapore citizen pr
+          - singaporean or permanent resident
+          - singaporean permanent resident
+          - singaporean or pr
+          - singaporean pr
+          - singapore permanent resident or singapore citizen
+          - singapore permanent resident or citizen
+          - singapore pr or singapore citizen
+          - singapore pr or singaporean
+          - singapore pr or citizen
+          - singapore pr citizen
+          - citizen or permanent resident
+          - citizen permanent resident
+          - citizen or pr
+          - citizen spr
+          - citizen pr
+          - permanent resident or citizen
+          - pr or singapore citizen
+          - pr or citizen
+          - pr citizen
+        exclude:
+          - non singapore
+          - not singapore
+          - not a singapore
+          - not a citizen
+          - not citizen
+          - non citizen
+          - not a pr
+          - not pr
+          - non pr
+          - not a permanent
+          - not permanent
+
+      - id: sg_pr
+        values: [pr]
+        synonyms:
+          - are you a singapore permanent resident
+          - are you a singapore pr
+          - are you a permanent resident of singapore
+          - are you an spr
+          - hold singapore pr
+          - singapore permanent resident
+          - singapore permanent residency
+          - permanent resident of singapore
+          - singapore pr holder
+          - singapore pr
+          - spr holder
+        exclude:
+          - citizen or
+          - or citizen
+          - and citizen
+          - citizen pr
+          - pr citizen
+          - pr or
+          - pr and
+          - singaporean pr
+          - or singaporean
+          - or singapore citizen
+          - not a pr
+          - not pr
+          - non pr
+          - not a singapore
+          - not singapore
+          - non singapore
+          - not a permanent
+          - not permanent
+
+      # Yes for anyone who is NOT a citizen ("non-Singapore citizen"): PR or foreigner.
+      - id: non_citizen
+        values: [pr, foreigner]
+        synonyms:
+          - are you a non singapore citizen
+          - are you not a singapore citizen
+          - non singapore citizen
+          - not a singapore citizen
+          - non singaporean
+          - not a singaporean
+          - non citizen of singapore
+        exclude:
+          - or pr
+          - or spr
+          - or permanent
+          - citizen pr
+          - citizen spr
+          - citizen permanent
+          - citizen or
+          - citizen and
+
+      - id: foreigner
+        values: [foreigner]
+        synonyms:
+          - are you a foreigner
+          - are you foreigner
+          - non singapore citizen or permanent resident
+          - non singapore citizen or singapore permanent resident
+          - non singapore citizen or singapore pr
+          - non singapore citizen or spr
+          - non singapore citizen or pr
+          - non singapore citizen pr
+          - non singapore citizen permanent resident
+          - not a singapore citizen or permanent resident
+          - not a singapore citizen or pr
+          - not a singapore citizen pr
+          - non citizen or pr
+          - foreigner
+        exclude: []
     # Caveat: a profile value of citizen also "contains"-matches the option "Non-Singapore Citizen"; the 7.3.2
     # rule tries an exact option first, so this only bites when no exact "Singapore Citizen" option exists.
 
@@ -162,6 +329,194 @@ questions:
       ltvp_loc: [long term visit pass, ltvp, letter of consent, loc]
       student_pass: [student pass, student s pass]
       other: [other, others]
+    # yes_if (apply_design 7.3.3): Yes/No "do you hold ..." labels answered from work_pass. Wording [common]; not
+    # individually web-verified (2026-11-02). Only "hold / have / holder / on a valid X" wordings are listed, never a
+    # bare "employment pass", so "Will you require an Employment Pass?" (requires_sponsorship.SG) is never
+    # captured. `other` is deliberately in no list, so an unusual pass answers No here, never Yes.
+    yes_if:
+      - id: holds_ep
+        values: [ep]
+        synonyms:
+          - do you hold a valid employment pass
+          - do you have a valid employment pass
+          - do you hold a valid singapore employment pass
+          - do you have a valid singapore employment pass
+          - do you currently hold an employment pass
+          - do you currently have an employment pass
+          - do you hold an employment pass
+          - do you have an employment pass
+          - are you an employment pass holder
+          - are you on an employment pass
+          - are you currently on an employment pass
+          - valid singapore employment pass
+          - valid employment pass
+          - singapore employment pass holder
+          - employment pass holder
+        exclude:
+          - or require
+          - or need
+          - require an
+          - require a
+          - need an
+          - need a
+          - apply for
+          - applying for
+          - eligible for
+          - pass sponsorship
+          - sponsor you
+          - sponsor your
+          - or s pass
+          - and s pass
+
+      - id: holds_s_pass
+        values: [s_pass]
+        synonyms:
+          - do you hold a valid s pass
+          - do you have a valid s pass
+          - do you currently hold an s pass
+          - do you currently have an s pass
+          - do you hold an s pass
+          - do you have an s pass
+          - are you an s pass holder
+          - are you on an s pass
+          - are you currently on an s pass
+          - valid s pass
+          - s pass holder
+        exclude:
+          - or require
+          - or need
+          - require an
+          - require a
+          - need an
+          - need a
+          - apply for
+          - applying for
+          - eligible for
+          - pass sponsorship
+          - sponsor you
+          - sponsor your
+          - or employment pass
+          - and employment pass
+          - or ep
+
+      # A generic "valid work pass / work visa" label: Yes for an EP, an S Pass or a Letter of Consent.
+      - id: holds_work_pass
+        values: [ep, s_pass, ltvp_loc]
+        synonyms:
+          - do you hold a valid singapore work pass
+          - do you have a valid singapore work pass
+          - do you currently hold a valid work pass
+          - do you currently have a valid work pass
+          - do you hold a valid work pass
+          - do you have a valid work pass
+          - do you hold a valid singapore work visa
+          - do you hold a valid work visa
+          - do you have a valid work visa
+          - are you on a valid work pass
+          - employment pass or s pass holder
+          - employment pass or s pass
+          - valid singapore work pass
+          - valid work pass
+          - valid work visa
+        exclude:
+          - or require
+          - or need
+          - require an
+          - require a
+          - need an
+          - need a
+          - apply for
+          - applying for
+          - eligible for
+          - pass sponsorship
+          - sponsor you
+          - sponsor your
+          - or are you
+          - citizen or
+          - or pr
+          - or permanent
+
+      - id: holds_dp
+        values: [dp]
+        synonyms:
+          - do you hold a valid dependant pass
+          - do you have a valid dependant pass
+          - do you hold a valid dependent pass
+          - do you have a valid dependent pass
+          - do you hold a dependant pass
+          - do you have a dependant pass
+          - do you hold a dependent pass
+          - do you have a dependent pass
+          - are you a dependant pass holder
+          - are you a dependent pass holder
+          - dependant pass holder
+          - dependent pass holder
+        exclude:
+          - or require
+          - or need
+          - require an
+          - require a
+          - need an
+          - need a
+          - apply for
+          - applying for
+          - eligible for
+          - pass sponsorship
+          - sponsor you
+          - sponsor your
+
+      - id: holds_ltvp_loc
+        values: [ltvp_loc]
+        synonyms:
+          - do you hold a long term visit pass
+          - do you have a long term visit pass
+          - do you hold a valid long term visit pass
+          - do you hold a ltvp
+          - do you have a ltvp
+          - do you hold a letter of consent
+          - do you have a letter of consent
+          - do you hold a valid letter of consent
+          - long term visit pass holder
+          - letter of consent holder
+          - ltvp holder
+        exclude:
+          - or require
+          - or need
+          - require an
+          - require a
+          - need an
+          - need a
+          - apply for
+          - applying for
+          - eligible for
+          - pass sponsorship
+          - sponsor you
+          - sponsor your
+
+      - id: holds_student_pass
+        values: [student_pass]
+        synonyms:
+          - do you hold a valid student pass
+          - do you have a valid student pass
+          - do you hold a student pass
+          - do you have a student pass
+          - are you on a student pass
+          - are you currently on a student pass
+          - valid student pass
+          - student pass holder
+        exclude:
+          - or require
+          - or need
+          - require an
+          - require a
+          - need an
+          - need a
+          - apply for
+          - applying for
+          - eligible for
+          - pass sponsorship
+          - sponsor you
+          - sponsor your
 
   - key: singapore_status.ns_status
     kind: enum
@@ -185,6 +540,102 @@ questions:
       serving: [serving, currently serving, still serving, in service, nsf, ongoing, yet to complete, not yet completed, pending]
       exempted: [exempted, exempt, exempted from ns, disqualified, deferred, medically exempted]
       not_applicable: [not applicable, na, n a, not liable, female, foreigner, non singaporean, no obligation, not required, nil, none]
+    # yes_if (apply_design 7.3.3): Yes/No labels answered from ns_status (TAFEP says employers should not ask, but
+    # banks and some Workday / SuccessFactors forms still do). Wording [common]; not individually web-verified
+    # (2026-11-02). Each list is literally true for every enum value: "Have you completed NS?" is No for serving,
+    # exempted and not_applicable. "Are you liable for NS?" is not mapped on purpose (NSmen stay liable for
+    # reservist duty after ORD, so no single set of enum values answers it).
+    yes_if:
+      - id: ns_completed
+        values: [completed]
+        synonyms:
+          - have you completed your full time national service
+          - have you completed full time national service
+          - have you completed your national service
+          - have you completed national service
+          - have you completed your full time ns
+          - have you completed your ns
+          - have you completed ns
+          - have you served your national service
+          - have you served national service
+          - completed full time national service
+          - completed national service
+          - completed full time ns
+          - completed ns
+        exclude:
+          - not completed
+          - not yet completed
+          - yet to complete
+          - completed or
+          - or exempted
+          - or been exempted
+          - or serving
+
+      - id: ns_completed_or_exempt
+        values: [completed, exempted]
+        synonyms:
+          - have you completed or been exempted from national service
+          - have you completed or been exempted from ns
+          - have you completed or are you exempted from national service
+          - completed or been exempted from national service
+          - completed or exempted from national service
+          - completed or been exempted from ns
+          - completed or exempted from ns
+          - exempted or completed national service
+          - exempted or completed ns
+        exclude: []
+
+      # "Fulfilled" reads Yes for someone with nothing left to do, so not_applicable (no NS liability) is Yes too.
+      - id: ns_obligations_fulfilled
+        values: [completed, exempted, not_applicable]
+        synonyms:
+          - have you fulfilled your national service obligations
+          - have you fulfilled your ns obligations
+          - have you fulfilled national service obligations
+          - have you fulfilled ns obligations
+          - fulfilled your national service obligations
+          - fulfilled your ns obligations
+        exclude:
+          - not fulfilled
+          - yet to fulfil
+          - yet to fulfill
+
+      - id: ns_serving
+        values: [serving]
+        synonyms:
+          - are you currently serving your national service
+          - are you currently serving full time national service
+          - are you currently serving national service
+          - are you currently serving your ns
+          - are you currently serving ns
+          - are you still serving national service
+          - are you still serving ns
+          - are you currently an nsf
+          - have you yet to complete national service
+          - have you yet to complete your national service
+          - yet to complete national service
+          - yet to complete ns
+        exclude: []
+
+      - id: ns_exempted
+        values: [exempted]
+        synonyms:
+          - have you been exempted from national service
+          - have you been exempted from ns
+          - are you exempted from national service
+          - are you exempted from ns
+          - are you exempt from national service
+          - are you exempt from ns
+          - exempted from national service
+          - exempted from ns
+          - exempt from national service
+          - disqualified from national service
+        exclude:
+          - completed or
+          - or completed
+          - completed and
+          - and completed
+          - fulfilled
 
   - key: singapore_status.ord_date
     kind: date
