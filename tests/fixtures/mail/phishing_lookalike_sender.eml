@@ -1,0 +1,11 @@
+From: Workday <noreply@myworkday.com.phish.example>
+To: Alex Testcase <alex.testcase@example.com>
+Subject: Verify your email address
+Date: Mon, 02 Nov 2026 10:05:00 +0000
+Message-ID: <phishing_lookalike_sender@synthetic.test>
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: 7bit
+MIME-Version: 1.0
+
+Please verify your email address:
+https://acme.wd3.myworkdayjobs.com/en-US/External/activate/spoof999
