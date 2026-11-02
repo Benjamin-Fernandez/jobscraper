@@ -182,6 +182,45 @@ CREATE TABLE IF NOT EXISTS tailored (
     error TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_tailored_job ON tailored(job_id, id);
+
+-- M20 questions (questions_design §7)
+-- Required questions no resolver tier could answer, grouped by `key`. Employer text
+-- only: the owner's answers live in data/applicant.yaml `extra:` (ADR-0005).
+CREATE TABLE IF NOT EXISTS questions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    sig TEXT NOT NULL UNIQUE,               -- questions_design §5.1
+    key TEXT NOT NULL,                      -- extra key, or a profile path when target_path is set
+    target_path TEXT NOT NULL DEFAULT '',
+    title TEXT NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    kind TEXT NOT NULL,                     -- QuestionKind
+    label TEXT NOT NULL,                    -- verbatim, first seen (employer text)
+    label_norm TEXT NOT NULL,
+    options_json TEXT NOT NULL DEFAULT '[]',-- [{"label": verbatim, "norm": normalised}] as first seen
+    sensitive INTEGER NOT NULL DEFAULT 0,
+    reason TEXT NOT NULL,                   -- QuestionReason, latest sighting
+    named_by TEXT NOT NULL DEFAULT 'rule',  -- rule | model | profile
+    status TEXT NOT NULL DEFAULT 'open',    -- QuestionStatus
+    first_seen_at TEXT NOT NULL, last_seen_at TEXT NOT NULL, answered_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_questions_key ON questions(key);
+CREATE TABLE IF NOT EXISTS question_sightings (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    question_id INTEGER NOT NULL,
+    attempt_id INTEGER NOT NULL,
+    job_id TEXT NOT NULL,
+    company_id INTEGER,
+    employer_norm TEXT NOT NULL DEFAULT '',
+    ats TEXT NOT NULL DEFAULT '',
+    step TEXT NOT NULL DEFAULT '',
+    field_key TEXT NOT NULL,
+    label TEXT NOT NULL,                    -- verbatim as seen here
+    required INTEGER NOT NULL,
+    seen_at TEXT NOT NULL,
+    UNIQUE (question_id, attempt_id, field_key)
+);
+CREATE INDEX IF NOT EXISTS idx_sightings_attempt ON question_sightings(attempt_id);
+CREATE INDEX IF NOT EXISTS idx_sightings_question ON question_sightings(question_id);
 """
 
 # The one status that does not mean "an application went out". Moving to any
@@ -1131,3 +1170,190 @@ class Store:
             "UPDATE tailored SET files_deleted_at = ?, changes_json = NULL WHERE id = ?",
             (now or utcnow(), tailored_id))
         self.conn.commit()
+
+    # ---------------- questions (M20 lane Q) ----------------
+    #
+    # Questions from applications (questions_design §7, F-13): one `questions` row
+    # per distinct question (its `sig`), one sighting per time an attempt met it.
+    # Rows sharing a `key` are one group, answered once. No answer value is ever
+    # stored here (ADR-0005). `apply_attempts` belongs to lane B; until that table
+    # exists, retry candidates are simply none.
+
+    _QUESTION_STATUSES = ("open", "answered", "dismissed")
+
+    @staticmethod
+    def _question_dict(r: sqlite3.Row) -> dict[str, Any]:
+        d = dict(r)
+        try:
+            d["options"] = json.loads(d.get("options_json") or "[]")
+        except ValueError:
+            d["options"] = []
+        d["sensitive"] = bool(d.get("sensitive"))
+        return d
+
+    def upsert_question(self, q: dict[str, Any], now: str) -> int:
+        """Insert a question by its `sig`, or mark it seen again. A row seen
+        again after it was answered reopens (the saved answer did not fit this
+        time); a dismissed row stays dismissed. Returns the row id.
+
+        `q` holds the `questions` columns (sig, key, target_path, title,
+        description, kind, label, label_norm, sensitive, reason, named_by) and
+        the options as `options` ([{label, norm}]) or as `options_json` text."""
+        r = self.conn.execute("SELECT id, status FROM questions WHERE sig = ?",
+                              (q["sig"],)).fetchone()
+        if r is not None:
+            status = "open" if r["status"] == "answered" else r["status"]
+            self.conn.execute(
+                "UPDATE questions SET last_seen_at = ?, reason = ?, status = ? WHERE id = ?",
+                (now, q.get("reason") or "no_rule", status, r["id"]))
+            self.conn.commit()
+            return int(r["id"])
+        options_json = q.get("options_json")
+        if options_json is None:
+            options_json = json.dumps(list(q.get("options") or []), ensure_ascii=False)
+        cur = self.conn.execute(
+            """INSERT INTO questions (sig, key, target_path, title, description, kind, label,
+                   label_norm, options_json, sensitive, reason, named_by, status,
+                   first_seen_at, last_seen_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'open', ?, ?)""",
+            (q["sig"], q["key"], q.get("target_path") or "", q.get("title") or q["label"][:60],
+             q.get("description") or "", q["kind"], q["label"], q["label_norm"], options_json,
+             int(bool(q.get("sensitive"))), q.get("reason") or "no_rule",
+             q.get("named_by") or "rule", now, now))
+        self.conn.commit()
+        return int(cur.lastrowid)
+
+    def add_sighting(self, question_id: int, attempt_id: int, job_id: str,
+                     company_id: Optional[int], employer_norm: str, ats: str, step: str,
+                     field_key: str, label: str, required: bool, now: str) -> None:
+        """One appearance of a question in an attempt; a repeat is ignored."""
+        self.conn.execute(
+            """INSERT OR IGNORE INTO question_sightings (question_id, attempt_id, job_id,
+                   company_id, employer_norm, ats, step, field_key, label, required, seen_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (question_id, attempt_id, job_id, company_id, employer_norm or "", ats or "",
+             step or "", field_key, label, int(bool(required)), now))
+        self.conn.commit()
+
+    def question_rows(self) -> list[dict[str, Any]]:
+        """Every `questions` row, newest sighting first (key assignment and the
+        naming prompt's existing fields, questions_design §5.2-§5.3)."""
+        return [self._question_dict(r) for r in self.conn.execute(
+            "SELECT * FROM questions ORDER BY last_seen_at DESC, id DESC")]
+
+    def question_keys(self) -> list[tuple[str, str, str, bool]]:
+        """(key, title, kind, sensitive) per key, the oldest row's title and kind."""
+        out: dict[str, tuple[str, str, str, bool]] = {}
+        for r in self.conn.execute("SELECT key, title, kind, sensitive FROM questions ORDER BY id"):
+            k = r["key"]
+            if k in out:
+                if r["sensitive"] and not out[k][3]:
+                    out[k] = (*out[k][:3], True)
+                continue
+            out[k] = (k, r["title"], r["kind"], bool(r["sensitive"]))
+        return list(out.values())
+
+    def questions_by_key(self, key: str) -> list[dict[str, Any]]:
+        """The rows of one group, oldest first, each with its `options` parsed."""
+        return [self._question_dict(r) for r in self.conn.execute(
+            "SELECT * FROM questions WHERE key = ? ORDER BY id", (key,))]
+
+    def set_questions_status(self, key: str, status: str, now: str) -> int:
+        """Set every row of a group to `status`; `answered` stamps answered_at.
+        Returns the number of rows changed."""
+        if status not in self._QUESTION_STATUSES:
+            raise ValueError(f"unknown question status {status!r}")
+        cur = self.conn.execute(
+            "UPDATE questions SET status = ?, answered_at = CASE WHEN ? = 'answered' "
+            "THEN ? ELSE answered_at END WHERE key = ?", (status, status, now, key))
+        self.conn.commit()
+        return cur.rowcount
+
+    def retry_candidates(self) -> list[dict[str, Any]]:
+        """Jobs whose newest attempt failed `unanswerable_required` with at least
+        one question sighting: {job_id, attempt_id, company, title, open,
+        dismissed}, where open/dismissed count that attempt's questions by
+        status. Ready to retry = open == 0 and dismissed == 0."""
+        try:
+            rows = self.conn.execute(
+                """SELECT a.job_id, a.id AS attempt_id, c.name AS company, j.title AS title,
+                          COUNT(DISTINCT CASE WHEN q.status = 'open' THEN q.id END) AS open,
+                          COUNT(DISTINCT CASE WHEN q.status = 'dismissed' THEN q.id END)
+                              AS dismissed
+                     FROM apply_attempts a
+                     JOIN question_sightings s ON s.attempt_id = a.id
+                     JOIN questions q ON q.id = s.question_id
+                     LEFT JOIN jobs j ON j.job_id = a.job_id
+                     LEFT JOIN companies c ON c.id = COALESCE(a.company_id, j.company_id)
+                    WHERE a.state = 'failed' AND a.reason_code = 'unanswerable_required'
+                      AND a.id = (SELECT MAX(b.id) FROM apply_attempts b WHERE b.job_id = a.job_id)
+                    GROUP BY a.id ORDER BY a.id""").fetchall()
+        except sqlite3.OperationalError:          # no apply_attempts table yet (lane B)
+            return []
+        return [{"job_id": r["job_id"], "attempt_id": int(r["attempt_id"]),
+                 "company": r["company"] or "", "title": r["title"] or "",
+                 "open": int(r["open"]), "dismissed": int(r["dismissed"])} for r in rows]
+
+    def question_groups(self, status: str = "open") -> list[dict[str, Any]]:
+        """One dict per key (questions_design §7.1): key, title, description,
+        kind, sensitive, target_path, status, named_by, reason (of the latest
+        sighting), labels (verbatim, distinct), variants ([{question_id, label,
+        options, employers}], one per option set), employers (company names,
+        by first sighting), waiting (jobs ready-or-not in retry_candidates with
+        a sighting here), first_seen_at, last_seen_at. `status` = open |
+        answered | all; a group is open if any of its rows is."""
+        if status not in ("open", "answered", "all"):
+            raise ValueError(f"status must be open, answered or all, not {status!r}")
+        rows = [self._question_dict(r) for r in self.conn.execute(
+            "SELECT * FROM questions ORDER BY id")]
+        sightings: dict[int, list[dict[str, Any]]] = {}
+        for s in self.conn.execute(
+                """SELECT s.question_id, s.attempt_id, s.job_id, s.employer_norm, s.label,
+                          s.seen_at, s.id, c.name AS company
+                     FROM question_sightings s
+                     LEFT JOIN jobs j ON j.job_id = s.job_id
+                     LEFT JOIN companies c ON c.id = COALESCE(s.company_id, j.company_id)
+                    ORDER BY s.seen_at, s.id"""):
+            sightings.setdefault(int(s["question_id"]), []).append(dict(s))
+        candidates = {int(c["attempt_id"]) for c in self.retry_candidates()}
+        groups: dict[str, list[dict[str, Any]]] = {}
+        for r in rows:
+            groups.setdefault(r["key"], []).append(r)
+
+        def names(ss: list[dict[str, Any]]) -> list[str]:
+            out: list[str] = []
+            for s in ss:
+                n = s.get("company") or s.get("employer_norm") or ""
+                if n and n not in out:
+                    out.append(n)
+            return out
+
+        out = []
+        for key, grp in groups.items():
+            statuses = {r["status"] for r in grp}
+            gstatus = ("open" if "open" in statuses else
+                       "answered" if "answered" in statuses else "dismissed")
+            if status != "all" and gstatus != status:
+                continue
+            first, latest = grp[0], max(grp, key=lambda r: (r["last_seen_at"], r["id"]))
+            all_s = sorted((s for r in grp for s in sightings.get(r["id"], [])),
+                           key=lambda s: (s["seen_at"], s["id"]))
+            labels: list[str] = []
+            for lab in [r["label"] for r in grp] + [s["label"] for s in all_s]:
+                if lab and lab not in labels:
+                    labels.append(lab)
+            out.append({
+                "key": key, "title": first["title"], "description": first["description"],
+                "kind": first["kind"], "sensitive": any(r["sensitive"] for r in grp),
+                "target_path": first["target_path"], "status": gstatus,
+                "named_by": first["named_by"], "reason": latest["reason"],
+                "labels": labels,
+                "variants": [{"question_id": r["id"], "label": r["label"],
+                              "options": r["options"],
+                              "employers": names(sightings.get(r["id"], []))} for r in grp],
+                "employers": names(all_s),
+                "waiting": len({s["job_id"] for s in all_s if s["attempt_id"] in candidates}),
+                "first_seen_at": min(r["first_seen_at"] for r in grp),
+                "last_seen_at": max(r["last_seen_at"] for r in grp),
+            })
+        return out

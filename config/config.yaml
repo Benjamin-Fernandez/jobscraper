@@ -147,3 +147,9 @@ tailor:
   draft_days: 7              # D-59: a draft's files are deleted after this many days
   sent_days_after_close: 30  # D-59: a sent resume's files, after the application closes
   closed_statuses: [rejected, withdrawn]
+
+question_capture:              # questions_design.md (D-74)
+  enabled: true                # capture required questions no tier answered
+  llm_naming: true             # let the local model name and group non-sensitive questions (never answer)
+  naming_timeout_s: 20
+  naming_max_per_attempt: 10
