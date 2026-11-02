@@ -1,0 +1,18 @@
+Authentication-Results: mx.google.com;
+       dkim=pass header.i=@greenhouse-mail.io header.s=s1 header.b=Zm9vYmFy;
+       spf=pass (google.com: domain of no-reply@us.greenhouse-mail.io designates 192.0.2.10 as permitted sender) smtp.mailfrom=no-reply@us.greenhouse-mail.io;
+       dmarc=pass (p=REJECT sp=REJECT dis=NONE) header.from=greenhouse-mail.io
+From: Greenhouse <no-reply@us.greenhouse-mail.io>
+To: Alex Applicant <alex.applicant@inbox.example>
+Subject: Security code for your application to Northwind Traders
+Date: Mon, 02 Nov 2026 04:30:00 +0000
+Message-ID: <golden-46@synthetic.test>
+MIME-Version: 1.0
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: 7bit
+
+Copy and paste this code into the security code field on your application:
+
+Q4ZT8WNM
+
+After you enter the code, resubmit your application to confirm it.

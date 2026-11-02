@@ -1,0 +1,18 @@
+Authentication-Results: mx.google.com;
+       dkim=pass header.i=@tal.net header.s=s1 header.b=Zm9vYmFy;
+       spf=pass (google.com: domain of noreply@contosobank.tal.net designates 192.0.2.10 as permitted sender) smtp.mailfrom=noreply@contosobank.tal.net;
+       dmarc=pass (p=REJECT sp=REJECT dis=NONE) header.from=tal.net
+From: Contoso Bank Graduate Recruitment <noreply@contosobank.tal.net>
+To: Alex Applicant <alex.applicant@inbox.example>
+Subject: Operations Graduate Associate - application update
+Date: Sun, 01 Nov 2026 03:00:00 +0000
+Message-ID: <golden-21@synthetic.test>
+MIME-Version: 1.0
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: 7bit
+
+Dear Alex,
+
+Thank you for applying for the Operations Graduate Associate role. We are writing to let you know that the position has been filled.
+
+Contoso Bank Graduate Recruitment

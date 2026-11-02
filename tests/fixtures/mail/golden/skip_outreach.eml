@@ -1,0 +1,18 @@
+Authentication-Results: mx.google.com;
+       dkim=pass header.i=@northwind.example header.s=s1 header.b=Zm9vYmFy;
+       spf=pass (google.com: domain of riley.tan@northwind.example designates 192.0.2.10 as permitted sender) smtp.mailfrom=riley.tan@northwind.example;
+       dmarc=pass (p=REJECT sp=REJECT dis=NONE) header.from=northwind.example
+From: Riley Tan <riley.tan@northwind.example>
+To: Alex Applicant <alex.applicant@inbox.example>
+Subject: Opportunity at Northwind Traders
+Date: Mon, 02 Nov 2026 05:00:00 +0000
+Message-ID: <golden-47@synthetic.test>
+MIME-Version: 1.0
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: 7bit
+
+Hi Alex,
+
+I came across your profile and think you would be a great fit for a role in our analytics team. Would you be open to a quick call?
+
+Riley

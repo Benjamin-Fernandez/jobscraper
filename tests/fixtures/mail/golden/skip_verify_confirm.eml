@@ -1,0 +1,20 @@
+Authentication-Results: mx.google.com;
+       dkim=pass header.i=@myworkday.com header.s=s1 header.b=Zm9vYmFy;
+       spf=pass (google.com: domain of examplecorp@myworkday.com designates 192.0.2.10 as permitted sender) smtp.mailfrom=examplecorp@myworkday.com;
+       dmarc=pass (p=REJECT sp=REJECT dis=NONE) header.from=myworkday.com
+From: Example Corp <examplecorp@myworkday.com>
+To: Alex Applicant <alex.applicant@inbox.example>
+Subject: Verify your email address
+Date: Mon, 02 Nov 2026 04:00:00 +0000
+Message-ID: <golden-45@synthetic.test>
+MIME-Version: 1.0
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: 7bit
+
+Dear Alex,
+
+Please confirm your account: click the link below to verify your email address.
+
+https://examplecorp.wd3.myworkdayjobs.com/en-US/careers/activate/abc123
+
+Example Corp
