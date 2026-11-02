@@ -340,4 +340,9 @@ BODY:
 KNOWN LIMITS:
 - A `keep` of a skill list the site already filled is not filtered item by item (G8/G3 work as before). Deleting ungrounded chips the site already shows would be lane R widget work, if wanted.
 - THIS_EMPLOYER_RUNS is a judgement call: "the company" counts as this employer. `previously_applied` is not restricted.
+ADDENDUM 2 (lane R wd_a 02):
+- (10) `llm_fill.pick_option` now tries `deterministic_pick` first. It picks the single option that equals `wanted` (normalised) or names it by its "Category > Leaf" leaf, or, for a phone code like "+65", the single option showing "+65" ("<Country> (+65)"). It returns that option with no model call, so the enum-S deny list (which only guards prompts) doesn't apply. Everything else goes through `pick_refused` as before.
+  - Lane R: if pagefill filters options against `deny` before calling `pick_option`, drop that filter so the program's match is reachable.
+- (11) G2(e) is enforced in `guards._fact_field`: a fact fit that is not an offered option on a complete list becomes unknown "G2e: no_option_fits". The `resolve` HOW_HEARD fit on a listed choice now returns the owner's text only when it is an offered option; otherwise it uses the existing career/website keyword match, which already covers "Corporate Website" / "Company Website" / "Careers Site". So no synonym table and no architect note were needed.
+  - Not done: the guards still treat a shown "Singapore (+65)" as different from "+65" on a search-driven prompt (the options aren't known before typing). The fill-time `deterministic_pick` covers the re-fill.
 STATUS: open
