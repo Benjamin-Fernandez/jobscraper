@@ -336,9 +336,12 @@ class Store:
             self.conn.execute("ALTER TABLE app_events ADD COLUMN by TEXT")
         # The new tables come from SCHEMA's CREATE TABLE IF NOT EXISTS; record the
         # version they belong to (an upsert: an older database already has a row).
+        # Never downgrade: an older build opening a newer database keeps its number.
         self.conn.execute(
             "INSERT INTO meta (key, value) VALUES ('schema_version', ?) "
-            "ON CONFLICT (key) DO UPDATE SET value = excluded.value",
+            "ON CONFLICT (key) DO UPDATE SET value = "
+            "CAST(MAX(CAST(COALESCE(meta.value, '0') AS INTEGER), "
+            "CAST(excluded.value AS INTEGER)) AS TEXT)",
             (str(SCHEMA_VERSION),))
 
     def ping(self) -> None:
