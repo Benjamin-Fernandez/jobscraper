@@ -8,7 +8,8 @@ rejection ends the field unknown with a note that names the guard and never a va
   G1  shape          a choice value must be an offered option
   G2  fact refs      (a) in the chunk's scope, (b) relevant to the question, (c) set,
                      (d) on a choice: a tier-2/`extra` label match, or the model's option
-                     equals the program's; (e) no program fit: the model's option + G4/G5
+                     equals the program's; (e) no program fit -> unknown (D-86: never
+                     the model's option or evidence alone)
   G3  grounding      resume/job/keep: the quote is in the corpus; copy rule (every word of
                      a typed value is in the quote) or compose rule (`resolve.grounded`)
   G4  choice/source  a model-chosen option shares a word with its quote (Yes/No exempt)
@@ -541,25 +542,11 @@ def _fact_field(c: _Ctx, pf: PageField, d: ModelDecision) -> Answer:
             return _answer_unknown(pf, "G2d: model value differs from the fact",
                                    sensitive=fact.private)
         return _model_row(c, pf, pv, _source_of(ref), conf=CONF_FACT, sensitive=fact.private)
-    # (e) no program fit
-    if not choice or fact.private:
-        return _answer_unknown(pf, "G2e: no_option_fits", rule_id=name if ns == "profile" else "",
-                               sensitive=fact.private)
-    opt = option_for(pf, mv)
-    if opt in (None, "", []):
-        return _answer_unknown(pf, "G1: not an offered option")
-    if not yes_no(pf) and not g4_ok(opt, (d.evidence or "") + " " + fact.value):
-        return _answer_unknown(pf, "G4: option not backed by the fact")
-    checked = False
-    if yes_no(pf) or pf.field.required:
-        agree = _second_agrees(c, pf, opt)
-        if agree is None:
-            return _answer_unknown(pf, "G5: second opinion off")
-        if not agree:
-            return _answer_unknown(pf, "G5: second opinion disagrees")
-        checked = True
-    return _model_row(c, pf, opt, _source_of(ref), conf=CONF_MODEL_CHECKED if checked
-                      else CONF_MODEL, evidence=d.evidence)
+    # (e) no program fit: unknown. D-86 (review F7): a fact-cited option is used only when
+    # the program's own fact_value / fit_* maps the fact onto it (hierarchical lists by
+    # their leaves, facts._leaf_fit), never on the model's option or evidence alone.
+    return _answer_unknown(pf, "G2e: no_option_fits", rule_id=name if ns == "profile" else "",
+                           sensitive=fact.private)
 
 
 def _corpus(c: _Ctx, pf: PageField, src: FillSource) -> Optional[str]:

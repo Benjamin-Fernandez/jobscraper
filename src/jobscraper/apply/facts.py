@@ -34,7 +34,7 @@ from typing import Any, Iterable, Mapping, Optional, Sequence, Union
 from .. import applicant
 from . import declarations, resolve
 from .contracts import (
-    CHOICE_TYPES, ApplyFailure, Canonical, EntrySection, Fact, FieldType, FormField,
+    CHOICE_TYPES, ApplyFailure, Canonical, EntrySection, Fact, FieldType, FormField, Option,
     PageField, ReasonCode, ResolveContext,
 )
 from .plan import STOP_WORDS, content_tokens, contains_run, is_generic, norm_label, tokens
@@ -480,7 +480,43 @@ def fact_value(ref: str, field: FieldLike, rctx: ResolveContext, rules: Any, *,
                today: str = "") -> Optional[Fit]:
     """The value the program writes for a cited fact: (value, option_labels), or None
     when the fact is empty or fits none of the field's options (§5.3). For a private
-    fact this is the only way its value reaches the page."""
+    fact this is the only way its value reaches the page. A "Category > Leaf" list
+    (LL1) is also tried by its leaves, so the program, not the model, maps a fact onto
+    a hierarchical option (D-86, review F7)."""
+    fit = _fact_value(ref, field, rctx, rules, today=today)
+    if fit is None:
+        fit = _leaf_fit(ref, field, rctx, rules, today=today)
+    return fit
+
+
+def _leaf_fit(ref: str, field: FieldLike, rctx: ResolveContext, rules: Any, *,
+              today: str = "") -> Optional[Fit]:
+    """`fact_value` against the leaves of a "Category > Leaf" option list; a leaf that
+    occurs under two categories is ambiguous (None)."""
+    f = _ff(field)
+    if f.type not in CHOICE_TYPES or not any(" > " in o.label for o in f.options):
+        return None
+    by_leaf: dict[str, list[str]] = {}
+    for o in f.options:
+        by_leaf.setdefault(o.label.split(" > ")[-1].strip(), []).append(o.label)
+    leaf_field = dataclasses.replace(f, options=tuple(Option(leaf) for leaf in by_leaf))
+    if isinstance(field, PageField):
+        leaf_field = dataclasses.replace(field, field=leaf_field)
+    fit = _fact_value(ref, leaf_field, rctx, rules, today=today)
+    if fit is None:
+        return None
+    full: list[str] = []
+    for leaf in fit[1]:
+        hits = by_leaf.get(leaf, [])
+        if len(hits) != 1:
+            return None
+        full.append(hits[0])
+    labels = tuple(full)
+    return (list(labels) if f.type is FieldType.MULTI_CHOICE else labels[0]), labels
+
+
+def _fact_value(ref: str, field: FieldLike, rctx: ResolveContext, rules: Any, *,
+                today: str = "") -> Optional[Fit]:
     f = _ff(field)
     ns, _, name = ref.partition(":")
     if not name:
