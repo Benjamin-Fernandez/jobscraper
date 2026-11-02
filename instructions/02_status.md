@@ -6,9 +6,9 @@
 
 ## Now / Next (≤ 10 lines; history goes to `docs/planning/session_log.md`)
 
-- **Now:** paused by the owner. Merged: M19, M20 dossier + D-70 delta, lanes T and P (469/469). Paused: lane B (B1–B6 done), lane V (V1 done), tester Q-26 (WIP).
-- **Next:** spike S-5 (real Workday flow) once the owner gives the email + app password; then lane V (Workday).
-- **Blocked on the owner:** application email (and confirm backup), Gmail app password via the command, MyGreenhouse sign-in in the JobScraper Edge profile, then `data/applicant.yaml`.
+- **Now:** M20 build. Merged and pushed: lanes T, P, V part 1, B; int/Q-30 (D-74 Profile form + F-13 questions, D-75 work rights, tier-3 memory; review APPROVE WITH FIXES), 752/752 Python, web 253+1. Running: spike S-5b (LLM-driven Workday at the 2 D-77 employers), Q-38 tester (int/Q-36 oracles), Q-39 engineer (review F2/F6/F7).
+- **Next:** merge int/Q-36 (owner profile → errors 0) and Q-39; S-5b report → Q-35 D-78 redesign (folds in review F1/F3/F4); then V2 accounts, V4–V7, WP-Q1b (after F1), WP-F1 fixtures; M20 gate.
+- **Blocked on the owner:** nothing.
 
 ## 1. Milestones
 
@@ -82,6 +82,7 @@ Decided items aren't reopened. If facts change, raise a new decision that refere
 | D-60 | Tailor output | Clean template; DOCX + PDF via Word; page ceiling; temp 0.25 | Coordinator | DECIDED |
 | D-61 | Caps | 10/day, 2/employer/day, 1 in flight | Coordinator | DECIDED |
 | D-62 | Team and git | Standard team, no security reviewer; merge and push allowed | owner | DECIDED |
+| D-79 | Lenient profile reading (Q-36, Coordinator per D-78) | `normalise` on load/validate/save: enums any case/spacing + synonyms, quoted yes/no/true/false → bool (supersedes QD §8.1 strictness for these words), "prefer not to say" → decline, dates from YAML dates / "Mar 2020" / "03/2020" / DD/MM/YYYY (SG order); ambiguous forms still rejected. Entry dates (education/experience) keep a full day when given (D-68 A-4 computed_facts) | Coordinator, 2026-11-03 | DECIDED |
 | D-78 | LLM-driven form filling (owner, 2026-11-03) | Owner: "Calls should be made to the LLM to do the filling up of the forms. It should not be manual entry as manual entry hardcoded is vulnerable to systems changing… the LLM should be the one filling the information up, deciding whether the information comes from applicant.yaml / resume"; "if there are options to 'import from resume', it should always choose that". The local model fills every field from a generic page read (label, type, options) using applicant.yaml + resume text + saved answers; adapters keep only navigation; resume-import options are always taken (reverses D-70's Workday rule), then the model checks every field. Guard rails stay: standing answers (D-55, D-75) as facts, grounding, unknown required → stop + Questions inbox, CAPTCHA stop, caps, NF-06. Profile validation becomes lenient (case, YAML booleans, synonyms). Spike S-5b (real Workday at Kyndryl + PayPal, D-77) is the first prototype; architect redesign Q-35 | owner, 2026-11-03 | DECIDED |
 | D-77 | Workday test go-ahead (owner, direct, 2026-11-03) | Owner: "You will create the account for me, fill up the information and submit all automatically. I will manually check the email to see if you have submitted." Spike S-5 re-runs at Kyndryl (DevOps Engineer) + PayPal (Software Engineer) (GlobalFoundries dropped: applications moved to Eightfold): real accounts, IMAP verification, full wizard, automatic Submit, but only when every required answer comes from the profile/resolver (an unknown required answer stops that employer, never guessed). Starts after the owner fills `data/applicant.yaml` | owner, 2026-11-03 | DECIDED |
 | D-76 | Q-30 tester questions | Bare all-caps `US` in the verbatim label = United States (lowercase `us` = pronoun); D-75 `conflict` wins over `no_option_fits`; a choice question's first answer may be employer-scoped only (base picks empty allowed); adopt the tester's assumed call shapes (assign_key, parse_naming, naming_user_prompt, upsert_question). QD text amended later (architect/planner batch) | Coordinator, 2026-11-03 | DECIDED |
