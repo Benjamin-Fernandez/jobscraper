@@ -138,9 +138,9 @@ def _profile_key(rule_id: str, rule_keys: Mapping[str, Any]) -> str:
     """The profile path a tier-2 rule_id names: a questions.yaml key, a
     virtual "<key>#<id>" read as its parent; "" for anything else (a
     declaration label, llm:v1, computed.*)."""
-    if not rule_id or rule_id not in rule_keys:
+    key = (rule_id or "").split("#", 1)[0]
+    if not key or (rule_id not in rule_keys and key not in rule_keys):
         return ""
-    key = rule_id.split("#", 1)[0]
     return "" if key.startswith("computed.") else key
 
 
@@ -188,7 +188,7 @@ def capture(fields: Sequence[FormField], answers: Mapping[str, Answer], ctx: Res
         if decl in EMPLOYER_SPECIFIC_DECLARATIONS:
             continue
         reason, target = _reason(f, a, ctx, rule_keys, decl)
-        rule = rule_keys.get(a.rule_id)
+        rule = rule_keys.get(a.rule_id) or rule_keys.get((a.rule_id or "").split("#", 1)[0])
         sensitive = bool(a.sensitive or (rule is not None and rule.sensitive)
                          or reason is QuestionReason.ATTESTATION_UNCLEAR
                          or f.canonical in resolve.SENSITIVE_CANONICALS
@@ -245,8 +245,23 @@ class KeyChoice:
     title: str
     description: str = ""
     named_by: str = "rule"                   # rule | model | profile
-    asked_model: bool = False                # a naming call was made (the per-attempt cap)
-    naming_failed: bool = False              # it failed: log "question naming unavailable"
+
+
+ExistingLike = Union[ExistingKey, Sequence[Any], Mapping[str, Any]]
+
+
+def as_existing(x: ExistingLike) -> ExistingKey:
+    """An ExistingKey from itself, a (key, title, kind, sensitive) tuple
+    (store.question_keys()), or a questions-row dict."""
+    if isinstance(x, ExistingKey):
+        return x
+    if isinstance(x, Mapping):
+        labels = x.get("labels") or ([x["label_norm"]] if x.get("label_norm") else [])
+        return ExistingKey(str(x["key"]), str(x.get("title") or x["key"]), str(x.get("kind") or ""),
+                           bool(x.get("sensitive")), frozenset(norm_label(s) for s in labels),
+                           str(x.get("description") or ""))
+    key, title, kind, sensitive = (list(x) + [None, None, None])[:4]
+    return ExistingKey(str(key), str(title or key), str(kind or ""), bool(sensitive))
 
 
 def existing_keys(extra: Optional[Mapping[str, Any]] = None,
@@ -358,16 +373,18 @@ NAMING_MAX_TOKENS = 200
 NAMING_SEED = 7
 
 
-def naming_candidates(existing: Sequence[ExistingKey]) -> list[ExistingKey]:
+def naming_candidates(existing: Sequence[ExistingLike]) -> list[ExistingKey]:
     """What the prompt may list: non-sensitive `extra` keys (never a profile
     path, never a sensitive one), newest first, at most 50."""
-    return [e for e in existing
+    keys = [as_existing(x) for x in existing]
+    return [e for e in keys
             if not e.sensitive and EXTRA_KEY_RE.match(e.key)][:NAMING_EXISTING_MAX]
 
 
-def naming_user_prompt(q: CapturedQuestion, existing: Sequence[ExistingKey] = ()) -> str:
+def naming_user_prompt(q: CapturedQuestion, existing: Sequence[ExistingLike] = ()) -> str:
     """The question's own text and the keys already in use. Nothing from the
-    profile, no answer and no employer name (§5.3)."""
+    profile, no answer and no employer name (§5.3). `existing` = ExistingKeys,
+    (key, title, kind, sensitive) tuples or questions-row dicts."""
     lines = [f"QUESTION: {q.label}", f"HELP: {q.description}", f"TYPE: {_kind_value(q.kind)}",
              "OPTIONS:"]
     lines += [f"- {o}" for o in q.options[:NAMING_OPTIONS_MAX]]
@@ -376,12 +393,13 @@ def naming_user_prompt(q: CapturedQuestion, existing: Sequence[ExistingKey] = ()
     return "\n".join(lines)
 
 
-def parse_naming(reply: Any, existing: Sequence[ExistingKey],
+def parse_naming(reply: Any, existing: Sequence[ExistingLike],
                  q: CapturedQuestion) -> Optional[KeyChoice]:
-    """The model's reply, re-checked (§5.3): None (use the slug) for a reply
-    that is not the JSON asked for, a key outside the pattern, or a key some
-    other kind (or a sensitive question) already holds. `same_as` joins a
-    listed key of the same kind; any other `same_as` is ignored."""
+    """The model's reply (JSON text or a dict), re-checked (§5.3): None (use
+    the slug) for a reply that is not the JSON asked for, a key outside the
+    pattern, or a key that another kind (or a sensitive question) already
+    holds. `same_as` joins a listed key of the same kind; any other `same_as`
+    is ignored. An empty title becomes the question's label."""
     if isinstance(reply, str):
         try:
             reply = json.loads(reply)
@@ -390,11 +408,12 @@ def parse_naming(reply: Any, existing: Sequence[ExistingKey],
     if not isinstance(reply, dict):
         return None
     kind = _kind_value(q.kind)
-    by_key = {e.key: e for e in existing}
-    listed = {e.key: e for e in naming_candidates(existing)}
+    keys = [as_existing(x) for x in existing]
+    by_key = {e.key: e for e in keys}
+    listed = {e.key: e for e in naming_candidates(keys)}
     title = reply.get("title")
-    title = title.strip()[:TITLE_MAX] if isinstance(title, str) and title.strip() \
-        else short_title(q.label)
+    title = (title.strip()[:TITLE_MAX] if isinstance(title, str) and title.strip()
+             else short_title(q.label))
     desc = reply.get("description")
     desc = " ".join(desc.split())[:160] if isinstance(desc, str) else ""
     same = reply.get("same_as")
@@ -412,22 +431,6 @@ def parse_naming(reply: Any, existing: Sequence[ExistingKey],
     return KeyChoice(key, title, desc, "model")
 
 
-def _accepts_timeout(backend: Any) -> bool:
-    try:
-        params = inspect.signature(backend.complete).parameters.values()
-    except (TypeError, ValueError):
-        return False
-    return any(p.name == "timeout" or p.kind is p.VAR_KEYWORD for p in params)
-
-
-def _ask_model(backend: Any, user: str, timeout: Optional[float]) -> str:
-    kw: dict[str, Any] = {"format": NAMING_SCHEMA, "temperature": 0, "seed": NAMING_SEED}
-    if timeout and _accepts_timeout(backend):
-        kw["timeout"] = float(timeout)
-    comp = backend.complete(NAMING_SYSTEM, user, NAMING_MAX_TOKENS, **kw)
-    return comp.text
-
-
 def can_name(backend: Any) -> bool:
     """A model may be asked: a backend that is not OffBackend and is up."""
     if backend is None or isinstance(backend, OffBackend):
@@ -438,14 +441,43 @@ def can_name(backend: Any) -> bool:
         return False
 
 
-def assign_key(q: CapturedQuestion, *, extra: Optional[Mapping[str, Any]] = None,
-               rows: Sequence[Mapping[str, Any]] = (), backend: Any = None,
-               llm_naming: bool = True, timeout: Optional[float] = 20) -> KeyChoice:
+def _accepts_timeout(backend: Any) -> bool:
+    try:
+        params = inspect.signature(backend.complete).parameters.values()
+    except (TypeError, ValueError):
+        return False
+    return any(p.name == "timeout" or p.kind is p.VAR_KEYWORD for p in params)
+
+
+def ask_model(backend: Any, q: CapturedQuestion, existing: Sequence[ExistingLike] = (),
+              timeout: Optional[float] = None) -> Optional[str]:
+    """One naming call (§5.3), for apply_flow: `complete(NAMING_SYSTEM, user,
+    max_tokens=200, format=NAMING_SCHEMA, temperature=0, seed=7)`, capped at
+    `timeout` seconds when the backend takes one. Returns the reply text, or
+    None when the model is down or the call fails (the caller logs
+    "question naming unavailable" and uses the slug). Never called for a
+    sensitive question."""
+    if q.sensitive or not can_name(backend):
+        return None
+    kw: dict[str, Any] = {"max_tokens": NAMING_MAX_TOKENS, "format": NAMING_SCHEMA,
+                          "temperature": 0, "seed": NAMING_SEED}
+    if timeout and _accepts_timeout(backend):
+        kw["timeout"] = float(timeout)
+    try:
+        return backend.complete(NAMING_SYSTEM, naming_user_prompt(q, existing), **kw).text
+    except (BackendError, TimeoutError, OSError):
+        return None
+
+
+def assign_key(q: CapturedQuestion, extra: Optional[Mapping[str, Any]] = None,
+               rows: Sequence[Mapping[str, Any]] = (), suggestion: Any = None) -> KeyChoice:
     """The key for a question whose `sig` is new (§5.2), first rule that holds:
-    1 a profile gap -> its profile path; 2 an `extra` entry listing this label;
-    3 a `questions` row with this label and kind; 4 the local model's name
-    (not for a sensitive question, only with `llm_naming` and a usable
-    backend); 5 the slug. `rows` = store.question_rows()."""
+    1 a profile gap -> its profile path ("profile"); 2 an `extra` entry that
+    lists this label; 3 a stored `questions` row with this label and kind;
+    4 the model's `suggestion` (its reply, or parse_naming's result), never for
+    a sensitive question ("model"); 5 the slug ("rule"). `rows` are questions
+    rows ({key, label_norm, kind, title, sensitive}, e.g. store.question_rows()).
+    Pure: the naming call itself is `ask_model`, made by apply_flow."""
     if q.target_path:
         return KeyChoice(q.target_path, form_label(q.target_path) or short_title(q.label),
                          "", "profile")
@@ -459,19 +491,12 @@ def assign_key(q: CapturedQuestion, *, extra: Optional[Mapping[str, Any]] = None
                 and not r.get("target_path")):
             return KeyChoice(str(r["key"]), str(r.get("title") or r["key"]),
                              str(r.get("description") or ""), "rule")
-    asked = failed = False
-    if not q.sensitive and llm_naming and can_name(backend):
-        asked = True
-        try:
-            text = _ask_model(backend, naming_user_prompt(q, existing), timeout)
-        except (BackendError, TimeoutError, OSError):
-            text, failed = None, True
-        choice = parse_naming(text, existing, q) if text is not None else None
+    if suggestion is not None and not q.sensitive:
+        choice = (suggestion if isinstance(suggestion, KeyChoice)
+                  else parse_naming(suggestion, existing, q))
         if choice is not None:
-            return KeyChoice(choice.key, choice.title, choice.description, "model", True)
-        failed = True
-    return KeyChoice(slug_key(q.label_norm, existing, kind), short_title(q.label), "", "rule",
-                     asked, failed)
+            return KeyChoice(choice.key, choice.title, choice.description, "model")
+    return KeyChoice(slug_key(q.label_norm, existing, kind), short_title(q.label), "", "rule")
 
 
 def question_row(q: CapturedQuestion, choice: KeyChoice) -> dict[str, Any]:

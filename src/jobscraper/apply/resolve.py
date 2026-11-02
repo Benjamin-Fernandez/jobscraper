@@ -117,13 +117,24 @@ def _country_phrases() -> list[tuple[str, tuple[str, ...]]]:
 _COUNTRY_PHRASES = _country_phrases()
 
 
-def label_countries(label_norm: str) -> set[str]:
+_BARE_US = re.compile(r"(?<![A-Za-z0-9])US(?![A-Za-z0-9])")
+
+
+def label_countries(label_norm: str, label: str = "") -> set[str]:
     """The ISO codes (and "EU") a normalised label names, by contiguous token
     phrase: country names plus COUNTRY_ALIASES. Unlike tier-2 synonyms, a
     one-token name matches in a label of any length ("eligible to work in
-    canada"). Demonyms are not used."""
+    canada"). Demonyms are not used.
+
+    D-76: normalising lowercases, so the bare token is read on the verbatim
+    `label`: an upper-case standalone "US" is the United States, a lowercase
+    "us" the pronoun ("work for us"). A label written all in capitals tells
+    the two apart by nothing, so there "US" stays the pronoun."""
     toks = label_norm.split()
-    return {code for code, phrase in _COUNTRY_PHRASES if contains_run(toks, phrase)}
+    found = {code for code, phrase in _COUNTRY_PHRASES if contains_run(toks, phrase)}
+    if label and _BARE_US.search(label) and any(ch.islower() for ch in label):
+        found.add("US")
+    return found
 
 
 # --------------------------------------------------------------------------
@@ -884,11 +895,11 @@ def _tier2_one(f: FormField, label_norm: str, ctx: ResolveContext, r: Rule) -> _
 WORK_RIGHTS_CONFLICT = "work rights differ"     # the note capture reads as reason `conflict`
 
 
-def work_rights_countries(label_norm: str, ctx: ResolveContext) -> list[str]:
+def work_rights_countries(label_norm: str, ctx: ResolveContext, label: str = "") -> list[str]:
     """The countries a work-rights label asks about (§8.2 steps 1-2): those it
     names; else the applicant's country when it asks where they live; else the
     job's country (`ctx.job_country`, "this country", "where this job is")."""
-    named = label_countries(label_norm)
+    named = label_countries(label_norm, label)
     if named:
         return sorted(named)
     toks = label_norm.split()
@@ -909,7 +920,7 @@ def _tier2_country_bool(f: FormField, label_norm: str, ctx: ResolveContext,
     # "Can you work in the US without sponsorship?": authorised and needs none.
     without = (which == "authorised_to_work" and "without" in toks
                and bool(toks & {"sponsor", "sponsorship", "visa"}))
-    countries = work_rights_countries(label_norm, ctx)
+    countries = work_rights_countries(label_norm, ctx, f.label)
     values: dict[str, tuple[bool, str]] = {}
     for c in countries:
         v, src = applicant.work_right(ctx.profile, which, c)

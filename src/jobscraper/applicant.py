@@ -549,9 +549,12 @@ def _str_list(v: Any) -> bool:
     return isinstance(v, list) and all(isinstance(x, str) for x in v)
 
 
-def _extra_answer_errors(kind: str, ans: dict, base: str) -> list[FieldError]:
+def _extra_answer_errors(kind: str, ans: dict, base: str,
+                         scoped_only: bool = False) -> list[FieldError]:
     """`value` / `picks` / `seen` of one answer (an entry, or one by_employer
-    override) checked for its kind. `base` is the dotted path of `ans`."""
+    override) checked for its kind. `base` is the dotted path of `ans`.
+    `scoped_only`: an entry whose choice was answered for one employer only
+    (D-76): its base `picks` may be empty, and then only the overrides apply."""
     out: list[FieldError] = []
     value = ans.get("value")
     if kind in ("choice", "multi"):
@@ -565,7 +568,7 @@ def _extra_answer_errors(kind: str, ans: dict, base: str) -> list[FieldError]:
                 out.append(FieldError(f"{base}.{name}", "must be a list of option labels"))
                 ok = False
         if ok:
-            if kind == "choice" and not picks:
+            if kind == "choice" and not picks and not scoped_only:
                 out.append(FieldError(f"{base}.picks", "must name at least one option"))
             elif set(picks or []) - set(seen or []):
                 out.append(FieldError(f"{base}.picks", "must be options that are also in seen"))
@@ -614,8 +617,9 @@ def extra_entry_errors(key: Any, entry: Any) -> list[FieldError]:
         out.append(FieldError(f"{base}.sensitive", "must be true or false"))
     if kind not in EXTRA_KINDS:
         return out
-    out.extend(_extra_answer_errors(kind, entry, base))
     by_emp = entry.get("by_employer")
+    out.extend(_extra_answer_errors(kind, entry, base,
+                                    scoped_only=isinstance(by_emp, dict) and bool(by_emp)))
     if by_emp is None:
         return out
     if not isinstance(by_emp, dict):
