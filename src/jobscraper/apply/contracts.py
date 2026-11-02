@@ -20,13 +20,23 @@ from dataclasses import dataclass, field
 from enum import Enum, IntEnum
 from typing import Any, Callable, Optional, Protocol, Sequence, Union, runtime_checkable
 
-CONTRACT_VERSION = 4   # 2: D-69 (no FAILED after the Submit click, ADR-0004), D-68 context fields
+CONTRACT_VERSION = 5   # 2: D-69 (no FAILED after the Submit click, ADR-0004), D-68 context fields
                        # 3: D-70 (additive): prefill sources/policy, PREFILLED status, account
                        #    statuses, sign-up outcomes, Workday entry, identity email, adapter
                        #    `prefill`/`read_values`, SIGNING_UP -> SIGNING_UP (backup email)
                        # 4: D-74/D-75 (additive; questions_design.md): QuestionKind, QuestionReason,
                        #    QuestionStatus, CapturedQuestion, EXTRA_KEY_PATTERN,
                        #    ResolveContext.job_country, UNANSWERABLE_REQUIRED hint copy
+                       # 5: D-78 (ADR-0006; llm_fill_design.md): the local model fills every page.
+                       #    Added: AnswerSource STANDING/RESUME/JOB/RESUME_IMPORT, SITE_VALUE_SOURCES,
+                       #    ValueOrigin, TRUSTED_ORIGINS, PageField, EntryGroup, EntrySection,
+                       #    FillSource, Fact, ModelDecision, PageOutcome, GENERIC_LABELS,
+                       #    SiteNavigator (navigation only), Answer.evidence/shown/origin/entry,
+                       #    ReasonCode.MODEL_UNAVAILABLE (+ its REASON_TEXTS copy).
+                       #    Superseded (kept until the cleanup WP-C1): AtsAdapter's fill-side
+                       #    methods (plan_from_schema, read_step, fill, prefill, read_values),
+                       #    PrefillPolicy/PREFILL_POLICY. WorkdayEntry.AUTOFILL_WITH_RESUME is now
+                       #    chosen first (D-78 reverses D-70's rule).
 
 
 # --------------------------------------------------------------------------
@@ -120,6 +130,7 @@ class ReasonCode(str, Enum):
     DUPLICATE = "duplicate"
     PROFILE_INCOMPLETE = "profile_incomplete"
     CANCELLED = "cancelled"
+    MODEL_UNAVAILABLE = "model_unavailable"   # D-78: the local model is needed for every page
     ERROR = "error"
 
 
@@ -179,6 +190,10 @@ REASON_TEXTS: dict[ReasonCode, ReasonText] = {
     ReasonCode.CANCELLED: ReasonText(
         "You cancelled this application before it was sent.",
         "Start it again whenever you like."),
+    ReasonCode.MODEL_UNAVAILABLE: ReasonText(
+        "The local AI model wasn't available ({detail}), so JobScraper stopped before "
+        "finishing the form. Nothing was sent.",
+        "Start Ollama, check it with “python -m jobscraper doctor”, then try again."),
     ReasonCode.ERROR: ReasonText(
         "Something unexpected went wrong, so JobScraper stopped before sending.",
         "Try again. If it happens again, the Developer tab log has the details."),
@@ -356,10 +371,18 @@ class AnswerSource(str, Enum):
     MYGREENHOUSE = "mygreenhouse"                          # "Autofill with MyGreenhouse" (D-70)
     WORKDAY_LAST_APPLICATION = "workday_last_application"  # Workday "Use My Last Application"
     SITE_DEFAULT = "site_default"                          # a value the form showed before any input
+    # D-78 (llm_fill_design §5, §7). "profile:<path>" and "memory:extra.<key>" keep their prefixes.
+    STANDING = "standing"            # "standing:<id>": a derived fact (today, experience years,
+                                     # prior employment here, D-75 work rights), value made by the program
+    RESUME = "resume"                # the model wrote the value from the resume text (grounded)
+    JOB = "job"                      # the model wrote the value from the job posting (grounded)
+    RESUME_IMPORT = "resume_import"  # kept as shown: the site's own resume import put it there
 
 
 PREFILL_SOURCES = frozenset({AnswerSource.MYGREENHOUSE, AnswerSource.WORKDAY_LAST_APPLICATION,
                              AnswerSource.SITE_DEFAULT})
+# Every source a kept, site-shown value (status PREFILLED, tier NONE) may carry under D-78.
+SITE_VALUE_SOURCES = PREFILL_SOURCES | {AnswerSource.RESUME_IMPORT}
 
 
 class PrefillPolicy(str, Enum):
@@ -392,6 +415,11 @@ class Answer:
     prompt_hash: str = ""             # tier 5 only: sha256 of system+user, first 16 hex
     sensitive: bool = False           # an S field (design §5.3): never sent to the model, never logged
     note: str = ""                    # why it is UNKNOWN / UNGROUNDED (no personal values)
+    # D-78 (llm_fill_design §7, §11): audit extras. Local DB only, never logged.
+    evidence: str = ""                # the model's quote (resume/job/keep), or "" for program values
+    shown: Value = None               # what the field showed when the page was first read
+    origin: str = ""                  # ValueOrigin value of `shown`
+    entry: str = ""                   # entry group id ("work_experience#2"), "" outside repeated entries
 
     @property
     def fills(self) -> bool:
@@ -553,10 +581,10 @@ class SignUpOutcome(str, Enum):
 
 
 class WorkdayEntry(str, Enum):
-    """The Workday Apply choice (design §9.4.2)."""
-    APPLY_MANUALLY = "apply_manually"
-    USE_LAST_APPLICATION = "use_last_application"
-    AUTOFILL_WITH_RESUME = "autofill_with_resume"   # never chosen
+    """The Workday Apply choice (design §9.4.2; D-78 order in llm_fill_design §9.1)."""
+    APPLY_MANUALLY = "apply_manually"               # when no resume import is offered
+    USE_LAST_APPLICATION = "use_last_application"   # not chosen under D-78
+    AUTOFILL_WITH_RESUME = "autofill_with_resume"   # D-78: always chosen when offered
     DIRECT = "direct"                               # the tenant showed no choice
 
 
@@ -620,7 +648,8 @@ class AttemptContext:
     deadline: float                           # time.monotonic() value after which the attempt fails
     http: Any = None                          # net.HttpClient, for schema adapters
     applied_on_tenant: bool = False           # D-70: a Submit was clicked on this tenant before (§12.4)
-    prefill: str = ""                         # AnswerSource value that open()/prefill() put on the page, or ""
+    prefill: str = ""                         # AnswerSource value that open()/prefill() put on the page, or "";
+                                              # D-78: the ValueOrigin value SiteNavigator.choose_entry returned
 
 
 @dataclass
@@ -715,6 +744,187 @@ class AtsAdapter(Protocol):
     def after_submit(self, page: BrowserPage, ctx: AttemptContext) -> Optional[str]:
         """Poll once: "confirmed:<signal>" | "code_required" | "errors" | None
         (nothing yet). The orchestrator loops until the confirm timeout."""
+        ...
+
+    def visible_errors(self, page: BrowserPage) -> tuple[str, ...]:
+        ...
+
+
+# --------------------------------------------------------------------------
+# D-78: the local model fills every page (llm_fill_design.md, ADR-0006)
+# --------------------------------------------------------------------------
+
+class ValueOrigin(str, Enum):
+    """Who put the value a field shows when its page is first read (llm_fill_design §3.3).
+    The site-side values equal the AnswerSource values, so `AnswerSource(o.value)` works."""
+    EMPTY = "empty"
+    SITE_DEFAULT = "site_default"                          # a preselection or default of the form
+    RESUME_IMPORT = "resume_import"                        # the site's resume parser (always taken, D-78)
+    MYGREENHOUSE = "mygreenhouse"                          # the owner's MyGreenhouse profile
+    WORKDAY_LAST_APPLICATION = "workday_last_application"  # not chosen under D-78; kept for old rows
+    OURS = "ours"                                          # JobScraper typed it earlier in this attempt
+
+
+# Origins whose shown value is the owner's own entry: `keep` needs no grounding there
+# (still never for ALWAYS_OURS, employer-specific declarations or sensitive fields; §7 G8).
+TRUSTED_ORIGINS = frozenset({ValueOrigin.MYGREENHOUSE})
+
+# Normalised labels (design §7.1) too generic to identify a question alone (review Q-30 F1).
+# A field with one of these, or with fewer than 2 content tokens, is matched and captured
+# with its context (help text, else the preceding question), never by the label alone.
+GENERIC_LABELS = frozenset({
+    "if yes please specify", "if yes please explain", "if yes please provide details",
+    "if so please specify", "if so please explain", "if so please provide details",
+    "if other please specify", "if no please explain", "please specify", "please explain",
+    "please provide details", "details", "specify", "explain", "comments", "other",
+    "please select", "additional information", "remarks", "answer", "description",
+})
+
+
+@dataclass(frozen=True)
+class PageField:
+    """One field as the generic page reader found it (llm_fill_design §3)."""
+    field: FormField                  # key = the reader's id (stable within one read); type, label,
+                                      # required, options (verbatim; "Category > Leaf" for expanded lists)
+    widget: str                       # widget family that reads and fills it (apply/widgets.py registry key)
+    shown: Value = ""                 # what the field shows now ("" empty; list for multi)
+    origin: ValueOrigin = ValueOrigin.EMPTY
+    context: str = ""                 # the preceding question's label in the same group (for generic labels)
+    group: str = ""                   # entry group id, e.g. "work_experience#2"; "" outside repeated entries
+    group_title: str = ""             # the group's heading as shown ("Work Experience 2")
+    options_complete: bool = True     # False: a searchable list whose options appear only after typing
+    error: str = ""                   # the site's error text for this field, if any
+
+
+@dataclass(frozen=True)
+class EntryGroup:
+    """One repeated entry on a page (a job, a school, a language)."""
+    section: str                      # work_experience | education | languages | websites | certifications | other_<slug>
+    index: int                        # 1-based, as shown
+    title: str                        # heading text
+    locator: str                      # CSS/XPath of the entry container (the reader's scope for its fields)
+    delete_locator: str = ""          # its delete control; "" when it has none
+
+
+@dataclass(frozen=True)
+class EntrySection:
+    section: str
+    title: str
+    add_locator: str = ""             # the section's "Add" control; "" when it has none
+    required: bool = False            # the form requires at least one entry here
+    entries: tuple[EntryGroup, ...] = ()
+
+
+class FillSource(str, Enum):
+    """The `source` the model names for each field (llm_fill_design §6)."""
+    PROFILE = "profile"     # a data/applicant.yaml fact (ref "profile:<path>"); the program makes the value
+    EXTRA = "extra"         # an owner answer (ref "extra:<key>"); the program makes the value
+    STANDING = "standing"   # a derived fact (ref "standing:<id>"); the program makes the value
+    RESUME = "resume"       # the model's value from the resume text, with a verbatim quote
+    JOB = "job"             # the model's value from the job posting, with a verbatim quote
+    KEEP = "keep"           # the value the field shows is right (quote the source that says so)
+    UNKNOWN = "unknown"
+
+
+@dataclass(frozen=True)
+class Fact:
+    """One entry of the fact catalogue the model may cite (llm_fill_design §5)."""
+    ref: str                # "profile:contact.city", "profile:experience[1].title", "extra:visa_status",
+                            # "standing:today"; the model's `ref` must be one of these exactly
+    title: str              # what it is, in plain words
+    value: str = ""         # the text the model sees; "" when private
+    private: bool = False   # sensitive (design §5.3 S paths, sensitive extra): the model sees only `is_set`
+    is_set: bool = True
+    kind: str = "text"      # mapping kind for the program (questions.yaml kinds + "file")
+    entry: str = ""         # "experience[1]" etc. for facts that belong to one entry
+
+
+@dataclass(frozen=True)
+class ModelDecision:
+    """The model's reply for one field, before the guards (llm_fill_design §6.3)."""
+    field_key: str
+    source: FillSource
+    ref: str = ""
+    value: Value = None
+    evidence: str = ""
+    via: str = "page"       # page | entry:<group> | pick | second | recheck: which call produced it
+
+
+@dataclass
+class PageOutcome:
+    """What `apply.pagefill.fill_page` returns for one page (llm_fill_design §8)."""
+    step: str
+    fields: list[PageField] = field(default_factory=list)
+    answers: dict[str, Answer] = field(default_factory=dict)
+    unknown_required: tuple[str, ...] = ()   # field keys: the attempt stops and captures them
+    fill_failed: tuple[str, ...] = ()        # field keys the page would not take after the corrective pass
+    model_calls: int = 0
+    model_seconds: float = 0.0
+
+
+@runtime_checkable
+class SiteNavigator(Protocol):
+    """D-78: what an ATS module does. Navigation and site structure only; reading and
+    filling fields is generic (apply/page.py, apply/widgets.py, apply/pagefill.py).
+    Implementations live in apply/ats/<name>.py and register in REGISTRY (llm_fill_design §9)."""
+
+    name: str
+    needs_account: bool
+    password_rules: PasswordRules
+    mail_domains: tuple[str, ...]
+    otp_pattern: str
+
+    def match_url(self, url: str) -> Optional[Tenant]:
+        ...
+
+    def tenant_from_company(self, job: dict[str, Any]) -> Optional[Tenant]:
+        ...
+
+    def precheck(self, ctx: AttemptContext) -> None:
+        """Cheap checks before the browser (Greenhouse: the schema 404 -> POSTING_CLOSED). May do nothing."""
+        ...
+
+    def open(self, page: BrowserPage, ctx: AttemptContext) -> None:
+        """Reach the posting, dismiss a cookie banner (decline), click Apply."""
+        ...
+
+    def choose_entry(self, page: BrowserPage, ctx: AttemptContext) -> str:
+        """Take the site's import when offered (D-78: Workday "Autofill with Resume",
+        Greenhouse MyGreenhouse) and return the ValueOrigin value later pages carry, or ""."""
+        ...
+
+    def account_wall(self, page: BrowserPage) -> Optional[str]:
+        ...
+
+    def sign_in(self, page: BrowserPage, ctx: AttemptContext, password: Secret) -> None:
+        ...
+
+    def sign_up(self, page: BrowserPage, ctx: AttemptContext, password: Secret) -> str:
+        ...
+
+    def enter_code(self, page: BrowserPage, ctx: AttemptContext, code: str) -> None:
+        ...
+
+    def step_id(self, page: BrowserPage, ctx: AttemptContext) -> str:
+        """The current step's id ([a-z0-9_]; "form" on a one-page form; "review" on the review page)."""
+        ...
+
+    def scope(self, page: BrowserPage, ctx: AttemptContext) -> str:
+        """CSS of the container the reader reads ("" = the whole page minus header/nav/footer)."""
+        ...
+
+    def entry_sections(self, page: BrowserPage, ctx: AttemptContext) -> list[EntrySection]:
+        """Repeated sections on this step. `apply.page.entry_sections` is the generic default."""
+        ...
+
+    def next_step(self, page: BrowserPage, ctx: AttemptContext) -> StepResult:
+        """Click Next / Save and Continue, never a Submit button (that is `submit`)."""
+        ...
+
+    def submit(self, page: BrowserPage, ctx: AttemptContext) -> None:
+        ...
+
+    def after_submit(self, page: BrowserPage, ctx: AttemptContext) -> Optional[str]:
         ...
 
     def visible_errors(self, page: BrowserPage) -> tuple[str, ...]:

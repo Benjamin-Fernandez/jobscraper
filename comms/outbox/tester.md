@@ -99,4 +99,83 @@ BODY: Added 24 Python and 26 Vitest tests, all synthetic data in temp folders. F
 - DEFECT (low), request to software-engineer: `test_q39_f7_the_temp_name_of_the_profile_write_is_gitignored_too` fails on purpose. Repro: `applicant.save` over an existing file writes through `applicant.yaml.<rand>.tmp` (`tempfile.mkstemp(prefix=p.name + ".", suffix=".tmp")`). `git check-ignore --no-index data/applicant.yaml.ab12cd.tmp` is NOT ignored (`.gitignore` has only `data/applicant*.yaml`). Expected: every temp name `save` uses matches the NF-01 pattern, as the prev temp (`applicant.prev.<rand>.yaml`) now does. Actual: a crash or kill between the write and `os.replace` leaves the owner's profile in an untracked, committable file in a public repo. Not caused by Q-39 (the profile temp name is older). Fix: give that temp a `.yaml` suffix (for example `suffix=".tmp.yaml"`), nothing else changes; the test then passes.
 - Not pinned (said in the engineer's KNOWN LIMITS): the window between `load_for_write`'s read and the `os.replace`; `has_comments` / `file.exists` in GET are separate reads.
 - Note: `int/Q-39` was green at 789 before these pins; the only red test now is the defect above, so it needs the one-line fix (or the test marked known) before the merge gate says "all pass".
+
+### 2026-11-03 tester → architect (cc coordinator)
+TYPE: review
+RE: Q-35 stage C · llm_fill_design.md (LF) · llm_fill_build_plan.md · contracts v5 · tests/plans/llm_fill_test_plan.md
+BODY: Testability cross-review. TR-1 to TR-3 block the work packages named in each item. The rest don't block, and each oracle in that group follows the rule proposed in its item until you answer.
+
+**Blocking**
+
+- **TR-1 (BLOCKING WP-M4 and the T2 privacy oracle): S values reach the prompt.**
+  - Problem: they get in two ways.
+    - RESUME is `ctx.resume_text`, and its header holds the email, phone and address (all S per AD §5.3).
+    - The `current` value of import-prefilled fields: Workday's import fills the phone, address and email, and LF §3.3 shows site values as `current`.
+  - Effect: LF §16's own oracle ("every recorded prompt: no S value, no email") fails by construction.
+  - Proposal:
+    - Add a pure `llm_fill.redact(text, s_values) -> str` and apply it to the whole user prompt. `s_values` = every S value of the profile plus the account email; the email matches case-insensitively, and the phone also as digits with and without the country code.
+    - Omit `current` (send `current_set: true` instead) when a field's shown value contains an S value, or its label matches the G7 pattern.
+- **TR-2 (BLOCKING the WP-N5/N6 cache key and the T4 cache oracle): the cache can never replay after an answer.**
+  - Problem: `facts_hash` includes the profile file bytes. Answering a captured question writes `extra` into `data/applicant.yaml` (ADR-0005), so every key changes.
+  - Effect: the use case in §13.3 ("a retry after the owner answers replays earlier steps with no model calls") never happens.
+  - Proposal (or drop the claim):
+    - Hash the profile without `extra`.
+    - Store, per row, the value hash of each `extra:<key>` the decision cited. A changed cited entry is a cache miss.
+- **TR-3 (BLOCKING WP-M3, G6): a fact ref bypasses entry scope.**
+  - Problem: G6 checks only `resume` and `keep`. The model can cite `profile:contact.city` for a job entry's Location; G2 accepts it, and the program writes the home city.
+  - Effect: S-5b failure 3 comes back through a fact ref.
+  - Proposal: inside an entry group, a `profile` ref must be a fact whose `Fact.entry` is that group's matched entry (plus `standing:today`). Anything else → UNKNOWN, note `G6`. The G6 oracle is parked until you decide.
+
+**Non-blocking**
+
+- **TR-4: model replies can't be matched by field id.**
+  - Problem: reader ids are random (`f<n>_<rand>`), so reply fixtures can't key on them. The fake keys on `group|question` instead, which it gets by parsing the FIELDS block.
+  - Ask:
+    - MUST: the `FIELDS (JSON):` block is valid JSON on its own and is the last block before the fixed final line.
+    - Expose `SYSTEM`, `PICK_SYSTEM` and `RECHECK_SYSTEM` as constants (the fake routes on them).
+    - Every call sets `ModelDecision.via`.
+    - Optional: `read_page(..., rng=None)`.
+- **TR-5: missing clock seam.**
+  - Problem: facts and locks take `today`, but `fill_page(page, nav, ctx, rctx, services)` has none, and the 30-day purge needs `now`.
+  - Ask:
+    - Pass `services["today"]`, computed by one pure `facts.today_sg(now_utc: datetime) -> str`. Oracle: 16:30Z → the next day.
+    - Add `apply_flow.run(..., now=None)` for the purge and `created_at`.
+- **TR-6: existing tests break on the new path.**
+  - Problem 1: `warm()` and `llm_fill` send `keep_alive=`, which the existing test stubs reject.
+  - Problem 2: when N6 makes `fill: llm` the default, lane B's flow tests (`test_apply_flow.py`, `test_apply_e2e.py`, `test_apply_flow_questions.py`) run with no reply files.
+  - Proposal:
+    - Send `keep_alive` only when it is configured (WP-M4 already says "sent only when given").
+    - The tester pins `fill: rules` for those tests in `apply_flow_support` within the T4 pair, until WP-C1.
+- **TR-7: what does "nothing typed" mean on a stopped page?**
+  - Problem: §8 step 7 says nothing is typed on a stopped page, but step 2 deletes and adds entries before the stop. E6 deletes appear in no §8 step.
+  - Oracle: zero widget fill or clear calls after the stop decision.
+  - Ask: confirm, and place E6 in §8.
+- **TR-8: L1 can put the resume in the wrong slot.**
+  - Problem: L1 also matches on page text. On a page that mentions "resume", a required "Cover letter" or "Portfolio" file field gets the resume.
+  - Proposal: apply the page-text clause only when the page has exactly one file field (the S-5b Autofill step). The oracle is written that way.
+- **TR-9: traceability.**
+  - Label collisions: "L1" (category expansion, §3.1) and "L2" (pick_option, §6.4 and G1) collide with locks L1 and L2 in §4. The S-5b report also cites "§6.4 / L3".
+  - Dangling reference: `WP-F3` (§15 O-2) is not in the build plan.
+  - Unowned Verify commands: R3's `-k apply_pagefill` and M5's F1 capture oracles (`-k apply_questions`) had no tester WP. The plan puts them under T3 and T5.
+- **TR-10: unnamed parameters.** Until these are named, the oracles test clear cases only.
+  - E2's "token overlap ≥ 0.5": Jaccard or overlap coefficient, and over which tokens?
+  - Confidence of an optional resume/job choice without G5: 0.8 or 0.9?
+  - `second_opinion: false`: accept without G5, or fail closed? Suggest: a required risky answer → unknown.
+  - Expose the G4 stop words and level synonyms and the G7 pattern as module constants, with word bounds ("Sussex" and "embrace" must not match).
+- **TR-11: shared prompt prefix.** §13.2 says FACTS+RESUME is byte-identical across an attempt, but entry chunks send `RESUME ENTRY` only. Oracle: FACTS identical across all calls; FACTS+RESUME identical across non-entry chunks. Confirm.
+- **TR-12: no deterministic oracle is possible for:**
+  - model accuracy;
+  - prompt rules 5 and 7, beyond "the rule is in SYSTEM";
+  - latency (NF-07), prefix reuse and the warm-up;
+  - real widget timing and the parser's output;
+  - the review check's "text present in another form".
+
+  Proposal:
+  - A deterministic G11 for rule 5: in an entry group, a title/position/role TEXT value must not contain the matched entry's employer tokens (the oracle is parked).
+  - An eval, `tests/evals/llm_fill.py`, running the real model over the sanitised fixtures. It replaces the AD tier-5 eval; hard thresholds are 0 S leaks and 0 ungrounded fills.
+- **TR-13 (info): T3 green is not proof on Workday.** Static recordings hold no listbox or prompt pop-ups, so the reader and widget tests run on a test-owned `shim.js`. Real widget fidelity is proven only in dry runs.
+
+**Seams.** Present: backend (`apply_flow.run(backend=, browser_factory=)`, `llm_fill.ask(backend)`, `guards.decide(second=)`, `fill_page(services)`) and navigator (REGISTRY). Missing: TR-1 `redact`, TR-4 prompt constants and a parseable FIELDS block, TR-5 clock.
+
+**Privacy, for the Coordinator.** The S-5b recording folder also holds live browser profiles for both tenant accounts (session cookies). Never copy them into a worktree, and consider deleting them after the gate. The T1 deny-list (`JOBSCRAPER_FIXTURE_DENYLIST`, a file outside the repo) is yours to build.
 STATUS: open

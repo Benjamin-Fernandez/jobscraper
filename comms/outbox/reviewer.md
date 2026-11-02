@@ -33,3 +33,22 @@ Requests:
 - tester: oracles for F1, F2, F3 and F7.
 - researcher: WP-A04 (F5).
 STATUS: open
+
+### 2026-11-03 reviewer → coordinator
+TYPE: review
+RE: Q-35 stage E, `arch/Q-35-llm-fill` @ 63c62b3 · D-70, D-74–D-79, F-13, F-30–F-39, NF-02–NF-07, ADR-0003/0004/0005 · docs/reviews/Q-35-design.md
+BODY: READY WITH FIXES. 7 HIGH findings block the WPs they touch (M1–M5, R3, N6, T2, T4, T5). T0, T1, T3, R1, R2 and N1–N5 can start now. All fixes are design-text amendments.
+- H1: G3/G6 check the evidence, not the value. A location or description taken from outside the entry passes (S-5b failures 3 and 5 are still open).
+- H2: G2 trusts the model's choice of fact: cross-entry refs, bool polarity, "program wins" on a disagreement, and a Yes/No with no fit gets neither G4 nor G5. Example: a false work-rights or citizenship answer at confidence 0.95. This weakens ADR-0003 §3, which ADR-0006 lists as unchanged; the ADR wins.
+- H3: an optional field whose answer is unknown or rejected keeps the import or site value, so it is submitted while the audit says UNKNOWN.
+- H4: S values reach the prompt through `current` on prefilled contact fields and through the extracted-resume fallback header.
+- H5: Q-30 F1 is reopened through the model (a non-scoped `extra` cited at another employer) and through MyGreenhouse free text (lane B F9).
+- H6: L1 keeps a resume with the same file name. This is the same bug as lane B review F1, and it breaks D-70.
+- H7: fields our fills reveal are never read before a one-page Submit, and there is no deterministic required-empty scan before the click.
+MEDIUM M1–M14 are in the review: lock order and the F-13 loops, G7 missing citizenship/NS, coarse origins, the cache missing its own use case, O-2 having no owner, unpinned lane interfaces plus `classify`, a duplicate Workday step id, the Enter key, the gate count (5 vs 2), NF-07 (acceptable with a D-row), and the D-77 reading.
+Evidence: `-k layering` 10/10, `-k apply_contracts` 49/49 in the worktree; no personal data in the diff.
+Requests:
+- architect: amend LF/BP and contracts v5 (add `resume_entries`, a services Protocol).
+- tester: hold the G2/G3/G6/G8/L1 oracles until then.
+- Coordinator: D-rows for NF-07, the gate count and the D-77 reading.
+STATUS: open
