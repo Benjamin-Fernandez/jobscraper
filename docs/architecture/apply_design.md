@@ -372,8 +372,10 @@ declarations:                        # D-55 standing answers. S. Change any that
   criminal_record: false
   bankruptcy: false
   regulatory_disciplinary: false
-  non_compete: false
+  non_compete: false                 # D-87: any agreement that limits the work you can do: non-compete, non-solicitation, NDA or confidentiality, stock option or restricted stock terms
+  government_employment: false       # D-87: ever worked for the government, public sector, a statutory board or the military, not counting National Service
   health_disclosure: decline         # decline only; a required health question fails the attempt
+  # D-87: us_self_id.disability_status answers every disability question, in any country (no separate key)
 ```
 
 ### 5.5 Pre-fill from the resume (M21, F-10 bullet 2)
@@ -539,18 +541,36 @@ Lookup `(label_norm, field_type, ats)` then `(label_norm, field_type, '*')`. The
 | `criminal_record` | convicted, criminal, offence, offense, pending charges, court proceedings |
 | `bankruptcy` | bankrupt, bankruptcy, insolvency, insolvent, judgment debt |
 | `regulatory_disciplinary` | regulatory, disciplinary, mas, licence revoked, license revoked, suspended, censured, investigated by |
-| `non_compete` | non compete, restrictive covenant, non solicitation, bound by any agreement, restraint of trade |
+| `non_compete` (widened by D-87: any agreement that limits the work you can do) | non compete, non competes, noncompete, non competition, non solicitation, non solicit, nonsolicitation, non disclosure, nondisclosure, nda, ndas, confidentiality agreement, confidentiality agreements, confidentiality obligation, confidentiality obligations, restrictive covenant, restrictive covenants, restrictive agreement, restrictive agreements, restraint of trade, garden leave, bound by any agreement, agreement that restricts, agreements that restrict, agreement that would restrict, agreement restricting, agreements restricting, agreement that prevents, agreement that would prevent, agreement that prohibits, agreement that would prohibit, stock option agreement, stock option agreements, stock option or restricted stock, restricted stock grant, restricted stock agreement, restricted stock unit agreement, stock grant agreement, equity grant agreement (not "subject to any restrictions": work-rights questions use it) |
+| `government_employment` (D-87) | civil service, civil servant, civil servants, public service, public servant, public sector, public officer, government service, government employee, government employees, government employment, government agency, government agencies, government ministry, government department, government body, government bodies, statutory board, statutory boards, government official, public official, worked for the government, worked for government, worked for a government, worked for any government, worked in the government, worked in government, work for the government, working for the government, employed by the government, employed by government, employed by a government, employed by any government, employed in the government, employed in government, have you worked in government, have you worked in the government, have you worked in the public sector, have you worked in the public service, have you worked in the civil service. Subject to the government/NS rule below |
 | `health` | medical condition, health condition, mental health, medical history, illness |
+| `disability` (D-87; **label only**, never the description: EEO preambles mention disability) | disability, disabilities, disabled, person with disability, persons with disabilities, people with disabilities, pwd, pwds, handicap, handicapped |
 | `prior_employment_at_company` | previously worked, previously employed, previously been employed, worked for us, worked for, employed by, former employee, ex employee, have you worked, currently or previously employed |
 | `current_employee_at_company` (D-69) | currently an employee, current employee, currently employed, currently work for, currently working for, currently work at, currently working at, employee at, employee of |
 | `previously_applied` | previously applied, applied before, have you applied, applied to this, applied for a position |
 
 **Precedence (D-69):** when both `current_employee_at_company` and `prior_employment_at_company` match, the label is `prior_employment_at_company` if the text contains `previously`, `ever`, `before`, `former` or `ex` (as tokens), else `current_employee_at_company`; this pair alone never yields `AMBIGUOUS`. `AMBIGUOUS` is a module-level sentinel `declarations.AMBIGUOUS` (not a `DeclarationLabel` member).
 
+**D-87 classifier additions (Q-48; the owner's rule: declaration-type questions default to No / none / not applicable).** `classify_all(label_norm, description_norm="") -> tuple[frozenset[DeclarationLabel], bool]` returns (classes, unsure). `classify()` is built on it and keeps its contract: unsure → `AMBIGUOUS`; one class → that class; two or more → `AMBIGUOUS`; none → the marker rule above. Steps:
+
+1. Phrase hits (table; `disability` on the label only).
+2. **Longest match (R1):** a class's hit is dropped when every span it matched lies inside a longer matched span of another class. This changes nothing on the pre-D-87 table. It lets "worked for the government" beat `prior_employment_at_company`'s "worked for", "employed by the government" beat "employed by", and `pep`'s "senior government official" beat "government official".
+3. The D-69 pair (above).
+4. **Government/NS rule.** *gov* = a `government_employment` hit after R1. *mil* = a MILITARY term: military, armed forces, armed services, defence force, defence forces, defense force, army, navy, air force, national service, ns, nsf, nsman, saf, conscription, uniformed service, uniformed services. *excl* = an **NS exclusion**: an exclusion run (excluding, exclude, excludes, except, other than, apart from, aside from, besides, save for, not including, not counting, does not include, do not include) with an NS term starting within the next 4 tokens, or an NS term followed within 3 tokens by not included / excluded / not counted / does not count. NS terms: national service, full time national service, ns, nsf, mandatory military service, compulsory military service, mandatory national service, military service, mandatory service, compulsory service, conscription. *unsure* = government linked, glc, glcs, government owned, state owned, state enterprise.
+   - (gov or mil) and excl, not unsure → `government_employment`.
+   - gov, no mil, not unsure → `government_employment` (the owner's reading: NS is not government employment).
+   - gov with (mil and no excl), or gov with unsure → unsure (`AMBIGUOUS`: unknown, never No).
+   - mil without excl and no gov → not `government_employment`. An NS-inclusive question belongs to `ns_status` (tier-2 `yes_if`, LF L5); when no NS rule answers it, it is captured (LF G7, D-88).
+5. A `disability` label that also has veteran, gender, race, ethnic, ethnicity, religion or marital → unsure.
+
+`STANDING_DECLARATIONS` (employer-independent; a `declarations.py` constant): `pep`, `conflict_audit_independence`, `criminal_record`, `bankruptcy`, `regulatory_disciplinary`, `non_compete`, `government_employment`.
+
 **Rules:**
 
-- `AMBIGUOUS` → required: `unknown` (detail = label); optional: `blank_optional`. Never tier 5.
-- `pep`, `conflict_audit_independence`, `criminal_record`, `bankruptcy`, `regulatory_disciplinary`, `non_compete`: the bool in `declarations.<label>` (default false).
+- `AMBIGUOUS` → required: `unknown` (detail = label); optional: `blank_optional`. Never tier 5. **Except the agreement rule (D-87),** applied inside `answer()`: `classify_all` gives 2+ classes, not unsure, all in `STANDING_DECLARATIONS`, the field is not a single CHECKBOX, and every class has the same truth value → that bool by §7.3.2. `rule_id` and the source suffix = the sorted class values joined by `+` (e.g. `conflict_audit_independence+non_compete`), note `agreed: <classes>`. A set with an employer-specific class, `health` or `disability` stays `AMBIGUOUS`: D-70's prefill overwrite and the L6 skip key off a single class. A multi-class single checkbox stays `AMBIGUOUS` (ADR-0003: a tick is a signed statement, and token rules can't tell each class's polarity, e.g. "I have no conflict of interest and am bound by a non-compete").
+- **Negated question (D-87; mirrors LF L7 so the resolver path fails closed too):** a classified non-checkbox field answered by a bool whose label contains not, never, no, none, neither, free of or without (after NS-exclusion runs are removed) → required `unknown`, optional `blank_optional` (note "negated declaration question"). `is_negated` (single checkbox) also removes NS-exclusion runs first.
+- `pep`, `conflict_audit_independence`, `criminal_record`, `bankruptcy`, `regulatory_disciplinary`, `non_compete`, `government_employment` (D-87): the bool in `declarations.<label>` (default false).
+- `disability` (D-87): `us_self_id.disability_status` is the disability answer for every country (no separate key). `no` → false, `yes` → true, `decline`/absent → no bool. A bool goes onto a bool-shaped field by §7.3.2, onto another choice by `fit_enum` with `DISABILITY_VALUE_MAP`, and onto a single checkbox by the negation rule below. `DISABILITY_VALUE_MAP` = the EEO disability phrases plus, for "no": no disability, i do not have a disability, i don't have a disability, i do not have any disability, not a person with disability, i am not a person with disability; for "yes": i am a person with disability, person with disability. With no bool: the decline option when offered, else required `unknown`, optional `blank_optional`. S, filled by the program, never tier 5.
 - `shareholding_in_company`: true if `declarations.shareholding_in_company` or `company_match(employer, h)` for any `h` in `holdings`.
 - `relatives_at_company`: true if `declarations.relatives_at_company` or any `relatives_employers` entry company-matches.
 - `prior_employment_at_company`: true if any `experience[].employer` company-matches the employer or one of `ctx.employer_aliases` (internships count).
