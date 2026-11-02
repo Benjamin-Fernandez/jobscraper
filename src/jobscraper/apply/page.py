@@ -23,6 +23,15 @@ control (the group container for radios, checkbox groups and dates). A mark
 stays on its element across reads, so a re-read after our own fills (review
 H7) keeps the keys of the fields it saw before and gives new keys only to
 fields that appeared; `FormField.locator` is the CSS that finds the mark.
+Limit (review F6): a site that re-creates an element (React re-render) drops
+the mark, so the re-read gives that field a new reader key. Hence `known` may
+also be keyed by audit key (site id based, survives a re-render), and a field
+in a repeated entry gets its entry's index (`#<n>`, AD §6), so a field revealed
+between two entries does not renumber them. What stays the caller's job (R3):
+store each field's audit key the first time it is seen and key its own
+records (origins, decisions, uploads) by it as well as by the reader key; an
+ungrouped repeat keeps an ordinal `#n` that can shift when a same-id field
+appears before it, and a slug(label) key changes if the label does.
 
 Reading never chooses anything: lists that live behind a button or a search
 box are opened, read and closed with Escape. No Enter key, no typing.
@@ -635,7 +644,9 @@ def read_page(page: Any, *, scope: str = "", sections: Sequence[EntrySection] = 
     `origin`: who put the values shown on this first read (LF §3.3): the
     ValueOrigin value `choose_entry` returned; "" = `site_default`. A field whose
     key is in `known` keeps that origin instead (a re-read: OURS for what we
-    typed, the first read's origin for the rest). Empty values are EMPTY.
+    typed, the first read's origin for the rest). `known` may be keyed by reader
+    key or by audit key (pass `step`): the reader key wins, the audit key is the
+    fallback for an element the site re-created (review F6). Empty values are EMPTY.
     `pre_import` (review M3; `AttemptContext.pre_import`, keyed by audit key
     `<step>:<site id>[#n]`, so pass `step`): a value equal to what the form showed
     before the import is `site_default`, not the import's.
@@ -672,10 +683,16 @@ def read_page(page: Any, *, scope: str = "", sections: Sequence[EntrySection] = 
             options_complete=complete, error=r.get("error", "")))
         if field.label:
             last_label[ctx_key] = field.label
-    if pre_import and site is not ValueOrigin.SITE_DEFAULT:
-        akeys = audit_keys(page, out, step)
+    seen = {pf.field.key for pf in out}
+    imported = bool(pre_import) and site is not ValueOrigin.SITE_DEFAULT
+    akeys = audit_keys(page, out, step) if imported or any(k not in seen for k in known) else {}
+    if known and akeys:                       # F6: a re-created element found by its audit key
+        out = [_replace(pf, origin=_origin_of(akeys[pf.field.key], pf.field.type, pf.shown, known, site))
+               if pf.field.key not in known and akeys.get(pf.field.key) in known else pf for pf in out]
+    if imported:
         out = [_replace(pf, origin=ValueOrigin.SITE_DEFAULT)
                if (pf.origin is site and pf.field.key not in known
+                   and akeys.get(pf.field.key) not in known
                    and akeys.get(pf.field.key) in pre_import
                    and B.norm_text(_text(pf.shown)) == B.norm_text(pre_import[akeys[pf.field.key]]))
                else pf for pf in out]
@@ -757,7 +774,10 @@ def page_text(page: Any, scope: str = "") -> str:
 def audit_keys(page: Any, fields: Sequence[PageField], step: str) -> dict[str, str]:
     """`<step>:<site id>[#n]` per reader key (AD §6 key rules, LF §3.1): the Workday
     formField automation id, else the control's automation id, `name` or a
-    hand-written html id, else slug(label). Repeats in one step get `#1`, `#2`, ..."""
+    hand-written html id, else slug(label). An id that repeats in one step gets
+    `#<entry index>` inside a repeated entry (AD §6: stable when another entry or a
+    revealed field appears), else `#1`, `#2`, ... in page order; a clash left over
+    gets `.1`, `.2`. Computed per read: R3 keeps the first one it saw (F6)."""
     keys = [pf.field.key for pf in fields]
     ids = _safe(lambda: page.evaluate(AUDIT_IDS_JS, keys), None) or [""] * len(keys)
     base = []
@@ -767,14 +787,34 @@ def audit_keys(page: Any, fields: Sequence[PageField], step: str) -> dict[str, s
     counts: dict[str, int] = {}
     for b in base:
         counts[b] = counts.get(b, 0) + 1
-    seen: dict[str, int] = {}
-    out: dict[str, str] = {}
+    ordinal: dict[str, int] = {}
+    cand: list[str] = []
     for pf, b in zip(fields, base):
         if counts[b] > 1:
-            seen[b] = seen.get(b, 0) + 1
-            b = f"{b}#{seen[b]}"
-        out[pf.field.key] = b
+            gi = _group_index(pf.group)
+            if gi:
+                b = f"{b}#{gi}"
+            else:
+                ordinal[b] = ordinal.get(b, 0) + 1
+                b = f"{b}#{ordinal[b]}"
+        cand.append(b)
+    again: dict[str, int] = {}
+    for c in cand:
+        again[c] = again.get(c, 0) + 1
+    clash: dict[str, int] = {}
+    out: dict[str, str] = {}
+    for pf, c in zip(fields, cand):
+        if again[c] > 1:
+            clash[c] = clash.get(c, 0) + 1
+            c = f"{c}.{clash[c]}"
+        out[pf.field.key] = c
     return out
+
+
+def _group_index(group: str) -> int:
+    """The entry index of a `<section>#<index>` group ("" or no index -> 0)."""
+    tail = (group or "").rpartition("#")[2]
+    return int(tail) if tail.isdigit() else 0
 
 
 # ------------------------------------------------------------------ options (LF §3.1 "Options")
