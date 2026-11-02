@@ -10,12 +10,13 @@
 // server refuses a stale etag (409) and a profile that fails validation (422,
 // with a message per path); both are said in words. Keys the form does not
 // know round-trip untouched and are listed read-only in the last group.
-import { computed, nextTick, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, ref } from 'vue'
 import { describeError, getApplicant, problemOf, saveApplicant } from '../api.js'
 import {
   clone, entryPart, errorMap, fieldId, findItem, getAt, otherKeys, setAt, showValue, within,
 } from '../applicantForm.js'
 import FieldInput from './FieldInput.vue'
+import QuestionsInbox from './QuestionsInbox.vue'
 import TabLoading from './TabLoading.vue'
 
 const emit = defineEmits(['counts'])
@@ -33,7 +34,7 @@ const errors = ref([])          // [{path, message}] from the last save or load
 const conflict = ref('')        // '' | 'changed' | 'unreadable' (a 409 on save)
 const note = ref('')
 const problem = ref('')         // a save that failed for a reason that is not 409 or 422
-const openQuestions = ref(0)
+const openQuestions = ref(null)
 const removing = ref('')        // the `extra` key whose Remove is being confirmed
 const banner = ref(null)
 const inbox = ref(null)
@@ -49,15 +50,22 @@ const meter = computed(() => data.value?.completeness ?? null)
 const errMap = computed(() => errorMap(errors.value))
 const others = computed(() => (data.value ? otherKeys(draft.value, form.value) : []))
 
-watch([() => missing.value.length, openQuestions], () => {
+// The Profile tab shows "what needs you" in the view's label. `questions` is
+// null until the inbox has loaded (or never, on a server without the routes).
+function report() {
   emit('counts', { missing: missing.value.length, questions: openQuestions.value })
-})
+}
+function onInboxLoaded(n) {
+  openQuestions.value = n.open
+  report()
+}
 
 function adopt(res) {
   data.value = res
   draft.value = clone(res.profile ?? {})
   errors.value = res.errors ?? []
   conflict.value = ''
+  report()
 }
 
 async function load() {
@@ -93,6 +101,7 @@ async function reloadKeepingEdits() {
   draft.value = next
   errors.value = res.errors ?? []
   conflict.value = ''
+  report()
 }
 
 // ---- labels, tags, ids ----
@@ -241,6 +250,15 @@ defineExpose({ load })
           </ul>
         </section>
       </template>
+
+      <QuestionsInbox
+        ref="inbox"
+        :form="form"
+        :etag="data.etag"
+        @saved="reloadKeepingEdits"
+        @reload="load"
+        @loaded="onInboxLoaded"
+      />
 
       <template v-if="!fileError">
         <h2 class="section-title">Your details</h2>

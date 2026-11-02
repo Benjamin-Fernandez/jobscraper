@@ -97,8 +97,9 @@ async function probeCounts() {
   setCounts({ missing, questions })
 }
 function setCounts(c) {
-  counts.value = { missing: c.missing, questions: c.questions }
-  if (!chosen && view.value === 'resume' && c.missing + c.questions > 0) view.value = 'details'
+  // `questions: null` = the questions list has not reported; keep what was known.
+  counts.value = { missing: c.missing, questions: c.questions ?? counts.value.questions }
+  if (!chosen && view.value === 'resume' && todo.value > 0) view.value = 'details'
 }
 
 const busy = computed(() => uploading.value || refreshing.value || running.value)
