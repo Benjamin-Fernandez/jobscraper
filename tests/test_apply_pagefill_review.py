@@ -188,7 +188,7 @@ ENTRY_REPLY = [
     "Work Experience 2|From": _d("profile", "profile:experience[1].start"),
     "Work Experience 2|To": _d("profile", "profile:experience[1].end"),
     "Work Experience 2|Role Description": _d("unknown")}),
-    {"kind": "recheck", "repeat": True, "raw": _d("unknown")},
+    {"kind": "recheck", "repeat": True, "match": "Work Experience", "raw": _d("unknown")},
     _all("corrective", {"Work Experience 2|From": _d("profile", "profile:experience[1].start"),
                         "Work Experience 2|To": _d("profile", "profile:experience[1].end")}),
 ]
