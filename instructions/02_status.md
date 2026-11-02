@@ -6,9 +6,9 @@
 
 ## Now / Next (≤ 10 lines; history goes to `docs/planning/session_log.md`)
 
-- **Now:** paused by the owner (2026-11-02). M20 build of the D-78 LLM form filler: design READY; merged lanes N + R (navigation, accounts, page reader, widgets) + tester oracles, 920/920, pushed (090daf8). Live app: Workday attempts still stop as `unsupported_ats`. S-5b: tenant A submitted + confirmed.
-- **Next:** lane M (built + review-fixed, `eng/Q-35-M-llmfill` b79df03) → tester pins + architect COMPOSE_NEEDED → merge; R3 review + fixtures; N6a → N6b → M20 gate (5 Greenhouse dry runs + owner-approved Workday postings, D-83). Q-41 tenant B (owner filled the address) two-phase per D-83. Q-45 cover-letter compose design. Q-44 refresh-from-resume.
-- **Blocked on the owner:** nothing. (Profile rebuilt from the new resume 2026-11-02; job locations = Singapore ×3 from the owner for Q-41; optional: Cantonese levels.) Q-41 leg 2 running to Review; new defects Q-46 (entry Location from contact.city; ungrounded skill picks), Q-47 (tailor page trim).
+- **Now:** M20 build of the D-78 LLM form filler (design READY; lanes N + R merged, 090daf8). `int/Q-35-M` = lane M + architect COMPOSE_NEEDED/Q-45 design (3a99dce), tester adding pins there; lane R adapting R3. D-77 both done: tenant A submitted (S-5b), Kyndryl submitted 2026-11-02 (Q-41, "Applied"). Live app: Workday still `unsupported_ats` until N6a.
+- **Next:** tester pins (incl. Q-46 a–c) → merge `int/Q-35-M` (vitest + bundle) → R3 review + merge → N6a (incl. Q-46 e) → N6b → M20 gate (5 Greenhouse dry runs + owner-approved Workday postings, D-83). Q-45 compose build. Q-44 refresh-from-resume. Q-47 tailor page trim.
+- **Blocked on the owner:** nothing. Optional: Cantonese levels; whether a standing answer for NDA/restrictive-agreement questions should exist (Kyndryl's optional one was left blank).
 
 ## 1. Milestones
 
