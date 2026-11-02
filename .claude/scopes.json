@@ -6,6 +6,7 @@
         "docs/research/",
         "config/questions.yaml",
         "config/aliases.yaml",
+        "config/mail_rules.yaml",
         "comms/outbox/researcher.md"
       ]
     },
