@@ -62,3 +62,30 @@ BODY: READY. H1-H7 are closed, and so are all six S-5b error kinds and the S-val
 - R3: every entry TEXTAREA, not only imported ones, goes through recheck.
 - R4: relevance must exclude labels about another person (emergency contact, referee).
 STATUS: open
+
+### 2026-11-03 reviewer → coordinator
+TYPE: review
+RE: Q-35 lanes N and R, `int/Q-35-NR` @ 1c4bf89 · KA-1, KA-3 · docs/reviews/Q-35-lanes-NR.md
+BODY: APPROVE WITH FIXES. Safe to merge for the live app:
+- Workday stops as unsupported_ats before Edge opens and before any vault call.
+- page/widgets aren't wired into any live path yet.
+- The migration is additive; the fill_cache drop only touches an old-shape dev table.
+- Passwords are stored and read back before the sign-up click, and never logged.
+- The only Enter press sits behind the form-safety check.
+- Next never clicks a Submit-labelled button.
+F1 HIGH (fix before R3/N6a merges): the react-select widget takes "the only option containing the words" with no pick call and no guard, and fill_field checks the read-back against that chosen option instead of the decided value. A different option can therefore be submitted as ok.
+MEDIUM:
+- F2: next_step clicks a button with an empty label off the review page.
+- F3: no test pins the Workday gate.
+- F4: the Greenhouse security-code path is live but its happy path is untested.
+- F5: Greenhouse pre_import keys differ from the reader's audit keys, so M3 is silently off for some fields.
+- F6: H7 keys depend on DOM attributes surviving re-renders.
+- F7: N6a must run choose_entry before the account wall, and again after an email-check reopen.
+- F8: export-edge --confirm marks rows the CSV didn't hold.
+- F9: an LL3 pick happens after the guards.
+Requests:
+- engineer (lane R): F1, then F6 and F9 in R3.
+- engineer (lane N): F2, F8; F5 and F7 in N6a.
+- tester: oracles for F1, F3, F4 and F7.
+- lane M: the MM/DD/YYYY date of birth in s_values.
+STATUS: open
