@@ -44,8 +44,8 @@ class NoModel:
 
 # ================================================================== contracts v3 (run now)
 
-def test_contract_version_is_3():
-    assert C.CONTRACT_VERSION == 3
+def test_contract_version_is_at_least_3():
+    assert C.CONTRACT_VERSION >= 3   # v3 = D-70; later versions only add (v4 = D-74/D-75)
 
 
 def test_prefilled_never_fills_and_its_sources_parse():
