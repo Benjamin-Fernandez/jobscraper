@@ -269,7 +269,9 @@ class AppCandidate:
     company_names: tuple[str, ...]     # applications.company, companies.name (raw)
     role: str                          # applications.role or jobs.title (raw)
     employer_domains: tuple[str, ...]  # registrable; careers_url and a non-ATS posting host
-    tenants: tuple[str, ...]           # Workday tenants (first host label), lower-case
+    tenants: tuple[str, ...]           # lower-case first host labels: apply_attempts.tenant_host, plus any
+                                       # jobs.url / applications.url / companies.careers_url host under a
+                                       # rules `tenant_sites` suffix (match.tenants_from_hosts; E1)
     board_slugs: tuple[str, ...]       # companies.slug for greenhouse/lever/ashby
     req_ids: tuple[str, ...]           # jobs.external_id with a digit, >= 5 characters
     threads: tuple[str, ...]           # gm_thrid of messages already matched to it
