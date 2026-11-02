@@ -1,27 +1,26 @@
 # Handover note (rewrite every session; ≤ 40 lines; history goes to `docs/planning/session_log.md`)
 
-**Last session:** 2026-11-03, session 2 (resumed; lanes B, V, tester Q-26, researcher A03 running). **Branch/commit:** `personal`, pushed (`git log -1`). Suite 469/469.
+**Last session:** 2026-11-03, session 2 (continued). **Branch/commit:** `personal`, pushed (`git log -1`). Suite on personal 656/656 Python, web 220 + 34 skipped.
 
 ## Where we are
-- M19 DONE. M20 (re-scoped D-70: Workday first, Greenhouse with MyGreenhouse autofill) in build.
-- Merged into personal: dossier (designs, plans, tests, seeds), D-70 design delta (contracts v3), lane T (tailor, CLI `tailor`), lane P (profile + resolver, CLI `applicant check`), Q-21 oracles.
+- M19 DONE. M20 (D-70: Workday first, Greenhouse with MyGreenhouse autofill) in build. D-77: the owner allowed real accounts + automatic submission at Kyndryl (DevOps Engineer) and PayPal (Software Engineer). D-78: the local LLM fills every form generically (resume first, "import from resume" always, adapters = navigation only).
+- Merged into personal: dossier, D-70 delta, lanes T (tailor), P (profile + resolver), V part 1 (vault, mail CLI, IMAP watcher), B (browser + Greenhouse + review fixes, Q-31 tests), Q-21/Q-26/Q-28 tests, Q-29 resolver fix, Q-30 design (contracts v4), S-5 signed-out spike.
 
-## Paused lanes (worktrees kept under `.claude/worktrees/`; resume each on its branch)
-- Lane B built (B1–B12, `eng/M20-B-browser-greenhouse` 30b6d1d, 500/500 on branch; fixture dry run ready_to_submit, captcha fails closed). In review (Q-31 reviewer) + tester writing its test files; merge after APPROVE (bumps the live DB schema).
-- Lane V part 1 merged (V1 vault, V2 `mail set-password`/`mail test`, V3 IMAP watcher; 501/501). Next lane V: V2 `accounts` half + V4 after lane B merges; V5–V7 after spike S-5.
-- Tester Q-26 merged (487/487): fake IMAP (F4), D-70 oracles; gated helper names to confirm with lanes B/V (`keep_decision`, `choose_identity`, `workday.choose_entry`).
-- A03 `yes_if` rows merged; Q-29 resolver exclude fix running. Not started: Q-27 architect small items (`ResolveContext.job_title`, §5.4 `backup_email`).
+## Running / ready to merge (worktrees under `.claude/worktrees/`)
+- Spike S-5b (`spike/Q-23b-llm-workday`): LLM-driven real Workday applications at the 2 D-77 employers; records to the session scratchpad `s5b/<tenant>/`; feeds Q-35.
+- Q-36 (`eng/Q-36-lenient-profile`): lenient `applicant check`; owner's file down to 1 error (`ord_date` YAML date) → date follow-up running. Merge when the owner's file shows `errors: 0`.
+- Q-37 (`int/Q-30` 514054a = lanes Q + U, D-74/D-75 Profile tab + questions): tester green (752/752, web 253+1); KA-2 review running (`docs/reviews/Q-30.md`). Merge after APPROVE, then `cd web; npm run build` in the main checkout, smoke on 8768, push. `int-Q-30/web/node_modules` is a junction: remove the junction, never its contents.
 
 ## Waiting on the owner
-- D-72: application Gmail switched (address in Coordinator memory); app password saved and verified (IMAP login OK, 2026-11-03).
-- MyGreenhouse sign-in: the Coordinator opened Edge on the JobScraper profile (`%LOCALAPPDATA%\JobScraper\apply-profile`, now created) at my.greenhouse.io on 2026-11-03; the owner signs in there (the earlier sign-ins went to the normal Edge).
-- `data/applicant.yaml`: a resume-prefilled draft is in the session scratchpad (`applicant.yaml`; the scope guard blocks the Coordinator writing `data/`); owner copies it and fills residency, start date, salary (+ DOB, address, NS).
+- Nothing blocking. Application Gmail + app password verified (address only in Coordinator memory). MyGreenhouse signed in on the JobScraper Edge profile. `data/applicant.yaml` filled by the owner.
 
 ## Next 1–3 actions
-1. Resume lanes B, V and the tester (≤ 4 agents); researcher A03.
-2. When the app password works: spike S-5 (Q-23) on 2 owner-approved Workday employers, stop at Review; tester records WP-F1 fixtures; lane V V4–V7.
-3. M20 gate: Greenhouse dry runs + the 2 real Workday submissions (owner-allowed, D-70).
+1. Merge Q-36 and int/Q-30 (above); tell the owner the Profile tab is live at the next app launch.
+2. S-5b report → Q-35 architect redesign around D-78 (generic LLM filler) → lane V V2 accounts half, V4–V7 adjusted, WP-Q1b question capture in `apply_flow.py`, WP-F1 Workday fixtures.
+3. M20 gate: Greenhouse dry runs + the 2 real Workday submissions (D-77).
+- Backlog: Q-27 (`ResolveContext.job_title`, §5.4 `backup_email`), Q-32 (how-heard option mapping), Q-34 (web reaper run lock, M21), Q-15 docs (planner pastes `questions_build_plan.md` into `apply_build_plan.md`, PRD F-13 + D-75), QD text per D-76, S-5 report → `docs/architecture/spikes/S-5_workday.md`.
 
 ## Watch out
-- Agent worktrees start from master: briefs say `git switch -c <branch> personal` (resumed lanes: just continue on their branch).
-- Live app on 8765 runs from this checkout; dev instances use 8768 with a copied DB.
+- Agent worktrees start from master: briefs say `git switch -c <branch> personal`. Architect/researcher agents have no shell.
+- Live app on 8765 runs from this checkout; dev instances use 8768 with a copied DB. Before every push: grep the diff for personal data (public repo).
+- The scope guard blocks the Coordinator from writing `data/`; the auto-mode classifier blocks editing `.claude/scopes.json`.
