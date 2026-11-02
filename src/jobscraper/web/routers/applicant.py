@@ -18,7 +18,10 @@ tab, the Questions card, a hand edit):
 An invalid profile is `422 {"detail": "invalid", "errors": [{path, message}]}`
 (top level, not nested under `detail`, so the form can mark each path). Keys
 the form does not know round-trip untouched: the UI edits a deep copy of the
-whole profile and sends all of it back.
+whole profile and sends all of it back. Because a whole-file PUT can replace
+everything, `applicant.save` keeps the version it replaces as
+`applicant.prev.yaml` beside the profile (one rolling copy, Q-30 F7); GET reads
+the profile and its etag from one read of the file (Q-30 F6).
 """
 from __future__ import annotations
 
@@ -84,13 +87,14 @@ def applicant_view(cfg: Config) -> dict[str, Any]:
     path = cfg.applicant_path
     error = None
     try:
-        profile = applicant.load(path)
+        # One read: the profile and the etag come from the same bytes (Q-30 F6).
+        profile, etag = applicant.load_with_etag(path)
     except applicant.ApplicantError as exc:
-        profile, error = {}, str(exc)
+        profile, etag, error = {}, exc.etag, str(exc)
     filled, needed = applicant.completeness(profile)
     return {
         "profile": applicant.json_safe(profile),
-        "etag": applicant.etag(path),
+        "etag": etag,
         "errors": errors_json(applicant.validate(profile)) if error is None else [],
         "missing": applicant.missing_for_apply(profile, cfg.resume_dir),
         "completeness": {"filled": filled, "needed": needed},
@@ -112,10 +116,10 @@ def load_for_write(cfg: Config, sent_etag: str) -> dict:
     that cannot be read, 409 `changed` when it changed since `sent_etag`.
     Call with PROFILE_WRITE_LOCK held."""
     try:
-        current = applicant.load(cfg.applicant_path)
+        current, current_etag = applicant.load_with_etag(cfg.applicant_path)
     except applicant.ApplicantError:
         raise HTTPException(status_code=409, detail="unreadable")
-    if (sent_etag or "") != applicant.etag(cfg.applicant_path):
+    if (sent_etag or "") != current_etag:
         raise HTTPException(status_code=409, detail="changed")
     return current
 

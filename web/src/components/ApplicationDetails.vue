@@ -13,7 +13,8 @@
 import { computed, nextTick, onMounted, ref } from 'vue'
 import { describeError, getApplicant, problemOf, saveApplicant } from '../api.js'
 import {
-  clone, entryPart, errorMap, fieldId, findItem, getAt, otherKeys, setAt, showValue, within,
+  clone, entryPart, errorMap, fieldId, findItem, getAt, mergeEdits, otherKeys, setAt, showValue,
+  within,
 } from '../applicantForm.js'
 import FieldInput from './FieldInput.vue'
 import QuestionsInbox from './QuestionsInbox.vue'
@@ -81,11 +82,14 @@ async function load() {
 }
 
 // The Questions card rewrote the file: take its new etag and answers, but keep
-// what is typed here and not yet saved. A section (identity, contact, ...) the
-// form changed is kept as edited; every other section comes from the file.
+// what is typed here and not yet saved. The merge is per leaf (`mergeEdits`):
+// only the leaves the owner changed here come from the draft, everything else
+// from the file. Merging whole sections lost a profile-gap answer (Q-30 F2): the
+// owner edited another field of Contact, answered the card for
+// contact.address_line1, and the draft's old Contact, kept with the new etag,
+// wrote the answer away on the next "Save details".
 async function reloadKeepingEdits() {
   const before = data.value?.profile ?? {}
-  const mine = draft.value
   let res
   try {
     res = await getApplicant()
@@ -93,15 +97,8 @@ async function reloadKeepingEdits() {
     loadError.value = describeError(e)
     return
   }
-  const next = clone(res.profile ?? {})
-  const changed = (a, b) => JSON.stringify(a) !== JSON.stringify(b)
-  for (const key of Object.keys(mine)) {
-    if (key !== 'extra' && changed(mine[key], before[key])) next[key] = mine[key]
-  }
-  // The answers section is merged per answer: the new one stays, an edited one is kept.
-  for (const [k, entry] of Object.entries(mine.extra ?? {})) {
-    if (changed(entry, before.extra?.[k])) next.extra = { ...(next.extra ?? {}), [k]: entry }
-  }
+  // `draft.value` is read after the await: what was typed while it ran is kept too.
+  const next = mergeEdits(before, draft.value, res.profile ?? {})
   data.value = res
   draft.value = next
   errors.value = res.errors ?? []
@@ -373,6 +370,7 @@ defineExpose({ load })
               <p v-for="e in extraErrors(key)" :key="e.path + e.message" class="field-error">{{ e.message }}</p>
               <div v-if="removing === key" class="confirm" role="group" :aria-labelledby="`${fieldId(`extra.${key}`)}-confirm`">
                 <p :id="`${fieldId(`extra.${key}`)}-confirm`">Remove this answer? Applications that ask it will stop and ask you again.</p>
+                <p v-if="dirty" class="muted">Your other unsaved changes will be saved too.</p>
                 <div class="confirm-buttons">
                   <button type="button" class="danger-btn remove-yes" :disabled="saving" @click="removeAnswer(key)">Remove answer</button>
                   <button type="button" class="remove-no" @click="removing = ''">Keep it</button>

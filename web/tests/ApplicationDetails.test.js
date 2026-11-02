@@ -13,6 +13,7 @@
 //   * Copy is asserted on the component's rendered text (`wrapper.text()`), not on markup.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils'
+import QuestionsInbox from '../src/components/QuestionsInbox.vue'
 
 const loaders = import.meta.glob('../src/components/ApplicationDetails.vue')
 const PRESENT = Object.keys(loaders).length > 0
@@ -246,5 +247,126 @@ suite('answers the owner gave (group 15) and other keys (group 16)', () => {
   it('hides group 15 when there are no answers', async () => {
     const w = await mountDetails()
     expect(w.text()).not.toContain('Answers you gave to application questions')
+  })
+})
+
+// ---- Q-39 / Q-30 F2: unsaved edits survive a Questions-card save, per leaf ----
+// The Questions card (QuestionsInbox) rewrites the file and emits `saved`; the form then reloads, takes the
+// new etag and keeps only the leaves the owner changed (`mergeEdits`). The card's own POST is out of scope
+// here (QuestionsInbox.test.js): the test changes what the fake GET returns and emits the card's `saved`.
+
+const FORM_F2 = [
+  { id: 'contact', title: 'Contact', note: '', items: [
+    item('contact.email', 'Email for applications', 'email', { required: true, sensitive: true }),
+    item('contact.city', 'City', 'text', { required: true }),
+    item('contact.address_line1', 'Address line 1', 'text', { required: true }),
+  ] },
+]
+const PROFILE_F2 = { contact: { email: 'a@example.com', city: 'SG' } }
+const ETAG_FILE = 'cccccccccccccccc'
+
+function f2Payload(profile, over = {}) {
+  return payload({ profile, form: FORM_F2, missing: [], ...over })
+}
+
+const putsOf = () => server.calls.filter(c => c.method === 'PUT' && c.url === 'api/applicant')
+const getsOf = () => server.calls.filter(c => c.method === 'GET' && c.url === 'api/applicant')
+
+// The Questions card saved something: the file now holds `profile` under a new etag.
+async function cardSaved(w, profile) {
+  server.state.applicant = f2Payload(profile, { etag: ETAG_FILE })
+  w.findComponent(QuestionsInbox).vm.$emit('saved', { etag: ETAG_FILE })
+  await flushPromises()
+}
+
+suite('F2: a Questions-card save keeps the owner\'s unsaved edits, per leaf', () => {
+  it('a profile-gap answer survives a later "Save details" of an edited section', async () => {
+    const w = await mountDetails({ applicant: f2Payload(PROFILE_F2) })
+    await w.find('#f-contact-city-in').setValue('Typed City')                    // unsaved edit in Contact
+    expect(w.text()).toContain('You have unsaved changes.')
+    await cardSaved(w, { contact: { ...PROFILE_F2.contact, address_line1: '1 Road' } })
+    expect(getsOf()).toHaveLength(2)                                              // the form re-read the file
+    expect(w.find('#f-contact-city-in').element.value).toBe('Typed City')         // the typed edit is still there
+    expect(w.find('#f-contact-address-line1-in').element.value).toBe('1 Road')
+    await button(w, 'Save details').trigger('click')
+    await flushPromises()
+    expect(putsOf()).toHaveLength(1)
+    const sent = putsOf()[0].body
+    expect(sent.etag).toBe(ETAG_FILE)                                             // the new etag, so no 409
+    expect(sent.profile.contact.address_line1).toBe('1 Road')                     // the answer is not written away
+    expect(sent.profile.contact.city).toBe('Typed City')
+    expect(sent.profile.contact.email).toBe('a@example.com')
+  })
+
+  it('without unsaved edits the form simply shows the file the card wrote', async () => {
+    const w = await mountDetails({ applicant: f2Payload(PROFILE_F2) })
+    await cardSaved(w, { contact: { ...PROFILE_F2.contact, address_line1: '1 Road' } })
+    expect(w.text()).not.toContain('You have unsaved changes.')
+    await button(w, 'Save details').trigger('click')
+    await flushPromises()
+    expect(putsOf()[0].body.profile.contact).toEqual({ ...PROFILE_F2.contact, address_line1: '1 Road' })
+  })
+
+  it('the same leaf typed here and saved by the card: the card\'s value wins and is shown', async () => {
+    const w = await mountDetails({ applicant: f2Payload(PROFILE_F2) })
+    await w.find('#f-contact-address-line1-in').setValue('Typed Street')
+    await cardSaved(w, { contact: { ...PROFILE_F2.contact, address_line1: '1 Road' } })
+    expect(w.find('#f-contact-address-line1-in').element.value).toBe('1 Road')
+    await button(w, 'Save details').trigger('click')
+    await flushPromises()
+    expect(putsOf()[0].body.profile.contact.address_line1).toBe('1 Road')
+    expect(putsOf()[0].body.etag).toBe(ETAG_FILE)
+  })
+
+  it('an `extra` answer edited here and a new `extra` answer from the file are both sent', async () => {
+    const entry = (title, value) => ({ title, description: '', kind: 'text', sensitive: false, labels: [title.toLowerCase()], value })
+    const before = { ...PROFILE_F2, extra: { visa_note: entry('Visa note', 'a') } }
+    const w = await mountDetails({ applicant: f2Payload(before) })
+    await w.find('#f-extra-visa-note-in').setValue('typed note')
+    await cardSaved(w, { ...PROFILE_F2, extra: { visa_note: entry('Visa note', 'a'), fav_language: entry('Favourite language', 'Python') } })
+    await button(w, 'Save details').trigger('click')
+    await flushPromises()
+    const sent = putsOf()[0].body
+    expect(sent.etag).toBe(ETAG_FILE)
+    expect(sent.profile.extra.visa_note.value).toBe('typed note')
+    expect(sent.profile.extra.fav_language.value).toBe('Python')
+  })
+})
+
+suite('F2: removing an answer says what else it saves', () => {
+  const entry = { title: 'Visa note', description: '', kind: 'text', sensitive: false, labels: ['visa note'], value: 'a' }
+  const withExtra = () => f2Payload({ ...PROFILE_F2, extra: { visa_note: entry } })
+  const SAVED_TOO = 'Your other unsaved changes will be saved too.'
+
+  it('says so when the form has other unsaved edits, and sends them with the removal', async () => {
+    const w = await mountDetails({ applicant: withExtra() })
+    await w.find('#f-contact-city-in').setValue('Typed City')
+    await button(w, 'Remove').trigger('click')
+    await flushPromises()
+    expect(w.text()).toContain('Remove this answer? Applications that ask it will stop and ask you again.')
+    expect(w.text()).toContain(SAVED_TOO)
+    await button(w, 'Remove answer').trigger('click')
+    await flushPromises()
+    const sent = putsOf()[0].body
+    expect(sent.profile.contact.city).toBe('Typed City')
+    expect(sent.profile.extra).toBeUndefined()
+  })
+
+  it('does not say it when nothing else is unsaved', async () => {
+    const w = await mountDetails({ applicant: withExtra() })
+    await button(w, 'Remove').trigger('click')
+    await flushPromises()
+    expect(w.text()).toContain('Remove this answer?')
+    expect(w.text()).not.toContain(SAVED_TOO)
+  })
+
+  it('Keep it leaves everything as it was and sends nothing', async () => {
+    const w = await mountDetails({ applicant: withExtra() })
+    await w.find('#f-contact-city-in').setValue('Typed City')
+    await button(w, 'Remove').trigger('click')
+    await button(w, 'Keep it').trigger('click')
+    await flushPromises()
+    expect(putsOf()).toHaveLength(0)
+    expect(w.text()).not.toContain(SAVED_TOO)
   })
 })
