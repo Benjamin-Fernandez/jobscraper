@@ -1,4 +1,6 @@
-"""Greenhouse adapter (apply_design §9.1; D-70 §9.1.1 MyGreenhouse).
+"""Greenhouse adapter (apply_design §9.1; D-70 §9.1.1 MyGreenhouse), and from
+D-78 a `SiteNavigator` too (llm_fill_design §9.2: precheck, choose_entry =
+the MyGreenhouse autofill, step_id "form", scope / entry_sections defaults).
 
 Greenhouse publishes each posting's form as JSON (`?questions=true` on the
 public Job Board API), so the whole plan is built before Edge opens and every
@@ -24,8 +26,8 @@ from .. import browser as B
 from ..classify import PageSignal, classify, visible_text
 from ..plan import any_phrase
 from ..contracts import (
-    Answer, ApplyFailure, AttemptContext, Canonical, FieldType, FormField, FormPlan, Option,
-    PasswordRules, ReasonCode, Secret, StepResult, Tenant,
+    Answer, ApplyFailure, AttemptContext, Canonical, EntrySection, FieldType, FormField, FormPlan,
+    Option, PasswordRules, ReasonCode, Secret, StepResult, Tenant,
 )
 
 BOARD_HOST = "job-boards.greenhouse.io"
@@ -323,6 +325,89 @@ class GreenhouseAdapter:
                 raise ApplyFailure(ReasonCode.PAGE_UNRECOGNISED, "greenhouse: application",
                                    step="open")
             page.wait_for_timeout(500)
+
+    # ---------------- D-78 SiteNavigator (llm_fill_design §9.2) ----------------
+    #
+    # Navigation only; the generic reader and widgets fill the page. The old
+    # AtsAdapter fill-side methods (plan_from_schema as the fill plan, read_step,
+    # fill, prefill, read_values) stay until the cleanup WP-C1.
+
+    def precheck(self, ctx: AttemptContext) -> None:
+        """The board API schema request before Edge opens: 404/410 →
+        POSTING_CLOSED. The schema is no longer the fill plan; it is kept only
+        so `choose_entry` can see the MyGreenhouse autofill change the form. Any
+        other schema failure is logged and the attempt goes on (the page is read
+        generically)."""
+        try:
+            self.plan_from_schema(ctx)
+        except ApplyFailure as exc:
+            if exc.reason is ReasonCode.POSTING_CLOSED:
+                raise
+            ctx.log(f"greenhouse: schema not usable ({exc.detail or exc.reason.value}); "
+                    "reading the page instead")
+        except Exception as exc:                          # noqa: BLE001 - the page still works
+            ctx.log(f"greenhouse: schema request failed ({type(exc).__name__}); "
+                    "reading the page instead")
+
+    def choose_entry(self, page: Any, ctx: AttemptContext) -> str:
+        """The site's import (D-78): the MyGreenhouse autofill of apply_design
+        §9.1.1 steps 1-5 (`prefill`, unchanged) → "mygreenhouse", else "".
+        First the form's shown values go into `ctx.pre_import` (llm_fill_design
+        §3.3, review M3), so the reader can tell what the page showed before the
+        import (`site_default`) from what the import put there. Anything but an
+        ApplyFailure (a page signal) falls back to "": the generic fill then
+        fills every field itself."""
+        self._snapshot_pre_import(page, ctx)
+        try:
+            return self.prefill(page, ctx) or ""
+        except ApplyFailure:
+            raise
+        except Exception as exc:                          # noqa: BLE001 - fall back to the full fill
+            ctx.log(f"mygreenhouse: skipped ({type(exc).__name__})")
+            return ""
+
+    def _snapshot_pre_import(self, page: Any, ctx: AttemptContext) -> None:
+        """`ctx.pre_import[audit key] = shown text` for every non-empty field of
+        the schema plan, read before the MyGreenhouse click. Audit key = `form:`
+        + the control's html id (llm_fill_design §3.1; a single checkbox's id is
+        `<name>_1`); shown text per §3.1 ("true"/"false" for a checkbox, pill
+        texts joined for a multi-select). Never logged: the values are personal.
+        Best effort: no plan or a read error leaves the snapshot partial."""
+        plan = self._plans.get(ctx.attempt_id)
+        if plan is None:
+            return
+        fields = [f for f in plan.fields if f.type is not FieldType.HIDDEN]
+        try:
+            shown = self.read_values(page, ctx, fields)
+        except Exception:                                 # noqa: BLE001 - origins fall back to the import
+            return
+        for f in fields:
+            value = shown.get(f.key, "")
+            text = ", ".join(value) if isinstance(value, list) else str(value or "")
+            if not text:
+                continue
+            try:
+                html_id = self.locator(page, f).get_attribute("id") or ""
+            except Exception:                             # noqa: BLE001
+                html_id = ""
+            ctx.pre_import[f"form:{html_id or f.key}"] = text
+
+    def step_id(self, page: Any, ctx: AttemptContext) -> str:
+        """One page: the form is its own review page."""
+        return "form"
+
+    def scope(self, page: Any, ctx: AttemptContext) -> str:
+        """The generic default (the page minus header, nav and footer)."""
+        return ""
+
+    def entry_sections(self, page: Any, ctx: AttemptContext) -> list[EntrySection]:
+        """The generic default, `apply.page.entry_sections` (lane R); none until
+        that module exists."""
+        try:
+            from ..page import entry_sections as generic   # lane R, WP-R1
+        except ImportError:
+            return []
+        return list(generic(page, self.scope(page, ctx)))
 
     def account_wall(self, page: Any) -> Optional[str]:
         return None
