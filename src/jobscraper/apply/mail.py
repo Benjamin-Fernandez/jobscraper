@@ -110,15 +110,31 @@ def effective_settings(cfg: Any, get_setting: Callable[[str], Optional[str]]) ->
     return out
 
 
+def _setting(settings: Mapping[str, Any], key: str) -> Any:
+    """`settings[key]` for the flat settings-table form (`{"apply.mail.host": ...}`,
+    what `effective_settings` returns), else the nested form
+    (`{"apply": {"mail": {"host": ...}}}`, how the web API groups it)."""
+    if not isinstance(settings, Mapping):
+        return None
+    if key in settings:
+        return settings.get(key)
+    obj: Any = settings
+    for part in key.split("."):
+        if not isinstance(obj, Mapping):
+            return None
+        obj = obj.get(part)
+    return obj
+
+
 def mailbox_settings(settings: Mapping[str, Any], backup: bool = False) -> Mailbox:
     """The raw `apply.mail` (or `apply.mail_backup`) host, port, username; any may be ""."""
     pre = "apply.mail_backup." if backup else "apply.mail."
     try:
-        port = int(settings.get(pre + "port") or DEFAULT_PORT)
+        port = int(_setting(settings, pre + "port") or DEFAULT_PORT)
     except (TypeError, ValueError):
         port = DEFAULT_PORT
-    return Mailbox(str(settings.get(pre + "host") or "").strip().lower(), port,
-                   str(settings.get(pre + "username") or "").strip())
+    return Mailbox(str(_setting(settings, pre + "host") or "").strip().lower(), port,
+                   str(_setting(settings, pre + "username") or "").strip())
 
 
 def backup_is_separate(settings: Mapping[str, Any]) -> bool:
@@ -321,9 +337,12 @@ def find_link(links: Sequence[tuple[str, str]], link_domains: Sequence[str]) -> 
 
 
 def find_code(text: str, otp_pattern: Optional[str]) -> Optional[str]:
-    """The first line containing "code", searched with that line and the next (§11.1)."""
+    """The first line containing "code", searched with that line and the next (§11.1).
+
+    Blank lines are dropped first, so "next" is the next line with text: plain
+    mails put the code in its own paragraph ("...this code:", blank, "K7P2M9QX")."""
     pat = re.compile(otp_pattern or DEFAULT_OTP)
-    lines = text.splitlines()
+    lines = [l for l in text.splitlines() if l.strip()]
     for i, line in enumerate(lines):
         if not CODE_LINE.search(line):
             continue
@@ -366,7 +385,11 @@ def _imap_date(d: datetime) -> str:
 
 
 def _quote_folder(name: str) -> str:
-    return f'"{name}"' if any(c in name for c in ' []/"') else name
+    """imaplib sends the name as given; quote only names with a space or quote
+    (`[Gmail]/Spam` goes bare, as Gmail and the design §11.1 call expect)."""
+    if any(c in name for c in ' "'):
+        return '"' + name.replace("\\", "\\\\").replace('"', '\\"') + '"'
+    return name
 
 
 def _classify_login_error(exc: Exception) -> str:
@@ -396,15 +419,22 @@ class MailWatcher:
     def __init__(self, host: str, port: int, username: str, password: Secret,
                  timeout_s: float = 20, *,
                  connect: Optional[Callable[..., Any]] = None,
-                 sleep: Callable[[float], None] = time.sleep,
-                 clock: Callable[[], float] = time.monotonic):
+                 sleep: Optional[Callable[[float], None]] = None,
+                 clock: Optional[Callable[[], float]] = None):
         if not isinstance(password, Secret):
             raise TypeError("MailWatcher takes the password as a contracts.Secret")
         self.host, self.port, self.username = host, int(port), username
         self._password = password
         self.timeout_s = timeout_s
         self._connect_fn = connect
-        self._sleep, self._clock = sleep, clock
+        # None = look up time.sleep / time.monotonic at call time (patchable in tests)
+        self._sleep_fn, self._clock_fn = sleep, clock
+
+    def _sleep(self, s: float) -> None:
+        (self._sleep_fn or time.sleep)(s)
+
+    def _clock(self) -> float:
+        return (self._clock_fn or time.monotonic)()
 
     def __repr__(self) -> str:
         return f"MailWatcher({self.host}:{self.port})"
