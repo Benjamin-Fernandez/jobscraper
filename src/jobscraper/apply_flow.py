@@ -404,7 +404,9 @@ def apply_prefill_policy(source: str, fields: Sequence[FormField], answers: dict
                          ) -> tuple[dict[str, Answer], dict[str, Answer]]:
     """(audit answers, answers to fill) for one step under the policy of
     `source`. A field whose page value already equals our answer is recorded
-    `filled` with the note "already on page" and gets no input."""
+    `filled` with the note "already on page" and gets no input - never a file
+    field: a same-named attached file is not proof it is ours (every tailored
+    file has the same name), so our file is always uploaded (D-70 §9.1.1)."""
     policy = PREFILL_POLICY[AnswerSource(source)]
     audit: dict[str, Answer] = {}
     to_fill: dict[str, Answer] = {}
@@ -424,7 +426,7 @@ def apply_prefill_policy(source: str, fields: Sequence[FormField], answers: dict
         if what == KEEP:
             audit[f.key] = _prefilled(f, a, val, source, conf)
             continue
-        if what == OVERWRITE and a.fills and same_value(f, a, val):
+        if what == OVERWRITE and a.fills and f.type is not FieldType.FILE                 and same_value(f, a, val):
             audit[f.key] = dataclasses.replace(a, note=_join(a.note, "already on page"))
             continue
         if what == OVERWRITE and a.fills and not _is_empty(val):
