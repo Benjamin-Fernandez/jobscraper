@@ -113,6 +113,7 @@ class _Run:
     alias: dict = dc_field(default_factory=dict)            # re-created reader key -> the old key (F6)
     entry_failed: dict = dc_field(default_factory=dict)     # reader key -> note: an E5 add that failed (F5)
     corrected: set = dc_field(default_factory=set)          # keys the corrective pass re-asked (F8)
+    dead: set = dc_field(default_factory=set)               # keys of entries we confirmed deleted (F2)
 
 
 def fill_page(page: Any, nav: Any, ctx: AttemptContext, rctx: ResolveContext, services: Any) -> PageOutcome:
@@ -167,8 +168,6 @@ def fill_page(page: Any, nav: Any, ctx: AttemptContext, rctx: ResolveContext, se
         return _transport(run, UNAVAILABLE_NOTE)
     if run.transport:
         return _transport(run, run.transport)
-    # 13. the decision cache
-    _cache_put(run)
     return _outcome(run)
 
 
@@ -184,7 +183,8 @@ def _read(run: _Run, sections: Sequence[EntrySection]) -> list[PageField]:
                          known=run.known, step=run.step, pre_import=run.ctx.pre_import or None)
     akeys = P.audit_keys(run.page, fields, run.step) if fields else {}
     here = {pf.field.key for pf in fields}
-    by_audit = {a: k for k, a in run.audit.items() if k not in here and k not in run.alias.values()}
+    by_audit = {a: k for k, a in run.audit.items()
+                if k not in here and k not in run.dead and k not in run.alias.values()}
     for pf in fields:
         key = pf.field.key
         if key not in run.audit:
@@ -358,7 +358,8 @@ def _delete_entries(run: _Run, decision: Any, fields: Sequence[PageField],
         alive = {pf.field.key for pf in members if _present(run, pf)}
         section = gid.rpartition("#")[0]
         if clicked.get(gid) and not alive and left.get(section, 0) <= want.get(section, 0):
-            continue                                                 # confirmed gone
+            run.dead |= {pf.field.key for pf in members}             # gone: never inherited (F5/F6)
+            continue
         run.services.log(f"E3: delete not confirmed for {gid}")
         for pf in members:
             key = pf.field.key
@@ -701,6 +702,10 @@ def _mark(run: _Run, key: str, origin: ValueOrigin) -> None:
 
 
 def _outcome(run: _Run, *, unknown: Sequence[str] = ()) -> PageOutcome:
+    # 13. the decision cache, on a finished page AND on a stop: the retry after the owner
+    # answers the captured question replays every other decision (§13.3). Never on a
+    # transport failure (`_transport`).
+    _cache_put(run)
     answers = dict(run.answers)
     why = {**run.entry_failed, **run.failed}
     failed = [k for k in run.order if k in why and k not in unknown]
