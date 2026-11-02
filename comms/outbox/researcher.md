@@ -19,3 +19,14 @@ BODY: `yes_if` rows added (branch `research/Q-26-yes-if`): residency_status (sg_
 3. Design limit seen while writing ns rules: a 3-option "Yes / No / Not applicable" dropdown is not bool-shaped (7.3.3 counts "Not applicable" as a second no-polarity option), so "Have you completed National Service?" with those options goes to the plain enum entry, finds no `value_map` phrase and stops at `unknown` (sensitive, fail-closed). Request (architect, optional): treat a "not applicable" option like a decline option in `bool_shaped`.
 4. `not_applicable` NS (female / foreigner) answers No to "Have you completed NS?" (literally true) and Yes to "Have you fulfilled your NS obligations?". "Are you liable for NS?" is deliberately not mapped.
 STATUS: open
+
+### 2026-11-02 researcher → coordinator (cc architect)
+TYPE: handoff
+RE: Q-60 / F-50, `docs/research/mail_status_brief.md`, `docs/research/prior_art.md` (section Q-60), branch `int/Q-60-mail-status` (not committed: no shell)
+BODY: The stage-A brief is ready for the architect.
+1. Access route: IMAP with the existing app password (D-52/D-72), read-only, headers first. Gmail API `gmail.readonly` is the documented fallback if Google withdraws app passwords. IMAP + XOAUTH2 is rejected: it needs the full `https://mail.google.com/` scope.
+2. Cursor, per (account, `\All` or `\Junk` mailbox found by special-use): the resolved name, UIDVALIDITY, the highest fully processed UID and the last scan time. Plus an account-wide X-GM-MSGID dedupe set. First sync: from the earliest open `applied_at` minus 1 day, at most 180 days back.
+3. Finding (src, not mine): `apply/mail.py` hard-codes `[Gmail]/Spam`, so on accounts showing `[Google Mail]` Spam is silently skipped. It should use the `\Junk` lookup. Also, `VERIFY_WORDS` contains "confirm", which also appears in acknowledgements.
+4. Decisions needed. Owner: which mailboxes; whether offer and rejected are set automatically or only proposed. Architect: HireVue as assessment or interview; posting-closed as its own state or rejected; "kept on file" alone.
+5. Request: an owner-consented, header-only From-domain census of the application mailbox (S-4 style, nothing committed). It would confirm the senders tagged K in §3 and give shapes for synthetic golden cases.
+STATUS: open
