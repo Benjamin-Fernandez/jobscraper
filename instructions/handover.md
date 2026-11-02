@@ -9,13 +9,13 @@
 ## Running / ready to merge (worktrees under `.claude/worktrees/`)
 - Merged + pushed this session: int/Q-30 (Profile form + questions), int/Q-36 (lenient profile, D-79), int/Q-39 (review F2/F6/F7 + `data/*.tmp` ignore), S-5b spike, Q-35 design (contracts v5). personal 813/813, web 279+1.
 - S-5b: tenant A submitted + confirmed; tenant B account made, stopped at a required "Additional Address" → Q-41/D-80 once the owner fills `address_line2` (resume from My Information with `spikes/llm_fill/drive.py`; recordings + tenants.json in the session scratchpad `s5b/`).
-- Q-35 (D-78 LLM filler): stage E READY WITH FIXES (`docs/reviews/Q-35-design.md`). Running (4 agents): architect amending H1–H7/M1–M14/TR-1..3 in worktree `arch-Q-35` (no shell: Coordinator commits, then reviewer re-checks the HIGHs); tester T0/T1/T3 (`test-Q-35`); lane N N1–N5; lane R R1–R2. HELD until the amendment: M1–M5, Q5, R3, N6, T2, T4, T5.
+- Q-35 (D-78 LLM filler): stage E READY WITH FIXES (`docs/reviews/Q-35-design.md`). Amendment merged (06f2d4d). Running (4 agents): reviewer re-check of H1–H7; tester T0/T1/T3 → T2/T4/T5 (`test-Q-35`); lane N N1–N5; lane R R1–R2 → R3. Next: lane M (M1–M5, Q5) after the re-check; N6a after M + R merge, then N6b.
 
 ## Waiting on the owner
 - `contact.address_line2` (Q-41) and the template placeholders in `data/applicant.yaml` ("Example Pte Ltd" experience, default skills). Application Gmail + app password verified (address only in Coordinator memory). MyGreenhouse signed in on the JobScraper Edge profile. `data/applicant.yaml` filled by the owner.
 
 ## Next 1–3 actions
-1. Commit the amendment → reviewer re-check of H1–H7 → start lane M (+ R3, T2/T4/T5). Merge T0/T1/T3, N1–N5, R1–R2 as they pass (T1 fixtures: grep for personal data before merging). Q-41 once the owner fills `address_line2`.
+1. Re-check READY → start lane M. Merge T0/T1/T3, N1–N5, R1–R2 as they pass (T1 fixtures: grep for personal data before merging). Q-41 once the owner fills `address_line2`.
 2. S-5b report → Q-35 architect redesign around D-78 (generic LLM filler; folds in review F1/F3/F4 = Q-40, F1 before WP-Q1b) → lane V V2 accounts half, V4–V7 adjusted, WP-Q1b question capture in `apply_flow.py`, WP-F1 Workday fixtures.
 3. M20 gate: Greenhouse dry runs + the 2 real Workday submissions (D-77).
 - Backlog: Q-27 (`ResolveContext.job_title`, §5.4 `backup_email`), Q-32 (how-heard option mapping), Q-34 (web reaper run lock, M21), Q-15 docs (planner pastes `questions_build_plan.md` into `apply_build_plan.md`, PRD F-13 + D-75), QD text per D-76, S-5 report → `docs/architecture/spikes/S-5_workday.md`.
