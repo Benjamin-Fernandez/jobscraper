@@ -46,23 +46,49 @@ def _cls(label):
     return getattr(lab, "value", lab)
 
 
-def test_d91_pin_nda_willingness_answers_from_its_own_switch():
-    """D-91: class nda_willingness reads declarations.willing_to_sign_nda (default false)."""
-    for willing, want in ((True, "Yes"), (False, "No")):
-        prof = Q._prof(willing_to_sign_nda=willing)
+def _willing(state):
+    """The sample profile with declarations.willing_to_sign_nda absent ("absent"), null, false or true."""
+    prof = Q._prof()
+    prof["declarations"].pop("willing_to_sign_nda", None)
+    if state != "absent":
+        prof["declarations"]["willing_to_sign_nda"] = state
+    return prof
+
+
+def test_d91_pin_nda_willingness_answers_only_from_an_explicit_switch():
+    """D-91 (corrected): class nda_willingness reads declarations.willing_to_sign_nda, which
+    defaults to UNSET. Unset (absent or null) -> unknown / blank and never ticked; false -> No,
+    not ticked; true -> Yes, ticked. non_compete does not change it."""
+    for label in WILLING:
+        assert _cls(label) == "nda_willingness", (label, _cls(label))
+    for state in ("absent", None):
+        prof = _willing(state)
+        for label in WILLING:
+            _not_answered(label, prof=prof)
+            _not_answered(label, required=False, prof=prof)
+        assert not _ticked("I agree to sign the NDA", prof=prof), state
+    for state, want in ((False, "No"), (True, "Yes")):
         for nc in (False, True):
+            prof = _willing(state)
             prof["declarations"]["non_compete"] = nc
             for label in WILLING:
-                assert _cls(label) == "nda_willingness", (label, _cls(label))
                 _lab, a = Q._ans(label, prof=prof)
                 Q._filled(a, want)
-        assert _ticked("I agree to sign the NDA", prof=prof) is willing
+            assert _ticked("I agree to sign the NDA", prof=prof) is state, (state, nc)
+
+
+def test_d91_pin_normalise_leaves_nil_and_na_unset_for_the_nda_switch():
+    from jobscraper import applicant as A
+    for raw in ("nil", "NA", None):
+        n = A.normalise(_willing(raw))
+        assert n["declarations"].get("willing_to_sign_nda") is None, (raw, n["declarations"].get("willing_to_sign_nda"))
 
 
 def test_d91_pin_other_willingness_and_acknowledgements_stay_unanswered():
-    for prof in (Q._prof(willing_to_sign_nda=True), Q._prof(willing_to_sign_nda=False)):
+    for prof in (_willing(True), _willing(False), _willing("absent")):
         _not_answered("Are you willing to sign a non-compete?", prof=prof)
         _not_answered("Are you comfortable signing an NDA?", prof=prof)
+        _not_answered("Do you have any objection to signing an NDA?", prof=prof)
         for label in ("I have no objection to signing the NDA",
                       "I have read the confidentiality agreement and have no questions"):
             assert not _ticked(label, prof=prof), label
