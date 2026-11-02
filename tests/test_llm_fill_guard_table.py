@@ -71,6 +71,25 @@ def test_g2_refs_outside_the_catalogue_fail_and_a_fact_takes_the_programs_value(
 
 
 @needs(*NEEDS)
+def test_g2d_a_model_value_naming_the_fitted_option_by_its_leaf_is_the_programs_value():
+    """Failing pin (MEDIUM, fails closed): G1's `option_for` reads "Company careers website" as
+    the option "Online > Company careers website" (its leaf), and that is also the fact's own
+    value, but G2(d)'s non-enum branch compares the raw model value with the program's option
+    (`same_value(mv, pv)`, no `option_for`), so the how-heard question stops the application as
+    unknown "G2d". The enum branch already normalises with `option_for`."""
+    from jobscraper.apply.contracts import AnswerStatus as AS, FieldType as FT
+    P = _h()
+    opts = ("Online > Company careers website", "Online > LinkedIn", "Referral > Employee")
+    hh = P._pf("h", "How did you hear about us?", FT.DROPDOWN, options=opts)
+    for mv in ("", "Online > Company careers website", "Company careers website"):
+        d, _ = P._decide([hh], [P._md("h", "standing", mv, ref="standing:how_heard")])
+        a = d.answers["h"]
+        assert a.status is AS.FILLED and a.value == opts[0], (mv, a.status, a.note)
+    d, _ = P._decide([hh], [P._md("h", "standing", "LinkedIn", ref="standing:how_heard")])
+    assert d.answers["h"].status is AS.UNKNOWN, "another option is still a disagreement"
+
+
+@needs(*NEEDS)
 def test_g3_grounding():
     from jobscraper.apply import guards as G
     from jobscraper.apply.contracts import AnswerStatus as AS, AnswerTier, FieldType as FT

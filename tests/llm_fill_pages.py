@@ -551,8 +551,11 @@ def _d(source: str, ref: str = "", value: object = "", evidence: str = "") -> di
 
 
 MI = {
-    # S-5b 1: words, not an option of the hierarchical list -> pick_option
-    "|How Did You Hear About Us?": _d("standing", "standing:how_heard", "Company careers website"),
+    # S-5b 1: the hierarchical list is mapped by the program (fact_value + pick_option, D-86 F7). The
+    # model cites the fact with an empty value (LF §7 G2(d): empty or equal -> the program's value).
+    # The S-5b reply ("Company careers website", the fact's own words) ends G2d unknown today: tester
+    # question to the architect (2026-11-03) and the guard-table pin on the leaf form.
+    "|How Did You Hear About Us?": _d("standing", "standing:how_heard", ""),
     f"|Have you previously worked for {EMPLOYER}?": _d("standing", "standing:worked_here", "No"),
     "|Country": _d("profile", "profile:contact.country", "Singapore"),
     "|Given Name(s)": _d("profile", "profile:identity.legal_first_name", "Alex"),
@@ -566,12 +569,24 @@ MI = {
     "|Phone Number": _d("profile", "profile:contact.phone_number"),
     "|Phone Extension": _d("unknown"),
 }
+# G5 (LF §7): every required choice the model chose (not a cited fact) gets a second opinion that
+# must agree (lane R R3 run, 2026-11-03: wd_a/wd_b 02 lacked it). Keyed, repeatable.
+SECONDS = [
+    # a field whose read-back fails gets one corrective call (LF §8 step 11): the same citation again
+    {"kind": "corrective", "repeat": True, "reply": {
+        "|How Did You Hear About Us?": _d("standing", "standing:how_heard", ""),
+        "|Country Phone Code": _d("profile", "profile:contact.phone_country_code")}},
+    {"kind": "second", "repeat": True, "reply": {"|Phone Device Type": _d("resume", "", "Mobile", "Mobile")}},
+    {"kind": "second", "repeat": True, "reply": {
+        "|How Did You Hear About Us?": _d("standing", "standing:how_heard", "Company careers website")}},
+]
 REPLIES = {
     "wd_a": {
         "01-autofill_with_resume": [],          # FILE fields never reach the model
         "02-my_information": [
             {"kind": "page", "reply": dict(MI, **{"|Address Line 2": _d("unknown")})},
             {"kind": "pick", "match": "How Did You Hear About Us?", "raw": {"choice": "Company Website > Careers Page"}},
+            *SECONDS,
         ],
         "03-my_experience": [
             {"kind": "entry", "reply": {
@@ -586,6 +601,11 @@ REPLIES = {
                 # S-5b 5: the parser's description kept with the Projects block (recheck replaces it)
                 "Work Experience 1|Role Description": _d("keep", "", "", "Built REST APIs in Python and Postgres"),
             }},
+            # G11 / D-84 R3: the title that names the company is rechecked against the entry's block
+            # (keyed, so it is taken only by the Job Title recheck; listed before the entry-wide one)
+            {"kind": "recheck", "reply": {
+                "Work Experience 1|Job Title": _d("resume", "", "Software Engineering Intern",
+                                                  "Software Engineering Intern")}},
             {"kind": "recheck", "match": "Work Experience 1",
              "raw": _d("resume", "", "Built REST APIs in Python and Postgres for shipment tracking.",
                        "Built REST APIs in Python and Postgres for shipment tracking.")},
@@ -653,6 +673,7 @@ REPLIES = {
             # the required Additional Address: the model cites an empty profile path (S-5b tenant B)
             {"kind": "page", "reply": dict(MI, **{"|Address Line 2": _d("profile", "profile:contact.address_line2")})},
             {"kind": "pick", "match": "How Did You Hear About Us?", "raw": {"choice": "Company Website > Careers Page"}},
+            *SECONDS,
         ],
     },
 }
