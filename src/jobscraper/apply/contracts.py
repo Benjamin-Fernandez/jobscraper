@@ -460,6 +460,7 @@ class DeclarationLabel(str, Enum):
     PREVIOUSLY_APPLIED = "previously_applied"
     GOVERNMENT_EMPLOYMENT = "government_employment"   # D-87 / Q-48: standing bool, default false
     DISABILITY = "disability"   # D-87 / Q-48: us_self_id.disability_status, any country; label-only match
+    NDA_WILLINGNESS = "nda_willingness"   # D-91 / Q-48: declarations.willing_to_sign_nda; not standing
 
 
 # Declarations about THIS employer: a prefilled value (MyGreenhouse) never stands
