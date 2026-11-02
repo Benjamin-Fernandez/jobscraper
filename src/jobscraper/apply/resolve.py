@@ -40,7 +40,9 @@ from .contracts import (
     FieldType, FormField, Option, ResolveContext,
 )
 from . import declarations
-from .plan import contains_run, norm_label, phrase_match_tokens, tokens
+from .plan import (
+    contains_run, is_generic, norm_label, phrase_match_tokens, qualified_label, tokens,
+)
 
 MemoryLookup = Callable[[str, str, str], Optional[str]]
 
@@ -120,7 +122,7 @@ _COUNTRY_PHRASES = _country_phrases()
 _BARE_US = re.compile(r"(?<![A-Za-z0-9])US(?![A-Za-z0-9])")
 
 
-def label_countries(label_norm: str, label: str = "") -> set[str]:
+def label_countries(label_norm: str, label: str = "", job_country: str = "") -> set[str]:
     """The ISO codes (and "EU") a normalised label names, by contiguous token
     phrase: country names plus COUNTRY_ALIASES. Unlike tier-2 synonyms, a
     one-token name matches in a label of any length ("eligible to work in
@@ -128,12 +130,20 @@ def label_countries(label_norm: str, label: str = "") -> set[str]:
 
     D-76: normalising lowercases, so the bare token is read on the verbatim
     `label`: an upper-case standalone "US" is the United States, a lowercase
-    "us" the pronoun ("work for us"). A label written all in capitals tells
-    the two apart by nothing, so there "US" stays the pronoun."""
+    "us" the pronoun ("work for us").
+
+    Review Q-30 F4 (llm_fill_design §12.3): a label written all in capitals
+    tells the two apart by nothing, so there a bare "US" yields both readings,
+    the United States and `job_country` (the country "work for us" means). The
+    caller answers when both give the same answer and stops on `conflict` when
+    they differ. Without `job_country` it stays the pronoun, as before."""
     toks = label_norm.split()
     found = {code for code, phrase in _COUNTRY_PHRASES if contains_run(toks, phrase)}
-    if label and _BARE_US.search(label) and any(ch.islower() for ch in label):
-        found.add("US")
+    if label and _BARE_US.search(label):
+        if any(ch.islower() for ch in label):
+            found.add("US")
+        elif job_country:
+            found |= {"US", job_country.strip().upper()}
     return found
 
 
@@ -899,7 +909,7 @@ def work_rights_countries(label_norm: str, ctx: ResolveContext, label: str = "")
     """The countries a work-rights label asks about (§8.2 steps 1-2): those it
     names; else the applicant's country when it asks where they live; else the
     job's country (`ctx.job_country`, "this country", "where this job is")."""
-    named = label_countries(label_norm, label)
+    named = label_countries(label_norm, label, ctx.job_country or "SG")
     if named:
         return sorted(named)
     toks = label_norm.split()
@@ -980,22 +990,38 @@ def _extra_fit(f: FormField, kind: str, ans: dict) -> Optional[Fit]:
     return None
 
 
+def _label_hit(saved: str, label_norm: str) -> bool:
+    """A saved `extra` label equals this field's label: a plain label compared
+    normalised; a qualified one (F1, "<label> | <context>") compared as saved."""
+    if " | " in label_norm or " | " in saved:
+        return saved.strip() == label_norm
+    return norm_label(saved) == label_norm
+
+
 def _extra_answer(f: FormField, label_norm: str,
                   ctx: ResolveContext) -> tuple[Optional[Answer], str]:
     """Tier 3 from `extra:` (questions_design §6.2). Matches on the exact
     normalised label; never answers an employer-specific declaration (tier 4
-    owns those, ADR-0005)."""
+    owns those, ADR-0005).
+
+    F1 (review Q-30; llm_fill_design §12.1): a generic label ("Please specify",
+    a one-word label) means nothing alone. It matches only on its qualified
+    label (`plan.qualified_label`, which the caller passes as `label_norm`) and
+    only through `by_employer[<this employer>]`: the base value, saved at some
+    other employer, is never used for it."""
     extra = (ctx.profile or {}).get("extra")
     if not label_norm or not isinstance(extra, dict) or not extra:
         return None, ""
-    if declarations.classify(label_norm, norm_label(f.description)) \
+    base = label_norm.split(" | ", 1)[0]
+    if declarations.classify(base, norm_label(f.description)) \
             in EMPLOYER_SPECIFIC_DECLARATIONS:
         return None, ""
+    generic = is_generic(base)
     matches, invalid = [], []
     for key, entry in extra.items():
         labels = entry.get("labels") if isinstance(entry, dict) else None
         if not isinstance(labels, list) or not any(
-                isinstance(x, str) and norm_label(x) == label_norm for x in labels):
+                isinstance(x, str) and _label_hit(x, label_norm) for x in labels):
             continue
         if applicant.extra_entry_errors(key, entry):
             invalid.append(str(key))
@@ -1007,21 +1033,49 @@ def _extra_answer(f: FormField, label_norm: str,
             notes.append("memory ambiguous: " + ", ".join(k for k, _e in matches))
         return None, "; ".join(notes)
     key, entry = matches[0]
-    ans, scope = entry, ""
-    by_emp = entry.get("by_employer") or {}
-    if by_emp:
-        overrides = {declarations.employer_norm(str(k)): v for k, v in by_emp.items()}
-        for name in (ctx.employer_name, *ctx.employer_aliases):
-            e = declarations.employer_norm(name or "")
-            if e and e in overrides:
-                ans, scope = overrides[e], e
-                break
+    ans, scope = employer_answer(entry, ctx)
+    if generic and not scope:
+        return None, "; ".join(notes + [f"memory entry {key}: generic label, not answered "
+                                        "at this employer"])
     fit = _extra_fit(f, str(entry.get("kind")), ans)
     if fit is None:
         return None, "; ".join(notes)
     rule_id = f"extra.{key}" + (f"@{scope}" if scope else "")
     return _answer(f, fit, AnswerTier.MEMORY, f"memory:extra.{key}", CONF_MEMORY,
                    rule_id=rule_id, sensitive=entry.get("sensitive") is True), ""
+
+
+def extra_answer(f: FormField, label_norm: str,
+                 ctx: ResolveContext) -> tuple[Optional[Answer], str]:
+    """Lock L6 (llm_fill_design §4): the owner's own `extra` answer for this
+    (qualified) label, with the F1 guard. (Answer or None, note)."""
+    return _extra_answer(f, label_norm, ctx)
+
+
+def employer_answer(entry: dict, ctx: ResolveContext) -> tuple[dict, str]:
+    """The answer an `extra` entry gives at this employer (questions_design §6.2
+    step 3): its `by_employer` override when one names this employer or an
+    alias, else the entry itself. Returns (answer, the matched employer_norm or "")."""
+    by_emp = entry.get("by_employer") or {}
+    if isinstance(by_emp, dict) and by_emp:
+        overrides = {declarations.employer_norm(str(k)): v for k, v in by_emp.items()}
+        for name in (ctx.employer_name, *ctx.employer_aliases):
+            e = declarations.employer_norm(name or "")
+            if e and e in overrides:
+                return overrides[e], e
+    return entry, ""
+
+
+def extra_fit(f: FormField, kind: str, ans: dict) -> Optional[Fit]:
+    """§6.2 step 4 for callers outside the resolver (apply.facts, D-78): an
+    `extra` answer onto a field by its kind; None when it does not fit."""
+    return _extra_fit(f, kind, ans)
+
+
+def field_map_fit(c: Canonical, f: FormField, ctx: ResolveContext) -> Optional[Fit]:
+    """The tier-1 value logic for one canonical (§7.2), for apply.facts' standing
+    facts under D-78 (tier 1 no longer tags fields; its value rules live on)."""
+    return _field_map_value(c, f, ctx)
 
 
 def _memory_answer(f: FormField, label_norm: str, ctx: ResolveContext,
@@ -1429,11 +1483,14 @@ def _tier5_text(f: FormField, ctx: ResolveContext, backend: Any, user: str, sche
 # ---------------------------------------------------------------- the resolver
 
 def resolve_field(f: FormField, ctx: ResolveContext, *, backend: Any, rules: QuestionRules,
-                  memory: Optional[MemoryLookup]) -> Answer:
-    """One field through the tiers (§7)."""
+                  memory: Optional[MemoryLookup], ordinal: int = 0) -> Answer:
+    """One field through the tiers (§7). Tier 3 matches a generic label on its
+    qualified label (F1, llm_fill_design §12.1); `ordinal` = the field's place
+    among its step's generic fields (resolve_all counts them)."""
     if f.type is FieldType.HIDDEN:
         return _final(f, status=AnswerStatus.SKIPPED, note="hidden")
     label_norm = norm_label(f.label)
+    memory_label = qualified_label(f.label, f.description, "", step=f.step, ordinal=ordinal)
 
     # Tier 1. A canonical field belongs to the profile: when the field map has no
     # value, only the owner's memory may still answer it (no rule, no model).
@@ -1445,7 +1502,7 @@ def resolve_field(f: FormField, ctx: ResolveContext, *, backend: Any, rules: Que
             if not f.required:
                 return _final(f, note="cover letter is optional")
             return _tier5(f, ctx, backend) or _final(f, note="no cover letter")
-        t3, mnote = _tier3(f, label_norm, ctx, memory)
+        t3, mnote = _tier3(f, memory_label, ctx, memory)
         return t3 or _final(
             f, note=_join(t1.note if isinstance(t1, _Stop) else "", mnote),
             sensitive=isinstance(t1, _Stop) and t1.sensitive)
@@ -1457,7 +1514,7 @@ def resolve_field(f: FormField, ctx: ResolveContext, *, backend: Any, rules: Que
     # Tier 3 before a tier-2 stop (questions_design §6.2): the owner's own
     # explicit answer is a fact they gave, so it may settle a sensitive no-fit
     # or a D-75 conflict. Fail-closed still holds: a stop never reaches tier 5.
-    t3, mnote = _tier3(f, label_norm, ctx, memory)
+    t3, mnote = _tier3(f, memory_label, ctx, memory)
     if t3:
         return t3
     if t2.stop:                       # a sensitive no-fit, or D-75 countries that disagree
@@ -1491,8 +1548,10 @@ def resolve_all(fields: Sequence[FormField], ctx: ResolveContext, *, backend: An
     by_key = {f.key: f for f in fields}
     primaries = [f for f in fields if not f.alt_of]
     alternatives = [f for f in fields if f.alt_of]
+    ordinals = generic_ordinals(fields)
     for f in primaries:
-        out[f.key] = resolve_field(f, ctx, backend=backend, rules=rules, memory=memory)
+        out[f.key] = resolve_field(f, ctx, backend=backend, rules=rules, memory=memory,
+                                   ordinal=ordinals.get(f.key, 0))
     for f in alternatives:
         prim = out.get(f.alt_of)
         if prim is not None and prim.fills:
@@ -1503,5 +1562,18 @@ def resolve_all(fields: Sequence[FormField], ctx: ResolveContext, *, backend: An
         if pf is not None and pf.canonical is Canonical.COVER_LETTER and not f.required:
             out[f.key] = _final(f, note="cover letter is optional")
             continue
-        out[f.key] = resolve_field(f, ctx, backend=backend, rules=rules, memory=memory)
+        out[f.key] = resolve_field(f, ctx, backend=backend, rules=rules, memory=memory,
+                                   ordinal=ordinals.get(f.key, 0))
     return {f.key: out[f.key] for f in fields}
+
+
+def generic_ordinals(fields: Sequence[FormField]) -> dict[str, int]:
+    """Field key -> its position (0-based) among the generic-label fields of its
+    step, for the context-less qualified label (llm_fill_design §12.1, review M1)."""
+    out: dict[str, int] = {}
+    seen: dict[str, int] = {}
+    for f in fields:
+        if is_generic(norm_label(f.label)):
+            out[f.key] = seen.get(f.step, 0)
+            seen[f.step] = out[f.key] + 1
+    return out

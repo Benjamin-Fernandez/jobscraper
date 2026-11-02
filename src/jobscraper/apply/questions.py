@@ -35,7 +35,7 @@ from .contracts import (
     EMPLOYER_SPECIFIC_DECLARATIONS, EXTRA_KEY_PATTERN, Answer, AnswerStatus, Canonical,
     CapturedQuestion, FieldType, FormField, QuestionKind, QuestionReason, ResolveContext,
 )
-from .plan import norm_label
+from .plan import STOP_WORDS as _PLAN_STOP_WORDS, norm_label
 
 LABEL_MAX = 300
 DESCRIPTION_MAX = 300
@@ -296,8 +296,8 @@ def existing_keys(extra: Optional[Mapping[str, Any]] = None,
                         found[k]["description"], found[k]["in_extra"]) for k in order]
 
 
-STOP_WORDS = frozenset("a an the of in on for to and or your you are is do does have has what "
-                       "which please select enter provide".split())
+# questions_design §5.2 stop words; one table, kept in plan.py (plan.is_generic reads it too).
+STOP_WORDS = _PLAN_STOP_WORDS
 
 
 def _kind_value(kind: Any) -> str:
