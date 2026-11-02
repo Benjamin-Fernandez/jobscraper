@@ -179,3 +179,13 @@ BODY: Testability cross-review. TR-1 to TR-3 block the work packages named in ea
 
 **Privacy, for the Coordinator.** The S-5b recording folder also holds live browser profiles for both tenant accounts (session cookies). Never copy them into a worktree, and consider deleting them after the gate. The T1 deny-list (`JOBSCRAPER_FIXTURE_DENYLIST`, a file outside the repo) is yours to build.
 STATUS: open
+
+### 2026-11-03 tester → coordinator (cc lane R engineer, architect)
+TYPE: handoff
+RE: Q-35 WP-T0, WP-T1, WP-T3 · branch test/Q-35-llm-fill-oracles
+BODY: T0 `tests/test_apply_contracts_v5.py` (14). T1 `tests/llm_fill_pages.py` (builder), `tests/llm_fill_support.py` (FakeFillBackend keyed `<group_title>|<question>`, FixtureDir, secret scan), `tests/test_llm_fill_fixtures.py` (14, incl. a headless-Edge shim walk), fixtures `tests/fixtures/apply/llm_fill/**` (wd_a 7 steps, wd_b stop page, 7 stubs, shim.js, README). T3 `tests/test_apply_page_reader.py` (9 + 1 always-run), `tests/test_apply_widgets.py` (8 + 1), skip-clean until `jobscraper.apply.page` / `widgets` exist.
+- Fixtures are GENERATED from a spec that copies only the Workday DOM structure seen in S-5b; no recorded text, value, id or screenshot is copied; values are the sample profile's; question GUIDs synthetic.
+- Lane R, ASSUMED shapes (one helper each, tell me yours): `page.read_page(page, *, scope, sections, origin)`, `page.entry_sections(page, scope)`, `widgets.fill(page, field: PageField, value) -> bool` (True only on an equal read-back), `widgets.read(page, field) -> Value`. Fixture field identity in the oracles is `(group_title, label)`; `shown` for dates is compared as digits.
+- Architect (non-blocking, from writing T3): (1) LF §3.1 makes a prompt MULTI_CHOICE only when it "holds several pills", so an empty or one-pill multi prompt (Workday skills) reads as TYPEAHEAD; fields.json follows the rule as written; suggest detecting multi from the widget. (2) `PageField` has no `parts`, but the field view (§6.2) sends date `parts`; add `PageField.parts` or say where they come from. (3) The `click_filter` fallback has no stub yet; it goes with T4/N2.
+- Privacy: the owner deny-list scan (T1 part b) needs `JOBSCRAPER_FIXTURE_DENYLIST` pointing at a file outside the repo (yours to build). For these commits I scanned the staged trees against an in-memory list built from the recordings (names, e-mails, phone, address, past employers/schools, employer names, tenant hosts): 0 identifier hits.
+STATUS: open
