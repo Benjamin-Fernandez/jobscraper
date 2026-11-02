@@ -28,6 +28,8 @@ paths:
   resume_dir: data                            # where resume.pdf / resume.docx lives
   db: data/jobscraper.db
   shortlist: data/shortlist.json              # the accepted queue the web app reads
+  applicant: data/applicant.yaml              # your application details (M20) - gitignored
+  questions: config/questions.yaml            # how form questions map onto them (M20)
   aliases: config/aliases.yaml                # tailor: term variants (true synonyms only)
   master_resume: data/master_resume.json      # tailor: your resume, parsed once (gitignored)
   tailored_dir: data/tailored                 # tailor: per-job resumes, deleted after a while (gitignored)
@@ -129,6 +131,38 @@ retention:
   # to keep the database small (M17). Roles the judge accepted and roles you
   # track in Applications keep theirs - the Inbox shows it. 0 keeps everything.
   description_days: 7
+
+apply:
+  # Auto-apply (M20, docs/architecture/apply_design.md §16). Settings → Apply
+  # in the web app overrides mode, the caps, headed and captcha_wait_s.
+  mode: dry_run              # auto | dry_run. M20 ships dry_run; switch to auto after the M20 gate
+  daily_cap: 10              # D-61: Submit clicks per day (Asia/Singapore)
+  per_employer_daily_cap: 2  # D-61
+  headed: true               # D-53: show the Edge window
+  captcha_wait_s: 0          # F-38: seconds to leave a CAPTCHA'd tab open for you
+  profile_dir: "%LOCALAPPDATA%\\JobScraper\\apply-profile"
+  edge_sync: false           # S-1: true drops --disable-sync (only after the owner's sync test)
+  edge_save_bubble: false    # best-effort UIA click on Edge's Save prompt; needs edge_sync
+  type_delay_ms: 60          # press_sequentially delay (react-select search, retries)
+  action_pause_ms: 250       # fixed pause after each field (NF-05)
+  step_timeout_s: 45         # waiting for a page or step to appear
+  confirm_timeout_s: 60      # F-37
+  attempt_timeout_s: 420     # whole attempt, excluding the mail wait (NF-07)
+  dry_run_hold_s: 600        # F-37 dry run: keep the filled form open
+  resume_format: pdf         # pdf | docx: which tailored file to upload when both exist
+  mygreenhouse: true         # D-70: click "Autofill with (My)Greenhouse" when present, then fill only the gaps
+  mygreenhouse_wait_s: 20
+  workday_entry: auto        # D-70: auto = last application on a tenant applied to before, else Apply Manually | manual
+  max_wizard_steps: 15
+  llm_text_temperature: 0.3
+  mail:
+    host: imap.gmail.com
+    port: 993
+    wait_s: 300              # F-36
+    poll_s: 10
+  mail_backup:               # D-70: mailbox for contact.backup_email; host "" = same mailbox as `mail`
+    host: ""
+    port: 993
 
 tailor:
   # The resume tailor (M20, docs/architecture/tailor_design.md). It never adds a

@@ -21,9 +21,9 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Iterable, Optional
 
-from .models import RawJob, WatchedCompany
+from .models import RawJob, WatchedCompany, posting_key
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 # A posting closes after this many successful fetches in a row leave it out (H1-1).
 CLOSE_AFTER_MISSES = 2
@@ -163,6 +163,79 @@ CREATE TABLE IF NOT EXISTS company_list (
     searched_at TEXT
 );
 
+-- M20 apply (apply_design §13)
+-- One row per auto-apply attempt. `state` is an AttemptState value (apply/contracts.py);
+-- set_attempt_state refuses a transition the contract's table does not allow.
+CREATE TABLE IF NOT EXISTS apply_attempts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    job_id TEXT NOT NULL,
+    company_id INTEGER,                    -- jobs.company_id at queue time (per-employer cap)
+    ats TEXT, tenant_host TEXT,
+    mode TEXT NOT NULL CHECK (mode IN ('auto', 'dry_run')),
+    state TEXT NOT NULL,                   -- AttemptState values
+    step TEXT,                             -- current or last step id
+    reason_code TEXT, reason_detail TEXT,  -- ReasonCode value; detail has no personal values
+    end_url TEXT,                          -- page URL at the end, query string dropped
+    plan_source TEXT,                      -- schema | dom
+    resume_file TEXT, resume_sha256 TEXT,  -- file name only, and its hash
+    resume_source TEXT,                    -- tailored | original
+    tailored_id INTEGER,                   -- tailored.id when resume_source = tailored
+    confirmation TEXT,                     -- signal that matched, or 'owner'
+    code_resubmits INTEGER NOT NULL DEFAULT 0,
+    queued_at TEXT NOT NULL, started_at TEXT, submit_clicked_at TEXT, finished_at TEXT,
+    job_log TEXT                           -- the web job id (data/jobs/<id>.log), if started from the web
+);
+CREATE INDEX IF NOT EXISTS idx_attempts_job ON apply_attempts(job_id, id);
+CREATE INDEX IF NOT EXISTS idx_attempts_clicked ON apply_attempts(submit_clicked_at);
+-- NF-06: a posting can succeed only once.
+CREATE UNIQUE INDEX IF NOT EXISTS ux_attempts_one_success
+    ON apply_attempts(job_id) WHERE state IN ('submitted', 'submitted_unconfirmed');
+
+-- Every field of every attempt: what was asked, what was sent, where the answer came from (F-39).
+CREATE TABLE IF NOT EXISTS apply_answers (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    attempt_id INTEGER NOT NULL,
+    step TEXT NOT NULL DEFAULT '',
+    field_key TEXT NOT NULL,
+    label TEXT NOT NULL, label_norm TEXT NOT NULL,
+    field_type TEXT NOT NULL, required INTEGER NOT NULL,
+    section TEXT,
+    options_json TEXT,                     -- [{"label":..,"value":..}] as offered
+    value_json TEXT,                       -- exact value sent (JSON); NULL when blank
+    tier INTEGER NOT NULL, source TEXT NOT NULL, confidence REAL NOT NULL,
+    status TEXT NOT NULL,                  -- AnswerStatus values
+    rule_id TEXT, model TEXT, prompt_hash TEXT, note TEXT,
+    sensitive INTEGER NOT NULL DEFAULT 0,
+    recorded_at TEXT NOT NULL,
+    corrected_json TEXT, corrected_at TEXT -- M22 (F-12): the owner's correction
+);
+CREATE INDEX IF NOT EXISTS idx_answers_attempt ON apply_answers(attempt_id, id);
+
+-- ATS accounts (M21, F-35). Never a password: that lives in Windows Credential Manager.
+CREATE TABLE IF NOT EXISTS ats_accounts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ats TEXT NOT NULL, tenant_host TEXT NOT NULL, email TEXT NOT NULL,
+    vault_service TEXT NOT NULL,           -- the Credential Manager target; never the password
+    status TEXT NOT NULL,                  -- creating | created | verified | signin_failed | unknown
+    created_at TEXT NOT NULL, verified_at TEXT,
+    last_signin_at TEXT, last_signin_ok INTEGER,
+    exported_to_edge_at TEXT,
+    created_by_attempt INTEGER,
+    UNIQUE (ats, tenant_host, email)
+);
+
+-- Answers the owner corrected and asked to remember (resolver tier 3; M22 writes, M20 reads).
+CREATE TABLE IF NOT EXISTS answer_memory (
+    label_norm TEXT NOT NULL,
+    field_type TEXT NOT NULL,
+    ats TEXT NOT NULL DEFAULT '*',
+    value_json TEXT NOT NULL,              -- choice fields: option label(s)
+    source_answer_id INTEGER,
+    created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+    uses INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (label_norm, field_type, ats)
+);
+
 -- M20 tailor (tailor_design §11)
 CREATE TABLE IF NOT EXISTS tailored (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -256,6 +329,20 @@ class Store:
             # H1-1: every open posting starts from zero misses.
             self.conn.execute(
                 "ALTER TABLE jobs ADD COLUMN missed_runs INTEGER NOT NULL DEFAULT 0")
+        # M20 apply (apply_design §13, D-65): who wrote an application event.
+        # NULL = the owner; 'jobscraper' = auto-apply ("Applied by JobScraper", F-37).
+        ev_cols = {r["name"] for r in self.conn.execute("PRAGMA table_info(app_events)")}
+        if "by" not in ev_cols:
+            self.conn.execute("ALTER TABLE app_events ADD COLUMN by TEXT")
+        # The new tables come from SCHEMA's CREATE TABLE IF NOT EXISTS; record the
+        # version they belong to (an upsert: an older database already has a row).
+        # Never downgrade: an older build opening a newer database keeps its number.
+        self.conn.execute(
+            "INSERT INTO meta (key, value) VALUES ('schema_version', ?) "
+            "ON CONFLICT (key) DO UPDATE SET value = "
+            "CAST(MAX(CAST(COALESCE(meta.value, '0') AS INTEGER), "
+            "CAST(excluded.value AS INTEGER)) AS TEXT)",
+            (str(SCHEMA_VERSION),))
 
     def ping(self) -> None:
         """Raise if the database cannot be read (GET /api/healthz, C-6)."""
@@ -807,14 +894,17 @@ class Store:
                                role: Optional[str] = None,
                                url: Optional[str] = None,
                                at: Optional[str] = None,
-                               applied_at: Optional[str] = None) -> bool:
+                               applied_at: Optional[str] = None,
+                               by: Optional[str] = None) -> bool:
         """Upsert an application; append to `app_events` only on a real change.
 
         Returns whether an event was appended - re-posting the same status is a
         no-op for the history (M6-T2), though `notes` still updates. `applied_at`
         is stamped the first time the status leaves NOT_YET_APPLIED and is never
         re-stamped afterwards. `applied_at` overrides that stamp's date - only
-        for importing a record whose real date is known (M3-T3b).
+        for importing a record whose real date is known (M3-T3b). `by` names who
+        made the change on the event row: None is the owner, 'jobscraper' is
+        auto-apply (M20, apply_design §13).
         """
         now = at or utcnow()
         prev = self.application(job_id)
@@ -840,8 +930,8 @@ class Store:
         changed = prev_status != status
         if changed:
             self.conn.execute(
-                """INSERT INTO app_events (job_id, from_status, to_status, at)
-                   VALUES (?,?,?,?)""", (job_id, prev_status, status, now))
+                """INSERT INTO app_events (job_id, from_status, to_status, at, by)
+                   VALUES (?,?,?,?,?)""", (job_id, prev_status, status, now, by))
         self.conn.commit()
         return changed
 
@@ -1046,6 +1136,325 @@ class Store:
             "applications": q("SELECT COUNT(*) FROM applications"),
         }
 
+    # ---------------- apply (M20) ----------------
+    #
+    # Auto-apply attempts, their audit rows, ATS accounts and answer memory
+    # (apply_design §13). States and reason codes are the string values of
+    # apply/contracts.py's AttemptState / ReasonCode: the store is the bottom
+    # of the stack and may not import a stage package (tests/test_layering.py),
+    # so it keeps the transition table as plain strings in ATTEMPT_TRANSITIONS
+    # below, and apply_flow checks at import that it equals the contract's.
+
+    def job_for_apply(self, job_id: str) -> Optional[dict[str, Any]]:
+        """A job with its company's name, key, provider and slug (what ATS
+        detection reads, apply_design §9.0), or None."""
+        r = self.conn.execute(self._JOB_WITH_COMPANY + " WHERE j.job_id = ?",
+                              (job_id,)).fetchone()
+        return dict(r) if r else None
+
+    def create_attempt(self, job_id: str, company_id: Optional[int], mode: str,
+                       now: str) -> int:
+        """A new `queued` attempt. Does not commit."""
+        cur = self.conn.execute(
+            """INSERT INTO apply_attempts (job_id, company_id, mode, state, queued_at)
+               VALUES (?,?,?,'queued',?)""", (job_id, company_id, mode, now))
+        return int(cur.lastrowid)
+
+    def set_attempt_state(self, attempt_id: int, state: Any, *,
+                          step: Optional[str] = None, reason: Any = None,
+                          detail: Optional[str] = None, **cols: Any) -> None:
+        """Move an attempt to `state`, refusing what the contract forbids.
+
+        Raises ValueError for a transition `TRANSITIONS` does not allow, and for
+        any state but the post-click ones once `submit_clicked_at` is set (NF-06,
+        D-69: a clicked attempt ends only submitted or submitted_unconfirmed).
+        `cols` sets other `apply_attempts` columns in the same write (names are
+        checked against the table). A terminal state stamps `finished_at`, the
+        first move out of `queued` stamps `started_at`. Does not commit.
+        """
+        dst = _state(state)
+        row = self.conn.execute(
+            "SELECT state, submit_clicked_at FROM apply_attempts WHERE id = ?",
+            (attempt_id,)).fetchone()
+        if row is None:
+            raise ValueError(f"no attempt {attempt_id}")
+        src, clicked = row["state"], row["submit_clicked_at"] is not None
+        if not attempt_transition_allowed(src, dst, clicked=clicked):
+            raise ValueError(f"attempt {attempt_id}: {src} -> {dst} is not allowed"
+                             + (" after the Submit click" if clicked else ""))
+        sets: dict[str, Any] = {"state": dst}
+        if step is not None:
+            sets["step"] = step
+        if reason is not None:
+            sets["reason_code"] = _state(reason)
+        if detail is not None:
+            sets["reason_detail"] = detail
+        for k, v in cols.items():
+            if k not in _ATTEMPT_COLUMNS:
+                raise ValueError(f"apply_attempts has no column {k!r}")
+            sets[k] = v
+        now = utcnow()
+        if dst in TERMINAL_ATTEMPT_STATES and "finished_at" not in sets:
+            sets["finished_at"] = now
+        assignments = ", ".join(f"{k} = ?" for k in sets)
+        if src == "queued":
+            assignments += ", started_at = COALESCE(started_at, ?)"
+            params = [*sets.values(), now, attempt_id]
+        else:
+            params = [*sets.values(), attempt_id]
+        self.conn.execute(f"UPDATE apply_attempts SET {assignments} WHERE id = ?", params)
+
+    def update_attempt(self, attempt_id: int, **cols: Any) -> None:
+        """Set columns other than `state` (the resume file, the end URL).
+        Does not commit."""
+        bad = [k for k in cols if k not in _ATTEMPT_COLUMNS or k == "state"]
+        if bad:
+            raise ValueError(f"cannot set {bad} on apply_attempts here")
+        if cols:
+            self.conn.execute(
+                f"UPDATE apply_attempts SET {', '.join(f'{k} = ?' for k in cols)} WHERE id = ?",
+                [*cols.values(), attempt_id])
+
+    def mark_submit_clicked(self, attempt_id: int, now: str) -> bool:
+        """Record that Submit is about to be clicked. The caller commits this
+        BEFORE the click (NF-06): from here the attempt can only end
+        submitted or submitted_unconfirmed, and it counts against the caps.
+
+        A compare-and-set (review F4): it stamps only a live `filling` attempt
+        that has no click yet, and returns whether it did. False means the row
+        was closed meanwhile (e.g. reaped) or already clicked: do not click."""
+        cur = self.conn.execute(
+            "UPDATE apply_attempts SET submit_clicked_at = ? "
+            "WHERE id = ? AND state = 'filling' AND submit_clicked_at IS NULL", (now, attempt_id))
+        return cur.rowcount == 1
+
+    def begin_immediate(self) -> None:
+        """Start a write transaction now (SQLite BEGIN IMMEDIATE), so checks
+        read in it cannot be overtaken by another writer before the commit
+        (the pre-click duplicate + cap re-check, review F4). Commits anything
+        pending first."""
+        if self.conn.in_transaction:
+            self.conn.commit()
+        self.conn.execute("BEGIN IMMEDIATE")
+
+    def attempt(self, attempt_id: int) -> Optional[dict[str, Any]]:
+        r = self.conn.execute("SELECT * FROM apply_attempts WHERE id = ?",
+                              (attempt_id,)).fetchone()
+        return dict(r) if r else None
+
+    def attempts_for_job(self, job_id: str) -> list[dict[str, Any]]:
+        """A job's attempts, oldest first."""
+        return [dict(r) for r in self.conn.execute(
+            "SELECT * FROM apply_attempts WHERE job_id = ? ORDER BY id", (job_id,))]
+
+    def attempts_in_flight(self, exclude_id: Optional[int] = None) -> list[dict[str, Any]]:
+        """Attempts in a non-terminal state other than `queued` (apply_design
+        §12.1 (4): one in flight)."""
+        live = sorted(set(ATTEMPT_TRANSITIONS) - TERMINAL_ATTEMPT_STATES - {"queued"})
+        marks = ",".join("?" * len(live))
+        return [dict(r) for r in self.conn.execute(
+            f"SELECT * FROM apply_attempts WHERE state IN ({marks}) AND id != ? ORDER BY id",
+            (*live, -1 if exclude_id is None else exclude_id))]
+
+    def reap_attempts(self, now: str) -> int:
+        """Close attempts left in a non-terminal state by a run that died or was
+        cancelled (apply_design §4.3). The caller makes sure no apply job is
+        running. Clicked → submitted_unconfirmed (never failed, never
+        resubmitted); not clicked → failed(cancelled). An attempt in a
+        post-click-only state (`submitting`; `verifying_email` also occurs before a click) counts
+        as clicked even without a stamp (review F2: a missed stamp must never
+        free the posting). Returns how many. Commits."""
+        live = sorted(set(ATTEMPT_TRANSITIONS) - TERMINAL_ATTEMPT_STATES)
+        marks = ",".join("?" * len(live))
+        rows = self.conn.execute(
+            f"SELECT id, state, submit_clicked_at FROM apply_attempts WHERE state IN ({marks})",
+            live).fetchall()
+        for r in rows:
+            if r["submit_clicked_at"] or r["state"] == "submitting":
+                self.conn.execute(
+                    """UPDATE apply_attempts SET state = 'submitted_unconfirmed',
+                       reason_detail = COALESCE(reason_detail, 'interrupted after submit'),
+                       finished_at = ? WHERE id = ?""", (now, r["id"]))
+            else:
+                self.conn.execute(
+                    """UPDATE apply_attempts SET state = 'failed', reason_code = 'cancelled',
+                       reason_detail = 'interrupted', finished_at = ? WHERE id = ?""",
+                    (now, r["id"]))
+        self.conn.commit()
+        return len(rows)
+
+    def apply_duplicate(self, job_id: str) -> Optional[str]:
+        """Why this job must not be applied to again, or None (apply_design
+        §12.1 (2), NF-06). Checks, in order: the job's own application; a twin
+        (another job id with the same posting URL, M17) that is applied; an
+        attempt for the job or a twin that clicked Submit or succeeded."""
+        app = self.application(job_id)
+        if app and app["status"] not in NOT_YET_APPLIED:
+            return f"applied {app['applied_at'] or ''}".strip()
+        job = self.get_job(job_id)
+        key = posting_key(job["url"]) if job else ""
+        if key:
+            for a in self.conn.execute(
+                    """SELECT a.job_id, COALESCE(a.url, j.url) AS url,
+                              COALESCE(a.company, co.name) AS company,
+                              COALESCE(a.role, j.title) AS role
+                         FROM applications a
+                         LEFT JOIN jobs j ON j.job_id = a.job_id
+                         LEFT JOIN companies co ON co.id = j.company_id
+                        WHERE a.status NOT IN ('to_apply') AND a.job_id != ?""", (job_id,)):
+                if posting_key(a["url"]) == key:
+                    return f"same posting as {a['company'] or '?'} · {a['role'] or '?'}"
+        for a in self.conn.execute(
+                """SELECT at.job_id, j.url FROM apply_attempts at
+                     LEFT JOIN jobs j ON j.job_id = at.job_id
+                    WHERE at.submit_clicked_at IS NOT NULL
+                       OR at.state IN ('submitted', 'submitted_unconfirmed')"""):
+            if a["job_id"] == job_id or (key and posting_key(a["url"]) == key):
+                return "already submitted by JobScraper"
+        return None
+
+    def apply_counts(self, company_id: Optional[int], day_start: str) -> tuple[int, int]:
+        """(today_total, today_at_this_employer): attempts whose Submit was
+        clicked at or after `day_start` (UTC text; the caller computes the
+        Asia/Singapore midnight). Dry runs never click, so never count (D-61)."""
+        total = self.conn.execute(
+            "SELECT COUNT(*) FROM apply_attempts WHERE submit_clicked_at >= ?",
+            (day_start,)).fetchone()[0]
+        employer = self.conn.execute(
+            "SELECT COUNT(*) FROM apply_attempts WHERE submit_clicked_at >= ? AND company_id = ?",
+            (day_start, company_id)).fetchone()[0]
+        return int(total), int(employer)
+
+    def applied_to_company(self, company_id: Optional[int], exclude_job_id: str) -> bool:
+        """Has the owner applied to this employer before, for another job
+        (apply_design §12.3, the resolver's `previously_applied`)?"""
+        if company_id is None:
+            return False
+        r = self.conn.execute(
+            """SELECT 1 FROM applications a JOIN jobs j ON j.job_id = a.job_id
+                WHERE j.company_id = ? AND a.job_id != ? AND a.status NOT IN ('to_apply')
+               UNION ALL
+               SELECT 1 FROM apply_attempts at
+                WHERE at.company_id = ? AND at.job_id != ? AND at.submit_clicked_at IS NOT NULL
+               LIMIT 1""", (company_id, exclude_job_id, company_id, exclude_job_id)).fetchone()
+        return r is not None
+
+    _ANSWER_COLUMNS = ("step", "field_key", "label", "label_norm", "field_type", "required",
+                       "section", "options_json", "value_json", "tier", "source",
+                       "confidence", "status", "rule_id", "model", "prompt_hash", "note",
+                       "sensitive", "recorded_at")
+
+    def add_answers(self, attempt_id: int, rows: Iterable[dict[str, Any]]) -> int:
+        """Append audit rows (apply_design §7.8). Each row is a dict with the
+        `apply_answers` columns; `options_json` / `value_json` may be given as
+        Python values (they are JSON-encoded here). Does not commit."""
+        n = 0
+        cols = ", ".join(("attempt_id",) + self._ANSWER_COLUMNS)
+        marks = ",".join("?" * (len(self._ANSWER_COLUMNS) + 1))
+        for row in rows:
+            vals = []
+            for c in self._ANSWER_COLUMNS:
+                v = row.get(c)
+                if c in ("options_json", "value_json") and v is not None and not isinstance(v, str):
+                    v = json.dumps(v, ensure_ascii=False)
+                elif c in ("required", "sensitive"):
+                    v = int(bool(v))
+                elif c == "step":
+                    v = v or ""
+                elif c == "recorded_at":
+                    v = v or utcnow()
+                vals.append(v)
+            self.conn.execute(f"INSERT INTO apply_answers ({cols}) VALUES ({marks})",
+                              (attempt_id, *vals))
+            n += 1
+        return n
+
+    def answers(self, attempt_id: int) -> list[dict[str, Any]]:
+        return [dict(r) for r in self.conn.execute(
+            "SELECT * FROM apply_answers WHERE attempt_id = ? ORDER BY id", (attempt_id,))]
+
+    def answer_memory_get(self, label_norm: str, field_type: str, ats: str) -> Optional[str]:
+        """The remembered value (JSON text) for a question, this ATS first,
+        then any ATS ('*') (apply_design §7.4)."""
+        for key in (ats, "*"):
+            r = self.conn.execute(
+                "SELECT value_json FROM answer_memory WHERE label_norm = ? AND field_type = ? "
+                "AND ats = ?", (label_norm, field_type, key)).fetchone()
+            if r:
+                return r[0]
+        return None
+
+    def answer_memory_put(self, label_norm: str, field_type: str, value_json: str, *,
+                          ats: str = "*", source_answer_id: Optional[int] = None,
+                          now: Optional[str] = None) -> None:
+        """Remember an answer (M22's correction UI). Commits."""
+        now = now or utcnow()
+        self.conn.execute(
+            """INSERT INTO answer_memory (label_norm, field_type, ats, value_json,
+                   source_answer_id, created_at, updated_at) VALUES (?,?,?,?,?,?,?)
+               ON CONFLICT (label_norm, field_type, ats) DO UPDATE SET
+                   value_json = excluded.value_json,
+                   source_answer_id = excluded.source_answer_id,
+                   updated_at = excluded.updated_at""",
+            (label_norm, field_type, ats, value_json, source_answer_id, now, now))
+        self.conn.commit()
+
+    _ACCOUNT_COLUMNS = frozenset({"vault_service", "status", "verified_at", "last_signin_at",
+                                  "last_signin_ok", "exported_to_edge_at", "created_by_attempt"})
+
+    def upsert_account(self, ats: str, tenant_host: str, email: str, vault_service: str,
+                       status: str, *, now: Optional[str] = None,
+                       created_by_attempt: Optional[int] = None) -> int:
+        """Create the account row, or update its status and vault target.
+        Never a password (NF-02). Commits; returns the row id."""
+        now = now or utcnow()
+        self.conn.execute(
+            """INSERT INTO ats_accounts (ats, tenant_host, email, vault_service, status,
+                   created_at, created_by_attempt) VALUES (?,?,?,?,?,?,?)
+               ON CONFLICT (ats, tenant_host, email) DO UPDATE SET
+                   vault_service = excluded.vault_service, status = excluded.status""",
+            (ats, tenant_host.lower(), email, vault_service, status, now, created_by_attempt))
+        self.conn.commit()
+        return int(self.account(ats, tenant_host, email)["id"])
+
+    def account(self, ats: str, tenant_host: str, email: str) -> Optional[dict[str, Any]]:
+        r = self.conn.execute(
+            "SELECT * FROM ats_accounts WHERE ats = ? AND tenant_host = ? AND email = ?",
+            (ats, tenant_host.lower(), email)).fetchone()
+        return dict(r) if r else None
+
+    def accounts(self) -> list[dict[str, Any]]:
+        return [dict(r) for r in self.conn.execute(
+            "SELECT * FROM ats_accounts ORDER BY created_at, id")]
+
+    def set_account_status(self, account_id: int, status: str, **cols: Any) -> None:
+        """Commits."""
+        bad = [k for k in cols if k not in self._ACCOUNT_COLUMNS]
+        if bad:
+            raise ValueError(f"ats_accounts has no settable column {bad}")
+        sets = {"status": status, **cols}
+        self.conn.execute(
+            f"UPDATE ats_accounts SET {', '.join(f'{k} = ?' for k in sets)} WHERE id = ?",
+            [*sets.values(), account_id])
+        self.conn.commit()
+
+    def delete_account(self, account_id: int) -> bool:
+        cur = self.conn.execute("DELETE FROM ats_accounts WHERE id = ?", (account_id,))
+        self.conn.commit()
+        return cur.rowcount > 0
+
+    def accounts_to_export(self) -> list[dict[str, Any]]:
+        """Accounts not yet exported to Edge's password manager (apply_design §10.3)."""
+        return [dict(r) for r in self.conn.execute(
+            """SELECT * FROM ats_accounts WHERE exported_to_edge_at IS NULL
+                 AND status IN ('created', 'verified') ORDER BY id""")]
+
+    def mark_exported(self, ids: Iterable[int], now: str) -> None:
+        for i in ids:
+            self.conn.execute("UPDATE ats_accounts SET exported_to_edge_at = ? WHERE id = ?",
+                              (now, i))
+        self.conn.commit()
+
     # ---------------- tailored (M20) ----------------
 
     _TAILORED_COLS = (
@@ -1131,3 +1540,61 @@ class Store:
             "UPDATE tailored SET files_deleted_at = ?, changes_json = NULL WHERE id = ?",
             (now or utcnow(), tailored_id))
         self.conn.commit()
+
+
+# ---------------- apply (M20): the attempt state machine as plain strings ----------------
+#
+# A copy of apply/contracts.py's TRANSITIONS / TERMINAL_STATES / POST_CLICK_STATES,
+# because store.py may not import a stage package. apply_flow asserts at import
+# that this copy equals the contract (`check_attempt_table`), so a contract change
+# that is not mirrored here stops every apply run instead of drifting silently.
+
+TERMINAL_ATTEMPT_STATES = frozenset({"submitted", "submitted_unconfirmed",
+                                     "ready_to_submit", "failed"})
+POST_CLICK_ATTEMPT_STATES = frozenset({"submitting", "verifying_email",
+                                       "submitted", "submitted_unconfirmed"})
+
+ATTEMPT_TRANSITIONS: dict[str, frozenset[str]] = {
+    "queued": frozenset({"tailoring", "planning", "failed"}),
+    "tailoring": frozenset({"planning", "failed"}),
+    "planning": frozenset({"opening", "failed"}),
+    "opening": frozenset({"signing_in", "signing_up", "filling", "failed"}),
+    "signing_in": frozenset({"verifying_email", "filling", "failed"}),
+    # signing_up -> signing_up: the one backup-email retry (D-70, contract v3)
+    "signing_up": frozenset({"signing_up", "verifying_email", "signing_in", "filling", "failed"}),
+    "verifying_email": frozenset({"signing_in", "filling", "submitting",
+                                  "submitted_unconfirmed", "failed"}),
+    "filling": frozenset({"filling", "submitting", "ready_to_submit", "failed"}),
+    "submitting": frozenset({"verifying_email", "submitted", "submitted_unconfirmed"}),
+    "submitted": frozenset(),
+    "submitted_unconfirmed": frozenset(),
+    "ready_to_submit": frozenset(),
+    "failed": frozenset(),
+}
+
+_ATTEMPT_COLUMNS = frozenset({
+    "job_id", "company_id", "ats", "tenant_host", "mode", "state", "step", "reason_code",
+    "reason_detail", "end_url", "plan_source", "resume_file", "resume_sha256",
+    "resume_source", "tailored_id", "confirmation", "code_resubmits", "queued_at",
+    "started_at", "submit_clicked_at", "finished_at", "job_log"})
+
+
+def _state(v: Any) -> str:
+    """An enum member's value, or the text itself."""
+    return str(getattr(v, "value", v))
+
+
+# States that need a recorded Submit click (contract `can_transition`, clicked=False).
+CLICK_REQUIRED_ATTEMPT_STATES = frozenset({"submitting", "submitted", "submitted_unconfirmed"})
+
+
+def attempt_transition_allowed(src: str, dst: str, *, clicked: bool) -> bool:
+    """The contract's `can_transition(src, dst, clicked=...)`, on strings,
+    both halves (apply_design §4.1, review F2): after the click only the
+    post-click states (never `failed`); without a recorded click never
+    `submitting` / `submitted` / `submitted_unconfirmed`."""
+    if dst not in ATTEMPT_TRANSITIONS.get(src, frozenset()):
+        return False
+    if clicked:
+        return dst in POST_CLICK_ATTEMPT_STATES
+    return dst not in CLICK_REQUIRED_ATTEMPT_STATES

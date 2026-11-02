@@ -706,9 +706,13 @@ def test_a_posting_can_succeed_only_once():
     cid = st.insert_company("x", "X", "https://x.example")
     jid = _job(st, cid, 1)
     a1 = st.create_attempt(jid, cid, "auto", NOW)
-    _walk(st, a1, _PATH_TO_SUBMIT + (S.SUBMITTED,))
+    _walk(st, a1, _PATH_TO_SUBMIT[:-1])
+    st.mark_submit_clicked(a1, NOW)                  # NF-06: SUBMITTING needs a recorded click (review F2)
+    _walk(st, a1, (S.SUBMITTING, S.SUBMITTED))
     a2 = st.create_attempt(jid, cid, "auto", NOW)
-    _walk(st, a2, _PATH_TO_SUBMIT)
+    _walk(st, a2, _PATH_TO_SUBMIT[:-1])
+    st.mark_submit_clicked(a2, NOW)
+    _walk(st, a2, (S.SUBMITTING,))
     try:
         st.set_attempt_state(a2, S.SUBMITTED_UNCONFIRMED)
         st.commit()
@@ -716,6 +720,74 @@ def test_a_posting_can_succeed_only_once():
         pass
     else:
         raise AssertionError("the unique index must refuse a second success for one job (NF-06)")
+    st.close()
+
+
+@needs("jobscraper.store:Store.create_attempt")
+def test_the_store_refuses_submitting_without_a_recorded_click():
+    """Review F2 (apply_design 4.1): the store MUST refuse what the contract's click rule refuses."""
+    st = _store()
+    cid = st.insert_company("x", "X", "https://x.example")
+    aid = st.create_attempt(_job(st, cid, 1), cid, "auto", NOW)
+    _walk(st, aid, _PATH_TO_SUBMIT[:-1])
+    try:
+        st.set_attempt_state(aid, S.SUBMITTING)
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("filling -> submitting without submit_clicked_at must raise ValueError")
+    assert st.attempt(aid)["state"] == "filling"
+    st.mark_submit_clicked(aid, NOW)
+    st.set_attempt_state(aid, S.SUBMITTING)              # with the click it is allowed
+    st.close()
+
+
+@needs("jobscraper.store:attempt_transition_allowed")
+def test_the_stores_string_copy_of_the_transition_rule_equals_the_contract_for_every_pair():
+    from jobscraper.store import attempt_transition_allowed
+    for src in S:
+        for dst in S:
+            for clicked in (False, True):
+                want = can_transition(src, dst, clicked=clicked)
+                got = attempt_transition_allowed(src.value, dst.value, clicked=clicked)
+                assert got == want, f"{src.value} -> {dst.value} clicked={clicked}: store {got}, contract {want}"
+
+
+@needs("jobscraper.store:Store.reap_attempts")
+def test_the_reaper_never_turns_submitting_into_failed_even_if_the_click_was_not_recorded():
+    """Review F2: a process that died inside submit() may have clicked; freeing the posting
+    (failed(cancelled)) would let the next run submit twice."""
+    st = _store()
+    cid = st.insert_company("x", "X", "https://x.example")
+    aid = st.create_attempt(_job(st, cid, 1), cid, "auto", NOW)
+    _walk(st, aid, _PATH_TO_SUBMIT[:-1])
+    st.conn.execute("UPDATE apply_attempts SET state = 'submitting' WHERE id = ?", (aid,))
+    st.commit()                                          # state submitting, submit_clicked_at NULL
+    st.reap_attempts(NOW)
+    row = st.attempt(aid)
+    assert row["state"] == "submitted_unconfirmed", row
+    assert row["reason_code"] is None
+    st.close()
+
+
+@needs("jobscraper.store:Store.mark_submit_clicked")
+def test_mark_submit_clicked_refuses_an_attempt_that_is_no_longer_live():
+    """Review F4: the pre-click write is a compare-and-set. A reaped (failed) or not-yet-started
+    row must not get a click stamped on it: that would block the posting for good."""
+    st = _store()
+    cid = st.insert_company("x", "X", "https://x.example")
+    reaped = st.create_attempt(_job(st, cid, 1), cid, "auto", NOW)
+    _walk(st, reaped, _PATH_TO_SUBMIT[:-1])
+    st.set_attempt_state(reaped, S.FAILED, reason="cancelled")
+    queued = st.create_attempt(_job(st, cid, 2), cid, "auto", NOW)
+    st.commit()
+    for aid in (reaped, queued):
+        try:
+            st.mark_submit_clicked(aid, NOW)             # may raise or no-op; it must not stamp
+        except Exception:
+            pass
+        st.commit()
+        assert st.attempt(aid)["submit_clicked_at"] is None, st.attempt(aid)["state"]
     st.close()
 
 
