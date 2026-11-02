@@ -1,6 +1,6 @@
 # Handover note (rewrite every session; ≤ 40 lines; history goes to `docs/planning/session_log.md`)
 
-**Last session:** 2026-11-03, session 2 (continued). **Branch/commit:** `personal`, pushed (`git log -1`). Suite on personal 656/656 Python, web 220 + 34 skipped.
+**Last session:** 2026-11-03, session 2 (continued). **Branch/commit:** `personal`, pushed (`git log -1`). Suite on personal 752/752 Python, web 253 + 1 skipped.
 
 ## Where we are
 - M19 DONE. M20 (D-70: Workday first, Greenhouse with MyGreenhouse autofill) in build. D-77: the owner allowed real accounts + automatic submission at Kyndryl (DevOps Engineer) and PayPal (Software Engineer). D-78: the local LLM fills every form generically (resume first, "import from resume" always, adapters = navigation only).
@@ -11,6 +11,7 @@
 - Spike S-5b (`spike/Q-23b-llm-workday`): LLM-driven real Workday applications at the 2 D-77 employers; records to the session scratchpad `s5b/<tenant>/`; feeds Q-35.
 - `int/Q-36` (worktree `int-Q-36`, e465164 = personal + Q-36 lenient profile, D-79): owner's file `errors: 0` on the branch; 751/752 until tester Q-38 updates the strict oracle + adds `normalise` pins. Then merge into personal (fast-forward), push.
 - Q-39 engineer (`eng/Q-39-q30-fixes`, from int/Q-36): review F2/F6/F7. Merge after int/Q-36; rebuild the bundle (web change).
+
 ## Waiting on the owner
 - Nothing blocking. Application Gmail + app password verified (address only in Coordinator memory). MyGreenhouse signed in on the JobScraper Edge profile. `data/applicant.yaml` filled by the owner.
 
