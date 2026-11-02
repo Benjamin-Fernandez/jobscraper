@@ -18,6 +18,9 @@ The rules, in the order they matter:
   5. backends.py is the only module that talks to a model.
   6. Nothing imports pipeline.py. It is the top of the stack; an import of it
      from below is a cycle waiting to happen.
+  7. Foundation modules (applicant.py, vault.py, ...) import no stage, publisher
+     or orchestrator - except the contracts modules (apply.contracts,
+     tailor.contracts), the stdlib-only data shapes web/ may import too (D-73).
 
 Every module in the package is checked. v1's modules retired at M9-T1, so the
 only exemptions left in LEGACY are the CLI entry points.
@@ -224,14 +227,25 @@ def test_every_v2_module_is_classified():
         "an unclassified module is one no boundary rule protects.")
 
 
+def _foundation_crossings(imports: set[str]) -> set[str]:
+    """What a foundation module may not import: any stage, orchestrator or
+    publisher module - except the contracts modules (CONTRACTS), which are
+    stdlib-only data shapes (D-73; vault.py imports `Secret` and `PasswordRules`
+    from apply.contracts, apply_design section 10.1). Anything else inside the
+    apply/tailor packages (`apply.resolve`, `tailor.validator`) stays forbidden."""
+    return {n for n in imports
+            if n not in CONTRACTS and _top(n) in (STAGES | ORCHESTRATOR | PUBLISHER)}
+
+
 def test_foundation_modules_import_no_stage_or_orchestrator():
     """applicant.py and vault.py (M20) sit beside store.py at the bottom: they
-    may use each other and the rest of the foundation, never a stage."""
+    may use each other and the rest of the foundation, and exactly the contracts
+    modules (CONTRACTS, as web/ may), never a stage (D-73)."""
     offenders = []
     for owner, path in _all_v2_files():
         if owner not in FOUNDATION:
             continue
-        crossed = {_top(n) for n in _local_imports(path)} & (STAGES | ORCHESTRATOR | PUBLISHER)
+        crossed = _foundation_crossings(_local_imports(path))
         if crossed:
             offenders.append(f"{path.relative_to(SRC)} -> {sorted(crossed)}")
     assert not offenders, f"foundation must not reach upwards: {offenders}"
@@ -251,24 +265,59 @@ def test_apply_and_tailor_meet_only_through_their_flows():
     assert not offenders, offenders
 
 
-def test_the_layering_guard_catches_what_it_claims_to():
-    """Self-check on synthetic sources (the guard itself must not rot): the
-    import reader reports the stage packages' modules dotted, and only
-    apply_flow -> tailor_flow is an exempt orchestrator edge."""
+def _imports_of_source(text: str) -> set[str]:
+    """`_local_imports` on a synthetic source file (it resolves paths against SRC,
+    so SRC is pointed at a scratch directory for the call)."""
     import tempfile
     d = Path(tempfile.mkdtemp())
     f = d / "m.py"
-    f.write_text("from jobscraper.apply.contracts import A\n"
-                 "from jobscraper.tailor import contracts\n"
-                 "from jobscraper.apply import flowy\n"
-                 "from jobscraper.store import Store\n", encoding="utf-8")
+    f.write_text(text, encoding="utf-8")
     global SRC
-    real, SRC = SRC, d                  # _local_imports resolves paths against SRC
+    real, SRC = SRC, d
     try:
-        got = _local_imports(f)
+        return _local_imports(f)
     finally:
         SRC = real
+
+
+def test_the_layering_guard_catches_what_it_claims_to():
+    """Self-check on synthetic sources (the guard itself must not rot): the
+    import reader reports the stage packages' modules dotted, only
+    apply_flow -> tailor_flow is an exempt orchestrator edge, and the foundation
+    rule (D-73) lets a foundation module import exactly the contracts modules."""
+    got = _imports_of_source("from jobscraper.apply.contracts import A\n"
+                             "from jobscraper.tailor import contracts\n"
+                             "from jobscraper.apply import flowy\n"
+                             "from jobscraper.store import Store\n")
     assert {"apply.contracts", "tailor.contracts", "apply.flowy", "store"} <= got
     assert ("apply_flow", "tailor_flow") in ORCHESTRATOR_EDGES
     assert ("tailor_flow", "apply_flow") not in ORCHESTRATOR_EDGES
     assert ("pipeline", "tailor_flow") not in ORCHESTRATOR_EDGES
+
+    # Foundation, allowed: the contracts modules in every import spelling, and
+    # other foundation modules.
+    for src in ("from jobscraper.apply.contracts import Secret, PasswordRules\n",
+                "from .apply.contracts import Secret\n",
+                "from jobscraper.apply import contracts\n",
+                "from jobscraper.tailor.contracts import T\n",
+                "import jobscraper.apply.contracts\n",
+                "from jobscraper.store import Store\n"
+                "from jobscraper.vault import Vault\n"):
+        assert not _foundation_crossings(_imports_of_source(src)), src
+
+    # Foundation, forbidden: any other module of a stage package, a whole stage
+    # package, a plain stage, the publisher, an orchestrator - alone or beside
+    # an allowed contracts import (which must not mask it).
+    for src, bad in (
+            ("from jobscraper.apply.resolve import R\n", {"apply.resolve"}),
+            ("from jobscraper.apply import resolve\n", {"apply.resolve"}),
+            ("from jobscraper.apply import contracts, resolve\n", {"apply.resolve"}),
+            ("from jobscraper.apply.contracts import Secret\n"
+             "from jobscraper.apply.resolve import R\n", {"apply.resolve"}),
+            ("from jobscraper.tailor.validator import V\n", {"tailor.validator"}),
+            ("import jobscraper.apply.resolve\n", {"apply.resolve"}),
+            ("from . import apply\n", {"apply"}),
+            ("from jobscraper.filter import f\n", {"filter"}),
+            ("from jobscraper.shortlist import s\n", {"shortlist"}),
+            ("from jobscraper.apply_flow import a\n", {"apply_flow"})):
+        assert _foundation_crossings(_imports_of_source(src)) == bad, src
