@@ -12,6 +12,9 @@ the orchestrator all read the profile, so this file imports nothing above
 
 What it owns:
   - load / save / validate (§5.2 rules, every error names its dotted path)
+  - normalise (Q-36, D-78): the owner types "Male", "non-binary", `no` or "per
+    month"; `load` turns each into the canonical spelling once, so the resolver,
+    the tailor and the form API only ever see canonical values
   - missing_for_apply / completeness (F-11: auto-apply refuses an incomplete
     profile, and the Profile tab shows a meter)
   - llm_extract (the allow-list of non-sensitive facts a model may see, §5.3)
@@ -24,6 +27,7 @@ Sensitive ("S") paths (§5.3) never reach a prompt and never reach a log.
 from __future__ import annotations
 
 import calendar
+import copy
 import datetime as _dt
 import os
 import re
@@ -150,6 +154,19 @@ LIST_ENUMS: dict[str, tuple[str, ...]] = {
     "languages[].written": ("native", "fluent", "professional", "basic"),
 }
 
+# Q-36 (D-78): natural spellings that are not just a case/space/hyphen variant of
+# an allowed value. Keys are already lower-case with spaces and hyphens turned
+# into underscores ("per month" -> "per_month"); a "." is dropped too ("p.a.").
+_PERIOD_SYNONYMS: dict[str, str] = {
+    "month": "monthly", "per_month": "monthly", "monthly": "monthly", "mth": "monthly",
+    "year": "annual", "yearly": "annual", "annual": "annual",
+    "per_annum": "annual", "pa": "annual",
+}
+ENUM_SYNONYMS: dict[str, dict[str, str]] = {
+    "pay.expected_salary.period": _PERIOD_SYNONYMS,
+    "pay.current_salary.period": _PERIOD_SYNONYMS,
+}
+
 BOOLS: tuple[str, ...] = (
     "availability.willing_to_relocate",
     "pay.expected_salary.negotiable",
@@ -254,12 +271,71 @@ def _walk(value: Any, path: str = ""):
 
 
 # --------------------------------------------------------------------------
+# Normalisation (Q-36, D-78)
+# --------------------------------------------------------------------------
+
+def _canon_enum(v: Any, allowed: tuple[str, ...],
+                synonyms: Optional[dict[str, str]] = None) -> Any:
+    """The canonical spelling of an enum value, or `v` untouched when it still
+    does not map (validate then reports it).
+
+    Accepted on top of the exact spelling: any case and surrounding spaces
+    ("Male "), spaces or hyphens for underscores ("non-binary", "not applicable"),
+    the path's synonyms (pay periods), and a YAML boolean for a yes/no enum
+    (`disability_status: no` is read by YAML as False, not "no")."""
+    if isinstance(v, bool):
+        return ("yes" if v else "no") if {"yes", "no"} <= set(allowed) else v
+    if not isinstance(v, str):
+        return v
+    token = re.sub(r"[\s\-_]+", "_", v.strip().lower()).strip("_")
+    if token in allowed:
+        return token
+    if synonyms:
+        hit = synonyms.get(token) or synonyms.get(token.replace(".", ""))
+        if hit in allowed:
+            return hit
+    return v
+
+
+def _set_at(profile: dict, path: str, fn) -> None:
+    """Replace the value at a dotted `path` with `fn(value)`, in place, when
+    every step down to it is a mapping and the key is there."""
+    *parents, leaf = path.split(".")
+    cur: Any = profile
+    for part in parents:
+        cur = cur.get(part) if isinstance(cur, dict) else None
+    if isinstance(cur, dict) and leaf in cur:
+        cur[leaf] = fn(cur[leaf])
+
+
+def normalise(profile: Any) -> Any:
+    """A copy of `profile` with every enum field in its canonical spelling
+    (`_canon_enum`); the argument is not changed. A value that still does not
+    map is left as it is. Idempotent. `load`, `validate` and `save` all call it,
+    so a profile typed by hand, edited in the form or built in code reads the
+    same everywhere. Other fields (booleans, dates, numbers) are not touched."""
+    if not isinstance(profile, dict):
+        return profile
+    out = copy.deepcopy(profile)
+    for path, allowed in ENUMS.items():
+        _set_at(out, path,
+                lambda v, a=allowed, s=ENUM_SYNONYMS.get(path): _canon_enum(v, a, s))
+    for spec, allowed in LIST_ENUMS.items():
+        lst_name, key = spec.split("[].")
+        entries = out.get(lst_name)
+        for entry in entries if isinstance(entries, list) else []:
+            if isinstance(entry, dict) and key in entry:
+                entry[key] = _canon_enum(entry[key], allowed)
+    return out
+
+
+# --------------------------------------------------------------------------
 # Load / save
 # --------------------------------------------------------------------------
 
 def load(path: str | os.PathLike) -> dict:
-    """The profile at `path`; {} if the file does not exist. Raises
-    ApplicantError on YAML that cannot be read or is not a mapping."""
+    """The profile at `path`, normalised (`normalise`); {} if the file does not
+    exist. Raises ApplicantError on YAML that cannot be read or is not a mapping."""
     p = Path(path)
     if not p.exists():
         return {}
@@ -272,15 +348,17 @@ def load(path: str | os.PathLike) -> dict:
         return {}
     if not isinstance(data, dict):
         raise ApplicantError(f"{p.name} must be a mapping, got {type(data).__name__}")
-    return data
+    return normalise(data)
 
 
 def save(path: str | os.PathLike, profile: dict) -> None:
-    """Validate, then write atomically (tempfile in the same folder + os.replace).
+    """Normalise, validate, then write atomically (tempfile in the same folder
+    + os.replace). The file always holds the canonical spellings.
 
     Raises ApplicantError (with `.errors`) and writes nothing when the profile
     is invalid. YAML comments do not survive a save; the Profile form is the
     editor once there is one (§5.1)."""
+    profile = normalise(profile)
     errors = validate(profile)
     if errors:
         raise ApplicantError(f"{len(errors)} invalid field(s): "
@@ -307,7 +385,10 @@ def save(path: str | os.PathLike, profile: dict) -> None:
 def validate(profile: dict) -> list[FieldError]:
     """Every rule in apply_design §5.2. Empty values are not errors here (a
     required one shows up in `missing_for_apply`); a value that is present
-    must be well-formed. Messages name the rule and never repeat the value."""
+    must be well-formed. Messages name the rule and never repeat the value.
+
+    Enum values are checked after `normalise` (Q-36), so "Male" or `no` pass and
+    only a value that still maps to nothing is reported, with the allowed list."""
     errs: list[FieldError] = []
 
     def err(path: str, message: str) -> None:
@@ -315,6 +396,7 @@ def validate(profile: dict) -> list[FieldError]:
 
     if not isinstance(profile, dict):
         return [FieldError("", "the profile must be a mapping")]
+    profile = normalise(profile)
 
     version = profile.get("version")
     if version is not None and version != SCHEMA_VERSION:

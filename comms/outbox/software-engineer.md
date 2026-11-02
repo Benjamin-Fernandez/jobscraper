@@ -136,3 +136,12 @@ QUESTIONS / REQUESTS:
 - R1 (Coordinator): `.claude/scopes.json` does not include the spike scratch folder that the engineer role allows ("spikes: the scratch folder named in the delegation"), so the Write tool is blocked there. I ran the recorder from stdin (`python -`), so no script file was written by the shell. The recorder code is in this session's transcript; I can save it to the scratchpad once the scope allows it.
 KNOWN LIMITS: the empty-submit error markup is from the sign-in form, not a wizard step. Recordings are signed-out pages (no personal values), named `00-posting`, `01-entry`, `02-signin`, `03-create_account`, `04-signin_empty_error`, `05-direct_applyManually`, `06-userHome_signed_out`.
 STATUS: open
+
+### 2026-11-02 software-engineer → coordinator
+TYPE: handoff
+RE: Q-36 (D-78) · apply_design §5, questions_design §3
+BODY: Ready for review. Branch `eng/Q-36-lenient-profile`, one file: `src/jobscraper/applicant.py`. New `normalise(profile)` (deep copy, idempotent) canonicalises every ENUMS / LIST_ENUMS value: any case and surrounding spaces, spaces or hyphens as underscores, YAML booleans for yes/no enums (`no` -> "no", `true` -> "yes"), and `pay.*.period` synonyms (month, per month, monthly, mth -> monthly; year, yearly, annual, per annum, pa, p.a. -> annual). `load` returns the normalised profile; `validate` and `save` normalise first (so the form API and the CLI check see the same thing; `save` writes canonical spellings). A value that still does not map is left alone and reported as `path: must be one of: <allowed>` (never the value). Template spellings unchanged: `config/applicant.example.yaml` is a fixed point of `normalise` and validates clean.
+- Evidence: scratch check on synthetic YAML (all spellings above normalise, bad values error with the allowed list, input dict not mutated, idempotent); `python tests/run_tests.py` -> 656/656 passed. No existing test asserted strict case.
+- Not done (outside the WP): booleans typed as quoted strings ("yes") for BOOLS, "prefer not to say" -> decline, and a looser `singapore_status.ord_date` (accepts YYYY-MM only).
+- Owner file: `applicant check --file data/applicant.yaml` still reports `pay.expected_salary.period` (a string that maps to no period) and `singapore_status.ord_date` (string not in YYYY-MM form). Values not read or printed; the owner can fix both, or tell me which spelling to add.
+STATUS: open
