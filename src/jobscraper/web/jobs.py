@@ -55,7 +55,7 @@ logger = logging.getLogger(__name__)
 # (kind, options) -> argv. `kind` is "run" or "profile".
 CommandBuilder = Callable[[str, dict[str, Any]], list[str]]
 
-KINDS = ("run", "profile", "titles", "companies", "tailor")
+KINDS = ("run", "profile", "titles", "companies", "tailor", "apply")
 RECORD = "current.json"
 EXIT_CANCELLED = 143           # the CLI's cancel handler (128 + 15)
 KILLED_REASON = "cancelled (killed)"     # stats.reason of a run the web had to kill (D-64)
@@ -107,6 +107,12 @@ def cli_command(config_path: Optional[str | os.PathLike] = None) -> CommandBuild
             if not re.fullmatch(r"[A-Za-z0-9:_-]{1,80}", job_id):
                 raise ValueError("tailor needs a job_id of letters, digits, : _ -")
             argv += ["tailor", job_id]
+        elif kind == "apply":                  # apply_design 14.2 (M20 lane B)
+            ids = [str(j) for j in (opts.get("job_ids") or [])]
+            if not ids or len(ids) > 20 or not all(
+                    re.fullmatch(r"[A-Za-z0-9:_-]{1,80}", j) for j in ids):
+                raise ValueError("apply needs 1-20 job_ids of letters, digits, : _ -")
+            argv += ["apply", *ids] + (["--dry-run"] if opts.get("dry_run") else [])
         else:
             raise ValueError(f"unknown job kind {kind!r}")
         return argv

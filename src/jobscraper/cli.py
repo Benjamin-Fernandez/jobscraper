@@ -13,12 +13,15 @@
     python -m jobscraper sync        reconcile watchlist.yaml into the database
     python -m jobscraper purge       delete job descriptions past their time to live
     python -m jobscraper applicant   check the applicant profile for application forms
+    python -m jobscraper apply       auto-apply (dry run, show, open-profile)
 """
 from __future__ import annotations
 
 import argparse
+import json
 import logging
 import os
+import re
 import signal
 import sys
 from pathlib import Path
@@ -697,6 +700,136 @@ def cmd_applicant(args) -> int:
     return 0 if not errors and not missing else 1
 
 
+APPLY_ID_RE = re.compile(r"^[A-Za-z0-9:_-]{1,80}$")
+APPLY_MAX_IDS = 20
+
+
+def _effective_apply(cfg, store):
+    """`apply:` from config with Settings → Apply on top (apply_design §14.3)."""
+    return cfg.apply.with_settings(store.get_setting)
+
+
+def cmd_apply(args) -> int:
+    """M20 lane B (apply_design §14.1). `apply <job_id>... [--dry-run]` applies
+    to each job in order (dry run: everything is filled, nothing is sent);
+    `apply show <job_id|attempt_id>` prints the audit of one attempt;
+    `apply open-profile [URL]` opens Edge on the JobScraper profile for the
+    owner's own sign-ins. Exit 0 when every attempt ended submitted or
+    ready_to_submit, 1 otherwise, 2 on bad arguments."""
+    try:
+        sys.stdout.reconfigure(errors="replace")
+    except (AttributeError, ValueError):
+        pass
+    words = list(args.words)
+    if words[0] == "show":
+        return _apply_show(args, words[1:])
+    if words[0] == "open-profile":
+        return _apply_open_profile(args, words[1:])
+    bad = [w for w in words if not APPLY_ID_RE.match(w)]
+    if bad or len(words) > APPLY_MAX_IDS:
+        print(f"apply: give 1-{APPLY_MAX_IDS} job ids (letters, digits, : _ -)"
+              + (f"; not a job id: {bad[0][:80]}" if bad else ""), file=sys.stderr)
+        return 2
+    from . import apply_flow
+
+    cfg, store = _boot_v2(args)
+    try:
+        acfg = _effective_apply(cfg, store)
+        dry_run = bool(args.dry_run) or acfg.mode != "auto"
+        results = apply_flow.run(cfg, store, words, dry_run=dry_run,
+                                 backend=backends.build(cfg.budget), apply_cfg=acfg)
+        print(BAR)
+        print(f"{'job id':<28} {'attempt':>7}  {'state':<22} reason")
+        for r in results:
+            reason = f"{r.reason.value} {r.reason_detail}".strip() if r.reason else r.reason_detail
+            print(f"{r.job_id[:28]:<28} {r.attempt_id:>7}  {r.state.value:<22} {reason[:80]}")
+        print(BAR)
+        return 0 if results and all(r.ok for r in results) else 1
+    finally:
+        store.close()
+
+
+def _apply_show(args, rest: list[str]) -> int:
+    """The owner's audit of one attempt (D-68 A-3): header, one line per
+    answer (the exact value sent, sensitive ones included: this is the owner's
+    own terminal; files as name + SHA-256), then the evidence files. Nothing
+    goes to a job log."""
+    if len(rest) != 1:
+        print("apply show: give one job id or attempt id", file=sys.stderr)
+        return 2
+    from . import apply_flow
+
+    cfg, store = _boot_v2(args)
+    try:
+        key = rest[0]
+        if key.isdigit():
+            at = store.attempt(int(key))
+        else:
+            rows = store.attempts_for_job(key)
+            at = rows[-1] if rows else None
+        if at is None:
+            print(f"apply show: no attempt for {key}", file=sys.stderr)
+            return 1
+        job = store.job_for_apply(at["job_id"]) or {}
+        print(BAR)
+        print(f"attempt {at['id']}  job {at['job_id']}  "
+              f"{job.get('company') or '?'} - {job.get('title') or '?'}")
+        print(f"ats {at['ats'] or '-'}  mode {at['mode']}  state {at['state']}"
+              + (f"  reason {at['reason_code']}" if at["reason_code"] else "")
+              + (f": {at['reason_detail']}" if at["reason_detail"] else ""))
+        if at["resume_file"]:
+            print(f"resume {at['resume_file']} ({at['resume_source'] or '?'})")
+        print(f"queued {at['queued_at']}  started {at['started_at'] or '-'}  "
+              f"submit clicked {at['submit_clicked_at'] or '-'}  finished {at['finished_at'] or '-'}")
+        print(BAR)
+        for a in store.answers(at["id"]):
+            print(f"[{a['step'] or '-'}] {a['label']}{' *' if a['required'] else ''}")
+            src = a["source"] + (f" ({a['rule_id']})" if a["rule_id"] else "")
+            print(f"    = {_shown_answer(a['value_json'])}")
+            print(f"    tier {a['tier']}  conf {a['confidence']:.2f}  {src}  {a['status']}"
+                  + (f"  note: {a['note']}" if a["note"] else ""))
+        folder = apply_flow.evidence_root(cfg) / str(at["id"])
+        files = sorted(folder.glob("*.png")) + sorted(folder.glob("failed.html"))
+        print(BAR)
+        for f in files:
+            print(f"evidence {f}")
+        if not files:
+            print("evidence: none")
+        return 0
+    finally:
+        store.close()
+
+
+def _shown_answer(value_json) -> str:
+    if value_json is None:
+        return "(blank)"
+    try:
+        v = json.loads(value_json)
+    except ValueError:
+        return str(value_json)
+    if isinstance(v, dict) and "file" in v:
+        return f"file {v['file']} sha256 {v.get('sha256') or '?'}"
+    if isinstance(v, list):
+        return "; ".join(str(x) for x in v)
+    return str(v)
+
+
+def _apply_open_profile(args, rest: list[str]) -> int:
+    """`apply open-profile [URL]` (D-70): headed Edge on the JobScraper
+    profile, held until the owner closes it."""
+    if len(rest) > 1:
+        print("apply open-profile: at most one URL", file=sys.stderr)
+        return 2
+    from . import apply_flow
+
+    cfg, store = _boot_v2(args)
+    try:
+        acfg = _effective_apply(cfg, store)
+    finally:
+        store.close()
+    return apply_flow.open_profile(acfg, rest[0] if rest else "")
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="jobscraper",
                                 description="Weekly careers-site monitor")
@@ -795,6 +928,16 @@ def build_parser() -> argparse.ArgumentParser:
     tl_p.add_argument("--force", action="store_true",
                       help="tailor again even if a current file exists")
     tl_p.set_defaults(fn=cmd_tailor)
+
+    # --- apply (M20 lane B)
+    apl = sub.add_parser("apply", help="auto-apply to jobs (dry run: fill, never send); "
+                                       "`apply show ID`, `apply open-profile [URL]`")
+    apl.add_argument("words", nargs="+", metavar="JOB_ID",
+                     help="job ids (up to 20); or `show <job_id|attempt_id>`; "
+                          "or `open-profile [URL]`")
+    apl.add_argument("--dry-run", action="store_true",
+                     help="fill every form and stop before Submit (wins over apply.mode)")
+    apl.set_defaults(fn=cmd_apply)
     return p
 
 

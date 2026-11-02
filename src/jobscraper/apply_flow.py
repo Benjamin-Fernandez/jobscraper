@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import dataclasses
 import hashlib
+import os
 import re
 import time
 from datetime import datetime, timedelta, timezone
@@ -650,6 +651,50 @@ class _Run:
         finally:
             self.close()
         return results
+
+
+OPEN_PROFILE_URL = "https://my.greenhouse.io/"
+OPEN_PROFILE_HOLD_S = 3600
+OPEN_PROFILE_TEXT = ("Edge is open on the JobScraper profile. Sign in where you need to "
+                     "(MyGreenhouse, a Workday site), then close the window.")
+PROFILE_LOCKED_TEXT = "An apply run is using the profile; try again when it ends."
+
+
+def _names_profile_dir(exc: BaseException, profile_dir: str) -> bool:
+    """Does a launch error say the user-data directory is in use?"""
+    msg = str(exc).lower()
+    return (os.path.normcase(profile_dir).lower() in os.path.normcase(msg)
+            or profile_dir.lower() in msg or "user data dir" in msg
+            or "user-data-dir" in msg or "processsingleton" in msg)
+
+
+def open_profile(acfg: ApplyConfig, url: str = "", *, say: Callable[[str], None] = print,
+                 browser_factory: Optional[Callable[[ApplyConfig], Any]] = None) -> int:
+    """`apply open-profile [URL]` (§14.1, D-70): a headed Edge on the
+    JobScraper profile for the owner's own sign-ins (MyGreenhouse, Workday).
+    Nothing is filled and nothing is logged beyond the one line. Returns the
+    exit code: 0, or 1 when the profile is locked by a running apply job."""
+    acfg = dataclasses.replace(acfg, headed=True)
+    factory = browser_factory or default_browser_factory
+    try:
+        session = factory(acfg)
+    except Exception as exc:                              # noqa: BLE001 - one message, exit 1
+        if _names_profile_dir(exc, os.path.expandvars(acfg.profile_dir)):
+            say(PROFILE_LOCKED_TEXT)
+        else:
+            say(f"Edge could not start: {type(exc).__name__}")
+        return 1
+    try:
+        page = session.new_page()
+        try:
+            page.goto(url or OPEN_PROFILE_URL, wait_until="domcontentloaded")
+        except Exception:                                 # noqa: BLE001 - the window is open anyway
+            pass
+        say(OPEN_PROFILE_TEXT)
+        session.hold(OPEN_PROFILE_HOLD_S)
+    finally:
+        session.close()
+    return 0
 
 
 def run(cfg: Config, store: Store, job_ids: list[str], *, dry_run: bool, backend: Any,
