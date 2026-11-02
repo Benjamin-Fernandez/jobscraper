@@ -279,6 +279,83 @@ export function retryQuestions(jobIds) {
   return sendJson('questions/retry', 'POST', { job_ids: jobIds })
 }
 
+// ---- Q-60 (F-50): application status from email ----
+// The shapes are fixed in docs/architecture/mail_status_design.md section 11.1.
+// An app password goes out in one request body and nowhere else: these helpers
+// take it as an argument and keep no copy (MS section 13).
+
+// {enabled, interval_min, consent: {version, text},
+//  application_mailbox: {address, ready, connected} | null,
+//  accounts: [{id, address, enabled, shared_with_apply, state, code, message,
+//    notes: [{code, message}], last_sync_at, last_ok_at, first_sync_from, counts}],
+//  sync: {running, started_at, next_at, last: {state, code, finished_at}}, open_suggestions}
+export function getMail() {
+  return request('mail')
+}
+
+// 200 {ok, account_id} | 400 {code, detail} | 409 {code: 'exists', detail}.
+export function connectMailbox({ address, appPassword, consentVersion }) {
+  return sendJson('mail/accounts', 'POST',
+    { address, app_password: appPassword, consent_version: consentVersion })
+}
+
+// The application mailbox (F-50b): no password, its vault entry is reused.
+export function connectApplicationMailbox(consentVersion) {
+  return sendJson('mail/accounts/application', 'POST', { consent_version: consentVersion })
+}
+
+export function setMailboxPassword(id, appPassword) {
+  return sendJson(`mail/accounts/${encodeURIComponent(id)}/password`, 'PUT', { app_password: appPassword })
+}
+
+// The switch: {enabled} -> the account view.
+export function setMailboxEnabled(id, enabled) {
+  return sendJson(`mail/accounts/${encodeURIComponent(id)}`, 'PATCH', { enabled })
+}
+
+// {ok, vault_kept}
+export function disconnectMailbox(id) {
+  return request(`mail/accounts/${encodeURIComponent(id)}`, { method: 'DELETE' })
+}
+
+// 202 {started: true} | 409 {code: 'busy', detail} | 400 {code: 'no_mailbox'}.
+export function startMailSync() {
+  return sendJson('mail/sync', 'POST')
+}
+
+// {suggestions: [{id, job_id, company, role, status, to_status, category, reason,
+//  reason_text, quote, subject, sender_domain, received_at,
+//  candidates: [{job_id, company, role, status}], gmail_url}]}
+export function getMailSuggestions() {
+  return request('mail/suggestions')
+}
+
+// {ok, status} | 409 {code, detail}. `jobId` only for an ambiguous suggestion.
+export function acceptMailSuggestion(id, jobId) {
+  return sendJson(`mail/suggestions/${encodeURIComponent(id)}/accept`, 'POST',
+    jobId ? { job_id: jobId } : {})
+}
+
+export function dismissMailSuggestion(id) {
+  return sendJson(`mail/suggestions/${encodeURIComponent(id)}/dismiss`, 'POST')
+}
+
+// {ok, status} | 409 {code: 'not_latest', detail}.
+export function undoMailChange(evidenceId) {
+  return sendJson(`mail/evidence/${encodeURIComponent(evidenceId)}/undo`, 'POST')
+}
+
+// A failed mail call as {status, code, detail}. The routes answer {code, detail}
+// at the top level; FastAPI's HTTPException nests it under `detail`. Either way.
+export function mailProblem(e) {
+  if (!(e instanceof ApiError)) return { status: 0, code: '', detail: describeError(e) }
+  const nested = e.detail && typeof e.detail === 'object' && !Array.isArray(e.detail) ? e.detail : null
+  const code = String(e.body?.code ?? nested?.code ?? '')
+  const raw = nested ? nested.detail : e.detail
+  const detail = typeof raw === 'string' ? raw : ''
+  return { status: e.status, code, detail }
+}
+
 // What a failed applicant/questions call means, in one shape: the HTTP status,
 // a short `code` ('changed', 'unreadable', 'invalid', 'busy', 'not_ready', ...),
 // and the per-field `errors` and `job_ids` the body may carry. The detail may
