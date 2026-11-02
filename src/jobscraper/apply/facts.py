@@ -503,12 +503,18 @@ def _phrases_in(phrases: Iterable[str], toks: Sequence[str]) -> set[str]:
 
 
 def about_other_person(field: FieldLike) -> bool:
-    """D-84 R4: the question (label, help, section or entry heading) is about someone
-    other than the applicant (an emergency contact, a referee, next of kin, ...)."""
+    """D-84 R4: the question is about someone other than the applicant (an emergency
+    contact, a referee, next of kin, ...). Read from the label, the entry heading and
+    the section; help text and context only for a generic label ("Please specify"), so
+    "Email" with help "the hiring manager will contact you here" stays the applicant's
+    own question (review F5)."""
     f = _ff(field)
-    extra = (field.group_title + " " + field.context) if isinstance(field, PageField) else ""
-    toks = tokens(" ".join((f.label, f.description, f.section, extra)))
-    return bool(_phrases_in(OTHER_PERSON, toks))
+    parts = [f.label, f.section]
+    if isinstance(field, PageField):
+        parts.append(field.group_title)
+    if is_generic(norm_label(f.label)):
+        parts += [f.description, field.context if isinstance(field, PageField) else ""]
+    return bool(_phrases_in(OTHER_PERSON, tokens(" ".join(p for p in parts if p))))
 
 
 OWN_DETAIL_PATHS = ("identity.legal_first_name", "identity.legal_last_name",
