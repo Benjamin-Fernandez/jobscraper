@@ -184,8 +184,12 @@ def test_g7_d88_military_and_national_service_labels_are_sensitive():
                      second=lambda pf: P._md("m", "resume", "Yes", evidence="Python, SQL, PostgreSQL, Git"))
     a = d.answers["m"]
     assert a.status is AS.UNKNOWN and a.note.startswith("G7") and a.sensitive, (a.status, a.note)
+    # Coordinator ruling: an exact/leaf match is the program's (deterministic_pick, no call: S locks
+    # need it); a wanted value that needs the model is refused on a sensitive label, no call either
     fb = FakeFillBackend(replies=[{"kind": "pick", "repeat": True, "raw": {"choice": "Yes"}}])
-    assert L.pick_option(fb, q, "Yes", ["Yes", "No"], s_values=T.secrets()) is None and fb.calls == []
+    assert L.pick_option(fb, q, "Yes", ["Yes", "No"], s_values=T.secrets()) == "Yes" and fb.calls == []
+    assert L.pick_option(fb, q, "served two years", ["Yes", "No"], s_values=T.secrets()) is None
+    assert fb.calls == [], "G7: the model is never asked"
 
 
 HOW_HEARD_OPTS = ("Corporate Website", "LinkedIn", "Referral", "Other")

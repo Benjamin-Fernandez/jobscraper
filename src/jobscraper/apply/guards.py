@@ -67,6 +67,7 @@ SENSITIVE_LABEL: tuple[str, ...] = (
     "identity number", "passport", "disability", "disabled", "veteran", "marital", "pronoun",
     "pronouns", "citizen", "citizenship", "permanent resident", "pr", "resident status",
     "residency status", "residence status", "nationality", "national service", "ns", "ord",
+    "military", "armed forces",                      # D-88: NS-inclusive questions
 )
 CONTACT_WORDS: tuple[str, ...] = (
     "address", "street", "unit", "postal", "zip", "postcode", "phone", "mobile", "email",
@@ -452,6 +453,8 @@ def _second_agrees(c: _Ctx, pf: PageField, value: Any) -> Optional[bool]:
     if d2 is None or d2.source is FillSource.UNKNOWN:
         return False
     v2 = _decision_value(c, pf, d2)
+    if v2 is not None and skill_list(pf) and d2.source in (FillSource.RESUME, FillSource.JOB):
+        v2 = ground_items(c.rctx, v2 if isinstance(v2, list) else [v2], d2.evidence)
     return v2 is not None and same_value(v2, value, pf)
 
 
@@ -503,6 +506,18 @@ def _label_match_extra(ref: str, pf: PageField, rctx: ResolveContext) -> bool:
         for x in labels)
 
 
+def _restates_fact(pf: PageField, mv: Any, fact: Fact) -> bool:
+    """G2(d) restated fact (Q-48, LF §8 G2d): on a choice field that is not Yes/No, a model
+    value that is not an offered option but equals (normalised) the cited non-private
+    fact's own value means "map this fact"; the caller writes the program's fit (D-86 F7).
+    Private facts never qualify (G7 and the locks cover them)."""
+    if fact.private or not fact.value or not is_choice(pf) or yes_no(pf) \
+            or not _text_of(mv).strip():
+        return False
+    offered = option_for(pf, mv) is not None and pf.options_complete
+    return not offered and same_value(mv, fact.value, pf)
+
+
 def _fact_field(c: _Ctx, pf: PageField, d: ModelDecision) -> Answer:
     """G2 (+G7, G5) for a decision that cites a fact."""
     ref = d.ref or ""
@@ -521,6 +536,9 @@ def _fact_field(c: _Ctx, pf: PageField, d: ModelDecision) -> Answer:
     fit = F.fact_value(ref, pf, c.rctx, c.rules, today=c.today)
     choice = is_choice(pf)
     mv = d.value
+    if fit is not None and choice and pf.options_complete and pf.field.options \
+            and option_for(pf, fit[0]) in (None, "", []):
+        fit = None                       # G2(e): the program's value is no offered option
     if fit is not None:
         pv, _labels = fit
         if choice and (fact.kind in ("bool", "enum", "yes_no", "choice", "multi")):
@@ -530,7 +548,8 @@ def _fact_field(c: _Ctx, pf: PageField, d: ModelDecision) -> Answer:
                 if fact.private:
                     return _answer_unknown(pf, "G2d: private fact without a matching rule",
                                            sensitive=True)
-                if not _text_of(mv).strip() or not same_value(option_for(pf, mv) or mv, pv, pf):
+                if (not _text_of(mv).strip() or not same_value(option_for(pf, mv) or mv, pv, pf)) \
+                        and not _restates_fact(pf, mv, fact):
                     return _answer_unknown(pf, "G2d: model and fact disagree")
                 if yes_no(pf):                                  # D-84 R2
                     agree = _second_agrees(c, pf, pv)
@@ -538,7 +557,9 @@ def _fact_field(c: _Ctx, pf: PageField, d: ModelDecision) -> Answer:
                         return _answer_unknown(pf, "G5: second opinion off")
                     if not agree:
                         return _answer_unknown(pf, "G5: second opinion disagrees")
-        elif _text_of(mv).strip() and not same_value(mv, pv, pf):
+        elif _text_of(mv).strip() and not same_value(option_for(pf, mv) or mv, pv, pf) \
+                and not _restates_fact(pf, mv, fact):
+            # an option named by its leaf ("Category > Leaf") is the same option
             return _answer_unknown(pf, "G2d: model value differs from the fact",
                                    sensitive=fact.private)
         return _model_row(c, pf, pv, _source_of(ref), conf=CONF_FACT, sensitive=fact.private)
@@ -607,6 +628,41 @@ def _own_detail_for_other(c: _Ctx, pf: PageField, value: Any) -> bool:
     return F.about_other_person(pf) and F.names_own_detail(_text_of(value), c.rctx, c.own)
 
 
+SKILL_WORDS = ("skill", "skills")
+
+
+def skill_list(pf: PageField) -> bool:
+    """Q-46(b): a multi-select of skills (or any search-driven multi-select), whose items
+    are grounded one by one (`ground_items`), not by the quote as a whole."""
+    return pf.field.type is FieldType.MULTI_CHOICE and (
+        not pf.options_complete or bool(set(tokens(pf.field.label)) & set(SKILL_WORDS)))
+
+
+def ground_items(rctx: ResolveContext, items: Sequence[Any], evidence: str) -> list[Any]:
+    """Q-46(b): the listed items that stand on their own, in order. An item is kept when
+    it (or a member of its alias group) is a profile skill or attested skill, or occurs
+    as whole words in the quote; an item whose words contain a kept item's words ("HTML
+    Design" after "HTML") is a duplicate and dropped."""
+    p = rctx.profile or {}
+    known = {norm_label(t) for t in list(p.get("skills") or []) + list(p.get("attested_skills") or [])
+             if isinstance(t, str) and t.strip()}
+    ev = tokens(evidence or "")
+    kept: list[Any] = []
+    kept_toks: list[set[str]] = []
+    for item in items:
+        name = norm_label(str(item).split(" > ")[-1])
+        if not name:
+            continue
+        names = next(({norm_label(t) for t in g} for g in rctx.alias_groups
+                      if any(norm_label(t) == name for t in g)), {name})
+        ok = bool(names & known) or any(n and contains_run(ev, n.split()) for n in names)
+        toks = set(name.split())
+        if ok and not any(k <= toks for k in kept_toks):
+            kept.append(item)
+            kept_toks.append(toks)
+    return kept
+
+
 def _model_field(c: _Ctx, pf: PageField, d: ModelDecision) -> Answer:
     """resume / job: the model's own value, used only after G1, G3/G6, G4, G5, G7, G11."""
     value = d.value
@@ -623,6 +679,12 @@ def _model_field(c: _Ctx, pf: PageField, d: ModelDecision) -> Answer:
         if opt in (None, "", []):
             return _answer_unknown(pf, "G1: not an offered option")
         value = opt
+        if skill_list(pf):                           # Q-46(b): drop, don't reject the field
+            value = ground_items(c.rctx, value if isinstance(value, list) else [value],
+                                 d.evidence)
+            if not value:
+                return _answer_unknown(pf, "G3: no listed item grounded", ungrounded=True,
+                                       evidence=d.evidence)
     why = _grounded(c, pf, value, d)
     if why:
         return _answer_unknown(pf, why, ungrounded=True, evidence=d.evidence)
