@@ -290,6 +290,19 @@ def test_a_bad_option_label_is_422_and_nothing_is_saved():
 
 
 @needs(*GATE)
+def test_q39_f7_an_answer_keeps_the_replaced_profile_as_prev_and_a_refused_one_does_not():
+    with _world() as (c, path, ids, _f, _cfg):
+        before = path.read_bytes()
+        r = _answer(c, path, key="visa_status", picks={str(ids["visa_a"]): ["Not an option"]})
+        assert r.status_code == 422, r.text
+        assert not (path.parent / "applicant.prev.yaml").exists(), "a refused answer writes nothing"
+        r = _answer(c, path, key="has_driving_licence", value=True)
+        assert r.status_code == 200, r.text
+        assert path.read_bytes() != before
+        assert (path.parent / "applicant.prev.yaml").read_bytes() == before, "prev is the file the answer replaced"
+
+
+@needs(*GATE)
 def test_a_stale_etag_is_409_and_an_unknown_key_is_404_and_a_broken_file_is_409_unreadable():
     with _world() as (c, path, ids, _f, _cfg):
         stale = _etag(path)
