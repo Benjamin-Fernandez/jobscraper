@@ -36,8 +36,8 @@ import yaml
 from .. import applicant
 from ..backends import BackendError
 from .contracts import (
-    CHOICE_TYPES, Answer, AnswerStatus, AnswerTier, Canonical, FieldType, FormField,
-    Option, ResolveContext,
+    CHOICE_TYPES, EMPLOYER_SPECIFIC_DECLARATIONS, Answer, AnswerStatus, AnswerTier, Canonical,
+    FieldType, FormField, Option, ResolveContext,
 )
 from . import declarations
 from .plan import contains_run, norm_label, phrase_match_tokens, tokens
@@ -697,11 +697,17 @@ def _answer(f: FormField, fit: Fit, tier: AnswerTier, source: str, conf: float, 
 
 
 def _final(f: FormField, *, note: str = "", sensitive: bool = False,
-           status: Optional[AnswerStatus] = None) -> Answer:
-    """The post-tier rule: required -> unknown, optional -> blank_optional."""
+           status: Optional[AnswerStatus] = None, rule_id: str = "") -> Answer:
+    """The post-tier rule: required -> unknown, optional -> blank_optional.
+    `rule_id` = the one tier-2 key that matched, if any (question capture reads
+    it to tell a profile gap from a missing rule, questions_design §4.2)."""
     st = status or (AnswerStatus.UNKNOWN if f.required else AnswerStatus.BLANK_OPTIONAL)
     return Answer(field_key=f.key, value=None, tier=AnswerTier.NONE, source="",
-                  confidence=0.0, status=st, sensitive=sensitive, note=note)
+                  confidence=0.0, status=st, sensitive=sensitive, note=note, rule_id=rule_id)
+
+
+def _join(*notes: str) -> str:
+    return "; ".join(n for n in notes if n)
 
 
 def _today_iso() -> str:
@@ -825,6 +831,7 @@ class _Tier2:
     stop: Optional[_Stop] = None
     sensitive: bool = False              # a sensitive key matched: never tier 5
     note: str = ""
+    key: str = ""                        # the one rule selected (not set on a tie)
 
 
 def _tier2(f: FormField, label_norm: str, ctx: ResolveContext,
@@ -835,7 +842,12 @@ def _tier2(f: FormField, label_norm: str, ctx: ResolveContext,
     if len(best) > 1:
         return _Tier2(sensitive=any(r.sensitive for r in best),
                       note="ambiguous: " + ", ".join(r.key for r in best))
-    r = best[0]
+    t2 = _tier2_one(f, label_norm, ctx, best[0])
+    t2.key = best[0].key
+    return t2
+
+
+def _tier2_one(f: FormField, label_norm: str, ctx: ResolveContext, r: Rule) -> _Tier2:
     if r.kind == "country_bool":
         return _tier2_country_bool(f, label_norm, ctx, r)
     if r.is_virtual:
@@ -910,7 +922,94 @@ def _tier2_country_bool(f: FormField, label_norm: str, ctx: ResolveContext,
 # ---------------------------------------------------------------- tier 3
 
 def _tier3(f: FormField, label_norm: str, ctx: ResolveContext,
-           memory: Optional[MemoryLookup]) -> Optional[Answer]:
+           memory: Optional[MemoryLookup]) -> tuple[Optional[Answer], str]:
+    """The owner's own answers: `extra` in the profile first (questions_design
+    §6.2, ADR-0005), then the answer_memory callable. Returns (Answer or None,
+    a note for the final unknown when an `extra` entry was ambiguous or invalid)."""
+    a, note = _extra_answer(f, label_norm, ctx)
+    if a is not None:
+        return a, ""
+    return _memory_answer(f, label_norm, ctx, memory), note
+
+
+def _extra_fit(f: FormField, kind: str, ans: dict) -> Optional[Fit]:
+    """§6.2 step 4: the saved answer onto this field, by kind. A kind that does
+    not suit the field's type gives no answer."""
+    value = ans.get("value")
+    picks = {norm_label(x) for x in ans.get("picks") or []}     # stored normalised;
+    seen = {norm_label(x) for x in ans.get("seen") or []}       # a hand edit may not be
+    if kind == "yes_no":
+        return fit_bool(f, value)
+    if kind == "choice":
+        if f.type not in SINGLE_CHOICE:
+            return None
+        hits = [o for o in f.options if norm_label(o.label) in picks]
+        return _choose(f, hits) if len(hits) == 1 else None
+    if kind == "multi":
+        if f.type is not FieldType.MULTI_CHOICE or not f.options:
+            return None
+        norms = [(o, norm_label(o.label)) for o in f.options]
+        if any(n not in seen for _o, n in norms):      # an option the owner never decided on
+            return None
+        hits = [o for o, n in norms if n in picks]
+        return _choose(f, hits) if hits else None
+    if kind == "text":
+        return fit_text(f, value)
+    if kind == "date":
+        return fit_date(f, value)
+    if kind == "number":
+        return fit_number(f, value)
+    return None
+
+
+def _extra_answer(f: FormField, label_norm: str,
+                  ctx: ResolveContext) -> tuple[Optional[Answer], str]:
+    """Tier 3 from `extra:` (questions_design §6.2). Matches on the exact
+    normalised label; never answers an employer-specific declaration (tier 4
+    owns those, ADR-0005)."""
+    extra = (ctx.profile or {}).get("extra")
+    if not label_norm or not isinstance(extra, dict) or not extra:
+        return None, ""
+    if declarations.classify(label_norm, norm_label(f.description)) \
+            in EMPLOYER_SPECIFIC_DECLARATIONS:
+        return None, ""
+    matches, invalid = [], []
+    for key, entry in extra.items():
+        labels = entry.get("labels") if isinstance(entry, dict) else None
+        if not isinstance(labels, list) or not any(
+                isinstance(x, str) and norm_label(x) == label_norm for x in labels):
+            continue
+        if applicant.extra_entry_errors(key, entry):
+            invalid.append(str(key))
+        else:
+            matches.append((str(key), entry))
+    notes = [f"memory entry invalid: {k}" for k in invalid]
+    if len(matches) != 1:
+        if len(matches) > 1:
+            notes.append("memory ambiguous: " + ", ".join(k for k, _e in matches))
+        return None, "; ".join(notes)
+    key, entry = matches[0]
+    ans, scope = entry, ""
+    by_emp = entry.get("by_employer") or {}
+    if by_emp:
+        overrides = {declarations.employer_norm(str(k)): v for k, v in by_emp.items()}
+        for name in (ctx.employer_name, *ctx.employer_aliases):
+            e = declarations.employer_norm(name or "")
+            if e and e in overrides:
+                ans, scope = overrides[e], e
+                break
+    fit = _extra_fit(f, str(entry.get("kind")), ans)
+    if fit is None:
+        return None, "; ".join(notes)
+    rule_id = f"extra.{key}" + (f"@{scope}" if scope else "")
+    return _answer(f, fit, AnswerTier.MEMORY, f"memory:extra.{key}", CONF_MEMORY,
+                   rule_id=rule_id, sensitive=entry.get("sensitive") is True), ""
+
+
+def _memory_answer(f: FormField, label_norm: str, ctx: ResolveContext,
+                   memory: Optional[MemoryLookup]) -> Optional[Answer]:
+    """The answer_memory table through the injected callable (§7.4; frozen by
+    ADR-0005: nothing writes it, kept so lane B is undisturbed)."""
     if memory is None or not label_norm:
         return None
     raw = None
@@ -1328,19 +1427,24 @@ def resolve_field(f: FormField, ctx: ResolveContext, *, backend: Any, rules: Que
             if not f.required:
                 return _final(f, note="cover letter is optional")
             return _tier5(f, ctx, backend) or _final(f, note="no cover letter")
-        return _tier3(f, label_norm, ctx, memory) or _final(
-            f, note=t1.note if isinstance(t1, _Stop) else "",
+        t3, mnote = _tier3(f, label_norm, ctx, memory)
+        return t3 or _final(
+            f, note=_join(t1.note if isinstance(t1, _Stop) else "", mnote),
             sensitive=isinstance(t1, _Stop) and t1.sensitive)
 
     t2 = _tier2(f, label_norm, ctx, rules)
     if t2.answer:
         return t2.answer
-    if t2.stop:                       # a sensitive no-fit, or D-75 countries that disagree
-        return _final(f, note=t2.stop.note, sensitive=t2.stop.sensitive)
 
-    t3 = _tier3(f, label_norm, ctx, memory)
+    # Tier 3 before a tier-2 stop (questions_design §6.2): the owner's own
+    # explicit answer is a fact they gave, so it may settle a sensitive no-fit
+    # or a D-75 conflict. Fail-closed still holds: a stop never reaches tier 5.
+    t3, mnote = _tier3(f, label_norm, ctx, memory)
     if t3:
         return t3
+    if t2.stop:                       # a sensitive no-fit, or D-75 countries that disagree
+        return _final(f, note=_join(t2.stop.note, mnote), sensitive=t2.stop.sensitive,
+                      rule_id=t2.key)
 
     t4, attestation = _tier4(f, label_norm, ctx)
     if t4 is not None:
@@ -1349,10 +1453,13 @@ def resolve_field(f: FormField, ctx: ResolveContext, *, backend: Any, rules: Que
     if not t2.sensitive and not attestation:
         t5 = _tier5(f, ctx, backend)
         if t5 is not None:
-            if t2.note and not t5.fills:          # keep why tier 2 passed it on
-                t5.note = f"{t2.note}; {t5.note}" if t5.note else t2.note
+            passed_on = _join(t2.note, mnote)
+            if passed_on and not t5.fills:        # keep why tiers 2-3 passed it on
+                t5.note = _join(passed_on, t5.note)
+            if t5.status is AnswerStatus.UNKNOWN and not t5.rule_id:
+                t5.rule_id = t2.key
             return t5
-    return _final(f, note=t2.note)
+    return _final(f, note=_join(t2.note, mnote), rule_id=t2.key)
 
 
 def resolve_all(fields: Sequence[FormField], ctx: ResolveContext, *, backend: Any,

@@ -714,6 +714,13 @@ class FormItem:
     options: tuple[tuple[str, str], ...] = ()    # (value, label) for enum / fixed
     help: str = ""
     sub: tuple["FormItem", ...] = ()
+    # Rendering hints (lane U): a salary that may be null ("I don't have one";
+    # None = not required), a multi-line text box, one entry's name ("Add School"),
+    # the sentence a fixed answer shows.
+    nullable: Optional[bool] = None
+    multiline: bool = False
+    entry_label: str = ""
+    fixed_text: str = ""
 
 
 @dataclass(frozen=True)
@@ -820,10 +827,10 @@ FORM: tuple[FormGroup, ...] = (
     FormGroup("pay", "Pay", (
         _I("pay.expected_salary", "Expected salary", "salary",
            _enum_opts("pay.expected_salary.period",
-                      {"monthly": "per month", "annual": "per year"})),
+                      {"monthly": "per month", "annual": "per year"}), nullable=False),
         _I("pay.current_salary", "Current salary", "salary",
            _enum_opts("pay.current_salary.period",
-                      {"monthly": "per month", "annual": "per year"})),
+                      {"monthly": "per month", "annual": "per year"}), nullable=True),
         _I("pay.months_per_year", "Months of pay per year", "int",
            help="13 if you count the AWS bonus."),
     )),
@@ -840,7 +847,7 @@ FORM: tuple[FormGroup, ...] = (
                 {"gpa": "GPA", "cap": "CAP", "honours_class": "Honours class"})),
             _I("grade", "Grade", "text"),
             _I("grade_scale", "Out of", "text"),
-        )),
+        ), entry_label="School"),
     )),
     FormGroup("experience", "Experience", (
         _I("experience", "Experience", "entries", sub=(
@@ -849,8 +856,8 @@ FORM: tuple[FormGroup, ...] = (
             _I("start", "Start", "month"),
             _I("end", "End", "month", help="Leave it empty if you still work here."),
             _I("location", "Location", "text"),
-            _I("description", "What you did", "text"),
-        )),
+            _I("description", "What you did", "text", multiline=True),
+        ), entry_label="Job"),
     )),
     FormGroup("skills_languages", "Skills and languages", (
         _I("skills", "Skills", "list_text"),
@@ -860,7 +867,7 @@ FORM: tuple[FormGroup, ...] = (
             _I("language", "Language", "text"),
             _I("spoken", "Spoken", "enum", _enum_opts("languages[].spoken", _LEVELS)),
             _I("written", "Written", "enum", _enum_opts("languages[].written", _LEVELS)),
-        )),
+        ), entry_label="Language"),
     )),
     FormGroup("links", "Links", (
         _I("links.linkedin", "LinkedIn", "url"),
@@ -904,7 +911,8 @@ FORM: tuple[FormGroup, ...] = (
         _I("declarations.non_compete",
            "Are you bound by a non-compete or similar agreement?", "bool"),
         _I("declarations.health_disclosure", "Health questions", "fixed",
-           (("decline", "Always “Prefer not to say”"),)),
+           (("decline", "Always “Prefer not to say”"),),
+           fixed_text="Always “Prefer not to say”"),
     ), note="Your standing answers. Change any that stop being true."),
     # Rendered from the profile, not from items: one row per `extra` entry (§3.2
     # group 15), then every leaf no item above covers, read-only (group 16).
@@ -931,6 +939,8 @@ def _item_json(item: FormItem, parent: str = "") -> dict:
         "recommended": not parent and _under(item.path, RECOMMENDED_PATHS),
         "sensitive": is_sensitive(full),
         "sub": [_item_json(s, item.path) for s in item.sub],
+        "nullable": item.nullable, "multiline": item.multiline,
+        "entry_label": item.entry_label, "fixed_text": item.fixed_text,
     }
 
 
