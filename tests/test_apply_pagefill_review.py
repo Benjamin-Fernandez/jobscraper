@@ -86,7 +86,7 @@ def _run(pg, step, reply_file, services_cls=None, **kw):
 
 OPTIONAL_REPLY = [
     _all("page", {"|Primary programming language": _d("resume", "", "Python", RES),
-                  "|Strongest skill": _d("resume", "", "Python", RES)}),
+                  "|Strongest skill": _d("resume", "", "Python", "Python, SQL")}),
     _all("corrective", {"|Primary programming language": _d("resume", "", "Python", RES),
                         "|Strongest skill": _d("resume", "", "Python", RES)}),
     {"kind": "pick", "repeat": True, "raw": {"choice": "Python (Programming Language)"}},
@@ -173,13 +173,24 @@ def test_f3_the_deadline_between_rechecks_stops_the_next_recheck():
 
 
 ENTRY_REPLY = [
-    _all("entry", {"Languages 1|Language": _d("profile", "profile:languages[0].language", "English"),
-                   "Languages 1|I am fluent in this language.": _d("profile", "profile:languages[0].spoken", "true"),
-                   "Languages 1|Overall": _d("profile", "profile:languages[0].spoken", "Native"),
-                   "Languages 2|Language": _d("profile", "profile:languages[1].language", "Mandarin"),
-                   "Languages 2|I am fluent in this language.": _d("unknown"),
-                   "Languages 2|Overall": _d("profile", "profile:languages[1].spoken", "")}),
-    _all("corrective", {"Languages 2|Overall": _d("profile", "profile:languages[1].spoken", "")}),
+    _all("entry", {
+    "Work Experience 1|Job Title": _d("profile", "profile:experience[0].title"),
+    "Work Experience 1|Company": _d("profile", "profile:experience[0].employer"),
+    "Work Experience 1|Location": _d("profile", "profile:experience[0].location"),
+    "Work Experience 1|I currently work here": _d("profile", "profile:experience[0].end", "false"),
+    "Work Experience 1|From": _d("profile", "profile:experience[0].start"),
+    "Work Experience 1|To": _d("profile", "profile:experience[0].end"),
+    "Work Experience 1|Role Description": _d("unknown"),
+    "Work Experience 2|Job Title": _d("profile", "profile:experience[1].title"),
+    "Work Experience 2|Company": _d("profile", "profile:experience[1].employer"),
+    "Work Experience 2|Location": _d("profile", "profile:experience[1].location"),
+    "Work Experience 2|I currently work here": _d("profile", "profile:experience[1].end", "false"),
+    "Work Experience 2|From": _d("profile", "profile:experience[1].start"),
+    "Work Experience 2|To": _d("profile", "profile:experience[1].end"),
+    "Work Experience 2|Role Description": _d("unknown")}),
+    {"kind": "recheck", "repeat": True, "raw": _d("unknown")},
+    _all("corrective", {"Work Experience 2|From": _d("profile", "profile:experience[1].start"),
+                        "Work Experience 2|To": _d("profile", "profile:experience[1].end")}),
 ]
 
 
@@ -190,8 +201,7 @@ def test_f2_a_swallowed_delete_never_leaves_the_junk_entry_silently():
             return
         pg.evaluate(SWALLOW, '[data-automation-id="panel-set-delete-button"]')
         out, _r, _sv, _fb = _run(pg, "my_experience", _reply_file(Path(tmp), ENTRY_REPLY))
-        junk_left = "Japanese" in pg.evaluate(
-            "() => [...document.querySelectorAll('button[aria-haspopup=\"listbox\"]')].map(e => e.textContent).join('|')")
+        junk_left = "Campus Robot League" in _values(pg)
         reported = bool(out.unknown_required or out.fill_failed or out.transport_failed)
         assert not junk_left or reported, "the delete failed and nothing cleared, flagged or stopped"
 
@@ -202,12 +212,11 @@ def test_f5_an_entry_added_at_a_deleted_index_is_filled_and_a_failed_add_is_repo
         if pg is None:
             return
         out, _r, _sv, _fb = _run(pg, "my_experience", _reply_file(Path(tmp), ENTRY_REPLY))
-        shown = pg.evaluate(
-            "() => [...document.querySelectorAll('button[aria-haspopup=\"listbox\"]')].map(e => e.textContent)")
-        new_keys = {pf.field.key for pf in out.fields if pf.group_title == "Languages 2"}
+        shown = _values(pg)
+        new_keys = {pf.field.key for pf in out.fields if pf.group_title == "Work Experience 2"}
         reported = set(out.unknown_required) | set(out.fill_failed)
-        assert "Japanese" not in shown
-        assert "Mandarin" in shown or new_keys & reported, (shown, out.unknown_required, out.fill_failed)
+        assert "Campus Robot League" not in shown
+        assert "Sample Analytics" in shown or new_keys & reported, (out.unknown_required, out.fill_failed)
     with P._open("stubs/review_entries.html") as pg, tempfile.TemporaryDirectory() as tmp:
         if pg is None:
             return
@@ -248,18 +257,19 @@ class _Cache(P.FakeServices):
 
 @needs(*FILL)
 def test_cache_round_trip_replays_by_field_sig_and_never_stores_second_or_corrective():
-    reply = FIX / "wd_a/02-my_information/reply.json"
-    with P._open("wd_a/02-my_information/page.html") as pg:
+    tmp = Path(tempfile.mkdtemp())
+    reply = _reply_file(tmp, OPTIONAL_REPLY)
+    with P._open("stubs/review_optional_prompt.html") as pg:
         if pg is None:
             return
-        out1, _r, sv1, fb1 = _run(pg, "my_information", reply)
+        out1, _r, sv1, fb1 = _run(pg, "questions", reply)
     rows = [r for put in sv1.puts for r in put]
     assert rows, "a page with fresh model decisions stores them"
     assert not {r["decision"]["via"] for r in rows} & {"second", "corrective"}
-    with P._open("wd_a/02-my_information/page.html") as pg:
+    with P._open("stubs/review_optional_prompt.html") as pg:
         if pg is None:
             return
-        out2, _r, sv2, fb2 = _run(pg, "my_information", reply, services_cls=_Cache, rows=rows)
+        out2, _r, sv2, fb2 = _run(pg, "questions", reply, services_cls=_Cache, rows=rows)
     assert {r["field_sig"] for r in rows} <= set(sv2.asked), "the same field_sig is asked for"
     k1 = sum(len(c.keys) for c in fb1.calls if c.kind == "page")
     k2 = sum(len(c.keys) for c in fb2.calls if c.kind == "page")
@@ -271,17 +281,16 @@ def test_cache_round_trip_replays_by_field_sig_and_never_stores_second_or_correc
 
 @needs(*FILL)
 def test_f8_a_decision_the_site_rejected_is_not_cached():
-    with P._open("wd_a/02-my_information/page.html") as pg:
+    """The primary-language search misses (the site rejects it, one corrective); the skill's pick
+    succeeds. Only the skill's decision (evidence "Python, SQL") may be cached."""
+    with P._open("stubs/review_optional_prompt.html") as pg, tempfile.TemporaryDirectory() as tmp:
         if pg is None:
             return
-        out, _r, sv, fb = _run(pg, "my_information", FIX / "wd_a/02-my_information/reply.json")
-    corrected = [c for c in fb.calls if c.kind == "corrective"]
-    if not corrected:
-        return                       # nothing was rejected on this run: nothing to check
-    refs = {r["decision"]["ref"] for put in sv.puts for r in put}
-    rejected = {"standing:how_heard", "profile:contact.phone_country_code"}
-    assert not refs & rejected, refs & rejected
-
+        _out, _r, sv, fb = _run(pg, "questions", _reply_file(Path(tmp), OPTIONAL_REPLY))
+    assert any(c.kind == "corrective" for c in fb.calls), "precondition: the primary language was re-asked"
+    rows = [r for put in sv.puts for r in put]
+    assert rows, "the skill's decision is cached"
+    assert all(r["decision"]["evidence"] == "Python, SQL" for r in rows), [r["decision"]["evidence"] for r in rows]
 
 if WAITING[_W0:]:
     print(f"[test_apply_pagefill_review] {len(WAITING[_W0:])} oracle tests wait for modules not built yet: "

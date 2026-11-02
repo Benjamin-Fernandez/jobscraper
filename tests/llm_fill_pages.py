@@ -487,9 +487,11 @@ REVIEW_STUBS = {
         {"w": "prompt", "label": "Main programming language", "aid": "formField-mainLanguage", "req": True,
          "options": ["Java", "Kotlin"], "search": True}]},
     # F2 / F5: a junk entry to delete and a missing profile entry to add at the same index
-    "review_entries": {"title": "Languages (R3 review F2, F5)", "body": [
-        {"section": "Languages", "entries": [_lang("English", "Native"), _lang("Japanese", "Advanced")],
-         "template": _lang("", "")}]},
+    "review_entries": {"title": "Work Experience (R3 review F2, F5)", "body": [
+        {"section": "Work Experience", "template": _job("", "", "", ["", ""], ["", ""], ""), "entries": [
+            _job("Software Engineering Intern", "Example Logistics Pte Ltd", "Singapore", ["5", "2024"], ["8", "2024"],
+                 "Built REST APIs in Python and Postgres for shipment tracking."),
+            _job("Campus Robot League", "", "", ["", ""], ["", ""], "Built a line-following robot in C++.")]}]},
     # F6: a revealed field takes the page ordinal of a field that still exists
     "review_collide": {"title": "Audit key collision (R3 review F6)", "body": [
         {"w": "text", "label": "Favourite tool", "aid": "formField-tool1"},
