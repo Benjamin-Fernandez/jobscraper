@@ -40,7 +40,7 @@ from .contracts import (
     Option, ResolveContext,
 )
 from . import declarations
-from .plan import norm_label, phrase_match_tokens, tokens
+from .plan import contains_run, norm_label, phrase_match_tokens, tokens
 
 MemoryLookup = Callable[[str, str, str], Optional[str]]
 
@@ -53,7 +53,13 @@ TEXT_TYPES = frozenset({FieldType.TEXT, FieldType.TEXTAREA, FieldType.EMAIL, Fie
                         FieldType.NUMBER, FieldType.URL, FieldType.DATE, FieldType.TYPEAHEAD})
 SINGLE_CHOICE = frozenset({FieldType.DROPDOWN, FieldType.RADIO})
 
-KINDS = frozenset({"bool", "enum", "text", "number", "salary", "date", "url", "country"})
+KINDS = frozenset({"bool", "enum", "text", "number", "salary", "date", "url", "country",
+                   "country_bool"})
+
+# D-75 (questions_design §8.2): `kind: country_bool` answers a right-to-work or
+# sponsorship question for whichever country the label names, from these maps.
+COUNTRY_BOOL_KEYS = frozenset({"singapore_status.authorised_to_work",
+                               "singapore_status.requires_sponsorship"})
 
 # --------------------------------------------------------------------------
 # Countries (§7.2 COUNTRY, §7.3.2 country): ISO 3166-1 alpha-2 -> name, demonym.
@@ -86,6 +92,39 @@ COUNTRIES: dict[str, tuple[str, str]] = {
     "AR": ("Argentina", "Argentine"),
     "BR": ("Brazil", "Brazilian"),
 }
+
+# D-75 (questions_design §8.2 step 1): extra names a work-rights label may use
+# for a country. ISO codes are not aliases except those written here, and the
+# token "us" alone is never one ("are you authorised to work for us").
+COUNTRY_ALIASES: dict[str, tuple[str, ...]] = {
+    "US": ("united states", "united states of america", "u s", "u s a", "usa", "america"),
+    "GB": ("uk", "u k", "britain", "great britain", "england"),
+    "EU": ("european union", "eu", "eea", "europe"),
+    "AE": ("uae", "united arab emirates"),
+}
+# A label naming no country that asks about where the applicant lives means
+# contact.country; any other such label means the job's country.
+RESIDENCE_PHRASES = ("where you live", "where you reside", "country of residence",
+                     "where you currently live")
+
+
+def _country_phrases() -> list[tuple[str, tuple[str, ...]]]:
+    out = [(code, tuple(tokens(name))) for code, (name, _demonym) in COUNTRIES.items()]
+    out += [(code, tuple(tokens(a))) for code, names in COUNTRY_ALIASES.items() for a in names]
+    return [(c, t) for c, t in out if t]
+
+
+_COUNTRY_PHRASES = _country_phrases()
+
+
+def label_countries(label_norm: str) -> set[str]:
+    """The ISO codes (and "EU") a normalised label names, by contiguous token
+    phrase: country names plus COUNTRY_ALIASES. Unlike tier-2 synonyms, a
+    one-token name matches in a label of any length ("eligible to work in
+    canada"). Demonyms are not used."""
+    toks = label_norm.split()
+    return {code for code, phrase in _COUNTRY_PHRASES if contains_run(toks, phrase)}
+
 
 # --------------------------------------------------------------------------
 # Option vocabularies (§7.3.2)
@@ -247,6 +286,12 @@ def load_rules(path: Union[str, Path]) -> QuestionRules:
             value_map[str(v)] = tuple(phrases)
         if kind == "enum" and not value_map:
             raise ValueError(f"{where}: an enum needs a value_map")
+        if kind == "country_bool":
+            if key not in COUNTRY_BOOL_KEYS:
+                raise ValueError(f"{where}: kind country_bool is allowed only on "
+                                 + " and ".join(sorted(COUNTRY_BOOL_KEYS)))
+            if value_map or e.get("yes_if") is not None:
+                raise ValueError(f"{where}: kind country_bool takes no value_map or yes_if")
         sensitive = bool(e.get("sensitive", False))
         rules.append(Rule(key=key, kind=kind, sensitive=sensitive, synonyms=synonyms,
                           exclude=_phrase_list(e.get("exclude"), f"{where}.exclude"),
@@ -320,7 +365,8 @@ def bool_shaped(f: FormField) -> bool:
 def _candidate(r: Rule, f: FormField, label_toks: Sequence[str]) -> bool:
     """May this entry answer a field of this shape (§7.3.3)?"""
     if bool_shaped(f):
-        return r.kind == "bool"            # plain bool entries + virtual yes_if entries
+        # plain bool entries + virtual yes_if entries + the D-75 work-rights maps
+        return r.kind in ("bool", "country_bool")
     if f.type in CHOICE_TYPES:
         return not r.is_virtual
     if f.type in (FieldType.TEXT, FieldType.TEXTAREA):
@@ -790,6 +836,8 @@ def _tier2(f: FormField, label_norm: str, ctx: ResolveContext,
         return _Tier2(sensitive=any(r.sensitive for r in best),
                       note="ambiguous: " + ", ".join(r.key for r in best))
     r = best[0]
+    if r.kind == "country_bool":
+        return _tier2_country_bool(f, label_norm, ctx, r)
     if r.is_virtual:
         # §7.3.3 yes_if: a Yes/No question answered from the parent enum.
         value = profile_value(ctx.profile, r.parent)
@@ -812,6 +860,51 @@ def _tier2(f: FormField, label_norm: str, ctx: ResolveContext,
         return _Tier2(stop=_Stop(f"profile rule {r.key}: no offered option fits", True),
                       sensitive=True)
     return _Tier2(note=f"profile rule {r.key}: no value fits")
+
+
+WORK_RIGHTS_CONFLICT = "work rights differ"     # the note capture reads as reason `conflict`
+
+
+def work_rights_countries(label_norm: str, ctx: ResolveContext) -> list[str]:
+    """The countries a work-rights label asks about (§8.2 steps 1-2): those it
+    names; else the applicant's country when it asks where they live; else the
+    job's country (`ctx.job_country`, "this country", "where this job is")."""
+    named = label_countries(label_norm)
+    if named:
+        return sorted(named)
+    toks = label_norm.split()
+    if any(contains_run(toks, p.split()) for p in RESIDENCE_PHRASES):
+        home = profile_value(ctx.profile, "contact.country")
+        if isinstance(home, str) and home.strip():
+            return [home.strip().upper()]
+    return [(ctx.job_country or "SG").strip().upper()]
+
+
+def _tier2_country_bool(f: FormField, label_norm: str, ctx: ResolveContext,
+                        r: Rule) -> _Tier2:
+    """D-75 (§8.2 steps 3-6): the work-rights map's value for each country the
+    label means. Countries that disagree stop the field (never the model);
+    options that are not Yes/No leave it to the later tiers (not sensitive)."""
+    which = r.key.rsplit(".", 1)[1]
+    toks = set(label_norm.split())
+    # "Can you work in the US without sponsorship?": authorised and needs none.
+    without = (which == "authorised_to_work" and "without" in toks
+               and bool(toks & {"sponsor", "sponsorship", "visa"}))
+    countries = work_rights_countries(label_norm, ctx)
+    values: dict[str, tuple[bool, str]] = {}
+    for c in countries:
+        v, src = applicant.work_right(ctx.profile, which, c)
+        if without:
+            v = v and not applicant.work_right(ctx.profile, "requires_sponsorship", c)[0]
+        values[c] = (v, src)
+    if len({v for v, _src in values.values()}) > 1:
+        return _Tier2(stop=_Stop(f"{WORK_RIGHTS_CONFLICT}: " + ", ".join(countries)))
+    value, src = values[countries[0]]
+    fit = fit_bool(f, value)
+    if fit is None:
+        return _Tier2(note=f"profile rule {r.key}: no value fits")
+    return _Tier2(answer=_answer(f, fit, AnswerTier.PROFILE_RULE, f"profile:{r.key}.{src}",
+                                 CONF_PROFILE, rule_id=r.key, sensitive=False))
 
 
 # ---------------------------------------------------------------- tier 3
@@ -940,7 +1033,9 @@ def user_prompt(f: FormField, kind: str, ctx: ResolveContext, limit: int) -> str
     """§7.6 user prompt. Only llm_extract + computed facts from the profile:
     no S value can reach it."""
     facts = applicant.computed_facts(ctx.profile, applicant.today_sg())
-    person = dict(applicant.llm_extract(ctx.profile), computed=facts)
+    # D-75: the model is always told the standing work rights (not sensitive).
+    person = dict(applicant.llm_extract(ctx.profile), computed=facts,
+                  work_rights=applicant.work_rights_text(ctx.profile))
     lines = [f"QUESTION: {f.label}", f"HELP: {f.description}",
              f"TYPE: {kind}", f"REQUIRED: {'yes' if f.required else 'no'}"]
     if kind == "text":
@@ -1240,8 +1335,8 @@ def resolve_field(f: FormField, ctx: ResolveContext, *, backend: Any, rules: Que
     t2 = _tier2(f, label_norm, ctx, rules)
     if t2.answer:
         return t2.answer
-    if t2.stop:
-        return _final(f, note=t2.stop.note, sensitive=True)
+    if t2.stop:                       # a sensitive no-fit, or D-75 countries that disagree
+        return _final(f, note=t2.stop.note, sensitive=t2.stop.sensitive)
 
     t3 = _tier3(f, label_norm, ctx, memory)
     if t3:

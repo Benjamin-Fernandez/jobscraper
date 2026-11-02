@@ -75,8 +75,8 @@ REQUIRED_PATHS: tuple[str, ...] = (
     "contact.email", "contact.phone_country_code", "contact.phone_number",
     "contact.city", "contact.country",
     "singapore_status.residency_status",
-    "singapore_status.authorised_to_work.SG",
-    "singapore_status.requires_sponsorship.SG",
+    # D-75: the two work-rights maps are not here: they always have an answer
+    # (the country's key, else `default`, else the standing answer; work_rights).
     "availability.notice_period_days", "availability.earliest_start_date",
     "pay.expected_salary.amount",
     "education",
@@ -428,8 +428,9 @@ def validate(profile: dict) -> list[FieldError]:
             err(f"singapore_status.{block}", "must map country codes to true/false")
             continue
         for k, v in m.items():
-            if not (isinstance(k, str) and ISO2_RE.match(k)):
-                err(f"singapore_status.{block}", "keys must be 2-letter ISO country codes")
+            if not (isinstance(k, str) and (ISO2_RE.match(k) or k == WORK_RIGHTS_DEFAULT)):
+                err(f"singapore_status.{block}",
+                    "keys must be 2-letter ISO country codes or default")
             elif v is not None and not isinstance(v, bool):
                 err(f"singapore_status.{block}.{k}", "must be true or false")
 
@@ -994,10 +995,62 @@ def today_sg() -> _dt.date:
     return _dt.datetime.now(SGT).date()
 
 
+# --------------------------------------------------------------------------
+# Work rights (D-75, questions_design §8.1): "always assume I have working rights"
+# --------------------------------------------------------------------------
+
+WORK_RIGHTS_DEFAULT = "default"                 # the map key for every country not listed
+WORK_RIGHTS_MAPS = ("authorised_to_work", "requires_sponsorship")
+# The standing answer when neither the country nor `default` is set (D-75).
+WORK_RIGHTS_STANDING = {"authorised_to_work": True, "requires_sponsorship": False}
+
+
+def work_right(profile: dict, which: str, country: str) -> tuple[bool, str]:
+    """(value, where it came from) for one map: the country's own bool (source
+    = its ISO code), else `default`'s ("default"), else the standing answer
+    ("standing"). An absent or empty map therefore always has an answer."""
+    m = _get(profile or {}, f"singapore_status.{which}")
+    m = m if isinstance(m, dict) else {}
+    code = (country or "").strip().upper()
+    if isinstance(m.get(code), bool):
+        return m[code], code
+    if isinstance(m.get(WORK_RIGHTS_DEFAULT), bool):
+        return m[WORK_RIGHTS_DEFAULT], WORK_RIGHTS_DEFAULT
+    return WORK_RIGHTS_STANDING[which], "standing"
+
+
+def work_rights(profile: dict, country: str) -> tuple[bool, bool]:
+    """(authorised, needs_sponsorship) in `country` (ISO code)."""
+    return (work_right(profile, "authorised_to_work", country)[0],
+            work_right(profile, "requires_sponsorship", country)[0])
+
+
+def work_rights_text(profile: dict) -> str:
+    """The applicant's standing work rights as sentences, for the model (§8.1).
+    With the defaults it is exactly "The applicant has the right to work and
+    needs no visa sponsorship."; then one sentence per country whose value
+    differs from its map's default. Not sensitive: it is the D-75 answer."""
+    auth, _ = work_right(profile, "authorised_to_work", WORK_RIGHTS_DEFAULT)
+    spons, _ = work_right(profile, "requires_sponsorship", WORK_RIGHTS_DEFAULT)
+    out = [f"The applicant {'has' if auth else 'does not have'} the right to work and "
+           f"{'needs' if spons else 'needs no'} visa sponsorship."]
+    words = {("authorised_to_work", True): "has the right to work",
+             ("authorised_to_work", False): "does not have the right to work",
+             ("requires_sponsorship", True): "needs visa sponsorship",
+             ("requires_sponsorship", False): "needs no visa sponsorship"}
+    for which, default in (("authorised_to_work", auth), ("requires_sponsorship", spons)):
+        m = _get(profile or {}, f"singapore_status.{which}")
+        for code, v in (m.items() if isinstance(m, dict) else ()):
+            if code != WORK_RIGHTS_DEFAULT and isinstance(v, bool) and v != default:
+                out.append(f"For {code}: {words[(which, v)]}.")
+    return " ".join(out)
+
+
 def grounding_text(profile: dict, today: Optional[_dt.date] = None) -> str:
     """The profile part of the tier-5 grounding corpus (§7.7): every
     non-sensitive value one per line (the legal and preferred names, then the
-    llm_extract allow-list), then the computed facts as sentences."""
+    llm_extract allow-list), then the computed facts as sentences, then the
+    work-rights sentence (D-75)."""
     lines: list[str] = []
     for path in ("identity.legal_first_name", "identity.legal_last_name",
                  "identity.preferred_name"):
@@ -1013,6 +1066,9 @@ def grounding_text(profile: dict, today: Optional[_dt.date] = None) -> str:
                  f"({f['experience_years']} years).")
     if f["graduation_year"]:
         lines.append(f"Graduation year: {f['graduation_year']}.")
+    # D-75: the model is always told the standing work rights, and a choice
+    # answer may quote them as evidence (§7.7). Always the last line.
+    lines.append(work_rights_text(profile or {}))
     return "\n".join(lines)
 
 

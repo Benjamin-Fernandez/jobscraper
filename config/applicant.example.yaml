@@ -28,8 +28,8 @@ singapore_status:
   nationality: SG                    # ISO country code
   residency_status: citizen          # S. citizen | pr | foreigner
   work_pass: none_required           # none_required | ep | s_pass | dp | ltvp_loc | student_pass | other
-  authorised_to_work: {SG: true}     # add other countries a form may ask about, e.g. US: false
-  requires_sponsorship: {SG: false}
+  authorised_to_work: {SG: true, default: true}     # default: every country you don't list
+  requires_sponsorship: {SG: false, default: false}
   ns_status: not_applicable          # S. completed | serving | exempted | not_applicable
   ord_date: null                     # S. YYYY-MM, when ns_status is completed or serving
   race: decline                      # S. chinese | malay | indian | eurasian | other | decline
