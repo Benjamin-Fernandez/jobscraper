@@ -305,6 +305,19 @@ class Config:
         """The `apply:` block with the design's defaults (apply_design §16)."""
         return ApplyConfig.from_raw(self.raw.get("apply"))
 
+    # ---------------- applicant (M20) ----------------
+
+    @property
+    def applicant_path(self) -> Path:
+        """The applicant profile for application forms (apply_design §5).
+        Hand-filled from config/applicant.example.yaml; gitignored."""
+        return self._path("applicant", "data/applicant.yaml")
+
+    @property
+    def questions_path(self) -> Path:
+        """The tier-2 question rules (apply_design §7.3). Researcher-owned data."""
+        return self._path("questions", "config/questions.yaml")
+
     # ---------------- tailor (M20) ----------------
 
     @property

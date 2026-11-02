@@ -12,6 +12,7 @@
     python -m jobscraper reresolve   forget a company's cached ATS
     python -m jobscraper sync        reconcile watchlist.yaml into the database
     python -m jobscraper purge       delete job descriptions past their time to live
+    python -m jobscraper applicant   check the applicant profile for application forms
 """
 from __future__ import annotations
 
@@ -654,6 +655,48 @@ def cmd_watchlist(args) -> int:
     return 0
 
 
+def cmd_applicant(args) -> int:
+    """M20 lane P (apply_design §14.1): `applicant check` loads the applicant
+    profile, validates it and lists what auto-apply still needs.
+
+    Prints each error as `path: message` (messages never repeat a value), the
+    missing paths, the completeness meter and the resume file's name. Exit 0
+    only when there are no errors and nothing is missing. `applicant init` is
+    M21 (WP-W1)."""
+    from . import applicant
+
+    try:
+        sys.stdout.reconfigure(errors="replace")
+    except (AttributeError, ValueError):
+        pass
+    cfg = load_config(getattr(args, "config", None))
+    path = Path(args.file) if getattr(args, "file", None) else cfg.applicant_path
+    if not path.exists():
+        print(f"applicant: no profile at {path} - copy config/applicant.example.yaml "
+              "there and fill it in", file=sys.stderr)
+        return 1
+    try:
+        profile = applicant.load(path)
+    except applicant.ApplicantError as exc:
+        print(f"applicant: {exc}", file=sys.stderr)
+        return 1
+    errors = applicant.validate(profile)
+    missing = applicant.missing_for_apply(profile, cfg.resume_dir)
+    filled, needed = applicant.completeness(profile)
+    print(BAR)
+    print(f"applicant profile  {path}")
+    print(BAR)
+    for e in errors:
+        print(f"{e.path}: {e.message}")
+    print(f"errors: {len(errors)}")
+    print("missing: " + (", ".join(missing) if missing else "nothing"))
+    print(f"completeness {filled}/{needed}")
+    resume = applicant.resume_file(profile, cfg.resume_dir)
+    print(f"Resume: {resume.name} ok" if resume else "Resume: not found")
+    print(BAR)
+    return 0 if not errors and not missing else 1
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="jobscraper",
                                 description="Weekly careers-site monitor")
@@ -735,6 +778,14 @@ def build_parser() -> argparse.ArgumentParser:
                             help="set enabled: false on one entry")
     wld.add_argument("key", help="the entry's key, or its exact name")
     wl.set_defaults(fn=cmd_watchlist)
+
+    # --- applicant (M20 lane P)
+    ap = sub.add_parser("applicant", help="the applicant profile for application forms")
+    ap_sub = ap.add_subparsers(dest="applicant_cmd", required=True)
+    apc = ap_sub.add_parser("check", help="validate the profile and list what "
+                                          "auto-apply still needs")
+    apc.add_argument("--file", help="profile to check (default paths.applicant)")
+    ap.set_defaults(fn=cmd_applicant)
 
     # --- tailor (M20 lane T)
     tl_p = sub.add_parser("tailor", help="tailor your resume to one job (DOCX + PDF)")

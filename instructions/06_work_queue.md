@@ -29,12 +29,15 @@ The handover note lives in `handover.md`. This file holds only the queue and sho
 | Q-22 | D-70 design delta: Workday-first M20, MyGreenhouse autofill then fill-the-gaps, tailored resume replaces autofilled, backup email on "already registered", enum yes/no labels (researcher gap), Greenhouse label match rule (tester item 4) | architect | — | P0 | DONE | 0 | design + plan updated; lane V WPs ready |
 | Q-23 | Spike S-5: real Workday flow at 2 employers (sign-up, IMAP verify, every step recorded as fixtures), stop at Review; the real submissions there go through the built product at the M20 gate (owner-allowed, D-70) | software-engineer (spike) | Q-22; owner email + app password | P0 | BLOCKED | 0 | recorded pages + selector map |
 | Q-24 | Owner: MyGreenhouse sign-in in the JobScraper Edge profile | owner | — | P0 | BACKLOG | 0 | autofill button works in S-6 |
-| Q-25 | Lane V part 1: WP-V1 vault, V2 mail half, V3 IMAP watcher (`eng/M20-V-vault-mail`) | software-engineer (top) | Q-22 | P0 | IN PROGRESS | 0 | WP Verify |
-| Q-26 | WP-A03 `yes_if` rows in `config/questions.yaml`; WP-F4 fake IMAP fixtures; new D-70 oracles (architect outbox) | researcher; tester | Q-22 | P0 | BACKLOG | 0 | WP Verify |
+| Q-25 | Lane V part 1: WP-V1 vault, V2 mail half, V3 IMAP watcher (`eng/M20-V-vault-mail`) | software-engineer (top) | Q-22 | P0 | IN PROGRESS (paused; V1 done, V3 WIP) | 0 | WP Verify |
+| Q-26 | WP-A03 `yes_if` rows in `config/questions.yaml`; WP-F4 fake IMAP fixtures; new D-70 oracles (architect outbox) | researcher; tester | Q-22 | P0 | IN PROGRESS (tester WIP paused; A03 not started) | 0 | WP Verify |
+| Q-27 | Architect small items: `ResolveContext.job_title` (contracts, additive), §5.4 template `backup_email` line | architect | — | P1 | BACKLOG | 0 | contracts import; B9 passes the title |
 | Q-16 | Owner (optional): Edge sync test with `owner_sync_test.py` (spike report S-1c); if it passes, set `apply.edge_sync: true` | owner | Q-01 | P2 | BACKLOG | 0 | test password appears in the Default profile |
 | Q-15 | Docs: OVERVIEW/README/DESIGN updated for tailor and auto-apply ("never logs in anywhere" changes) | planner | M20 | P1 | BACKLOG | 0 | docs match the app |
 
 ## Notes
+- 2026-11-02: session stopped by the owner; lane B paused after B6 (B1–B6 committed, personal re-merge aborted on a config.py conflict). See handover.
+- 2026-11-02: lane P merged (469/469). Owner can now fill `data/applicant.yaml` from `config/applicant.example.yaml` and run `applicant check`.
 - 2026-11-02: lane T merged (CLI `tailor <job_id> [--report] [--force]`; `tailor_flow.tailor_for_apply` for B9); 440/442, the 2 = D-69 oracles (Q-21 running). Lane T reads `data/applicant.yaml` directly until P2 lands: swap to `applicant.load` in B9.
 - 2026-11-02: designs on `arch/Q-04-designs` (ec5a471, 718b40e); merged into personal via int/M19 with the tester's layering update (Q-07 add-on). Q-06/Q-08/Q-09 branch from it.
 - 2026-11-02: `int/M19` (worktree `.claude/worktrees/int-M19`) = personal + Q-02 (faddaa2) + Q-03 (eddc704); baseline 299/323 Python, 179/180 web, all known. Tester works on `test/Q-07-m19-tests` there; merge int → personal after green + a dry run on a copied DB. Known: Cancel on a stuck run can take ~30 s to answer (D-64 trade-off).
