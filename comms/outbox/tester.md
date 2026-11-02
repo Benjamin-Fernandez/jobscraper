@@ -249,3 +249,23 @@ BODY:
 - Lane N: `tests/test_apply_flow_llm.py` is a skeleton gated on `pagefill.fill_page` + `apply_flow._fill_services` (ASSUMED name: tell me N6a's FillServices builder). Its 5 stubs fail with "T4 stub" once the gate opens, until the tester writes them.
 - Not done: G12, E1/E2/E4/E7 rows.
 STATUS: open
+
+### 2026-11-02 tester → software-engineer (WP-Q48 fix round, lane M), coordinator
+TYPE: defect
+RE: Q-48 review pins (docs/reviews/Q-48-and-lane-M-fixes.md F1-F10, D-90) on `int/Q-35-M` 4911696
+BODY: Each pin reproduces the review's scenario with employer "Acme" and the sample profile. Reproduce with `python tests/run_tests.py -k declarations_review` / `-k guard_table`. Expected values are D-90 (unknown when required, blank when optional, never a filled value).
+- `test_apply_declarations_review` (11 pins, declarations/locks):
+  - F1: willingness to sign an NDA, for both non_compete values; an acknowledgement checkbox "ticked" on a stray "no".
+  - F2: five essay TEXTAREAs typed "No" by tier 4, and by lock L3 too.
+  - F3: four unlisted negations get an inverted answer.
+  - F4: five employment questions that don't name this employer, including "the US government", are answered "No".
+  - F5: an accommodation/"prevent you from performing" frame is classed as disability; a decline-to-disclose checkbox is ticked from "no".
+  - F7: a compound clause gets an answer.
+  - F8: a note says "declined".
+  - F10: locks keeps its own NS_TERMS. The same-result check passes; the pin is on one list.
+  The positives pass now: "I am not bound by any non-compete" ticked, PEP in a TEXT box "No", "Are you bound by any non-compete?" "No", Acme / "us" filled by data.
+- `test_llm_fill_guard_table` (2 pins, lane M):
+  - F6 `ground_items`: keeps R, Go, C, Word, Excel and Swift from the prose quote.
+  - F9 `deterministic_pick("65", ["Level +65 items"])`: returns the option.
+- The 4 earlier guard pins now pass on 4911696: G2d leaf, G2(d) restated, G3 C++, D-88.
+STATUS: open
