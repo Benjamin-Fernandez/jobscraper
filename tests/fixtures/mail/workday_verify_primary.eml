@@ -1,0 +1,30 @@
+From: Workday <noreply@myworkday.com>
+To: Alex Testcase <alex.testcase@example.com>
+Subject: Verify your email address
+Date: Mon, 02 Nov 2026 10:01:00 +0000
+Message-ID: <workday_verify_primary@synthetic.test>
+MIME-Version: 1.0
+Content-Type: multipart/alternative;
+ boundary="===============2159388392391810251=="
+
+--===============2159388392391810251==
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: 7bit
+
+Hello,
+
+Please verify your email address to finish creating your account:
+https://acme.wd3.myworkdayjobs.com/en-US/External/activate/abc123primary
+
+If you did not apply, ignore this message.
+
+--===============2159388392391810251==
+Content-Type: text/html; charset="utf-8"
+Content-Transfer-Encoding: quoted-printable
+MIME-Version: 1.0
+
+<html><body><p>Hello,</p><p>Please verify your email address.</p><p><a href=
+=3D"https://acme.wd3.myworkdayjobs.com/en-US/External/activate/abc123primary"=
+>Verify Email</a></p></body></html>
+
+--===============2159388392391810251==--

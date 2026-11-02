@@ -1,0 +1,31 @@
+From: Workday <noreply@myworkday.com>
+To: Alex Testcase <alex.backup@example.net>
+Subject: Verify your email address
+Date: Mon, 02 Nov 2026 10:02:00 +0000
+Message-ID: <workday_verify_backup@synthetic.test>
+Delivered-To: alex.backup@example.net
+MIME-Version: 1.0
+Content-Type: multipart/alternative;
+ boundary="===============3051607760695625632=="
+
+--===============3051607760695625632==
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: 7bit
+
+Hello,
+
+Please verify your email address to finish creating your account:
+https://acme.wd3.myworkdayjobs.com/en-US/External/activate/def456backup
+
+If you did not apply, ignore this message.
+
+--===============3051607760695625632==
+Content-Type: text/html; charset="utf-8"
+Content-Transfer-Encoding: quoted-printable
+MIME-Version: 1.0
+
+<html><body><p>Hello,</p><p>Please verify your email address.</p><p><a href=
+=3D"https://acme.wd3.myworkdayjobs.com/en-US/External/activate/def456backup">=
+Verify Email</a></p></body></html>
+
+--===============3051607760695625632==--
