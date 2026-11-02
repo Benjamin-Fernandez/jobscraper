@@ -43,6 +43,11 @@ from dataclasses import dataclass, field as dc_field, replace as _replace
 from pathlib import Path
 from typing import Any, Optional, Sequence
 
+from ..backends import BackendError
+from . import facts as F
+from . import guards as G
+from . import llm_fill as L
+from . import locks as K
 from . import page as P
 from . import widgets as W
 from .contracts import (
@@ -76,14 +81,15 @@ class _Run:
     ctx: AttemptContext
     rctx: ResolveContext
     services: Any
-    mods: Any
     cfg: dict
     stats: Any
     step: str = ""
     scope: str = ""
     sections: list = dc_field(default_factory=list)
     facts: list = dc_field(default_factory=list)
-    sv: list = dc_field(default_factory=list)
+    sv: list = dc_field(default_factory=list)               # S values: never in a prompt (§6.5)
+    deny: list = dc_field(default_factory=list)             # enum S values: refused in pick prompts
+    hkey: bytes = b""                                       # facts.hash_key(rctx): keyed field_sig (D-86)
     blocks: dict = dc_field(default_factory=dict)
     today: str = ""
     inputs_hash: str = ""
@@ -103,14 +109,7 @@ class _Run:
 def fill_page(page: Any, nav: Any, ctx: AttemptContext, rctx: ResolveContext, services: Any) -> PageOutcome:
     """Fill one page (LF §8). Raises what `facts.check_entries` (PROFILE_INCOMPLETE) and
     `services.classify` (CAPTCHA / bot check) raise; everything else is in the outcome."""
-    from . import facts as F, guards as G, llm_fill as L, locks as K    # lane M, same stage
-    from ..backends import BackendError
-
-    class _Mods:
-        pass
-    mods = _Mods()
-    mods.F, mods.G, mods.L, mods.K, mods.BackendError = F, G, L, K, BackendError
-    run = _Run(page=page, nav=nav, ctx=ctx, rctx=rctx, services=services, mods=mods,
+    run = _Run(page=page, nav=nav, ctx=ctx, rctx=rctx, services=services,
                cfg=dict(getattr(services, "cfg", None) or {}), stats=L.CallLog(model=services.model))
     # 1. step, scope, entry sections, the page's fields (§3; origins §3.3)
     run.step = nav.step_id(page, ctx)
@@ -122,6 +121,8 @@ def fill_page(page: Any, nav: Any, ctx: AttemptContext, rctx: ResolveContext, se
     run.facts = F.fact_catalogue(rctx.profile, rctx, today=run.today)
     F.check_entries(run.sections, rctx)
     run.sv = F.s_values(rctx.profile, rctx.account_email)
+    run.deny = F.enum_s_values(rctx.profile)
+    run.hkey = F.hash_key(rctx)
     run.blocks = F.entry_blocks(rctx)
     run.inputs_hash = F.inputs_hash(L.redact(rctx.resume_text or "", run.sv), rctx.jd_text or "")
     try:
@@ -192,7 +193,6 @@ def _decide(run: _Run, fields: Sequence[PageField], sections: Sequence[EntrySect
             forced: dict[str, str]):
     """Steps 3-6 for `fields`: locks, cache replay, model chunks and follow-ups, decide.
     `forced`: group id -> source entry id for entries we added (E5)."""
-    F, G, L, K = run.mods.F, run.mods.G, run.mods.L, run.mods.K
     fields = list(fields)
     matches = dict(F.match_entries(list(sections), fields, run.rctx))
     matches.update(forced)
@@ -201,7 +201,7 @@ def _decide(run: _Run, fields: Sequence[PageField], sections: Sequence[EntrySect
                          uploaded=run.ctx.uploaded, page_text=P.page_text(run.page, run.scope))
     quals = K.qualified_labels(fields)
     for pf in fields:
-        run.sigs[pf.field.key] = F.field_sig(pf, quals.get(pf.field.key, ""))
+        run.sigs[pf.field.key] = F.field_sig(pf, quals.get(pf.field.key, ""), key=run.hkey)
     # 4. cached decisions go through the guards like fresh ones (§13.3)
     decisions = _cached(run, [pf for pf in fields if pf.field.key not in locked])
     cached = {d.field_key for d in decisions}
@@ -243,7 +243,6 @@ def _long_list_picks(run: _Run, fields: Sequence[PageField], decisions: list) ->
     `pick` call when the list is longer than `long_list` (the model saw no enum) or the
     answer cites a fact (the words are the fact's, not an option; guards path G2e).
     decide then guards the picked option (G1, G4, G5)."""
-    G, L = run.mods.G, run.mods.L
     long_list = int(run.cfg.get("long_list", DEFAULT_LONG_LIST))
     by_key = {pf.field.key: pf for pf in fields}
     out = []
@@ -257,7 +256,8 @@ def _long_list_picks(run: _Run, fields: Sequence[PageField], decisions: list) ->
             continue
         _time_left(run)
         choice = L.pick_option(run.services.backend, pf, d.value, [o.label for o in pf.field.options],
-                               s_values=run.sv, cfg=run.cfg, stats=run.stats)
+                               s_values=run.sv, cfg=run.cfg, stats=run.stats,
+                               sensitive=G.sensitive_label(pf), deny=run.deny)
         pick = ModelDecision(key, d.source, d.ref, choice or "", d.evidence, via="pick")
         out.append(pick)
         run.fresh.append(pick)
@@ -267,7 +267,6 @@ def _long_list_picks(run: _Run, fields: Sequence[PageField], decisions: list) ->
 def _second(run: _Run, pf: PageField, matches: dict) -> ModelDecision:
     """G5's second call; past the follow-up budget or the deadline it answers unknown
     (G5 then keeps nothing)."""
-    L = run.mods.L
     key = pf.field.key
     if not _followup_ok(run) or run.services.deadline_left() <= 0:
         return ModelDecision(key, FillSource.UNKNOWN, via="second")
@@ -310,7 +309,6 @@ def _apply(run: _Run, decision: Any, fields: Sequence[PageField],
 
 
 def _apply_one(run: _Run, key: str, ans: Answer, reset: bool) -> None:
-    G = run.mods.G
     pf = run.fields[key]
     if reset:
         r = W.reset_field(run.page, pf)
@@ -355,7 +353,6 @@ def _picker(run: _Run, pf: PageField, ans: Answer):
     """LL3 (review F9): the pick a search-driven list needs at fill time. The model picks,
     then G4 checks the option against the answer's quote (or the program's words) BEFORE
     the widget clicks it; a failed check is no pick (-> the field fails, never a guess)."""
-    G, L = run.mods.G, run.mods.L
     if pf.field.type not in (FieldType.DROPDOWN, FieldType.RADIO, FieldType.TYPEAHEAD,
                              FieldType.MULTI_CHOICE):
         return None
@@ -366,8 +363,9 @@ def _picker(run: _Run, pf: PageField, ans: Answer):
             return ""
         try:
             got = L.pick_option(run.services.backend, pf, want, list(options), s_values=run.sv,
-                                cfg=run.cfg, stats=run.stats) or ""
-        except run.mods.BackendError:
+                                cfg=run.cfg, stats=run.stats, sensitive=ans.sensitive,
+                                deny=run.deny) or ""
+        except BackendError:
             run.transport = UNAVAILABLE_NOTE
             return ""
         return got if got and G.g4_ok(got, quote) else ""
@@ -430,7 +428,6 @@ def _corrective(run: _Run) -> None:
     if not targets:
         return
     run.services.classify(run.page)
-    G, L, K = run.mods.G, run.mods.L, run.mods.K
     fields = [pf for pf in _read(run, run.sections) if pf.field.key in targets]
     if not fields:
         return
@@ -444,7 +441,7 @@ def _corrective(run: _Run) -> None:
         got = L.ask(run.services.backend, L.Chunk("corrective", None, tuple(open_)), run.facts, run.rctx,
                     step_title=run.step, s_values=run.sv, cfg=run.cfg, locked=locked, stats=run.stats)
         decisions += got
-    matches = dict(run.mods.F.match_entries(run.sections, fields, run.rctx))
+    matches = dict(F.match_entries(run.sections, fields, run.rctx))
     decision = G.decide(fields, locked, decisions, run.facts, run.rctx, matches=matches,
                         second=lambda pf: _second(run, pf, matches), today=run.today,
                         rules=run.services.rules, sections=run.sections, model=run.services.model,
@@ -488,7 +485,6 @@ def _required_scan(run: _Run) -> tuple[str, ...]:
 
 def _cached(run: _Run, fields: Sequence[PageField]) -> list[ModelDecision]:
     """Replayed decisions (via "cache:<via>"); a row whose cited facts changed is a miss."""
-    F, L = run.mods.F, run.mods.L
     if not run.cfg.get("cache", True) or not fields:
         return []
     sigs = {pf.field.key: run.sigs.get(pf.field.key, "") for pf in fields}
@@ -515,7 +511,6 @@ def _cached(run: _Run, fields: Sequence[PageField]) -> list[ModelDecision]:
 def _cache_put(run: _Run) -> None:
     """The latest fresh decision per field (no G5 or corrective replies; no value for a
     fact decision: the program recomputes it, §13.3)."""
-    F, L = run.mods.F, run.mods.L
     if not run.cfg.get("cache", True) or not run.fresh:
         return
     latest: dict[str, ModelDecision] = {}
