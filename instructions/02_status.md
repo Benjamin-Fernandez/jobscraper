@@ -6,9 +6,9 @@
 
 ## Now / Next (≤ 10 lines; history goes to `docs/planning/session_log.md`)
 
-- **Now:** M20 build. Merged and pushed: lanes T, P, V part 1, B; int/Q-30 (D-74 Profile form + F-13 questions, D-75 work rights, tier-3 memory; review APPROVE WITH FIXES), 752/752 Python, web 253+1. S-5b spike DONE (tenant A submitted + confirmed; tenant B waits on a profile field). Q-35 design written (`arch/Q-35-llm-fill` 63c62b3: llm_fill_design, ADR-0006, build plan, contracts v5); running: stage C test plan + stage E design review, Q-42 tester (int/Q-39 oracles).
-- **Next:** merge int/Q-36 (owner profile → errors 0) and Q-39; S-5b report → Q-35 D-78 redesign (folds in review F1/F3/F4); then V2 accounts, V4–V7, WP-Q1b (after F1), WP-F1 fixtures; M20 gate.
-- **Blocked on the owner:** `contact.address_line2` (required at tenant B, Q-41); remove the template placeholders in `data/applicant.yaml` ("Example Pte Ltd" experience, default skills).
+- **Now:** paused by the owner (2026-11-02). M20 build of the D-78 LLM form filler: design READY; merged lanes N + R (navigation, accounts, page reader, widgets) + tester oracles, 920/920, pushed (090daf8). Live app: Workday attempts still stop as `unsupported_ats`. S-5b: tenant A submitted + confirmed.
+- **Next:** lane M (built + review-fixed, `eng/Q-35-M-llmfill` b79df03) → tester pins + architect COMPOSE_NEEDED → merge; R3 review + fixtures; N6a → N6b → M20 gate (5 Greenhouse dry runs + owner-approved Workday postings, D-83). Q-41 tenant B (owner filled the address) two-phase per D-83. Q-45 cover-letter compose design. Q-44 refresh-from-resume.
+- **Blocked on the owner:** nothing. (Profile rebuilt from the new resume on the owner's request 2026-11-02; optional: job locations, Cantonese levels.)
 
 ## 1. Milestones
 
