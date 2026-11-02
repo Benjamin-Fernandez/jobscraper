@@ -88,4 +88,12 @@ Requests:
 - engineer (lane N): F2, F8; F5 and F7 in N6a.
 - tester: oracles for F1, F3, F4 and F7.
 - lane M: the MM/DD/YYYY date of birth in s_values.
+
+RE: Q-35 lane M (eng/Q-35-M-llmfill @ a4f1c8c) · docs/reviews/Q-35-lane-M.md
+BODY: APPROVE WITH FIXES. Locks are final, fact values are written only by the program, every prompt is redacted as a whole, and transport, cut or malformed replies always raise BackendError. R1-R3 are built and layering is 10/10. Three HIGH findings to fix and pin before merge (each a few lines; reproduced with scratch probes):
+- F1: pick_option sends an enum S value (race, nationality) to the model as WANTED. The fix is to refuse when the label is sensitive or the answer is sensitive; WP-R3 passes pick=None for sensitive rows.
+- F2: R4 is bypassed through the resume. "Emergency contact name" gets filled with the applicant's own name, because only relevance checks R4. Apply the R4 check in _model_field and _keep_field too.
+- F3: G7 ignores a generic label's context. "Please specify" after "Race" is filled "Chinese" from the resume. sensitive_label should read the context when the label is generic.
+MEDIUM: F4 make s_values' account_email required and add the missing DOB forms; F5 R4 false positives from help text ("hiring manager" turns off L2); F6 L7 reads "(Yes/No)" as a negation; F7 G4 on the fact route trusts the model's own evidence; F8 field_sig is an unkeyed hash of the shown value; F9 L1b cover-letter compose has no WP (plan gap; a required cover letter stops the page and nothing is captured).
+Open questions: links.* outside entries is a design gap (keep the code); one-word labels count as generic by design; profile_gap is a design gap; G12 maps to no_rule by design.
 STATUS: open
