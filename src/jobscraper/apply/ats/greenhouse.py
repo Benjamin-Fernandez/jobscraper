@@ -145,7 +145,10 @@ class GreenhouseAdapter:
     needs_account = False
     password_rules = PasswordRules()
     mail_domains = ("greenhouse.io", "greenhouse-mail.io")
-    otp_pattern = r"\b([A-Za-z0-9]{8})\b"          # pending S-4
+    # D-85: the security code is alone on its line (trimmed), 6-12 letters/digits, and
+    # the only such line after the "code" sentence; none or several -> no code (no
+    # guess). A whole-line pattern (^...$) selects that rule in `mail.find_code`.
+    otp_pattern = r"^([A-Za-z0-9]{6,12})$"
     # The site prefill this adapter may apply (D-70 §9.1.1); apply_flow reads it
     # to defer the planning-time unanswerable check until after the prefill.
     prefill_source = "mygreenhouse"
