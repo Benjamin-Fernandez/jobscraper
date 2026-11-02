@@ -192,6 +192,36 @@ def test_g7_d88_military_and_national_service_labels_are_sensitive():
     assert fb.calls == [], "G7: the model is never asked"
 
 
+@needs(*NEEDS, "jobscraper.apply.guards:ground_items")
+def test_f6_pin_short_and_common_word_skills_are_not_grounded_from_prose():
+    """Q-48 review F6 (lane M, `guards.ground_items`): a skill that is also a letter or an ordinary
+    word ("R", "Go", "C", "Word", "Excel", "Swift") is kept only from a profile/attested skills
+    list, never because the word occurs in a prose quote."""
+    import copy
+    from jobscraper.apply import guards as G
+    import llm_fill_t2 as T
+    prof = copy.deepcopy(T.rctx().profile)
+    prof["skills"] = ["C++", "Python", ".NET", "Java"]
+    prof["attested_skills"] = []
+    ctx = T.rctx(profile=prof)
+    prose = "Led the R&D team; go-to-market; Series C; excel in teamwork; Swift delivery of word-of-mouth"
+    assert G.ground_items(ctx, ["R", "Go", "C", "Word", "Excel", "Swift"], prose) == []
+    assert G.ground_items(ctx, ["C", "C#", "Objective-C"], "Built services in C++ and Python") == []
+    assert G.ground_items(ctx, ["Python"], "Built services in C++ and Python") == ["Python"]
+    listed = copy.deepcopy(prof)
+    listed["skills"] = ["Go", "R", "Python"]
+    assert G.ground_items(T.rctx(profile=listed), ["Go", "R"], prose) == ["Go", "R"], "a listed skill is kept"
+
+
+@needs(*NEEDS, "jobscraper.apply.llm_fill:deterministic_pick")
+def test_f9_pin_a_phone_code_pick_needs_the_plus():
+    """Q-48 review F9 (lane M, `llm_fill.deterministic_pick`): bare digits are not a phone code."""
+    from jobscraper.apply import llm_fill as L
+    assert L.deterministic_pick("65", ["Level +65 items"]) is None
+    assert L.deterministic_pick("+65", ["Singapore (+65)", "Malaysia (+60)"]) == "Singapore (+65)"
+    assert L.deterministic_pick("No", ["Yes", "No"]) == "No"
+
+
 HOW_HEARD_OPTS = ("Corporate Website", "LinkedIn", "Referral", "Other")
 
 
