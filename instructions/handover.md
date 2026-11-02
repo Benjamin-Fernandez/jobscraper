@@ -14,7 +14,7 @@
 
 ## Waiting on the owner
 - D-72: the owner switched the application Gmail account (address in Coordinator memory, not the repo); no backup email. Old Credential Manager entry deleted. Still needed: a 16-letter app password for the new account in `jobscraper:imap:imap.gmail.com` (the password pasted in chat was the account password: Gmail rejected it, not stored). Check: IMAP login test.
-- MyGreenhouse sign-in inside the JobScraper Edge profile (`%LOCALAPPDATA%\JobScraper\apply-profile` does not exist yet).
+- MyGreenhouse sign-in: the Coordinator opened Edge on the JobScraper profile (`%LOCALAPPDATA%\JobScraper\apply-profile`, now created) at my.greenhouse.io on 2026-11-03; the owner signs in there (the earlier sign-ins went to the normal Edge).
 - `data/applicant.yaml`: a resume-prefilled draft is in the session scratchpad (`applicant.yaml`; the scope guard blocks the Coordinator writing `data/`); owner copies it and fills residency, start date, salary (+ DOB, address, NS).
 
 ## Next 1–3 actions
