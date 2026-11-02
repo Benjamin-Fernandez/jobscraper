@@ -31,8 +31,9 @@
 | F-06 | UI/UX ports (C-10, C-12–C-18) | P1 | DONE | M19 UI lane |
 | F-07 | Hardening (C-22, C-23) | P2 | DONE | M19 |
 | F-10 | Applicant profile (data/applicant.yaml) | P0 | DONE | M20 lane P merged |
-| F-11 | Profile form in the Profile tab | P0 | TODO | M21 |
-| F-12 | Answer memory | P1 | TODO | M22 |
+| F-11 | Profile form in the Profile tab | P0 | TODO | M20 (D-74) |
+| F-12 | Answer memory | P0 | TODO | M20 (D-74) |
+| F-13 | Questions to answer: unanswered application questions become profile fields in the web app | P0 | TODO | M20 (D-74) |
 | F-20 | Master resume | P0 | DONE | M20 lane T merged |
 | F-21 | Keyword map and coverage | P0 | DONE | M20 lane T merged |
 | F-22 | Truthful rewrite | P0 | TODO | swaps M20, LLM M21 |
@@ -81,6 +82,7 @@ Decided items aren't reopened. If facts change, raise a new decision that refere
 | D-60 | Tailor output | Clean template; DOCX + PDF via Word; page ceiling; temp 0.25 | Coordinator | DECIDED |
 | D-61 | Caps | 10/day, 2/employer/day, 1 in flight | Coordinator | DECIDED |
 | D-62 | Team and git | Standard team, no security reviewer; merge and push allowed | owner | DECIDED |
+| D-74 | Profile in the web app + dynamic fields (owner, 2026-11-03) | Profile → Application details form (WP-W1, W5) moves into M20. New F-13: questions an application can't answer are captured and shown in the Profile tab as new fields; the owner's answer is stored locally and reused by the resolver (answer memory, F-12 brought forward); waiting attempts can be retried. The model may only name/group questions, never answer them there. Design Q-30 | owner, 2026-11-03 | DECIDED |
 | D-73 | Lane V points | Foundation modules may import `apply.contracts`/`tailor.contracts` only (layering rule, Q-28); accept engineer choices: emailed code = next non-blank line; `[Gmail]/Spam` unquoted; `mail set-password --host/--user` also save to the settings table; `mail test --backup` without a backup mailbox tests the main one and says so | Coordinator, 2026-11-03 | DECIDED |
 | D-72 | Application mailbox | Owner switched the application Gmail account (address kept out of the repo); no backup email (`contact.backup_email` empty; the D-70 backup path stays in code but is inert); old Credential Manager entry deleted | owner, 2026-11-03 | DECIDED |
 | D-71 | Lane P open points | Accept the engineer's stricter choices (fixed-mapping fields never reach tiers 2/4/5; checkbox/email/phone/date/URL/typeahead never reach the model; required cover letter may); `backup_email` added to the template (architect to fold into §5.4); `ResolveContext.job_title` additive field → architect (Q-27) | Coordinator, 2026-11-02 | DECIDED |
