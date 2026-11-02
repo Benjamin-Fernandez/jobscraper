@@ -1243,15 +1243,17 @@ class Store:
         """Close attempts left in a non-terminal state by a run that died or was
         cancelled (apply_design §4.3). The caller makes sure no apply job is
         running. Clicked → submitted_unconfirmed (never failed, never
-        resubmitted); not clicked → failed(cancelled). Returns how many.
-        Commits."""
+        resubmitted); not clicked → failed(cancelled). An attempt in a
+        post-click-only state (`submitting`; `verifying_email` also occurs before a click) counts
+        as clicked even without a stamp (review F2: a missed stamp must never
+        free the posting). Returns how many. Commits."""
         live = sorted(set(ATTEMPT_TRANSITIONS) - TERMINAL_ATTEMPT_STATES)
         marks = ",".join("?" * len(live))
         rows = self.conn.execute(
-            f"SELECT id, submit_clicked_at FROM apply_attempts WHERE state IN ({marks})",
+            f"SELECT id, state, submit_clicked_at FROM apply_attempts WHERE state IN ({marks})",
             live).fetchall()
         for r in rows:
-            if r["submit_clicked_at"]:
+            if r["submit_clicked_at"] or r["state"] == "submitting":
                 self.conn.execute(
                     """UPDATE apply_attempts SET state = 'submitted_unconfirmed',
                        reason_detail = COALESCE(reason_detail, 'interrupted after submit'),
@@ -1565,18 +1567,17 @@ def _state(v: Any) -> str:
     return str(getattr(v, "value", v))
 
 
-def attempt_transition_allowed(src: str, dst: str, *, clicked: bool) -> bool:
-    """The contract's `can_transition(src, dst, clicked=...)`, on strings.
+# States that need a recorded Submit click (contract `can_transition`, clicked=False).
+CLICK_REQUIRED_ATTEMPT_STATES = frozenset({"submitting", "submitted", "submitted_unconfirmed"})
 
-    One deliberate difference, raised with the tester (outbox, M20-B): the half
-    of the click rule that says SUBMITTING needs a recorded click is applied
-    only by apply_flow (which records the click first), not here, because the
-    store oracle `test_a_posting_can_succeed_only_once` walks into SUBMITTING
-    without one. The half that matters for NF-06 - after the click nothing but
-    the post-click states, never `failed` - is enforced here.
-    """
+
+def attempt_transition_allowed(src: str, dst: str, *, clicked: bool) -> bool:
+    """The contract's `can_transition(src, dst, clicked=...)`, on strings,
+    both halves (apply_design §4.1, review F2): after the click only the
+    post-click states (never `failed`); without a recorded click never
+    `submitting` / `submitted` / `submitted_unconfirmed`."""
     if dst not in ATTEMPT_TRANSITIONS.get(src, frozenset()):
         return False
     if clicked:
         return dst in POST_CLICK_ATTEMPT_STATES
-    return True
+    return dst not in CLICK_REQUIRED_ATTEMPT_STATES
