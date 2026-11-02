@@ -223,6 +223,13 @@ def _text(loc: Any) -> str:
             return ""
 
 
+def _attr(loc: Any, name: str) -> str:
+    try:
+        return re.sub(r"\s+", " ", loc.get_attribute(name) or "").strip()
+    except Exception:
+        return ""
+
+
 def _click(page: Any, loc: Any, timeout_ms: int = 3000) -> str:
     """Click; when it times out, click the preceding sibling `click_filter`, then
     the following one, then the parent (S-5 a; spike `wd_click`). A private
@@ -701,20 +708,26 @@ class WorkdayNavigator:
     def next_step(self, page: Any, ctx: AttemptContext) -> StepResult:
         """Save and Continue / Next. On the review page the button reads Submit:
         report `is_review` and click nothing (submitting is `submit`, once).
+        Only a button whose text or aria-label reads Save and Continue / Next is
+        clicked; an unlabelled or other button fails closed (review F2: an
+        icon-only or pseudo-element label could be Submit).
         After the click wait ≤ `step_timeout_s` for another step or errors; the
         errors come back as the flagged fields' labels (no values)."""
         step = self.step_id(page, ctx)
         dismiss_cookies(page)
+        if self.submit_ready(page):                      # a visible Submit: never click past it
+            return StepResult(step=step or "review", is_review=True)
         btn = self._nav_button(page)
         if btn is None:
             btn = _first_visible(page.get_by_role("button", name=NEXT_NAME), 3)
         if btn is None:
-            if self.submit_ready(page):
-                return StepResult(step=step or "review", is_review=True)
             raise ApplyFailure(ReasonCode.PAGE_UNRECOGNISED, "workday: no next button", step=step)
-        label = _text(btn)
-        if SUBMIT_ANY.search(label) or (not label and step == "review"):
+        label, aria = _text(btn), _attr(btn, "aria-label")
+        if SUBMIT_ANY.search(label) or SUBMIT_ANY.search(aria):
             return StepResult(step=step or "review", is_review=True)
+        if not (NEXT_NAME.match(label) or NEXT_NAME.match(aria)):
+            raise ApplyFailure(ReasonCode.PAGE_UNRECOGNISED,
+                               "workday: next button unlabelled or unexpected", step=step)
         _click(page, btn)
         end = time.monotonic() + B.options_for(page).step_timeout_s
         while True:

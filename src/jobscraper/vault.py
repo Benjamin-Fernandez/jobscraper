@@ -29,6 +29,7 @@ import string
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Optional, Union
+from urllib.parse import urlsplit
 
 from .apply.contracts import PasswordRules, Secret
 
@@ -198,6 +199,24 @@ def export_edge_csv(rows: Iterable[Any], out_dir: Union[str, os.PathLike]) -> Pa
         w.writerows(body)
     log.info("Edge password export written: %s (%d accounts)", path.name, len(body))
     return path
+
+
+def export_accounts(path: Union[str, os.PathLike]) -> set[tuple[str, str]]:
+    """The `(tenant host, email lower-case)` pairs an export lists, read from its
+    `url` and `username` columns (the password column is never read out). Used
+    by `accounts export-edge --confirm` to mark exactly the accounts the owner
+    imported (review F8). An unreadable file gives an empty set."""
+    out: set[tuple[str, str]] = set()
+    try:
+        with open(path, encoding="utf-8", newline="") as fh:
+            for row in csv.DictReader(fh):
+                host = (urlsplit(row.get("url") or "").hostname or "").lower()
+                email = (row.get("username") or "").strip().lower()
+                if host and email:
+                    out.add((host, email))
+    except (OSError, UnicodeDecodeError, csv.Error):
+        return set()
+    return out
 
 
 def delete_export(path: Union[str, os.PathLike]) -> None:
