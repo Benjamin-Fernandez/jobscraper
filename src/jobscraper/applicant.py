@@ -12,9 +12,10 @@ the orchestrator all read the profile, so this file imports nothing above
 
 What it owns:
   - load / save / validate (§5.2 rules, every error names its dotted path)
-  - normalise (Q-36, D-78): the owner types "Male", "non-binary", `no` or "per
-    month"; `load` turns each into the canonical spelling once, so the resolver,
-    the tailor and the form API only ever see canonical values
+  - normalise (Q-36, D-78): the owner types "Male", "non-binary", `no`, "per
+    month", an unquoted 2020-03-15 or "Mar 2020"; `load` turns each into the
+    canonical form once, so the resolver, the tailor and the form API only ever
+    see canonical values
   - missing_for_apply / completeness (F-11: auto-apply refuses an incomplete
     profile, and the Profile tab shows a meter)
   - llm_extract (the allow-list of non-sensitive facts a model may see, §5.3)
@@ -166,6 +167,19 @@ ENUM_SYNONYMS: dict[str, dict[str, str]] = {
     "pay.expected_salary.period": _PERIOD_SYNONYMS,
     "pay.current_salary.period": _PERIOD_SYNONYMS,
 }
+# Any enum that has a "decline" value reads these as "decline" (same key form).
+_DECLINE_SYNONYMS = frozenset({"prefer_not_to_say", "rather_not_say"})
+# A quoted word for a plain boolean field (an unquoted yes/no is already a bool).
+_TRUE_WORDS = frozenset({"yes", "true"})
+_FALSE_WORDS = frozenset({"no", "false"})
+# Month names for "Mar 2020" / "March 2020" (the first three letters, or "sept").
+_MONTH_NAMES: dict[str, int] = {
+    name: i for i, names in enumerate(
+        (("jan", "january"), ("feb", "february"), ("mar", "march"), ("apr", "april"),
+         ("may",), ("jun", "june"), ("jul", "july"), ("aug", "august"),
+         ("sep", "sept", "september"), ("oct", "october"), ("nov", "november"),
+         ("dec", "december")), start=1)
+    for name in names}
 
 BOOLS: tuple[str, ...] = (
     "availability.willing_to_relocate",
@@ -281,8 +295,9 @@ def _canon_enum(v: Any, allowed: tuple[str, ...],
 
     Accepted on top of the exact spelling: any case and surrounding spaces
     ("Male "), spaces or hyphens for underscores ("non-binary", "not applicable"),
-    the path's synonyms (pay periods), and a YAML boolean for a yes/no enum
-    (`disability_status: no` is read by YAML as False, not "no")."""
+    the path's synonyms (pay periods), "prefer not to say" for "decline", and a
+    YAML boolean for a yes/no enum (`disability_status: no` is read by YAML as
+    False, not "no")."""
     if isinstance(v, bool):
         return ("yes" if v else "no") if {"yes", "no"} <= set(allowed) else v
     if not isinstance(v, str):
@@ -294,6 +309,73 @@ def _canon_enum(v: Any, allowed: tuple[str, ...],
         hit = synonyms.get(token) or synonyms.get(token.replace(".", ""))
         if hit in allowed:
             return hit
+    if "decline" in allowed and token in _DECLINE_SYNONYMS:
+        return "decline"
+    return v
+
+
+def _canon_bool(v: Any) -> Any:
+    """True/False for a quoted "yes"/"true"/"no"/"false" (any case, spaces
+    around); anything else is returned as it is."""
+    if isinstance(v, str):
+        word = v.strip().lower()
+        if word in _TRUE_WORDS:
+            return True
+        if word in _FALSE_WORDS:
+            return False
+    return v
+
+
+_YEAR_MONTH_RE = re.compile(r"^(\d{4})/(\d{1,2})$")                 # 2020/03
+_MONTH_YEAR_RE = re.compile(r"^(\d{1,2})/(\d{4})$")                 # 03/2020
+_NAME_YEAR_RE = re.compile(r"^([A-Za-z]{3,9})\.?[\s,\-]*(\d{4})$")  # Mar 2020, March 2020
+_DAY_MONTH_YEAR_RE = re.compile(r"^(\d{1,2})/(\d{1,2})/(\d{4})$")   # 15/03/2020
+
+
+def _canon_date(v: Any, formats: tuple[str, ...]) -> Any:
+    """The canonical text of a date field, or `v` untouched when it does not map.
+
+    `formats` is what the field accepts ("month" = YYYY-MM, "day" = YYYY-MM-DD).
+    A YAML date or datetime (an unquoted 2020-03-15) becomes its ISO day, or
+    YYYY-MM when the field is month-only. Text: an already valid value is kept
+    (trimmed); a day given to a month-only field is cut to the month; for a
+    month field "2020/03", "03/2020", "Mar 2020" and "March 2020" read as
+    YYYY-MM; for a day field "15/03/2020" reads as day/month/year (Singapore
+    order) and a real date. Other slash forms ("03/04/20", "2020/03/04") are
+    ambiguous and stay as typed, so validate reports them."""
+    if isinstance(v, _dt.datetime):
+        v = v.date()
+    if isinstance(v, _dt.date):
+        return v.isoformat() if "day" in formats else f"{v.year:04d}-{v.month:02d}"
+    if not isinstance(v, str):
+        return v
+    s = v.strip()
+    if _parse_date(s, formats) is not None:
+        return s
+    if "month" in formats:
+        day = _parse_date(s, ("day",))
+        if day is not None:                        # "day" is not accepted: cut to the month
+            return f"{day[0]:04d}-{day[1]:02d}"
+        year = month = None
+        m = _YEAR_MONTH_RE.match(s)
+        if m:
+            year, month = int(m.group(1)), int(m.group(2))
+        else:
+            m = _MONTH_YEAR_RE.match(s)
+            if m:
+                year, month = int(m.group(2)), int(m.group(1))
+            else:
+                m = _NAME_YEAR_RE.match(s)
+                if m and m.group(1).lower() in _MONTH_NAMES:
+                    year, month = int(m.group(2)), _MONTH_NAMES[m.group(1).lower()]
+        if year is not None and 1 <= month <= 12:
+            return f"{year:04d}-{month:02d}"
+    if "day" in formats:
+        m = _DAY_MONTH_YEAR_RE.match(s)
+        if m:
+            iso = f"{int(m.group(3)):04d}-{int(m.group(2)):02d}-{int(m.group(1)):02d}"
+            if _parse_date(iso, ("day",)) is not None:
+                return iso
     return v
 
 
@@ -309,23 +391,44 @@ def _set_at(profile: dict, path: str, fn) -> None:
 
 
 def normalise(profile: Any) -> Any:
-    """A copy of `profile` with every enum field in its canonical spelling
-    (`_canon_enum`); the argument is not changed. A value that still does not
-    map is left as it is. Idempotent. `load`, `validate` and `save` all call it,
-    so a profile typed by hand, edited in the form or built in code reads the
-    same everywhere. Other fields (booleans, dates, numbers) are not touched."""
+    """A copy of `profile` with every enum, plain boolean and date field in its
+    canonical form (`_canon_enum`, `_canon_bool`, `_canon_date`); the argument is
+    not changed. A value that still does not map is left as it is, for validate
+    to report. Idempotent. `load`, `validate` and `save` all call it, so a
+    profile typed by hand, edited in the form or built in code reads the same
+    everywhere. Numbers, text and URLs are not touched.
+
+    Entry dates (`education[]`, `experience[]`) keep a full day when one is given
+    (D-68 A-4: computed_facts reads it); only a month-only field such as
+    `singapore_status.ord_date` is cut to YYYY-MM."""
     if not isinstance(profile, dict):
         return profile
     out = copy.deepcopy(profile)
     for path, allowed in ENUMS.items():
         _set_at(out, path,
                 lambda v, a=allowed, s=ENUM_SYNONYMS.get(path): _canon_enum(v, a, s))
+    for path in BOOLS:
+        _set_at(out, path, _canon_bool)
+    for block in ("authorised_to_work", "requires_sponsorship"):
+        m = _get(out, f"singapore_status.{block}")
+        if isinstance(m, dict):
+            for k in m:
+                m[k] = _canon_bool(m[k])
+    for path, formats in DATE_FIELDS.items():
+        _set_at(out, path, lambda v, f=formats: _canon_date(v, f))
     for spec, allowed in LIST_ENUMS.items():
         lst_name, key = spec.split("[].")
         entries = out.get(lst_name)
         for entry in entries if isinstance(entries, list) else []:
             if isinstance(entry, dict) and key in entry:
                 entry[key] = _canon_enum(entry[key], allowed)
+    for lst_name in ("education", "experience"):
+        entries = out.get(lst_name)
+        for entry in entries if isinstance(entries, list) else []:
+            if isinstance(entry, dict):
+                for key in ("start", "end"):
+                    if key in entry:
+                        entry[key] = _canon_date(entry[key], ENTRY_DATE_FORMATS)
     return out
 
 

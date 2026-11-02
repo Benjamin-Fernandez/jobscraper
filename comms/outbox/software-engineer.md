@@ -145,3 +145,9 @@ BODY: Ready for review. Branch `eng/Q-36-lenient-profile`, one file: `src/jobscr
 - Not done (outside the WP): booleans typed as quoted strings ("yes") for BOOLS, "prefer not to say" -> decline, and a looser `singapore_status.ord_date` (accepts YYYY-MM only).
 - Owner file: `applicant check --file data/applicant.yaml` still reports `pay.expected_salary.period` (a string that maps to no period) and `singapore_status.ord_date` (string not in YYYY-MM form). Values not read or printed; the owner can fix both, or tell me which spelling to add.
 STATUS: open
+
+### 2026-11-02 software-engineer → coordinator
+TYPE: handoff
+RE: Q-36 follow-up (dates, quoted booleans, decline) · `src/jobscraper/applicant.py`
+BODY: `normalise` now also canonicalises dates, quoted booleans and "prefer not to say". Month-only field (`ord_date`): date/datetime, "YYYY-MM-DD", "YYYY/MM", "MM/YYYY", "Mar 2020", "March 2020" -> "YYYY-MM". Day fields (`date_of_birth`, `earliest_start_date`): date/datetime and "DD/MM/YYYY" (real date, Singapore order) -> "YYYY-MM-DD"; "12/31/2000", "03/04/01", "2001/07/04" stay as typed and fail with the usual message. Plain bool fields and the authorised_to_work / requires_sponsorship maps: quoted yes/true/no/false -> bool. Any enum with "decline": "prefer not to say" / "rather not say" -> decline. DEVIATION: education[]/experience[] start/end keep a full day (an unquoted 2024-05-15 becomes "2024-05-15", not "2024-05"), because apply_design §5.2 / D-68 A-4 accept a day there and computed_facts counts it; only non-canonical forms ("Mar 2020", "03/2020", "2020/03") become YYYY-MM. Say if you want entries cut to the month instead. Evidence: scratch check on synthetic data, `python tests/run_tests.py` -> 656/656 passed; `applicant check --file <owner file>` -> errors: 0, missing: nothing, completeness 26/26, exit 0.
+STATUS: open
