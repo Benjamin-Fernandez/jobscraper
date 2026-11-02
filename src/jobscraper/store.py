@@ -1864,6 +1864,34 @@ class Store:
         self.conn.commit()
         return cur.rowcount
 
+    # ---------------- apply, D-70/D-78 (lane N): identity and audit notes ----------------
+
+    def accounts_for_tenant(self, ats: str, tenant_host: str) -> dict[str, str]:
+        """{email lower-case: status} of this tenant's accounts (apply_design §10.5)."""
+        return {str(r["email"]).strip().lower(): r["status"] for r in self.conn.execute(
+            "SELECT email, status FROM ats_accounts WHERE ats = ? AND tenant_host = ?",
+            (ats, tenant_host.lower()))}
+
+    def applied_on_tenant(self, ats: str, tenant_host: str) -> bool:
+        """A Submit was clicked on this tenant before (apply_design §12.4)."""
+        r = self.conn.execute(
+            """SELECT 1 FROM apply_attempts WHERE ats = ? AND tenant_host = ?
+                 AND submit_clicked_at IS NOT NULL LIMIT 1""",
+            (ats, tenant_host.lower())).fetchone()
+        return r is not None
+
+    def annotate_answers(self, attempt_id: int, notes: dict[tuple[str, str], str]) -> int:
+        """Set `note` on already-written audit rows, keyed (step, field_key)
+        (llm_fill_design §8 review check). Notes carry no values. Does not commit;
+        returns how many rows changed."""
+        n = 0
+        for (step, key), note in notes.items():
+            cur = self.conn.execute(
+                "UPDATE apply_answers SET note = ? WHERE attempt_id = ? AND step = ? AND field_key = ?",
+                (note, attempt_id, step or "", key))
+            n += cur.rowcount
+        return n
+
 # ---------------- apply (M20): the attempt state machine as plain strings ----------------
 #
 # A copy of apply/contracts.py's TRANSITIONS / TERMINAL_STATES / POST_CLICK_STATES,

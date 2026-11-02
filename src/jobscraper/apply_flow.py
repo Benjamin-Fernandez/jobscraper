@@ -34,15 +34,17 @@ from pathlib import Path
 from typing import Any, Callable, Optional, Sequence
 from urllib.parse import urlsplit
 
-from . import applicant, tailor_flow
+from . import applicant, tailor_flow, vault
 from .apply import browser as B
+from .apply import mail
 from .apply import resolve as R
+from .apply.accounts import BOTH_NO_PASSWORD_DETAIL, NO_PASSWORD_DETAIL, SIGN_IN, choose_identity
 from .apply.classify import PageSignal, classify
 from .apply.contracts import (
     ALWAYS_OURS, CHOICE_TYPES, EMPLOYER_SPECIFIC_DECLARATIONS, POST_CLICK_STATES, PREFILL_POLICY,
-    REASON_TEXTS, STATE_TEXTS, TERMINAL_STATES, TRANSITIONS, Answer, AnswerSource, AnswerStatus,
-    AnswerTier, ApplyFailure, AttemptContext, AttemptResult, AttemptState, Canonical, FieldType,
-    FormField, PrefillPolicy, ReasonCode, ResolveContext,
+    REASON_TEXTS, STATE_TEXTS, TERMINAL_STATES, TRANSITIONS, AccountStatus, Answer, AnswerSource,
+    AnswerStatus, AnswerTier, ApplyFailure, AttemptContext, AttemptResult, AttemptState, Canonical,
+    FieldType, FormField, PrefillPolicy, ReasonCode, ResolveContext, SignUpOutcome,
 )
 from .apply.detect import detect
 from .apply.plan import norm_label
@@ -55,6 +57,7 @@ S = AttemptState
 SG = timezone(timedelta(hours=8))        # Asia/Singapore: no DST since 1982, so a fixed offset
 REDACTED = "[redacted]"
 _BLANK = (None, "", [])
+CODE_REQUIRED = "code_required"          # await_confirmation's note for §4.2's emailed code
 
 
 def check_attempt_table() -> None:
@@ -788,12 +791,20 @@ class _Run:
         adapter, tenant = detect(job)
         at.ats = adapter.name
         self.store.update_attempt(at.id, ats=adapter.name, tenant_host=tenant.host)
+        if not hasattr(adapter, "read_step"):
+            # D-78 lane N: a navigation-only module (Workday) is registered before the
+            # page-filling loop that drives it (WP-N6). Until then it stops here,
+            # before Edge opens: nothing is opened, typed or created on the site.
+            raise ApplyFailure(ReasonCode.UNSUPPORTED_ATS,
+                               f"{adapter.name}: form filling arrives with WP-N6",
+                               step="planning")
         ctx = AttemptContext(
             attempt_id=at.id, job=job, tenant=tenant, dry_run=self.dry_run,
             email=str(_profile_path(self.profile, "contact.email") or ""),
             resume_path=resume_path, log=lambda line: self.log(f"[attempt {at.id}] {line}"),
             screenshot=at.shot,
-            deadline=time.monotonic() + acfg.attempt_timeout_s, http=self.http)
+            deadline=time.monotonic() + acfg.attempt_timeout_s, http=self.http,
+            applied_on_tenant=self.store.applied_on_tenant(adapter.name, tenant.host))
         rctx = self.resolve_ctx(job, tenant, adapter, resume_path)
         plan = adapter.plan_from_schema(ctx)
         if plan is not None:
@@ -817,8 +828,9 @@ class _Run:
         at.shot(page, "open")
         self.check_page(page, at)
         wall = adapter.account_wall(page)
-        if wall:                       # accounts, sign-in and sign-up: lane V (WP-V4)
-            raise ApplyFailure(ReasonCode.PAGE_UNRECOGNISED, f"{adapter.name}: account {wall}")
+        if wall:                       # accounts, sign-in, sign-up, email check (WP-N4)
+            rctx = self.account(page, ctx, adapter, at, job, rctx)
+            self.check_page(page, at)
         at.to(S.FILLING, step="application")
 
         # prefill (D-70): the site's own autofill, once, before the first step
@@ -938,6 +950,8 @@ class _Run:
         try:
             adapter.submit(page, ctx)
             outcome, note = self.await_confirmation(page, ctx, adapter)
+            if outcome is None and note == CODE_REQUIRED:
+                outcome, note = self.code_after_submit(page, ctx, adapter, at, job)
         except Exception as exc:                          # noqa: BLE001 - NF-06
             outcome, note = None, f"error after submit ({type(exc).__name__})"
         end_url = (page.url or "").split("?", 1)[0]
@@ -959,6 +973,195 @@ class _Run:
         if at.tailored_id is not None:
             self.store.mark_tailored_sent(at.tailored_id)
 
+    # -- accounts and mail (N-block; apply_design §10.2, §10.5, §11, §4.2;
+    #    llm_fill_build_plan WP-N4 = WP-V4 without the entry rule and the review notes)
+
+    def account(self, page: Any, ctx: AttemptContext, adapter: Any, at: _Attempt,
+                job: dict[str, Any], rctx: ResolveContext) -> ResolveContext:
+        """The account wall: choose the identity (§10.5), sign in or sign up,
+        check the email when the site asks. `ctx.email` becomes the identity, and
+        so does the returned ResolveContext's `account_email` (tier-1 EMAIL then
+        answers with the address the account uses)."""
+        tenant = ctx.tenant
+        service = vault.service_for(adapter.name, tenant.host)
+        primary = str(_profile_path(self.profile, "contact.email") or "").strip()
+        backup = str(_profile_path(self.profile, "contact.backup_email") or "").strip()
+        rows = self.store.accounts_for_tenant(adapter.name, tenant.host)
+        ident = choose_identity(primary, backup, rows,
+                                lambda e: vault.get(service, e) is not None)
+        ctx.email = ident.email
+        which = "backup" if backup and ident.email.lower() == backup.lower() else "main"
+        self.log(f"[attempt {at.id}] account: {ident.action.replace('_', ' ')} with the {which} email")
+        if ident.action == SIGN_IN:
+            self.sign_in(page, ctx, adapter, at, job, service)
+        else:
+            self.sign_up(page, ctx, adapter, at, job, service, primary, backup)
+        return dataclasses.replace(rctx, account_email=ctx.email)
+
+    def _account_id(self, adapter: Any, ctx: AttemptContext, service: str, at: _Attempt,
+                    status: str) -> int:
+        row = self.store.account(adapter.name, ctx.tenant.host, ctx.email)
+        if row is not None:
+            return int(row["id"])
+        return self.store.upsert_account(adapter.name, ctx.tenant.host, ctx.email, service,
+                                         status, created_by_attempt=at.id)
+
+    def sign_in(self, page: Any, ctx: AttemptContext, adapter: Any, at: _Attempt,
+                job: dict[str, Any], service: str, *, after_check: bool = False) -> None:
+        """One sign-in with the identity's vault password. A rejection marks the
+        row `signin_failed` (never retried automatically: lock-out risk)."""
+        at.to(S.SIGNING_IN, step="signing_in")
+        secret = vault.get(service, ctx.email)
+        if secret is None:
+            raise ApplyFailure(ReasonCode.LOGIN_FAILED,
+                               "JobScraper has no saved password for this account.")
+        acc_id = self._account_id(adapter, ctx, service, at, AccountStatus.CREATED.value)
+        try:
+            adapter.sign_in(page, ctx, secret)
+        except ApplyFailure as exc:
+            if exc.reason is ReasonCode.LOGIN_FAILED:
+                self.store.set_account_status(acc_id, AccountStatus.SIGNIN_FAILED.value,
+                                              last_signin_ok=0)
+            raise
+        row = self.store.account(adapter.name, ctx.tenant.host, ctx.email)
+        self.store.set_account_status(acc_id, row["status"] if row else AccountStatus.CREATED.value,
+                                      last_signin_at=utcnow(), last_signin_ok=1)
+        if not after_check and classify(page) is PageSignal.VERIFY_EMAIL:
+            self.check_email(page, ctx, adapter, at, job, service)
+
+    def sign_up(self, page: Any, ctx: AttemptContext, adapter: Any, at: _Attempt,
+                job: dict[str, Any], service: str, primary: str, backup: str) -> None:
+        """§10.2: the password is in the vault (read back) and the row is
+        `creating` BEFORE the sign-up click. "Already registered" on the main
+        email → one sign-up with the backup email (§10.5; the one allowed
+        signing_up → signing_up). A field error rolls the vault entry and the row
+        back; any other exception keeps both (`unknown`: the next attempt signs
+        in with the stored password)."""
+        if not _profile_path(self.profile, "consents.privacy_consent"):
+            raise ApplyFailure(ReasonCode.UNANSWERABLE_REQUIRED, "account terms")
+        host = ctx.tenant.host
+        tried_backup = False
+        while True:
+            at.to(S.SIGNING_UP, step="signing_up")
+            secret = vault.generate(adapter.password_rules)
+            try:
+                vault.put(service, ctx.email, secret)
+            except vault.VaultError:
+                raise ApplyFailure(ReasonCode.ERROR, "the password could not be stored") from None
+            acc_id = self.store.upsert_account(adapter.name, host, ctx.email, service,
+                                               AccountStatus.CREATING.value,
+                                               created_by_attempt=at.id)
+            try:
+                outcome = adapter.sign_up(page, ctx, secret)
+            except ApplyFailure as exc:
+                if exc.reason is ReasonCode.VALIDATION_ERROR:     # refused before accepting
+                    vault.delete(service, ctx.email)
+                    self.store.delete_account(acc_id)
+                else:
+                    self.store.set_account_status(acc_id, AccountStatus.UNKNOWN.value)
+                raise
+            except Exception:
+                self.store.set_account_status(acc_id, AccountStatus.UNKNOWN.value)
+                raise
+            if outcome != SignUpOutcome.ALREADY_REGISTERED.value:
+                self.store.set_account_status(acc_id, AccountStatus.CREATED.value)
+                break
+            vault.delete(service, ctx.email)              # the generated password was never accepted
+            self.store.set_account_status(acc_id, AccountStatus.EXISTS_NO_PASSWORD.value)
+            rows = self.store.accounts_for_tenant(adapter.name, host)
+            if (not tried_backup and backup and ctx.email.lower() == primary.lower()
+                    and backup.lower() not in rows):
+                tried_backup = True
+                ctx.email = backup
+                self.log(f"[attempt {at.id}] account: the main email is already registered "
+                         "here; signing up with the backup email")
+                continue
+            raise ApplyFailure(ReasonCode.LOGIN_FAILED,
+                               BOTH_NO_PASSWORD_DETAIL if backup else NO_PASSWORD_DETAIL)
+        self.log(f"[attempt {at.id}] account: created ({outcome})")
+        if outcome == SignUpOutcome.VERIFY_EMAIL.value or classify(page) is PageSignal.VERIFY_EMAIL:
+            self.check_email(page, ctx, adapter, at, job, service)
+        elif outcome == SignUpOutcome.SIGN_IN.value:
+            self.sign_in(page, ctx, adapter, at, job, service)
+
+    def check_email(self, page: Any, ctx: AttemptContext, adapter: Any, at: _Attempt,
+                    job: dict[str, Any], service: str) -> None:
+        """`verifying_email` before the click (AD §9.4.4): the link or code from
+        the identity's mailbox, then sign in (once more) or reopen the posting.
+        The row becomes `verified`."""
+        at.to(S.VERIFYING_EMAIL, step="verifying_email")
+        v = self.wait_for_mail(ctx, adapter, at, job, want="either")
+        if v.kind == "link":
+            page.goto(v.value, wait_until="domcontentloaded")
+            B.settle(page)
+        else:
+            adapter.enter_code(page, ctx, v.value)
+        acc_id = self._account_id(adapter, ctx, service, at, AccountStatus.CREATED.value)
+        self.store.set_account_status(acc_id, AccountStatus.VERIFIED.value, verified_at=utcnow())
+        self.check_page(page, at)
+        wall = adapter.account_wall(page)
+        if wall is None and getattr(adapter, "step_id", None) is not None \
+                and not adapter.step_id(page, ctx):
+            adapter.open(page, ctx)                       # candidate home or a notice: back to the posting
+            self.check_page(page, at)
+            wall = adapter.account_wall(page)
+        if wall == "sign_in":
+            self.sign_in(page, ctx, adapter, at, job, service, after_check=True)
+        elif wall:
+            raise ApplyFailure(ReasonCode.PAGE_UNRECOGNISED,
+                               f"{adapter.name}: account form after the email check")
+
+    def wait_for_mail(self, ctx: AttemptContext, adapter: Any, at: _Attempt,
+                      job: dict[str, Any], *, want: str):
+        """The verification mail for `ctx.email` (§11, §11.5): its own mailbox,
+        `to_addr` = the identity, mail since the attempt started. The wait does
+        not count against the attempt deadline (NF-07, review Q-35 M11).
+        Raises ApplyFailure(MAIL_NOT_SET_UP / EMAIL_VERIFICATION_TIMEOUT)."""
+        settings = mail.effective_settings(self.cfg, self.store.get_setting)
+        watcher = mail.watcher_for(ctx.email, self.profile, settings)
+        employer = mail.employer_domain(str(job.get("careers_url") or ""))
+        extra = (employer,) if employer else ()
+        links = (ctx.tenant.host,) + tuple(getattr(adapter, "link_domains", adapter.mail_domains)) + extra
+        row = self.store.attempt(at.id) or {}
+        started = row.get("started_at") or utcnow()
+        since = datetime.strptime(started, TIME_FMT).replace(tzinfo=timezone.utc)
+        t0 = time.monotonic()
+        try:
+            v = watcher.wait_for(since_utc=since,
+                                 sender_domains=tuple(adapter.mail_domains) + extra,
+                                 link_domains=links, otp_pattern=adapter.otp_pattern or None,
+                                 want=want, wait_s=int(settings.get("apply.mail.wait_s") or 300),
+                                 poll_s=int(settings.get("apply.mail.poll_s") or 10),
+                                 to_addr=ctx.email)
+        finally:
+            ctx.deadline += time.monotonic() - t0
+        self.log(f"[attempt {at.id}] verification mail found ({v.kind}) from {v.sender_domain}")
+        return v
+
+    def code_after_submit(self, page: Any, ctx: AttemptContext, adapter: Any, at: _Attempt,
+                          job: dict[str, Any]):
+        """§4.2 (Greenhouse): the emailed security code, entered once, then the
+        same submission's Submit once more (`code_resubmits` ≤ 1). Any problem
+        → (None, note): the caller ends `submitted_unconfirmed` (NF-06)."""
+        row = self.store.attempt(at.id) or {}
+        if int(row.get("code_resubmits") or 0) >= 1:
+            return None, "a second security code was asked for"
+        at.to(S.VERIFYING_EMAIL, step="verifying_email")
+        try:
+            v = self.wait_for_mail(ctx, adapter, at, job, want="code")
+        except ApplyFailure as exc:
+            if exc.reason is ReasonCode.MAIL_NOT_SET_UP:
+                return None, "security code needed; mailbox not set up"
+            return None, f"security code: {exc.reason.value}"
+        adapter.enter_code(page, ctx, v.value)
+        self.store.update_attempt(at.id, code_resubmits=int(row.get("code_resubmits") or 0) + 1)
+        at.to(S.SUBMITTING, step="submit")
+        adapter.submit(page, ctx)
+        outcome, note = self.await_confirmation(page, ctx, adapter)
+        if outcome is None and note == CODE_REQUIRED:
+            return None, "a second security code was asked for"
+        return outcome, note
+
     def await_confirmation(self, page: Any, ctx: AttemptContext, adapter: Any):
         """(confirmation signal, "") or (None, note) within `confirm_timeout_s`."""
         end = time.monotonic() + self.acfg.confirm_timeout_s
@@ -966,8 +1169,8 @@ class _Run:
             got = adapter.after_submit(page, ctx)
             if got and got.startswith("confirmed:"):
                 return got.split(":", 1)[1], ""
-            if got == "code_required":            # the emailed code needs the mailbox (lane V)
-                return None, "security code needed; mailbox not set up"
+            if got == "code_required":            # the emailed code (§4.2): code_after_submit
+                return None, CODE_REQUIRED
             if got == "errors":
                 return None, "errors after submit"
             sig = classify(page)
