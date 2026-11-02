@@ -59,6 +59,7 @@ L1_KEPT_NOTE = "L1: kept, uploaded in this attempt"     # locks: the file on the
 TIMED_OUT_NOTE = "transport: timed out"
 G9_FAILED_NOTE = "G9: cleared after failed fill"
 DELETE_UNCONFIRMED_NOTE = "E3: delete not confirmed"
+ENTRY_ADD_FAILED_NOTE = "E5: entry not added"
 MISS_NOTES = ("search_miss", "no_option")                 # widgets notes: the list had nothing to take
 UNAVAILABLE_NOTE = "transport: model unavailable"
 DEFAULT_REVEAL_ROUNDS = 2
@@ -495,20 +496,18 @@ def _add_entry(run: _Run, section: str, source: str) -> tuple[str, ...]:
 
 
 def _add_failed(run: _Run, section: str, why: str) -> tuple[str, ...]:
-    """Review F5: E5 asked for an entry the page didn't get. Always logged (the section
-    name only, no personal value). When the section is required and the page now shows
-    no entry for it, its required fields are reported fill_failed (`run.entry_failed`,
-    kept through the corrective pass) so the flow stops; a missing optional extra entry
-    (a language, a website) is reported in the log only, since the page holds nothing
-    untrue. A required section with no fields on the page is caught by the site's Next."""
+    """Review F5: E5 asked for an entry the page didn't get; never silent. Logged (the
+    section name only) and reported in the outcome: the section's fields on the page
+    (its required ones, else all of them) are listed in `fill_failed` with the note
+    "E5: entry not added" (`run.entry_failed`, kept through the corrective pass), so the
+    flow sees the application is missing an entry the source has. PageOutcome has no
+    entry channel; a section with no fields on the page is logged only."""
     run.services.log(f"E5: add failed in {section}: {why}")
-    sec = next((s for s in run.sections if s.section == section), None)
-    if sec is None or not sec.required or sec.entries:
-        return ()
-    for key in [k for k in run.order if k in run.fields]:
-        pf = run.fields[key]
-        if pf.field.required and pf.group.rpartition("#")[0] == section:
-            run.entry_failed[key] = "entry_add_failed"
+    keys = [k for k in run.order if k in run.fields and k not in run.dead
+            and run.fields[k].group.rpartition("#")[0] == section]
+    required = [k for k in keys if run.fields[k].field.required]
+    for key in required or keys:
+        run.entry_failed[key] = ENTRY_ADD_FAILED_NOTE
     return ()
 
 
@@ -711,8 +710,8 @@ def _outcome(run: _Run, *, unknown: Sequence[str] = ()) -> PageOutcome:
     failed = [k for k in run.order if k in why and k not in unknown]
     for k in failed:
         if k in answers:
-            answers[k] = _replace(answers[k], status=AnswerStatus.FILL_FAILED,
-                                  note=answers[k].note or f"fill: {why[k]}")
+            note = why[k] if k in run.entry_failed and k not in run.failed else (answers[k].note or f"fill: {why[k]}")
+            answers[k] = _replace(answers[k], status=AnswerStatus.FILL_FAILED, note=note)
     fields = [run.fields[k] for k in run.order if k in run.fields]
     return PageOutcome(step=run.step, fields=fields, answers=answers, unknown_required=tuple(unknown),
                        fill_failed=tuple(failed), model_calls=run.stats.calls,
