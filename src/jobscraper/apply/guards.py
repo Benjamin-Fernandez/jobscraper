@@ -149,8 +149,14 @@ def _phrases(words: Iterable[str], text_toks: Sequence[str]) -> bool:
 
 
 def sensitive_label(pf: PageField) -> bool:
-    """G7: the question is about an S topic (whole words: "Sussex" is not "sex")."""
-    return _phrases(SENSITIVE_LABEL, tokens(pf.field.label + " " + pf.field.description))
+    """G7: the question is about an S topic (whole words: "Sussex" is not "sex"). A
+    generic label ("Please specify") belongs to its context question (§12.1), so its
+    context and group heading count too: a follow-up to "Race" is an S field (review F3).
+    `llm_fill._withhold` uses this, so such a field's `current` is withheld as well."""
+    text = pf.field.label + " " + pf.field.description
+    if is_generic(norm_label(pf.field.label)):
+        text += " " + (pf.context or "") + " " + (pf.group_title or "")
+    return _phrases(SENSITIVE_LABEL, tokens(text))
 
 
 def contact_label(pf: PageField) -> bool:
