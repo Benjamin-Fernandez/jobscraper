@@ -208,8 +208,17 @@ def _rule_lock(pf: PageField, label_norm: str, rctx: ResolveContext,
 
 # ---------------------------------------------------------------- L3, L7
 
+# A trailing answer hint ("... offence? (Yes/No)") is not a negation (review F6).
+ANSWER_HINTS = (("yes", "no"), ("yes", "or", "no"), ("y", "n"), ("no", "yes"),
+                ("no", "or", "yes"))
+
+
 def _negated(label_norm: str) -> bool:
     toks = label_norm.split()
+    for hint in ANSWER_HINTS:
+        if len(toks) > len(hint) and tuple(toks[-len(hint):]) == hint:
+            toks = toks[:-len(hint)]
+            break
     return any(contains_run(toks, list(n)) for n in NEGATIONS)
 
 
