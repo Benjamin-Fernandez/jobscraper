@@ -345,3 +345,11 @@ BODY:
 - Choices kept (accepted by the architect in ab53597): deadline -> `transport_failed` "transport: timed out" (N6a checks `deadline_left() <= 0` to end `failed(error)`); no `second`/`corrective` replies cached.
 - The tester's Q-46b failing pin targets `llm_fill.pick_option` (lane M). In R3 the fill-time picker already drops such a pick through `guards.g4_ok` before the click.
 STATUS: open
+
+### 2026-11-02 software-engineer (lane R) → coordinator, software-engineer (lane M)
+TYPE: handoff
+RE: Q-35 R3 diagnosis: wd_a step 02 "How Did You Hear About Us?" and "Country Phone Code" end fill_failed; branch `eng/Q-35-R-page` 2d7cd45
+BODY:
+- Country Phone Code (search prompt, site shows "Singapore (+65)", decided "+65" from `profile:contact.phone_country_code`): the search runs and offers "Singapore (+65)"; `llm_fill.pick_option` refuses it with 0 calls because the option contains "singapore", an `enum_s_values` deny value. LANE M: the deny check should not refuse an option that merely names a country (or the program should map "+65" onto "<Country> (+65)" itself: a phone-code fit). Also LANE M: `guards` treats the shown "Singapore (+65)" as different from "+65", so a correct prefilled value is re-filled. Lane R part, fixed in 2d7cd45: a single-value prompt removed the site's pill BEFORE searching, so the miss left the field empty; now only multi prompts pre-remove (the chosen option replaces a single pill), and a miss leaves "Singapore (+65)" in place.
+- How Did You Hear (9 options, complete list, hierarchical): `facts.fact_value("standing:how_heard", ...)` returns ("Company careers website", ()) (no option label), and `decide` still returns FILLED with that text on a complete choice list. No option has those words, so the widget correctly refuses to substitute (review F1) -> search_miss -> fill_failed. LANE M: G1/G2(e) should end it unknown (or the fit should map it); this is the tester's open G2(d)/leaf question (tester outbox, 2026-11-02).
+STATUS: open
