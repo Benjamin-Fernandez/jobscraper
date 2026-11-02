@@ -213,8 +213,63 @@ ANSWER_HINTS = (("yes", "no"), ("yes", "or", "no"), ("y", "n"), ("no", "yes"),
                 ("no", "or", "yes"))
 
 
+# D-87 (AD §7.5 rule 4): an NS-exclusion run ("excluding mandatory military service",
+# "national service is not counted") is not a negation of the question.
+NS_EXCLUSION_LEADS = (("excluding",), ("exclude",), ("excludes",), ("except",),
+                      ("other", "than"), ("apart", "from"), ("aside", "from"), ("besides",),
+                      ("save", "for"), ("not", "including"), ("not", "counting"),
+                      ("does", "not", "include"), ("do", "not", "include"))
+NS_EXCLUSION_TAILS = (("not", "included"), ("excluded",), ("not", "counted"),
+                      ("does", "not", "count"))
+NS_TERMS = (("full", "time", "national", "service"), ("mandatory", "military", "service"),
+            ("compulsory", "military", "service"), ("mandatory", "national", "service"),
+            ("national", "service"), ("military", "service"), ("mandatory", "service"),
+            ("compulsory", "service"), ("conscription",), ("nsf",), ("ns",))
+
+
+def _run_at(toks: list[str], i: int, runs: Sequence[tuple[str, ...]]) -> int:
+    """The length of the first run in `runs` starting at toks[i], else 0."""
+    for r in runs:
+        if tuple(toks[i:i + len(r)]) == r:
+            return len(r)
+    return 0
+
+
+def strip_ns_exclusion(toks: list[str]) -> list[str]:
+    """D-87: `toks` without its NS-exclusion runs (a lead with an NS term starting in the
+    next 4 tokens, or an NS term followed within 3 tokens by a "not included" tail)."""
+    out: list[str] = []
+    i = 0
+    while i < len(toks):
+        lead = _run_at(toks, i, NS_EXCLUSION_LEADS)
+        if lead:
+            for j in range(i + lead, min(i + lead + 4, len(toks))):
+                n = _run_at(toks, j, NS_TERMS)
+                if n:
+                    i = j + n
+                    break
+            else:
+                out.append(toks[i])
+                i += 1
+            continue
+        n = _run_at(toks, i, NS_TERMS)
+        if n:
+            for j in range(i + n, min(i + n + 3, len(toks))):
+                t = _run_at(toks, j, NS_EXCLUSION_TAILS)
+                if t:
+                    i = j + t
+                    break
+            else:
+                out.extend(toks[i:i + n])
+                i += n
+            continue
+        out.append(toks[i])
+        i += 1
+    return out
+
+
 def _negated(label_norm: str) -> bool:
-    toks = label_norm.split()
+    toks = strip_ns_exclusion(label_norm.split())
     for hint in ANSWER_HINTS:
         if len(toks) > len(hint) and tuple(toks[-len(hint):]) == hint:
             toks = toks[:-len(hint)]
@@ -223,8 +278,10 @@ def _negated(label_norm: str) -> bool:
 
 
 def _declaration_lock(pf: PageField, label_norm: str, rctx: ResolveContext) -> Optional[Answer]:
-    """L3: the tier-4 declaration answer (AD §7.5); AMBIGUOUS -> unknown. L7: a Yes/No
-    choice whose label is negated ("I have never been...", "free of", "without") cannot
+    """L3: the tier-4 declaration answer (AD §7.5). Every classified field, AMBIGUOUS
+    included, goes to `declarations.answer()`, which owns the D-87 agreement rule (L3
+    does not end AMBIGUOUS itself). L7: a Yes/No choice whose label is negated ("I have
+    never been...", "free of", "without"; NS-exclusion runs removed first, D-87) cannot
     be mapped safely -> unknown (attestation_unclear). A single checkbox keeps L3's own
     negation rule (tick when the statement on it is true)."""
     f = pf.field
