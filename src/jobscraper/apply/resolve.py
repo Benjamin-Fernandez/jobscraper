@@ -1233,7 +1233,8 @@ MONTHS = ("january", "february", "march", "april", "may", "june", "july", "augus
           "september", "october", "november", "december")
 WEEKDAYS = ("monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday")
 CAPITAL_ALLOW = frozenset({"i", "i'm", "i've", "singapore", "english", *MONTHS, *WEEKDAYS})
-_WORD = re.compile(r"[A-Za-z][A-Za-z0-9]*(?:['’][A-Za-z]+)?")
+# A word, with C++ / C# / .NET-style tokens kept whole (Q-35 G3: "C++" is not "word C").
+_WORD = re.compile(r"(?:(?<![^\s(/,])\.)?[A-Za-z][A-Za-z0-9]*(?:\+\+|#)?(?:['’][A-Za-z]+)?")
 
 
 def corpus_norm(text: str) -> str:
@@ -1354,7 +1355,7 @@ def grounded(kind: str, reply: dict, ctx: ResolveContext, *, n_options: int = 0,
         if pos and re.search(r"[.!?]\s*$|[\r\n]", between):
             sentence_start = True
         w = m.group(0)
-        if w[0].isupper() and not sentence_start and w.lower().replace("’", "'") \
+        if w.lstrip(".")[0].isupper() and not sentence_start and w.lower().replace("’", "'") \
                 not in CAPITAL_ALLOW and not _has_word(cnorm, w):
             v.append(f"word {w}")
         sentence_start = False
