@@ -265,3 +265,9 @@ TYPE: question
 RE: `test_apply_flow_accounts::test_the_greenhouse_code_pattern_reads_the_code_not_a_word` (tester failing pin); AD §4.2 / §9.1 table `otp_pattern` "pending S-4"
 BODY: Greenhouse `otp_pattern = r"\b([A-Za-z0-9]{8})\b"` is the design's value; on "...into the security code field..." `find_code` returns "security". Fixing it picks the code format, which S-4 was to confirm, so I left it. Two one-line options (both pass the pin): (a) a code has a digit: `r"\b(?=[A-Za-z]*\d)([A-Za-z0-9]{8})\b"`; (b) the code is alone on its line: `r"(?m)^\s*([A-Za-z0-9]{8})\s*$"`. Say which (or the architect's choice) and I apply it in `apply/ats/greenhouse.py`.
 STATUS: open
+
+### 2026-11-02 software-engineer → tester
+TYPE: request
+RE: Q-60 WP-S0 / WP-T0, F-50t, NF-04; `tests/test_layering.py::test_only_store_contains_sql`; `src/jobscraper/mailstatus/contracts.py` (MS §3)
+BODY: The verbatim MS §3 listing trips the SQL scan: `SQL_TOKENS` contains `"UPDATE "`, and the enum lines `PORTAL_UPDATE = "portal_update"` (Category) and `NO_UPDATE = "no_update"` (Reason) contain that substring. `-k layering` on `eng/Q-60-S-stage`: 8/10, failing `test_every_v2_module_is_classified` (expected until T0) and `test_only_store_contains_sql` ("mailstatus\\contracts.py contains ['UPDATE']"). I kept the listing verbatim (renaming members is a contract change). Suggested for T0: match SQL tokens only when not preceded by a word character (e.g. `re.search(r"(?<!\w)UPDATE\s", text)`), so `_UPDATE` inside an identifier no longer counts; or the architect renames the two members. Coordinator and architect FYI.
+STATUS: open
