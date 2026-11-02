@@ -1,0 +1,34 @@
+[
+ {
+  "label": "Country Phone Code",
+  "type": "typeahead",
+  "widget": "prompt",
+  "required": true,
+  "options": [],
+  "options_sorted": true,
+  "shown": "",
+  "group": "",
+  "group_title": "",
+  "context": "",
+  "options_complete": false,
+  "automation_id": "formField-countryPhoneCode",
+  "parts": [],
+  "help": ""
+ },
+ {
+  "label": "City",
+  "type": "text",
+  "widget": "text",
+  "required": false,
+  "options": [],
+  "options_sorted": true,
+  "shown": "",
+  "group": "",
+  "group_title": "",
+  "context": "",
+  "options_complete": true,
+  "automation_id": "formField-city",
+  "parts": [],
+  "help": ""
+ }
+]

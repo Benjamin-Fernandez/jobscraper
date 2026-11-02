@@ -1,0 +1,21 @@
+[
+ {
+  "label": "Do you have any relatives working at Example Employer?",
+  "type": "radio",
+  "widget": "radio",
+  "required": true,
+  "options": [
+   "No",
+   "Yes"
+  ],
+  "options_sorted": true,
+  "shown": "",
+  "group": "",
+  "group_title": "",
+  "context": "",
+  "options_complete": true,
+  "automation_id": "formField-relatives",
+  "parts": [],
+  "help": ""
+ }
+]

@@ -1,0 +1,248 @@
+{
+ "calls": [
+  {
+   "kind": "entry",
+   "reply": {
+    "Work Experience 1|Job Title": {
+     "source": "keep",
+     "ref": "",
+     "value": "Software Engineering Intern, Example Logistics Pte Ltd",
+     "evidence": "Software Engineering Intern, Example Logistics Pte Ltd"
+    },
+    "Work Experience 1|Company": {
+     "source": "profile",
+     "ref": "profile:experience[0].employer",
+     "value": "Example Logistics Pte Ltd",
+     "evidence": ""
+    },
+    "Work Experience 1|Location": {
+     "source": "resume",
+     "ref": "",
+     "value": "Singapore",
+     "evidence": "Example Logistics Pte Ltd, Singapore"
+    },
+    "Work Experience 1|I currently work here": {
+     "source": "profile",
+     "ref": "profile:experience[0].end",
+     "value": "false",
+     "evidence": ""
+    },
+    "Work Experience 1|From": {
+     "source": "profile",
+     "ref": "profile:experience[0].start",
+     "value": "2024-05",
+     "evidence": ""
+    },
+    "Work Experience 1|To": {
+     "source": "profile",
+     "ref": "profile:experience[0].end",
+     "value": "2024-08",
+     "evidence": ""
+    },
+    "Work Experience 1|Role Description": {
+     "source": "keep",
+     "ref": "",
+     "value": "",
+     "evidence": "Built REST APIs in Python and Postgres"
+    }
+   }
+  },
+  {
+   "kind": "recheck",
+   "match": "Work Experience 1",
+   "raw": {
+    "source": "resume",
+    "ref": "",
+    "value": "Built REST APIs in Python and Postgres for shipment tracking.",
+    "evidence": "Built REST APIs in Python and Postgres for shipment tracking."
+   }
+  },
+  {
+   "kind": "entry",
+   "reply": {
+    "Work Experience 2|Job Title": {
+     "source": "profile",
+     "ref": "profile:experience[1].title",
+     "value": "Data Intern",
+     "evidence": ""
+    },
+    "Work Experience 2|Company": {
+     "source": "profile",
+     "ref": "profile:experience[1].employer",
+     "value": "Sample Analytics",
+     "evidence": ""
+    },
+    "Work Experience 2|Location": {
+     "source": "resume",
+     "ref": "",
+     "value": "Singapore",
+     "evidence": "Alex Testcase | Singapore"
+    },
+    "Work Experience 2|I currently work here": {
+     "source": "profile",
+     "ref": "profile:experience[1].end",
+     "value": "false",
+     "evidence": ""
+    },
+    "Work Experience 2|From": {
+     "source": "profile",
+     "ref": "profile:experience[1].start",
+     "value": "2025-01",
+     "evidence": ""
+    },
+    "Work Experience 2|To": {
+     "source": "profile",
+     "ref": "profile:experience[1].end",
+     "value": "2025-06",
+     "evidence": ""
+    },
+    "Work Experience 2|Role Description": {
+     "source": "keep",
+     "ref": "",
+     "value": "",
+     "evidence": "Automated weekly reports with SQL and Python."
+    }
+   }
+  },
+  {
+   "kind": "recheck",
+   "match": "Work Experience 2",
+   "raw": {
+    "source": "resume",
+    "ref": "",
+    "value": "Automated weekly reports with SQL and Python.",
+    "evidence": "Automated weekly reports with SQL and Python."
+   }
+  },
+  {
+   "kind": "entry",
+   "reply": {
+    "Education 1|School or University": {
+     "source": "profile",
+     "ref": "profile:education[0].institution",
+     "value": "Nanyang Example University",
+     "evidence": ""
+    },
+    "Education 1|Degree": {
+     "source": "profile",
+     "ref": "profile:education[0].degree",
+     "value": "Bachelor's Degree",
+     "evidence": ""
+    },
+    "Education 1|Field of Study": {
+     "source": "profile",
+     "ref": "profile:education[0].major",
+     "value": "Computer Engineering",
+     "evidence": ""
+    },
+    "Education 1|Overall Result (GPA)": {
+     "source": "profile",
+     "ref": "profile:education[0].grade",
+     "value": "4.20",
+     "evidence": ""
+    },
+    "Education 1|From": {
+     "source": "profile",
+     "ref": "profile:education[0].start",
+     "value": "2021",
+     "evidence": ""
+    },
+    "Education 1|To (Actual or Expected)": {
+     "source": "profile",
+     "ref": "profile:education[0].end",
+     "value": "2025",
+     "evidence": ""
+    }
+   }
+  },
+  {
+   "kind": "entry",
+   "reply": {
+    "Languages 1|Language": {
+     "source": "profile",
+     "ref": "profile:languages[0].language",
+     "value": "English",
+     "evidence": ""
+    },
+    "Languages 1|I am fluent in this language.": {
+     "source": "profile",
+     "ref": "profile:languages[0].spoken",
+     "value": "true",
+     "evidence": ""
+    },
+    "Languages 1|Overall": {
+     "source": "profile",
+     "ref": "profile:languages[0].spoken",
+     "value": "Native",
+     "evidence": ""
+    }
+   }
+  },
+  {
+   "kind": "entry",
+   "reply": {
+    "Languages 2|Language": {
+     "source": "keep",
+     "ref": "",
+     "value": "Japanese",
+     "evidence": ""
+    },
+    "Languages 2|I am fluent in this language.": {
+     "source": "unknown",
+     "ref": "",
+     "value": "",
+     "evidence": ""
+    },
+    "Languages 2|Overall": {
+     "source": "resume",
+     "ref": "",
+     "value": "Advanced",
+     "evidence": "Languages: English, Mandarin"
+    }
+   }
+  },
+  {
+   "kind": "entry",
+   "reply": {
+    "Websites 1|URL": {
+     "source": "profile",
+     "ref": "profile:links.github",
+     "value": "https://github.com/example-alex-testcase",
+     "evidence": ""
+    }
+   }
+  },
+  {
+   "kind": "page",
+   "reply": {
+    "|Type to Add Skills": {
+     "source": "profile",
+     "ref": "profile:skills",
+     "value": [
+      "Python",
+      "SQL",
+      "Git"
+     ],
+     "evidence": ""
+    },
+    "|LinkedIn Profile": {
+     "source": "profile",
+     "ref": "profile:links.linkedin",
+     "value": "https://www.linkedin.com/in/example-alex-testcase",
+     "evidence": ""
+    }
+   }
+  },
+  {
+   "kind": "corrective",
+   "reply": {
+    "Education 1|Degree": {
+     "source": "profile",
+     "ref": "profile:education[0].degree",
+     "value": "Bachelor's Degree",
+     "evidence": ""
+    }
+   }
+  }
+ ]
+}

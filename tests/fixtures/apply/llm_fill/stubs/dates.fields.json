@@ -1,0 +1,78 @@
+[
+ {
+  "label": "From",
+  "type": "date",
+  "widget": "segmented_date",
+  "required": true,
+  "options": [],
+  "options_sorted": true,
+  "shown": "3/2026",
+  "group": "",
+  "group_title": "",
+  "context": "",
+  "options_complete": true,
+  "automation_id": "formField-startDate",
+  "parts": [
+   "Month",
+   "Year"
+  ],
+  "help": ""
+ },
+ {
+  "label": "To",
+  "type": "date",
+  "widget": "segmented_date",
+  "required": false,
+  "options": [],
+  "options_sorted": true,
+  "shown": "",
+  "group": "",
+  "group_title": "",
+  "context": "",
+  "options_complete": true,
+  "automation_id": "formField-endDate",
+  "parts": [
+   "Month",
+   "Year"
+  ],
+  "help": ""
+ },
+ {
+  "label": "Date of Signature",
+  "type": "date",
+  "widget": "segmented_date",
+  "required": false,
+  "options": [],
+  "options_sorted": true,
+  "shown": "",
+  "group": "",
+  "group_title": "",
+  "context": "",
+  "options_complete": true,
+  "automation_id": "formField-dateSignedOn",
+  "parts": [
+   "Day",
+   "Month",
+   "Year"
+  ],
+  "help": ""
+ },
+ {
+  "label": "Graduation Year",
+  "type": "date",
+  "widget": "segmented_date",
+  "required": false,
+  "options": [],
+  "options_sorted": true,
+  "shown": "",
+  "group": "",
+  "group_title": "",
+  "context": "",
+  "options_complete": true,
+  "automation_id": "formField-lastYearAttended",
+  "parts": [
+   "Year"
+  ],
+  "help": ""
+ }
+]
