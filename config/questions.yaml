@@ -49,7 +49,9 @@ questions:
       - authorisation to work
       - permitted to work
       - eligible to work
-    exclude: [united states, u s, usa, united kingdom, uk, canada, australia, europe, european union, india, germany, hong kong, malaysia, china, japan, argentina]
+    exclude: [united states, u s, usa, united kingdom, uk, canada, australia, europe, european union, india, germany, hong kong, malaysia, china, japan, argentina, in the us, in us, in the usa, in the uk, in uk, in canada, in australia, in europe, in the eu, in india, in germany, in malaysia, in china, in japan, in argentina]
+    # One-token excludes (usa, uk, canada...) only act on labels of 4 tokens or fewer (7.1), so the 'in <country>'
+    # pairs below are what stop "authorised to work in the UK" from answering as Singapore (2026-11-02, Q-26).
 
   - key: singapore_status.authorised_to_work.US
     kind: bool
@@ -85,7 +87,9 @@ questions:
       - visa transfer
       - immigration sponsorship
       - sponsorship to work
-    exclude: [united states, u s, usa, united kingdom, uk, canada, australia, europe, european union, india, germany, hong kong, malaysia, china, japan]
+    exclude: [united states, u s, usa, united kingdom, uk, canada, australia, europe, european union, india, germany, hong kong, malaysia, china, japan, in the us, in us, in the usa, in the uk, in uk, in canada, in australia, in europe, in the eu, in india, in germany, in malaysia, in china, in japan, in argentina]
+    # One-token excludes (usa, uk, canada...) only act on labels of 4 tokens or fewer (7.1), so the 'in <country>'
+    # pairs below are what stop "authorised to work in the UK" from answering as Singapore (2026-11-02, Q-26).
 
   - key: singapore_status.requires_sponsorship.US
     kind: bool
