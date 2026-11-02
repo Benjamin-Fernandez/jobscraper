@@ -106,6 +106,7 @@ class _Run:
     failed: dict = dc_field(default_factory=dict)           # reader key -> widgets note
     fresh: list = dc_field(default_factory=list)            # model decisions made on this page
     transport: str = ""                                     # set by a pick that failed in transport
+    alias: dict = dc_field(default_factory=dict)            # re-created reader key -> the old key (F6)
 
 
 def fill_page(page: Any, nav: Any, ctx: AttemptContext, rctx: ResolveContext, services: Any) -> PageOutcome:
@@ -168,18 +169,25 @@ def fill_page(page: Any, nav: Any, ctx: AttemptContext, rctx: ResolveContext, se
 # ------------------------------------------------------------------ steps 1, 3-6
 
 def _read(run: _Run, sections: Sequence[EntrySection]) -> list[PageField]:
-    """Read the scope; remember each field's first audit key and its latest PageField."""
+    """Read the scope; remember each field's first audit key and its latest PageField.
+    A new reader key whose audit key equals an earlier field's is that field re-created
+    (React re-render) ONLY when the earlier key is absent from this read (review F6:
+    audit keys repeat by design, so a live or revealed field never inherits another's
+    answer); it then takes over its answer and `run.alias` maps it to the old key."""
     fields = P.read_page(run.page, scope=run.scope, sections=list(sections), origin=run.ctx.prefill or "",
                          known=run.known, step=run.step, pre_import=run.ctx.pre_import or None)
     akeys = P.audit_keys(run.page, fields, run.step) if fields else {}
-    by_audit = {a: k for k, a in run.audit.items()}
+    here = {pf.field.key for pf in fields}
+    by_audit = {a: k for k, a in run.audit.items() if k not in here and k not in run.alias.values()}
     for pf in fields:
         key = pf.field.key
         if key not in run.audit:
-            old = by_audit.get(akeys.get(key, ""))
+            old = by_audit.pop(akeys.get(key, ""), None) if akeys.get(key) else None
             run.audit[key] = run.audit.get(old, "") if old else akeys.get(key, "")
-            if old and old in run.answers and key not in run.answers:   # a re-created element (F6)
-                run.answers[key] = _replace(run.answers[old], field_key=key)
+            if old:
+                run.alias[key] = old
+                if old in run.answers and key not in run.answers:
+                    run.answers[key] = _replace(run.answers[old], field_key=key)
         if key not in run.fields:
             run.order.append(key)
         run.fields[key] = pf
@@ -187,12 +195,9 @@ def _read(run: _Run, sections: Sequence[EntrySection]) -> list[PageField]:
 
 
 def _seen(run: _Run, pf: PageField) -> bool:
-    """Decided on this page already (by reader key, or by audit key after a re-render)."""
+    """Decided on this page already (by reader key, or as a confirmed re-creation, F6)."""
     key = pf.field.key
-    if key in run.answers:
-        return True
-    a = run.audit.get(key, "")
-    return bool(a) and any(run.audit.get(k) == a for k in run.answers)
+    return key in run.answers or run.alias.get(key, "") in run.answers
 
 
 def _decide(run: _Run, fields: Sequence[PageField], sections: Sequence[EntrySection],
