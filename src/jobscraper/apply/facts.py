@@ -584,6 +584,30 @@ def _own_contact_ref(ref: str) -> bool:
     return bool(set(re.split(r"[._\[\]]+", name.lower())) & set(ADDRESS_WORDS))
 
 
+# Q-46(c): "worked here" / "current employee here" answer only a question about THIS
+# employer (it says us / our / here / this company, or names the employer or an alias);
+# "Have you ever worked for the Government?" is not one.
+EMPLOYER_STANDING_REFS = ("standing:worked_here", "standing:current_employee_here")
+THIS_EMPLOYER_RUNS = (("us",), ("our",), ("we",), ("here",), ("this", "company"),
+                      ("this", "employer"), ("this", "organisation"),
+                      ("this", "organization"), ("this", "firm"), ("this", "bank"),
+                      ("this", "group"), ("the", "company"))
+
+
+def names_this_employer(field: FieldLike, rctx: Optional[ResolveContext]) -> bool:
+    """Q-46(c): the label (or its help text) refers to the employer of this application."""
+    f = _ff(field)
+    toks = tokens(f"{f.label} {f.description}")
+    if any(contains_run(toks, list(r)) for r in THIS_EMPLOYER_RUNS):
+        return True
+    names = [rctx.employer_name or ""] + list(rctx.employer_aliases or ()) if rctx else []
+    for n in names:
+        emp = declarations.employer_norm(n).split()
+        if emp and contains_run(toks, emp):
+            return True
+    return False
+
+
 OWN_DETAIL_PATHS = ("identity.legal_first_name", "identity.legal_last_name",
                     "identity.preferred_name", "contact.city")
 
@@ -642,6 +666,8 @@ def relevant(ref: str, field: FieldLike, rules: Any, *, facts: Sequence[Fact] = 
         return False
     if _own_contact_ref(ref) and in_entry_section(field):
         return False                                 # Q-46(a): an entry's Location is not home
+    if ref in EMPLOYER_STANDING_REFS and not names_this_employer(field, rctx):
+        return False                                 # Q-46(c): "worked for the Government"
     ns, _, name = ref.partition(":")
     label_norm = norm_label(f.label)
     if ns == "profile" and rule_match(name, f, rules) is not None:
