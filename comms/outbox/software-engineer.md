@@ -237,3 +237,19 @@ TYPE: question
 RE: Q-35 WP-R3 `pagefill.fill_page` - the `guards.decide` result shape is not pinned (LF §7, §8 pinned-signature table)
 BODY: LF §8 pins `guards.decide(...) -> Decision` but not `Decision`'s fields, and `llm_fill.Chunk` is pinned only as a NamedTuple. R3 reads the answers, the stop list and the entry actions from it. Proposal (lane M builds it, R3 reads it): `Decision(answers: dict[str, Answer], unknown_required: tuple[str, ...], deletes: tuple[str, ...]  # group ids (E3, E6), adds: tuple[tuple[str, str], ...]  # (section, source entry id) (E5), resets: tuple[str, ...]  # field keys G9 clears/resets/unticks)`, with `Answer.note` naming the G9 action. A pin in contracts or LF §8 avoids lanes M and R guessing; R3 waits for it (or for lane M's M3).
 STATUS: open
+
+### 2026-11-03 software-engineer → coordinator
+TYPE: handoff
+RE: Q-35 lane N review fixes F2, F5, F8 (`docs/reviews/Q-35-lanes-NR.md`), branch `eng/Q-35-N-workday`
+BODY: Fixed in 2fd4b90 (src only).
+- F2: Workday `next_step` returns `is_review` (no click) whenever a Submit button is visible (`submit_ready`), or the nav button's text or aria-label contains "submit". Otherwise it clicks only a button whose text or aria-label reads Save and Continue / Next (`NEXT_NAME`); an unlabelled or other label → `page_unrecognised` "workday: next button unlabelled or unexpected", nothing clicked.
+- F5: Greenhouse `_snapshot_pre_import` now reads with lane R's `page.read_page(page, scope=..., options=False, step="form")` and keys with `page.audit_keys(page, fields, "form")`. Text = the shown value as `read_page` compares it (a list joined "; "). Skipped when MyGreenhouse is off or has no button. This answers my earlier open question.
+- F8: new `vault.export_accounts(path) -> {(host, email_lower)}` reads the export's url/username columns (the password column is never printed); `accounts export-edge --confirm` marks only the not-yet-exported rows the newest file lists.
+- Evidence: scratch checks on local stubs (headless Edge): empty label → page_unrecognised, 0 clicks; aria-label "Next" → clicked; "Continue" → page_unrecognised; a Submit elsewhere or on the nav button → review, 0 clicks. Pre-import keys equal the reader's audit keys; after a stub import the unchanged pre-filled field is `site_default` and the changed one `mygreenhouse`. Export with 2 accounts, a 3rd created after the export, `--confirm` → 2 marked, 3rd not; no password in the output. Suite: SUITE_LINE
+STATUS: open
+
+### 2026-11-03 software-engineer → coordinator
+TYPE: request
+RE: Q-35 WP-N6a, review F7 (Workday integration order)
+BODY: For the N6a engineer: on Workday the Start Your Application dialog comes before the account form, so the flow must run open → `nav.choose_entry` → `account_wall` / `account()` (today `account_wall` runs right after `open`). `check_email` reopens the posting with `adapter.open()`, which lands on the dialog again; call `choose_entry` again after that reopen, before looking for the sign-in wall. Also remove in N6a: the interim `unsupported_ats` guard for Workday in `apply_flow.body`, and `workday._click` once lane R's `page.click` is in use. Add a flow oracle for the order.
+STATUS: open
