@@ -275,7 +275,8 @@ def classify_all(label_norm: str, description_norm: str = ""
     2. Longest match: a class's hit is dropped when every span it matched lies
        inside a longer span matched by another class ("worked for the
        government" beats prior employment's "worked for"; "senior government
-       official" is a PEP question, not a government-employment one).
+       official" is a PEP question, not a government-employment one). D-89:
+       prior / current employment also lose to a government span they overlap.
     3. "Current" and "prior" employee together resolve by D-69 precedence.
     4. The government/NS rule on `government_employment` (see _MILITARY).
     5. A disability label that is also about veterans, gender, race, religion
@@ -287,11 +288,21 @@ def classify_all(label_norm: str, description_norm: str = ""
         spans = _spans(label_toks if lab is L.DISABILITY else text, phrases)
         if spans:
             found[lab] = spans
-    dropped = {
-        lab for lab, spans in found.items()
-        if all(any(other is not lab and b2 - a2 > b1 - a1 and a2 <= a1 and b1 <= b2
-                   for other, others in found.items() for a2, b2 in others)
-               for a1, b1 in spans)}
+    gov_spans = found.get(L.GOVERNMENT_EMPLOYMENT, [])
+
+    def covered(lab: DeclarationLabel, a1: int, b1: int) -> bool:
+        # R1: inside a longer span of another class. D-89: for the two employer
+        # classes, also overlapping a government span ("Have you worked for the
+        # government?": prior's "have you worked" sticks out of "worked for the
+        # government"); a question that names the employer has no such span.
+        if any(other is not lab and b2 - a2 > b1 - a1 and a2 <= a1 and b1 <= b2
+               for other, others in found.items() for a2, b2 in others):
+            return True
+        return lab in (L.PRIOR_EMPLOYMENT, L.CURRENT_EMPLOYEE) \
+            and any(a1 < b2 and a2 < b1 for a2, b2 in gov_spans)
+
+    dropped = {lab for lab, spans in found.items()
+               if all(covered(lab, a1, b1) for a1, b1 in spans)}
     hits = set(found) - dropped
     if {L.CURRENT_EMPLOYEE, L.PRIOR_EMPLOYMENT} <= hits:
         hits -= {L.CURRENT_EMPLOYEE, L.PRIOR_EMPLOYMENT}
