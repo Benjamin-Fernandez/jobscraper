@@ -35,7 +35,7 @@ from .contracts import (
     EMPLOYER_SPECIFIC_DECLARATIONS, EXTRA_KEY_PATTERN, Answer, AnswerStatus, Canonical,
     CapturedQuestion, FieldType, FormField, QuestionKind, QuestionReason, ResolveContext,
 )
-from .plan import STOP_WORDS as _PLAN_STOP_WORDS, norm_label
+from .plan import STOP_WORDS as _PLAN_STOP_WORDS, norm_label, qualified_label
 
 LABEL_MAX = 300
 DESCRIPTION_MAX = 300
@@ -194,6 +194,121 @@ def capture(fields: Sequence[FormField], answers: Mapping[str, Answer], ctx: Res
                          or f.canonical in resolve.SENSITIVE_CANONICALS
                          or (target and applicant.is_sensitive(target)))
         options = tuple(o.label for o in f.options[:OPTIONS_MAX])
+        out.append(CapturedQuestion(
+            label=f.label[:LABEL_MAX], label_norm=label_norm, kind=kind_for(f),
+            reason=reason, field_key=f.key, field_type=f.type, required=True,
+            sensitive=sensitive, description=(f.description or "")[:DESCRIPTION_MAX],
+            options=options, option_norms=tuple(norm_label(o) for o in options),
+            target_path=target, step=f.step, ats=ctx.ats, employer_norm=employer,
+            note=(a.note or "")[:NOTE_MAX]))
+    return out
+
+
+# --------------------------------------------------------------------------
+# Capture from the page (D-78; llm_fill_design §11, §12.1; WP-M5)
+# --------------------------------------------------------------------------
+
+# Notes pagefill gives fields left unknown by a transport failure (BackendError, a
+# timeout, a reply still cut or malformed): the attempt ends model_unavailable and
+# nothing is captured (§11), so these are skipped even if they reach capture_page.
+TRANSPORT_NOTES = ("transport", "model: unavailable", "model_unavailable")
+_TAG = re.compile(r"^(G\d+|L\d+|E\d+)")
+_INDEX = re.compile(r"\[\d+\]")
+
+
+def _gap_target(path: str) -> str:
+    """A G2 profile_gap's rule_id as a target path: a path the Profile form edits
+    (list entries by any index: "experience[1].location"), else ""."""
+    if not path or ":" in path:
+        return ""
+    return path if _INDEX.sub("[0]", path) in _form_targets() else ""
+
+
+def _rule_gap(f: FormField, ctx: ResolveContext, rules: Any) -> str:
+    """The empty profile path the unique tier-2 row for this label names, else "". The
+    model never sees an empty non-private fact (§5.1), so it says "unknown" where the
+    old tier 2 saw a profile gap; the owner's answer still belongs in the profile."""
+    if rules is None or not getattr(rules, "rules", None):
+        return ""
+    best, _score = rules.select(norm_label(f.label), f)
+    if len(best) != 1:
+        return ""
+    r = best[0]
+    key = r.parent if getattr(r, "is_virtual", False) else r.key
+    if not key or key.startswith("computed.") or key not in _form_targets():
+        return ""
+    return "" if _has_value(ctx.profile or {}, key) else key
+
+
+def page_reason(f: FormField, a: Answer, ctx: ResolveContext, rule_keys: Mapping[str, Any],
+                declaration: Any, rules: Any = None) -> tuple[QuestionReason, str]:
+    """(reason, target_path) from the guard or lock that left the field unknown (§11):
+    G2 profile_gap / no_option_fits (G2d, G2e); L3, L7 attestation_unclear; L4 conflict;
+    G3, G6, G11 ungrounded; any other guard no_rule. A model "unknown" (or a G2a/G2b
+    reject) whose label the unique tier-2 row maps to an empty profile path is a
+    profile_gap with that target. A lock answer from the resolver's own rules (L5
+    no-fit, L3 ambiguous, the D-75 conflict note) keeps `_reason`."""
+    note = a.note or ""
+    m = _TAG.match(note)
+    tag = m.group(1) if m else ""
+    if note.startswith(resolve.WORK_RIGHTS_CONFLICT) or tag == "L4":
+        return QuestionReason.CONFLICT, ""
+    if tag == "G2":
+        if "profile_gap" in note:
+            target = _gap_target(a.rule_id)
+            return (QuestionReason.PROFILE_GAP, target) if target else (QuestionReason.NO_RULE, "")
+        if note.startswith(("G2d", "G2e")):
+            return QuestionReason.NO_OPTION_FITS, ""
+    if tag in ("", "G2") and (note.startswith(("model:", "G2a", "G2b")) or not note):
+        gap = _rule_gap(f, ctx, rules)
+        if gap:
+            return QuestionReason.PROFILE_GAP, gap
+        return QuestionReason.NO_RULE, ""
+    if tag == "G2":
+        return QuestionReason.NO_RULE, ""
+    if tag in ("L3", "L7"):
+        return QuestionReason.ATTESTATION_UNCLEAR, ""
+    if tag in ("G3", "G6", "G11"):
+        return QuestionReason.UNGROUNDED, ""
+    if tag.startswith(("G", "E")):
+        return QuestionReason.NO_RULE, ""
+    return _reason(f, a, ctx, rule_keys, declaration)
+
+
+def capture_page(fields: Sequence[Any], answers: Mapping[str, Answer], ctx: ResolveContext,
+                 rules: resolve.QuestionRules) -> list[CapturedQuestion]:
+    """`capture` for the D-78 page (one capture point: the page stop, §11). `fields` are
+    `PageField`s; `label_norm` is the qualified label (§12.1: a generic label carries its
+    help text or context, else its place on the step), so "Please specify" after two
+    different questions are two questions, and the saved answer matches only where it
+    was asked. Not captured: optional fields, files, hidden inputs, employer-specific
+    declarations, and fields left unknown by a transport failure."""
+    rule_keys = {r.key: r for r in getattr(rules, "rules", ()) or ()}
+    employer = declarations.employer_norm(ctx.employer_name or "")
+    forms = [pf.field for pf in fields]
+    ords = resolve.generic_ordinals(forms)
+    out: list[CapturedQuestion] = []
+    for pf in fields:
+        f = pf.field
+        a = answers.get(f.key)
+        if a is None or not f.required or a.status not in UNANSWERED \
+                or f.type in NOT_CAPTURED_TYPES \
+                or (a.note or "").lower().startswith(TRANSPORT_NOTES):
+            continue
+        decl = declarations.classify(norm_label(f.label), norm_label(f.description))
+        if decl in EMPLOYER_SPECIFIC_DECLARATIONS:
+            continue
+        label_norm = qualified_label(f.label, f.description, pf.context, step=f.step,
+                                     ordinal=ords.get(f.key, 0))
+        reason, target = page_reason(f, a, ctx, rule_keys, decl, rules)
+        rule = rule_keys.get(a.rule_id) or rule_keys.get((a.rule_id or "").split("#", 1)[0])
+        sensitive = bool(a.sensitive or (rule is not None and rule.sensitive)
+                         or reason is QuestionReason.ATTESTATION_UNCLEAR
+                         or f.canonical in resolve.SENSITIVE_CANONICALS
+                         or (target and applicant.is_sensitive(target))
+                         or (a.note or "").startswith("G7"))
+        options = tuple(o.label for o in f.options[:OPTIONS_MAX]) \
+            if f.type is not FieldType.DATE else ()
         out.append(CapturedQuestion(
             label=f.label[:LABEL_MAX], label_norm=label_norm, kind=kind_for(f),
             reason=reason, field_key=f.key, field_type=f.type, required=True,
