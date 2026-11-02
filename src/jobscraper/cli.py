@@ -782,6 +782,136 @@ def cmd_mail(args) -> int:
         store.close()
 
 
+EDGE_IMPORT_STEPS = ("Import it into Edge: Settings > Profiles > Import browser data > "
+                     "Import from other password managers > Passwords (CSV file).")
+EDGE_FIRST_NOTE = "Check with one account first: import, then look for it in Edge's passwords."
+EDGE_CONFIRM_HINT = ("When it is imported, run `python -m jobscraper accounts export-edge "
+                     "--confirm` to delete the file (it holds passwords).")
+_EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+
+
+def _account_tenant(url: str):
+    """(ats, Tenant) for an ATS whose sites need an account, or None. The
+    navigators' own `match_url` decides (apply_design §10.4: Workday forms A
+    and B, one canonical host per tenant)."""
+    from .apply.ats import REGISTRY
+
+    for name, nav in REGISTRY.items():
+        if not getattr(nav, "needs_account", False):
+            continue
+        tenant = nav.match_url(url)
+        if tenant is not None:
+            return name, tenant
+    return None
+
+
+def cmd_accounts(args) -> int:
+    """M20 lane V / D-78 lane N (apply_design §10.3, §10.4, §14.1): the ATS
+    accounts JobScraper made or was given. Passwords live only in Windows
+    Credential Manager and are never printed.
+
+    `accounts list` prints ATS, tenant, email, status and the dates;
+    `accounts add --url URL --email ADDRESS` stores a password you already have
+    (prompted with getpass) and marks the account `created`, which also
+    clears a `signin_failed` / `exists_no_password` row (a `verified` row stays
+    verified); exit 2 when the URL is no known ATS that needs an account.
+    `accounts export-edge` writes the CSV for Edge's password import (data/,
+    gitignored); `--confirm` deletes the newest export and stamps its rows.
+    """
+    import getpass
+    from . import vault
+    from .apply.contracts import AccountStatus, Secret
+
+    try:
+        sys.stdout.reconfigure(errors="replace")
+    except (AttributeError, ValueError):
+        pass
+    cfg, store = _boot_v2(args)
+    data_dir = cfg.db_path.parent
+    try:
+        if args.accounts_cmd == "list":
+            rows = store.accounts()
+            print(BAR)
+            print(f"{'ats':<10} {'tenant':<40} {'status':<18} created / verified / exported")
+            print(BAR)
+            for r in rows:
+                print(f"{r['ats']:<10} {r['tenant_host'][:40]:<40} {r['status']:<18} "
+                      f"{r['created_at'] or '-'} / {r['verified_at'] or '-'} / "
+                      f"{r['exported_to_edge_at'] or '-'}")
+                print(f"{'':<10} {r['email']}")
+            if not rows:
+                print("no accounts yet")
+            print(BAR)
+            return 0
+
+        if args.accounts_cmd == "add":
+            found = _account_tenant(args.url)
+            if found is None:
+                print("accounts add: not the URL of an ATS that needs an account "
+                      "(a Workday posting or careers-site URL)", file=sys.stderr)
+                return 2
+            ats, tenant = found
+            email = (args.email or "").strip()
+            if not _EMAIL_RE.match(email):
+                print("accounts add: --email is not an email address", file=sys.stderr)
+                return 2
+            pw = getpass.getpass(f"Password for your {ats} account on {tenant.host}: ")
+            if not pw:
+                print("accounts add: no password entered; nothing stored", file=sys.stderr)
+                return 1
+            service = vault.service_for(ats, tenant.host)
+            try:
+                vault.put(service, email, Secret(pw))
+            except vault.VaultError as exc:
+                print(f"accounts add: {exc}", file=sys.stderr)
+                return 1
+            row = store.account(ats, tenant.host, email)
+            if row is not None and row["status"] == AccountStatus.VERIFIED.value:
+                store.upsert_account(ats, tenant.host, email, service, AccountStatus.VERIFIED.value)
+                status = AccountStatus.VERIFIED.value
+            else:
+                store.upsert_account(ats, tenant.host, email, service, AccountStatus.CREATED.value)
+                status = AccountStatus.CREATED.value
+            print(f"stored the password for {ats} {tenant.host} in Credential Manager "
+                  f"(account {status})")
+            return 0
+
+        # export-edge
+        vault.purge_stale_exports(data_dir)
+        if args.confirm:
+            exports = sorted(data_dir.glob(vault.EXPORT_GLOB), key=lambda p: p.stat().st_mtime)
+            if not exports:
+                print("accounts export-edge --confirm: no export file to delete", file=sys.stderr)
+                return 1
+            newest = exports[-1]
+            # Exactly the accounts the file lists (review F8): one created after the
+            # export was written is not in Edge and stays unexported.
+            listed = vault.export_accounts(newest)
+            ids = [r["id"] for r in store.accounts_to_export()
+                   if ((r["tenant_host"] or "").lower(), (r["email"] or "").lower()) in listed]
+            vault.delete_export(newest)
+            store.mark_exported(ids, utcnow())
+            print(f"deleted {newest.name}; {len(ids)} account(s) marked as imported into Edge")
+            return 0
+        first = not any(r["exported_to_edge_at"] for r in store.accounts())
+        rows = store.accounts_to_export()
+        if not rows:
+            print("nothing to export: every account is already in Edge (or has no password)")
+            return 0
+        path = vault.export_edge_csv(rows, data_dir)
+        print(f"wrote {path}")
+        print(EDGE_IMPORT_STEPS)
+        if first:
+            print(EDGE_FIRST_NOTE)
+        print(EDGE_CONFIRM_HINT)
+        return 0
+    except vault.VaultError as exc:
+        print(f"accounts: {exc}", file=sys.stderr)
+        return 1
+    finally:
+        store.close()
+
+
 APPLY_ID_RE = re.compile(r"^[A-Za-z0-9:_-]{1,80}$")
 APPLY_MAX_IDS = 20
 
@@ -1026,6 +1156,18 @@ def build_parser() -> argparse.ArgumentParser:
     mlt.add_argument("--find-from", metavar="DOMAIN",
                      help="also print the time of the newest message from DOMAIN")
     ml.set_defaults(fn=cmd_mail)
+    # --- accounts (M20 lane V, D-78 lane N WP-N1)
+    ac = sub.add_parser("accounts", help="ATS accounts: list, add one you have, export to Edge")
+    ac_sub = ac.add_subparsers(dest="accounts_cmd", required=True)
+    ac_sub.add_parser("list", help="every account (never a password)")
+    aca = ac_sub.add_parser("add", help="store the password of an account you already have "
+                                        "(prompted, never echoed)")
+    aca.add_argument("--url", required=True, help="a posting or careers-site URL on that tenant")
+    aca.add_argument("--email", required=True, help="the account's email address")
+    ace = ac_sub.add_parser("export-edge", help="write a CSV for Edge's password import")
+    ace.add_argument("--confirm", action="store_true",
+                     help="the export is imported: delete the newest file and mark its accounts")
+    ac.set_defaults(fn=cmd_accounts)
     # --- apply (M20 lane B)
     apl = sub.add_parser("apply", help="auto-apply to jobs (dry run: fill, never send); "
                                        "`apply show ID`, `apply open-profile [URL]`")

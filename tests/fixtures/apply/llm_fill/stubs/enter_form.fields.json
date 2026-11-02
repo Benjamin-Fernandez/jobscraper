@@ -30,5 +30,21 @@
   "automation_id": "formField-city",
   "parts": [],
   "help": ""
+ },
+ {
+  "label": "Mobile Country Code",
+  "type": "typeahead",
+  "widget": "prompt",
+  "required": true,
+  "options": [],
+  "options_sorted": true,
+  "shown": "",
+  "group": "",
+  "group_title": "",
+  "context": "",
+  "options_complete": false,
+  "automation_id": "formField-mobileCountryCode",
+  "parts": [],
+  "help": ""
  }
 ]

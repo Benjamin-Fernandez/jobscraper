@@ -7,9 +7,8 @@ rule (9.4.2), the MyGreenhouse KEEP table (9.1.1) and the MyGreenhouse browser f
 
 ASSUMED APIs (change in the helpers named below if the engineers choose differently):
   apply/accounts.py:  choose_identity(primary, backup, rows, has_password) -> Identity(email, action)   [design 10.5, exact]
-  apply/ats/workday.py:  choose_entry(offered: set[str], applied_on_tenant: bool, setting: str = "auto")
-                         -> (WorkdayEntry, prefill_source)    [ASSUMED; offered holds
-                         "apply_manually" / "use_last_application" / "autofill_with_resume"]
+  apply/ats/workday.py:  entry_choice(offered, setting="auto") -> (WorkdayEntry, origin)   [D-78 supersedes the
+                         D-70 rule (Use My Last Application when applied before); lane N, exact]
   apply_flow.py:  keep_decision(field: FormField, answer: Answer, shown, ctx_email: str) -> str
                   one of "keep" | "overwrite" | "fill"        [ASSUMED name; rules from the 9.1.1 table]
   GreenhouseAdapter.prefill(page, ctx) -> "mygreenhouse" | ""  [design, exact]
@@ -249,24 +248,18 @@ def test_identity_choice():
 
 # ================================================================== Workday Apply choice (9.4.2)
 
-@needs("jobscraper.apply.ats.workday:choose_entry")
+@needs("jobscraper.apply.ats.workday:entry_choice")
 def test_workday_apply_choice_rule():
-    from jobscraper.apply.ats.workday import choose_entry
+    """D-78 supersedes D-70 here: the import is always taken (Autofill with Resume when
+    offered), "Use My Last Application" is never chosen, whether or not a Submit was clicked
+    on the tenant before. The full table is tests/test_workday_nav.py."""
+    from jobscraper.apply.ats.workday import entry_choice
     M, L, A = "apply_manually", "use_last_application", "autofill_with_resume"
-    assert choose_entry({M, L, A}, True) == (WorkdayEntry.USE_LAST_APPLICATION,
-                                             AnswerSource.WORKDAY_LAST_APPLICATION.value)
-    assert choose_entry({M, L, A}, False) == (WorkdayEntry.APPLY_MANUALLY,
-                                              AnswerSource.SITE_DEFAULT.value)
-    assert choose_entry({M, A}, True)[0] is WorkdayEntry.APPLY_MANUALLY       # last app not offered
-    assert choose_entry({M, L, A}, True, "manual")[0] is WorkdayEntry.APPLY_MANUALLY   # config forces
-    for offered in ({M, L, A}, {M}, {M, L}):
-        assert choose_entry(offered, True)[0] is not WorkdayEntry.AUTOFILL_WITH_RESUME, "never chosen"
-    try:
-        choose_entry({A}, False)
-    except Exception as e:      # ApplyFailure(page_unrecognised, "workday: only resume autofill offered")
-        assert "only resume autofill" in str(e) or "only resume autofill" in getattr(e, "detail", "")
-    else:
-        raise AssertionError("only Autofill with Resume offered must fail page_unrecognised")
+    assert entry_choice({M, L, A}) == (WorkdayEntry.AUTOFILL_WITH_RESUME, C.ValueOrigin.RESUME_IMPORT.value)
+    assert entry_choice({M, L}) == (WorkdayEntry.APPLY_MANUALLY, C.ValueOrigin.SITE_DEFAULT.value)
+    assert entry_choice({M, L, A}, "manual")[0] is WorkdayEntry.APPLY_MANUALLY   # config forces
+    for offered in ({M, L, A}, {M}, {M, L}, {L}, {A}):
+        assert entry_choice(offered)[0] is not WorkdayEntry.USE_LAST_APPLICATION, "never chosen (D-78)"
 
 
 # ================================================================== MyGreenhouse KEEP table (9.1.1)

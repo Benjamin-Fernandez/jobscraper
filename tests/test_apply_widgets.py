@@ -170,10 +170,11 @@ def test_a_search_miss_fails_and_leaves_no_typed_text_behind():
     with _open("stubs/enter_form.html") as pg:
         if pg is None:
             return
-        pf = _by_label(pg)["Country Phone Code"]
+        pf = _by_label(pg)["Mobile Country Code"]           # outside the form: Enter is allowed
         assert _fill(pg, pf, "Atlantis (+999)") is False
-        assert pg.input_value("#enter-prompt") == ""
+        assert pg.input_value("#outside-prompt") == ""
         assert pg.locator('[data-automation-id="selectedItem"]').count() == 0
+        assert pg.evaluate("document.body.dataset.formSubmits") == "0"
 
 
 @needs(*NEEDS)
@@ -182,9 +183,80 @@ def test_a_search_driven_prompt_reads_back_the_intended_option_not_the_first_hit
     with _open("stubs/enter_form.html") as pg:
         if pg is None:
             return
-        pf = _by_label(pg)["Country Phone Code"]
+        pf = _by_label(pg)["Mobile Country Code"]           # LF §3.2 / M8: outside any form, so Enter may search
         assert _fill(pg, pf, "Malaysia (+60)") is True
         assert _value(pg, pf) == "Malaysia (+60)"
+        assert pg.evaluate("document.body.dataset.formSubmits") == "0"
+
+
+@needs(*NEEDS)
+def test_a_search_driven_prompt_inside_a_form_fails_safely_without_submitting():
+    """LF §3.2 / review M8: inside a <form> with a submit control Enter is never pressed,
+    so a search-only prompt can't be filled there: the fill reports failure, nothing is
+    submitted, and no typed text or pill is left behind."""
+    with _open("stubs/enter_form.html") as pg:
+        if pg is None:
+            return
+        pf = _by_label(pg)["Country Phone Code"]
+        assert _fill(pg, pf, "Malaysia (+60)") is False
+        assert pg.evaluate("document.body.dataset.formSubmits") == "0"
+        assert pg.evaluate("document.body.dataset.submitCount || '0'") == "0"
+        assert pg.input_value("#enter-prompt") == ""
+        assert pg.locator('#enter-prompt').locator(
+            'xpath=ancestor::*[starts-with(@data-automation-id,"formField-")][1]'
+        ).locator('[data-automation-id="selectedItem"]').count() == 0
+
+
+
+# ------------------------------------------------------------------ review Q-35-lanes-NR F1 (HIGH)
+
+def _open_apply(rel: str):
+    """Like `_open`, but serving tests/fixtures/apply (the widget stubs live outside llm_fill/)."""
+    from contextlib import contextmanager
+    from llm_fill_support import FixtureDir, browser_page
+
+    @contextmanager
+    def cm():
+        got = browser_page()
+        if got is None:
+            yield None
+            return
+        pw, browser, pg = got
+        try:
+            with FixtureDir(Path(__file__).resolve().parent / "fixtures" / "apply") as srv:
+                pg.goto(srv.url(rel))
+                yield pg
+        finally:
+            browser.close()
+            pw.stop()
+    return cm()
+
+
+@needs(*NEEDS, "jobscraper.apply.widgets:fill_field")
+def test_a_react_select_never_settles_on_an_option_that_only_contains_the_words():
+    """Review F1 (HIGH): LL3 / M14: a searchable list takes an exact match, else `pick`. A search
+    for "Computer Engineering" that shows only "Computer Engineering Technology" must not be
+    clicked and reported ok: the fill fails (`search_miss`), `pick` is asked, nothing is chosen.
+    Same for "Java" vs "JavaScript". Failing pin until lane R's F1 fix."""
+    from jobscraper.apply import widgets as W
+    with _open_apply("widgets/react_select.html") as pg:
+        if pg is None:
+            return
+        f = _by_label(pg)
+        asked: list[tuple[str, list[str]]] = []
+
+        def pick(want, options):
+            asked.append((want, list(options)))
+            return ""                                      # the model declines: no equal option
+        for label, want, sel in (("Discipline", "Computer Engineering", "#sel-discipline"),
+                                 ("Main programming language", "Java", "#sel-language")):
+            got = W.fill_field(pg, f[label], want, pick=pick)
+            chosen = pg.evaluate(f"document.querySelector('{sel}').dataset.value")
+            assert chosen == "", f"{label}: the page now shows {chosen!r} for the decided {want!r}"
+            assert got.ok is False and got.note == "search_miss", (label, got)
+            assert any(a[0] == want for a in asked), f"{label}: pick was not asked"
+        got = W.fill_field(pg, f["Degree"], "Bachelor of Engineering", pick=pick)
+        assert got.ok is True and pg.evaluate("document.querySelector('#sel-degree').dataset.value")             == "Bachelor of Engineering", "an exact option still fills"
 
 
 if WAITING[_W0:]:

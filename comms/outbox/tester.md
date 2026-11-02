@@ -189,3 +189,27 @@ BODY: T0 `tests/test_apply_contracts_v5.py` (14). T1 `tests/llm_fill_pages.py` (
 - Architect (non-blocking, from writing T3): (1) LF §3.1 makes a prompt MULTI_CHOICE only when it "holds several pills", so an empty or one-pill multi prompt (Workday skills) reads as TYPEAHEAD; fields.json follows the rule as written; suggest detecting multi from the widget. (2) `PageField` has no `parts`, but the field view (§6.2) sends date `parts`; add `PageField.parts` or say where they come from. (3) The `click_filter` fallback has no stub yet; it goes with T4/N2.
 - Privacy: the owner deny-list scan (T1 part b) needs `JOBSCRAPER_FIXTURE_DENYLIST` pointing at a file outside the repo (yours to build). For these commits I scanned the staged trees against an in-memory list built from the recordings (names, e-mails, phone, address, past employers/schools, employer names, tenant hosts): 0 identifier hits.
 STATUS: open
+
+### 2026-11-03 tester → coordinator (cc lane N, lane R, lane M engineers)
+TYPE: handoff
+RE: Q-35 int/Q-35-NR oracles: M14 fix, T4 lane N, review F1/F3/F4/F7/F8, T2 (lane M) · branch int/Q-35-NR
+BODY: Commits on int/Q-35-NR (tests only): 7fcd508 M14 (the search-driven prompt moved outside the form; new pin: inside a form a search-only prompt fails safely, `formSubmits` 0, no text or pill left). b6ce72f `test_workday_nav.py` (13: job_url, entry_choice, step ids M7, forms A/B, external_id, no Enter; headless Edge on `tests/fixtures/apply/workday_nav/*` + wd_a/wd_b: entry dialog, account form beats the progress bar, beecatcher untouched, click_filter fallback, step ids/scope/entry_sections, review never clicked, errors as labels, confirmations); D-70 `test_workday_apply_choice_rule` rewritten against `entry_choice` (D-78). 334c121 `test_store_fill_cache.py` (7), `test_greenhouse_nav.py` (6), `test_accounts_cli.py` (6, in-memory keyring), `test_apply_flow_accounts.py` (10: F3 gate, identity, sign-up order and rollback, F4 code path), `tests/vault_support.py`. da82193 F1 pin. Last commit: T2 `test_llm_fill_{facts,locks,guards,model}.py` (+ `tests/llm_fill_t2.py`), skip-clean on int; 31/31 against lane M a4f1c8c via an in-memory overlay (lane M modules loaded from git objects; nothing written). `find_secrets` fixed per lane M's report (digit runs, not all digits joined) and pinned.
+- Failing pins (code defects; each needs its lane's fix, then goes green):
+  1. F1 HIGH (lane R): `test_apply_widgets::test_a_react_select_never_settles_on_an_option_that_only_contains_the_words`. Repro: `tests/fixtures/apply/widgets/react_select.html`, decided "Computer Engineering", the search shows only "Computer Engineering Technology". Expected: `fill_field` -> ok False, note `search_miss`, `pick` asked, nothing chosen. Actual: the option is clicked (the page shows "Computer Engineering Technology").
+  2. F8 MEDIUM (lane N): `test_accounts_cli::test_confirm_marks_only_the_accounts_the_export_held`. Expected: an account created after `export-edge` stays unexported after `--confirm`. Actual: it is stamped exported.
+  3. NEW, MEDIUM, live with the int/Q-35-NR merge (lane N, D-85): `test_apply_flow_accounts::test_the_greenhouse_code_pattern_reads_the_code_not_a_word` and `::test_d85_the_code_is_the_only_short_alphanumeric_line_after_the_sentence`. Today `GreenhouseAdapter.otp_pattern` `([A-Za-z0-9]{8})` makes `mail.find_code` return the word "security" from "...into the security code field...". Expected per D-85: the only trimmed line of 6-12 letters/digits after the sentence (a letters-only code is valid); zero or two candidate lines -> None. Both oracles go through one helper, `_gh_code(body) = find_code(body, GreenhouseAdapter.otp_pattern)`; if D-85 lands as its own function, only that helper changes (tell me the name).
+- F5 (lane N 081b338): `test_greenhouse_nav` snapshot oracles rewritten against the reader keys (fake `page.read_page`/`audit_keys`: read before the click, `options=False`, `step="form"`, lists joined "; ", skipped without MyGreenhouse or its button, a read error leaves it empty and prefill runs). They skip-clean with a note until 081b338 is on int; 7/7 against lane N's greenhouse.py via the overlay.
+- Skip-clean until N6a: F7 (`test_on_workday_choose_entry_runs_before_the_account_wall`). The F3 pin asserts the gate and must be replaced when N6a lands (its message says so).
+STATUS: open
+
+### 2026-11-03 tester → coordinator
+TYPE: request
+RE: merging eng/Q-35-M-llmfill into int/Q-35-NR
+BODY: `git merge eng/Q-35-M-llmfill` conflicts only in `comms/outbox/software-engineer.md` (both sides appended entries; keeping both resolves it). That file is outside my scope, so I aborted the merge. The src files don't overlap. Please merge it yourself; T2 then runs for real (`-k llm_fill_`).
+STATUS: open
+
+### 2026-11-03 tester → coordinator
+TYPE: handoff
+RE: Q-35 tester items not done in this delegation (budget)
+BODY: Not started: the M5 capture oracles (`questions.capture_page`, `page_reason`, `TRANSPORT_NOTES`; lane M's names), T5 (`test_apply_resolve_memory.py` F1, `test_apply_resolve_rules.py` F4, `test_questions_variants.py` F3, `test_apply_questions_page.py`, `web/tests/QuestionCard.test.js`), the T4 flow part `test_apply_flow_llm.py` (skip-clean until N6a), TR-6 (pin `apply.fill: rules` in `apply_flow_support`). T2 is a core set (privacy, lock precedence, Decision shape, G1/G10, prompt order, retry); the guard table of test plan §4 (G2-G12, E1-E7 cases) is still to write.
+STATUS: open

@@ -1,0 +1,32 @@
+<!doctype html>
+<!-- Synthetic Workday "Start Your Application" dialog (S-5 structure only; no real tenant).
+     ?offer=a,m,l picks the choices shown: a = Autofill with Resume, m = Apply Manually,
+     l = Use My Last Application. A click records the automation id in body.dataset.chosen. -->
+<html lang="en"><head><meta charset="utf-8"><title>Example Employer Careers</title>
+<style>body{font-family:sans-serif}.hidden{display:none}</style></head>
+<body data-chosen="">
+<main>
+  <h2 data-automation-id="jobPostingHeader">Graduate Engineer</h2>
+  <div data-automation-id="wd-popup-frame" role="dialog" aria-label="Start Your Application">
+    <h2>Start Your Application</h2>
+    <a role="button" href="#" data-k="a" data-automation-id="autofillWithResume">Autofill with Resume</a>
+    <a role="button" href="#" data-k="m" data-automation-id="applyManually">Apply Manually</a>
+    <a role="button" href="#" data-k="l" data-automation-id="useMyLastApplication">Use My Last Application</a>
+  </div>
+  <div data-automation-id="applyFlowPage" class="hidden"><h3>My Information</h3></div>
+</main>
+<script>
+(function () {
+  const want = (new URLSearchParams(location.search).get('offer') || 'a,m,l').split(',');
+  document.querySelectorAll('[data-k]').forEach(b => {
+    if (!want.includes(b.dataset.k)) b.remove();
+    b.addEventListener('click', ev => {
+      ev.preventDefault();
+      document.body.dataset.chosen = b.dataset.automationId;
+      document.querySelector('[data-automation-id="wd-popup-frame"]').classList.add('hidden');
+      document.querySelector('[data-automation-id="applyFlowPage"]').classList.remove('hidden');
+    });
+  });
+})();
+</script>
+</body></html>
