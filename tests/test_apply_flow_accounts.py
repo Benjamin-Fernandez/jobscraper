@@ -11,8 +11,9 @@
   - F4 (Greenhouse emailed security code, auto mode): the code from the fake IMAP mailbox is
     entered once and Submit pressed once more -> submitted, `code_resubmits` 1; a second code
     request -> submitted_unconfirmed; the IMAP wait is added back to the deadline; the code
-    is never logged; plus a failing pin: the Greenhouse adapter's own `otp_pattern` reads
-    the word "security" out of the code mail instead of the code;
+    is never logged; D-85 (failing pins until lane N applies it): the code is the only line of
+    6-12 letters/digits after the sentence, "security" is never the code, a letters-only code
+    is valid, zero or two candidates -> no code;
   - F7 (skip-clean until N6a): on Workday `choose_entry` runs before the account wall.
 Fakes: tests/apply_flow_support.py (adapter, browser), tests/vault_support.py (keyring), a fake
 `imaplib.IMAP4_SSL` serving tests/fixtures/mail/greenhouse_code.eml re-dated to now.
@@ -355,15 +356,39 @@ def test_a_dry_run_never_reaches_the_code_path():
         assert log == [], "no mailbox opened in a dry run"
 
 
-@needs("jobscraper.apply.mail:find_code")
-def test_the_greenhouse_code_pattern_reads_the_code_not_a_word():
-    """Failing pin (MEDIUM, live with the int/Q-35-NR merge): GreenhouseAdapter.otp_pattern is
-    `\\b([A-Za-z0-9]{8})\\b`, so on the code line "...into the security code field..." it
-    returns the 8-letter word "security"; the flow would type that and resubmit."""
+def _gh_code(body: str):
+    """How the flow reads a Greenhouse code: `mail.find_code(text, GreenhouseAdapter.otp_pattern)`
+    (the watcher's call). If lane N moves D-85 into its own function, change only this helper."""
     from jobscraper.apply.ats.greenhouse import GreenhouseAdapter
     from jobscraper.apply.mail import find_code
+    return find_code(body, GreenhouseAdapter.otp_pattern)
+
+
+def _gh_body(*code_lines: str) -> str:
     msg = email.message_from_bytes((ROOT / "tests" / "fixtures" / "mail" / "greenhouse_code.eml").read_bytes())
-    assert find_code(msg.get_payload(), GreenhouseAdapter.otp_pattern) == CODE
+    body = msg.get_payload()
+    return body.replace(CODE, "\n\n".join(code_lines)) if code_lines else body.replace(CODE, "")
+
+
+@needs("jobscraper.apply.mail:find_code")
+def test_the_greenhouse_code_pattern_reads_the_code_not_a_word():
+    """Failing pin until D-85 lands (MEDIUM, live with the int/Q-35-NR merge): the Greenhouse
+    `otp_pattern` `\\b([A-Za-z0-9]{8})\\b` returns the word "security" from the line "...into the
+    security code field..."; the flow would type that and resubmit."""
+    assert _gh_code(_gh_body()) != "security"
+    assert _gh_code(_gh_body(CODE)) == CODE
+
+
+@needs("jobscraper.apply.mail:find_code")
+def test_d85_the_code_is_the_only_short_alphanumeric_line_after_the_sentence():
+    """D-85: the code is the only line (trimmed) of 6-12 letters/digits after the "security
+    code" sentence; a code without a digit is valid (~24% of 8-character codes have none);
+    zero or several candidate lines -> no code (fail closed). Failing pin until lane N's D-85."""
+    assert _gh_code(_gh_body("KPQMXRTZ")) == "KPQMXRTZ", "letters only is a valid code"
+    assert _gh_code(_gh_body("  A1B2C3  ")) == "A1B2C3", "6 characters, trimmed"
+    assert _gh_code(_gh_body("A1B2C3D4E5F6")) == "A1B2C3D4E5F6", "12 characters"
+    assert _gh_code(_gh_body(CODE, "Q2W3E4R5")) is None, "two candidates: fail closed"
+    assert _gh_code(_gh_body()) is None, "no candidate: fail closed"
 
 
 # ------------------------------------------------------------------ F7 (N6a)

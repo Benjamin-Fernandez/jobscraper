@@ -1,10 +1,13 @@
 """Greenhouse SiteNavigator oracles (Q-35 WP-T4, lane N WP-N3; llm_fill_design §3.3, §9.2;
 review M3; amendment: the pre_import snapshot).
 
-  - `choose_entry` fills `ctx.pre_import` (key `form:<html id>`, text per LF §3.1, non-empty
-    only) BEFORE `prefill` (the MyGreenhouse click) runs, and returns what `prefill` returned;
-    a non-ApplyFailure in `prefill` falls back to "" (the generic fill does everything); an
-    ApplyFailure (a page signal) propagates;
+  - `choose_entry` fills `ctx.pre_import` BEFORE `prefill` (the MyGreenhouse click) runs and
+    returns what `prefill` returned. Review F5 (lane N 081b338+): the snapshot is read with lane
+    R's reader (`page.read_page(..., options=False, step="form")`) and keyed with its
+    `page.audit_keys(..., "form")`; text = the shown value (a list joined "; "), non-empty only;
+    skipped when MyGreenhouse is off or has no button; a read error leaves it empty and
+    `prefill` still runs. These oracles skip-clean (with a note) until the F5 code is on the
+    branch; a non-ApplyFailure in `prefill` falls back to ""; an ApplyFailure propagates;
   - `step_id` is "form"; `scope` is the generic default "";
   - `precheck` re-raises only POSTING_CLOSED; any other schema failure is logged and the
     attempt goes on.
@@ -12,6 +15,7 @@ Fakes only (no browser, no network). Verify: python tests/run_tests.py -k greenh
 """
 from __future__ import annotations
 
+import contextlib
 import sys
 import time
 from pathlib import Path
@@ -38,55 +42,106 @@ def _ctx(lines):
                           log=lines.append, screenshot=lambda p, s: "", deadline=time.monotonic() + 600)
 
 
-class _Loc:
-    def __init__(self, html_id):
-        self.html_id = html_id
-
-    def get_attribute(self, name):
-        return self.html_id if name == "id" else None
-
-
-def _adapter(order, shown, *, prefill=lambda: "mygreenhouse"):
-    """A GreenhouseAdapter whose page reads are faked; `order` records the calls."""
+def _f5_landed() -> bool:
+    import inspect
     from jobscraper.apply.ats.greenhouse import GreenhouseAdapter
-    from jobscraper.apply.contracts import FieldType, FormField, FormPlan
-    a = GreenhouseAdapter()
-    fields = [FormField(key="first_name", label="First Name", type=FieldType.TEXT, required=True),
-              FormField(key="phone", label="Phone", type=FieldType.TEXT, required=False),
-              FormField(key="skills", label="Skills", type=FieldType.MULTI_CHOICE, required=False),
-              FormField(key="consent", label="I agree", type=FieldType.CHECKBOX, required=False),
-              FormField(key="token", label="", type=FieldType.HIDDEN, required=False)]
-    a._plans[7] = FormPlan(ats="greenhouse", job_id="1", apply_url="https://job-boards.greenhouse.io/x",
-                           source="schema", fields=fields)
-    ids = {"first_name": "first_name", "phone": "phone", "skills": "", "consent": "consent_1"}
+    if "audit_keys" in inspect.getsource(GreenhouseAdapter._snapshot_pre_import):
+        return True
+    print("  note: the F5 pre_import snapshot (reader keys) is not on this branch yet; F5 oracles not run")
+    return False
 
-    def read_values(page, ctx, fs):
-        order.append(("read_values", [f.key for f in fs]))
-        return {f.key: shown.get(f.key, "") for f in fs}
+
+@contextlib.contextmanager
+def _reader(order, fields, keys, *, boom=False):
+    """Fake `jobscraper.apply.page.read_page` / `audit_keys` (looked up at call time)."""
+    from jobscraper.apply import page as P
+    saved = (P.read_page, P.audit_keys)
+
+    def read_page(page, **kw):
+        order.append(("read_page", kw))
+        if boom:
+            raise RuntimeError("the page went away")
+        return list(fields)
+
+    def audit_keys(page, fs, step):
+        order.append(("audit_keys", step))
+        return dict(keys)
+    P.read_page, P.audit_keys = read_page, audit_keys
+    try:
+        yield
+    finally:
+        P.read_page, P.audit_keys = saved
+
+
+def _fields():
+    from jobscraper.apply.contracts import FieldType as FT, ValueOrigin as VO
+    import llm_fill_t2 as T
+    fields = [T.pf("r1", "First Name", shown="Alex", origin=VO.SITE_DEFAULT),
+              T.pf("r2", "Phone", shown=""),
+              T.pf("r3", "Skills", FT.MULTI_CHOICE, shown=["Python", "SQL"], origin=VO.SITE_DEFAULT),
+              T.pf("r4", "I agree", FT.CHECKBOX, shown="true", origin=VO.SITE_DEFAULT)]
+    keys = {"r1": "form:first_name", "r2": "form:phone", "r3": "form:skills", "r4": "form:consent_1"}
+    return fields, keys
+
+
+def _adapter(order, *, prefill=lambda: "mygreenhouse", button=True):
+    """A GreenhouseAdapter with a faked MyGreenhouse button and prefill; `order` records calls."""
+    from jobscraper.apply.ats.greenhouse import GreenhouseAdapter
+    a = GreenhouseAdapter()
+    a._autofill_button = lambda page: object() if button else None
 
     def run_prefill(page, ctx):
         order.append(("prefill", dict(ctx.pre_import)))
         return prefill()
-    a.read_values = read_values
     a.prefill = run_prefill
-    a.locator = lambda page, f: _Loc(ids.get(f.key, ""))
     return a
 
 
-@needs(*NEEDS)
-def test_choose_entry_snapshots_the_form_before_the_mygreenhouse_click():
+@needs(*NEEDS, "jobscraper.apply.page:audit_keys")
+def test_choose_entry_snapshots_the_form_with_the_reader_keys_before_the_click():
+    if not _f5_landed():
+        return
     order, lines = [], []
-    shown = {"first_name": "Alex", "phone": "", "skills": ["Python", "SQL"], "consent": "true",
-             "token": "abc"}
-    a = _adapter(order, shown)
-    ctx = _ctx(lines)
-    assert a.choose_entry(object(), ctx) == "mygreenhouse"
-    assert [o[0] for o in order] == ["read_values", "prefill"], "snapshot first, then the import"
-    assert "token" not in order[0][1], "hidden fields are not read"
-    want = {"form:first_name": "Alex", "form:skills": "Python, SQL", "form:consent_1": "true"}
-    assert order[1][1] == want, "pre_import is complete when prefill runs"
+    fields, keys = _fields()
+    a, ctx = _adapter(order), _ctx(lines)
+    with _reader(order, fields, keys):
+        assert a.choose_entry(object(), ctx) == "mygreenhouse"
+    assert [o[0] for o in order] == ["read_page", "audit_keys", "prefill"], "snapshot first, then the import"
+    assert order[0][1].get("options") is False and order[0][1].get("step") == "form"
+    assert order[1][1] == "form"
+    want = {"form:first_name": "Alex", "form:skills": "Python; SQL", "form:consent_1": "true"}
+    assert order[2][1] == want, "pre_import is complete when prefill runs (keys = the reader's audit keys)"
     assert ctx.pre_import == want
     assert not any("Alex" in line or "Python" in line for line in lines), "never logged"
+
+
+@needs(*NEEDS, "jobscraper.apply.page:audit_keys")
+def test_no_snapshot_without_an_import_and_a_read_error_leaves_it_empty():
+    import dataclasses
+    from jobscraper.apply import browser as B
+    if not _f5_landed():
+        return
+    fields, keys = _fields()
+    order: list = []
+    a, ctx = _adapter(order, button=False), _ctx([])
+    with _reader(order, fields, keys):
+        assert a.choose_entry(object(), ctx) == "mygreenhouse"
+    assert [o[0] for o in order] == ["prefill"] and ctx.pre_import == {}, "no MyGreenhouse button"
+    saved = B.options_for
+    B.options_for = lambda page: dataclasses.replace(saved(page), mygreenhouse=False)
+    try:
+        order = []
+        a, ctx = _adapter(order), _ctx([])
+        with _reader(order, fields, keys):
+            a.choose_entry(object(), ctx)
+        assert [o[0] for o in order] == ["prefill"] and ctx.pre_import == {}, "MyGreenhouse off"
+    finally:
+        B.options_for = saved
+    order = []
+    a, ctx = _adapter(order), _ctx([])
+    with _reader(order, fields, keys, boom=True):
+        assert a.choose_entry(object(), ctx) == "mygreenhouse"
+    assert order[-1][0] == "prefill" and ctx.pre_import == {}, "best effort: prefill still runs"
 
 
 @needs(*NEEDS)
@@ -95,16 +150,14 @@ def test_choose_entry_falls_back_on_a_prefill_crash_and_propagates_a_page_signal
 
     def boom():
         raise RuntimeError("selector gone")
-    order, lines = [], []
-    a = _adapter(order, {"first_name": "Alex"}, prefill=boom)
-    ctx = _ctx(lines)
-    assert a.choose_entry(object(), ctx) == ""
-    assert ctx.pre_import == {"form:first_name": "Alex"}
+    lines: list[str] = []
+    a = _adapter([], prefill=boom, button=False)
+    assert a.choose_entry(object(), _ctx(lines)) == ""
     assert any("mygreenhouse: skipped" in line for line in lines)
 
     def captcha():
         raise ApplyFailure(ReasonCode.CAPTCHA, "")
-    a = _adapter([], {}, prefill=captcha)
+    a = _adapter([], prefill=captcha, button=False)
     try:
         a.choose_entry(object(), _ctx([]))
     except ApplyFailure as e:

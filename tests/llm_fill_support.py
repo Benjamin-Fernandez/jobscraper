@@ -177,15 +177,24 @@ def _digits(s: str) -> str:
     return re.sub(r"\D", "", s)
 
 
+_DIGIT_RUN = re.compile(r"\d[\d\s\-.()+/]*\d")
+
+
 def find_secrets(text: str, deny: Iterable[str]) -> list[str]:
-    """Deny-list entries present in `text` (case-insensitive; numbers also as digits only)."""
-    low, digits = text.lower(), _digits(text)
+    """Deny-list entries present in `text` (case-insensitive). A number (>= 6 digits) also
+    counts when its digits sit inside one digit run of the text ("+65 9123 4567" carries
+    "91234567"); digits from separate runs are never joined (lane M's report: refs like
+    `experience[0]` x6 then `1500` once read as the postal code "000001")."""
+    low = text.lower()
+    runs = [_digits(r) for r in _DIGIT_RUN.findall(text)]
     hits = []
     for d in deny:
         d = (d or "").strip()
         if len(d) < 3:
             continue
-        if d.lower() in low or (len(_digits(d)) >= 6 and _digits(d) == re.sub(r"\D", "", d) and _digits(d) in digits):
+        dd = _digits(d)
+        number = len(dd) >= 6 and re.fullmatch(r"[\d\s\-.()+/]+", d) is not None
+        if d.lower() in low or (number and any(dd in r for r in runs)):
             hits.append(d)
     return hits
 
