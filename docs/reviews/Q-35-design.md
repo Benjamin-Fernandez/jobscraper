@@ -293,3 +293,78 @@ LF §3.2.
   - Gate count, 5 vs 2 (M10).
   - D-77 reading (M13).
   - O-1 goes to the owner as the architect asked.
+
+---
+
+## Re-check after the amendment (2026-11-03)
+
+- **What was checked:** `git diff 3b5c8b6..06f2d4d` in the main checkout (design commit 0f1b21e: LF, BP, ADR-0006 "Amendment", contracts v5). The architect's change log is the newest Q-35 entry in `comms/outbox/architect.md`.
+- **Evidence (main checkout at 06f2d4d):**
+  - `python tests/run_tests.py -k layering` printed `10/10 passed`.
+  - `-k apply_contracts` printed `49/49 passed`.
+  - The added lines were grepped for employer names, owner names, e-mail addresses, `+65` numbers and Workday hosts: no match.
+
+### VERDICT: READY
+
+H1–H7 are closed in the design text, and the M-fixes I spot-checked are in. **Contracts v5 stay additive:** only defaulted fields (`ResolveContext.resume_entries`/`other_employers`, `AttemptContext.pre_import`/`uploaded`, `PageOutcome.transport_failed`) and a new `FillServices` Protocol were added. The Protocol uses only `BrowserPage`/`Sequence`/`Any`, which contracts already has. Layering stays green. The four MEDIUM findings below don't block; fold them in while lane M builds (WP-M1/M3) and while the tester writes T2.
+
+### HIGH findings: how each was closed
+
+| Finding | Closed by | Check |
+|---|---|---|
+| H1 grounding | G3 copy rule: every content token of a TEXT value, entry TEXTAREA or text `keep` must be in the evidence. Entry corpus = block + entry facts; no block → reject. `recheck` is a copy task; unknown or rejected → cleared or unknown, never kept | Closed |
+| H2 fact refs | G2 (a) per-chunk ref scope via `Fact.entry`; (b) `facts.relevant`; (d) a disagreement → unknown, no "program wins"; a private bool/enum on a choice needs a tier-2 label match; (e) no fit → G4 + G5. Audit: tier LLM, `fill:v2`, model, hash | Closed (R2 is a wording point) |
+| H3 untrusted leftovers | G9: clear / reset / untick / "unverified" at 0.5; required → unknown; audit = read-back. G5 covers optional Yes/No | Closed |
+| H4 S values in prompts | §6.5: `s_values` + `redact` on the whole user prompt of every call (all pinned follow-up signatures take `s_values`); `current_set` withholding rules; redacted debug dump; the cache stores no fact value and only hashes `shown` | Closed |
+| H5 other employers | G12 + `other_employers`; a generic-label field cites only this employer's `extra` entries; G8 trusts MyGreenhouse only for non-TEXTAREA, non-cover-letter fields that pass G12 | Closed (R1 is a new false-stop risk) |
+| H6 attachments | L1 keeps a file only when it is in `ctx.uploaded`; the page-text clause applies only with one FILE input; a cover letter or transcript never gets the resume | Closed |
+| H7 revealed fields | §8 step 10 (≤ 2 reveal rounds), step 12 `scan_required` before Next, and the "Before Submit" scan (Greenhouse: the whole form, before the one-way click) | Closed |
+
+### S-5b error kinds walked again
+
+| # | Error | Now |
+|---|---|---|
+| 1 | Hierarchical "How did you hear" | Closed. LL2 `pick`; G2(e) → G4 + G5 (the field is required) |
+| 2 | Title kept the employer's name | Closed. G11 + `recheck`, and the copy rule |
+| 3 | Job location from the resume header | Closed. "Singapore" is not in an in-block quote, so the copy rule fails; a header quote fails G6 |
+| 4 | Language level invented | Closed. An unmatched group allows no refs and is deleted (E3); a cross-entry ref is outside the chunk's enum (G2a) |
+| 5 | Projects section in a role description | Closed. `recheck` lines must occur in the block; unknown → cleared or unknown. A `keep` can't pass the copy rule with a quote of 240 chars or less |
+| 6 | Listbox read back as filled while empty | Closed. Strict read-back for every family (M14) |
+
+### MEDIUM spot-checks
+
+- **M1:** lock order L1, L2, L4/L5, L6, L3/L7; an UNKNOWN lock consults L6 and never goes to the model; a context-less generic label gets the `| @step#n` qualifier.
+- **M2:** the G7 word list now includes citizenship, PR, residency, nationality, NS and ORD.
+- **M3:** Greenhouse takes the `pre_import` snapshot before the MyGreenhouse click.
+- **M4:** the cache stores the decision only, with `facts_used_hash`, and the guards re-run on replay.
+- **M5:** `resume_entries` is in v5 with an owner (WP-N6b); no block → reject; a section with no source entries → `profile_incomplete`.
+- **M6:** `FillServices` and the pinned-signature table are in; `classify` runs before step 9 and before the corrective pass; `transport_failed` is a field.
+- **M7:** `step_id` gets `_<N>`, and the loop guard also compares field signatures.
+- **M8:** Enter is allowed only in a prompt search box that isn't inside a `<form>`.
+- **M9 / E7:** nothing on the page changes before step 9.
+- **M10:** BP §0 maps I1, L1/L2, F2 and W8, and drops F3; the gate has 5 Greenhouse dry runs; N6 is split into N6a/N6b.
+- **M11 (D-81):** timeouts are 420 s / 900 s, both excluding the IMAP wait, and the deadline is checked before each call and before typing.
+- **M12:** G11. **M13 (D-83):** G8, plus the row-by-row audit in BP §7. **M14:** strict read-back for every family.
+
+### Remaining findings (MEDIUM, non-blocking)
+
+**R1. G12 rejects texts that name the applicant's own past employers.** LF §7 G12; `ResolveContext.other_employers`.
+- **Why:** `other_employers` is the watchlist names plus the sightings' employers. Nothing removes the companies in the applicant's own `experience[]`/`resume_entries`.
+- **Failure scenario:** the owner interned at a company that is also on the watchlist. Every composed text that mentions that internship is rejected at every other employer. A required cover letter (L1b) or a "Why do you want to join?" answer then stops the attempt. This fails closed, but it would happen often for a new graduate.
+- **Fix:** for composed texts, remove the employers that company-match the applicant's own experience/education entries (AD §7.5 `company_match`). Keep the full list for `extra` values and kept MyGreenhouse text.
+
+**R2. Say explicitly that G5 covers Yes/No answers accepted through G2(d)'s "the model's option equals the program's" branch.** LF §6.4 `second` row, G5.
+- **Why:** this branch applies when no tier-2 label match exists. The model can misread the question's polarity in the same direction as the literal `fit_bool` mapping, and the two then agree on a wrong answer.
+- **Spec:** ADR-0006's amendment ("every model-chosen Yes/No") implies G5 applies, but the §6.4 parenthetical reads narrower. ADR-0003 §3 wins.
+
+**R3. Entry TEXTAREAs that weren't imported can never pass the copy rule.** LF §6.4 `recheck`, G3; E5.
+- **Why:** an E5-added entry's description is longer than the 25-word / 240-char evidence a copy needs. It always ends blank (optional) or stops the attempt (required).
+- **Fix:** route every entry TEXTAREA through `recheck` (copy from the block), not only imported ones.
+
+**R4. The applicant's contact facts can answer questions about another person.** LF §5.3 `relevant`, `FACT_TITLE_SYNONYMS`.
+- **Failure scenario:** a required "Emergency contact number" or "Referee phone" passes the relevance check through the phone/contact-number synonyms. The program then writes the applicant's own phone.
+- **Fix:** a label containing a word for another person (emergency, next of kin, referee, reference, spouse, parent, guardian, manager) is never relevant to `contact.*` or `identity.*` facts. Add the oracle.
+
+**Notes (no action needed):**
+- L1's `uploaded` check works by file name plus our own upload. A Workday account that still shows an older same-named resume after our step-1 upload is an edge case; the review check covers it in part.
+- G9 will turn some required site defaults with no source into Questions-inbox items. That is expected and fails closed; watch for it at the gate.

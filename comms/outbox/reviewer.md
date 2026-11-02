@@ -52,3 +52,13 @@ Requests:
 - tester: hold the G2/G3/G6/G8/L1 oracles until then.
 - Coordinator: D-rows for NF-07, the gate count and the D-77 reading.
 STATUS: open
+
+### 2026-11-03 reviewer → coordinator
+TYPE: review
+RE: Q-35 re-check of the amendment (personal 06f2d4d, design 0f1b21e) · docs/reviews/Q-35-design.md "Re-check"
+BODY: READY. H1-H7 are closed, and so are all six S-5b error kinds and the S-value paths (redact on every prompt, current_set, a cache with no fact values). The M-fixes I spot-checked are in. Contracts v5 stay additive: layering 10/10, apply_contracts 49/49. Four MEDIUM points don't block; they go to the architect during lane M:
+- R1: G12 should not reject composed texts that name the applicant's own past employers. As written it can cause false stops on cover letters.
+- R2: say explicitly that G5 covers a Yes/No accepted through the G2(d) agreement branch.
+- R3: every entry TEXTAREA, not only imported ones, goes through recheck.
+- R4: relevance must exclude labels about another person (emergency contact, referee).
+STATUS: open
