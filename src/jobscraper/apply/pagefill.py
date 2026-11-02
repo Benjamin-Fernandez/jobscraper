@@ -58,6 +58,7 @@ from .contracts import (
 L1_KEPT_NOTE = "L1: kept, uploaded in this attempt"     # locks: the file on the page is ours
 TIMED_OUT_NOTE = "transport: timed out"
 G9_FAILED_NOTE = "G9: cleared after failed fill"
+MISS_NOTES = ("search_miss", "no_option")                 # widgets notes: the list had nothing to take
 UNAVAILABLE_NOTE = "transport: model unavailable"
 DEFAULT_REVEAL_ROUNDS = 2
 DEFAULT_FOLLOWUPS = 25
@@ -146,6 +147,9 @@ def fill_page(page: Any, nav: Any, ctx: AttemptContext, rctx: ResolveContext, se
         # 11. corrective pass, then G9 on optional fields we couldn't fill (review F1)
         _corrective(run)
         _clear_failed_optional(run)
+        stop = _required_misses(run)
+        if stop:
+            return _outcome(run, unknown=stop)
         # 12. the required scan
         stop = _required_scan(run)
         if stop:
@@ -513,6 +517,25 @@ def _clear_failed_optional(run: _Run) -> None:
                                         source=pf.origin.value, status=AnswerStatus.PREFILLED,
                                         confidence=G.CONF_UNVERIFIED, note=G.UNVERIFIED_NOTE)
         del run.failed[key]
+
+
+def _required_misses(run: _Run) -> tuple[str, ...]:
+    """Review F4 (LF §6.4 LL3, §11; LF §8 step 10 allows the stop): a REQUIRED field whose
+    list offered no option we may take (`search_miss`, `no_option`) is unknown -> captured,
+    so the owner can answer it. A value the page would not keep (`readback`, `site_error`,
+    `not_decided`) stays fill_failed."""
+    out = []
+    for key in [k for k in run.order if k in run.failed]:
+        pf = run.fields.get(key)
+        if pf is None or not pf.field.required or run.failed[key] not in MISS_NOTES:
+            continue
+        base = run.answers.get(key) or Answer(field_key=key, value=None, tier=AnswerTier.NONE, source="",
+                                              confidence=0.0)
+        run.answers[key] = _replace(base, status=AnswerStatus.UNKNOWN, confidence=0.0,
+                                    note=f"LL3: no option found ({run.failed[key]})")
+        del run.failed[key]
+        out.append(key)
+    return tuple(out)
 
 
 # ------------------------------------------------------------------ step 13 and the outcome
