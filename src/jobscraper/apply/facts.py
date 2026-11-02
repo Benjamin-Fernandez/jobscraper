@@ -853,6 +853,26 @@ def s_values(profile: dict, account_email: str = "") -> list[str]:
     return sorted(uniq, key=lambda s: (-len(s), s))
 
 
+def enum_s_values(profile: dict) -> list[str]:
+    """The applicant's private values that `s_values` leaves out because they are ordinary
+    words (gender, race, residency, NS, marital status, nationality, EEO answers): each
+    private leaf's value and its Profile-form wording. `redact` must not use them (they
+    would blank "Chinese" the language); `llm_fill.pick_option` refuses to send any of
+    them to the model (review F1). Lowercase, 2+ characters."""
+    p = applicant.normalise(profile or {})
+    out: set[str] = set()
+    for path, v in _leaves(p):
+        if _visible(path) or isinstance(v, (dict, list)) or v is None or isinstance(v, bool):
+            continue
+        text = str(applicant.json_safe(v)).strip()
+        if len(text) < 2:
+            continue
+        out.add(text.lower())
+        for labels in _form_value_map(path, text).values():
+            out.update(x.strip().lower() for x in labels if len(x.strip()) >= 2)
+    return sorted(out)
+
+
 def today_sg(now_utc: float) -> str:
     """Today in Asia/Singapore (UTC+8) as YYYY-MM-DD for a UTC epoch (TR-5): 16:00Z is
     already the next day."""

@@ -536,13 +536,32 @@ def _one_shot(backend, system: str, user: str, fmt: dict, *, cfg, stats, keys,
     raise BackendError("model reply cut or not a JSON object")
 
 
+def pick_refused(field: PageField, wanted: str, *, s_values: Sequence[str] = (),
+                 sensitive: bool = False, deny: Sequence[str] = ()) -> bool:
+    """Review F1: a pick prompt carries the wanted value itself, so it is never made for
+    a sensitive answer (`Answer.sensitive`), an S question (G7, incl. a generic label's
+    context), a value holding a free-text S value, or one of the applicant's enum S
+    values (`facts.enum_s_values`: "Chinese", "Singapore Citizen", ...)."""
+    w = str(wanted or "").strip()
+    if sensitive or guards.sensitive_label(field) or _contains_s(w, s_values):
+        return True
+    n = norm_label(w)
+    return any(n and n == norm_label(d) for d in deny or ())
+
+
 def pick_option(backend, field: PageField, wanted: str, options: Sequence[str], *,
                 s_values: Sequence[str], cfg: Mapping[str, Any] = None,
-                stats: Optional[CallLog] = None) -> Optional[str]:
+                stats: Optional[CallLog] = None, sensitive: bool = False,
+                deny: Sequence[str] = ()) -> Optional[str]:
     """LL2/LL3 (§6.4): the option that means `wanted`, copied exactly, else None (an
-    answer that is not one of `options` is no answer, G1). Widgets get this injected."""
+    answer that is not one of `options` is no answer, G1). Widgets get this injected,
+    with `sensitive=answer.sensitive` and `deny=facts.enum_s_values(profile)`: a refused
+    pick (`pick_refused`) makes no call and returns None, so LL3 ends the field unknown
+    (required) or cleared (optional) and no S value reaches the model (review F1)."""
     opts = [str(o) for o in options if str(o).strip()]
     if not opts or not str(wanted or "").strip():
+        return None
+    if pick_refused(field, wanted, s_values=s_values, sensitive=sensitive, deny=deny):
         return None
     user = redact("\n".join([
         f"QUESTION: {field.field.label}",
