@@ -32,6 +32,7 @@ const REASONS = {
   no_option_fits: "Your saved answer isn't one of this form's options",
   attestation_unclear: "A declaration JobScraper couldn't classify",
   conflict: 'Your work rights differ between the countries asked',
+  compose_needed: "Needs a cover letter or motivation text JobScraper can't write yet",
 }
 // Fields that are one control per value; the rest fall back to the question's own kind.
 const NOT_FOR_GAP = new Set(['entries', 'fixed', 'salary', 'country_bool_map'])

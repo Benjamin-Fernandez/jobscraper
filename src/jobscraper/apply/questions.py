@@ -215,6 +215,39 @@ TRANSPORT_NOTES = ("transport", "model: unavailable", "model_unavailable")
 _TAG = re.compile(r"^(G\d+|L\d+|E\d+)")
 _INDEX = re.compile(r"\[\d+\]")
 
+# D-86 interim (review F9): until a compose WP exists (Q-45), a required cover letter or
+# "why join" text the program can't fill stops the attempt and is captured per job with
+# reason `compose_needed`, so the owner sees why. contracts v5 has no such QuestionReason
+# yet (requested from the architect); until it lands the row says `no_rule` and the
+# note starts "compose_needed".
+try:
+    COMPOSE_NEEDED = QuestionReason("compose_needed")
+except ValueError:
+    COMPOSE_NEEDED = QuestionReason.NO_RULE
+COMPOSE_NOTE = "compose_needed"
+_COVER = re.compile(r"\bcover\s*letter\b|\bmotivation(al)?\s+letter\b", re.I)
+_MOTIVE = re.compile(r"\bwhy\b.{0,60}\b(join|work|apply|applying|interested|want|choose|chose)\b"
+                     r"|\bmotivat(e|es|ed|ion)\b|\bwhat\s+(interests|attracts|excites)\s+you\b",
+                     re.I | re.S)
+
+
+def compose_needed(f: FormField, group: str = "") -> bool:
+    """A text only a compose step could write: a cover-letter upload, or a free-text
+    cover letter / motivation question outside repeated entries."""
+    text = f"{f.label} {f.description}"
+    if f.type is FieldType.FILE:
+        return bool(_COVER.search(text))
+    return f.type is FieldType.TEXTAREA and not group and bool(
+        _COVER.search(text) or _MOTIVE.search(f.label))
+
+
+def _compose_label(f: FormField, ctx: ResolveContext) -> str:
+    """Per job: the employer and a hash of the posting, so one job's answer is never
+    matched on another (a cover letter names its employer)."""
+    job = hashlib.sha256((ctx.jd_text or "").encode("utf-8")).hexdigest()[:8]
+    return (f"{norm_label(f.label)} | compose @"
+            f"{declarations.employer_norm(ctx.employer_name or '') or 'employer'}#{job}")
+
 
 def _gap_target(path: str) -> str:
     """A G2 profile_gap's rule_id as a target path: a path the Profile form edits
@@ -281,8 +314,10 @@ def capture_page(fields: Sequence[Any], answers: Mapping[str, Answer], ctx: Reso
     `PageField`s; `label_norm` is the qualified label (§12.1: a generic label carries its
     help text or context, else its place on the step), so "Please specify" after two
     different questions are two questions, and the saved answer matches only where it
-    was asked. Not captured: optional fields, files, hidden inputs, employer-specific
-    declarations, and fields left unknown by a transport failure."""
+    was asked. A required cover letter / "why join" text is captured per job with reason
+    `compose_needed` (D-86 interim), a cover-letter upload included. Not captured:
+    optional fields, other files, hidden inputs, employer-specific declarations, and
+    fields left unknown by a transport failure."""
     rule_keys = {r.key: r for r in getattr(rules, "rules", ()) or ()}
     employer = declarations.employer_norm(ctx.employer_name or "")
     forms = [pf.field for pf in fields]
@@ -292,8 +327,18 @@ def capture_page(fields: Sequence[Any], answers: Mapping[str, Answer], ctx: Reso
         f = pf.field
         a = answers.get(f.key)
         if a is None or not f.required or a.status not in UNANSWERED \
-                or f.type in NOT_CAPTURED_TYPES \
                 or (a.note or "").lower().startswith(TRANSPORT_NOTES):
+            continue
+        if compose_needed(f, pf.group):
+            out.append(CapturedQuestion(
+                label=f.label[:LABEL_MAX], label_norm=_compose_label(f, ctx),
+                kind=QuestionKind.TEXT, reason=COMPOSE_NEEDED, field_key=f.key,
+                field_type=f.type, required=True, sensitive=False,
+                description=(f.description or "")[:DESCRIPTION_MAX], step=f.step,
+                ats=ctx.ats, employer_norm=employer,
+                note=f"{COMPOSE_NOTE}: {a.note or ''}"[:NOTE_MAX]))
+            continue
+        if f.type in NOT_CAPTURED_TYPES:
             continue
         decl = declarations.classify(norm_label(f.label), norm_label(f.description))
         if decl in EMPLOYER_SPECIFIC_DECLARATIONS:
