@@ -536,6 +536,9 @@ def _fact_field(c: _Ctx, pf: PageField, d: ModelDecision) -> Answer:
     fit = F.fact_value(ref, pf, c.rctx, c.rules, today=c.today)
     choice = is_choice(pf)
     mv = d.value
+    if fit is not None and choice and pf.options_complete and pf.field.options \
+            and option_for(pf, fit[0]) in (None, "", []):
+        fit = None                       # G2(e): the program's value is no offered option
     if fit is not None:
         pv, _labels = fit
         if choice and (fact.kind in ("bool", "enum", "yes_no", "choice", "multi")):

@@ -824,7 +824,11 @@ def _field_map_value(c: Canonical, f: FormField, ctx: ResolveContext) -> Optiona
         v = pv("sourcing.how_heard_default")
         if f.type in CHOICE_TYPES:
             got = fit_text(f, v) if not _blank(v) else None
-            if got:
+            # on a listed choice the text counts only when it is an offered option (lane R
+            # wd_a 02); else the career/website match below maps it, or nothing does (G2e)
+            if got and (not f.options or any(norm_label(str(got[0])) in
+                                             (norm_label(o.label), norm_label(o.value))
+                                             for o in f.options)):
                 return got
             hits = _match_options(f, ["career", "careers", "website"])
             if not hits:
