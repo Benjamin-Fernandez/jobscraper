@@ -170,6 +170,29 @@ def test_the_synthetic_resume_header_carries_sample_s_values_for_the_privacy_ora
     assert find_secrets("\n".join(head), sample_secrets()), "the resume header must carry S values"
 
 
+def test_wd_a_my_information_is_prefilled_with_sample_s_values_for_the_privacy_oracle():
+    """Amended T1 (a), review H4: the phone, address and postal code inputs carry the sample's
+    values, so a prompt that shows them as `current` is caught (LF §6.5 withholds them)."""
+    shown = {f["label"]: f["shown"] for f in json.loads(_text(FIX / "wd_a/02-my_information/fields.json"))}
+    deny = sample_secrets()
+    for label in ("Phone Number", "Address Line 1", "Postal Code"):
+        assert shown[label] and find_secrets(shown[label], deny), label
+
+
+def test_the_fake_routes_on_the_documented_system_prompts():
+    """LF §6.2 wording, used until jobscraper.apply.llm_fill exports the constants."""
+    v = [{"id": "q", "question": "Q"}]
+    fb = FakeFillBackend(replies=[{"kind": k, "reply": {"|Q": {"source": "unknown", "ref": "", "value": "",
+                                                                "evidence": ""}}, "repeat": True}
+                                  for k in ("second", "page")] +
+                         [{"kind": "recheck", "match": "RESUME ENTRY", "raw": {"source": "unknown"}, "repeat": True}])
+    fb.complete("You fill in part of a job application form...\nThis is a check of a single field.", _prompt(v))
+    fb.complete("You fill in part of a job application form...", _prompt(v))
+    fb.complete("Copy, from RESUME ENTRY only, the lines that belong in this field for this entry.",
+                "RESUME ENTRY resume:experience[0]:\n...\nFIELD: Role Description")
+    assert [c.kind for c in fb.calls] == ["second", "page", "recheck"]
+
+
 # ---------------------------------------------------------------------------- the fake model
 def _prompt(views: list[dict], *, entry: bool = False) -> str:
     block = "RESUME ENTRY resume:experience[0]:\n..." if entry else "RESUME:\n..."

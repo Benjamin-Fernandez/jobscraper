@@ -1,15 +1,15 @@
 """Shared helpers for the D-78 llm_fill oracles (Q-35 WP-T1; not a test file).
 
-FakeFillBackend: a scripted local model. ASSUMED call shapes (tester outbox TR-4, review M6),
-one place to change when lane M pins them:
-  * the user prompt holds `FIELDS (JSON):` followed by one JSON value: a list of field views, or
-    an object keyed by field id; each view has `id`, `question`, optional `group_title`,
-    `site_error`. A reply key is `"<group_title>|<question>"` ("" outside entries), so replies
-    don't depend on the reader's random ids or on call order;
-  * the call kind comes from the system prompt (llm_fill.PICK_SYSTEM / RECHECK_SYSTEM when the
-    module exports them, else the phrases below), temperature 0.7 (second opinion), a field view
-    with `site_error` (corrective) or `RESUME ENTRY` in the user prompt (entry);
-  * pick / recheck replies are the reply entry's `raw` object, JSON-encoded as is.
+FakeFillBackend: a scripted local model, built on the amended LF §6.2 (pinned):
+  * the user prompt ends `FIELDS (JSON):` + one JSON array of field views (the last block before
+    the fixed final line); each view has `id`, `question`, optional `group_title`, `site_error`.
+    A reply key is `"<group_title>|<question>"` ("" outside entries), so replies don't depend on
+    the reader's random ids or on call order;
+  * the call kind comes from the system prompt: `llm_fill.SECOND_SYSTEM` / `PICK_SYSTEM` /
+    `RECHECK_SYSTEM` (falling back to their documented wording before the module exists), a field
+    view with `site_error` (corrective) or `RESUME ENTRY` in the user prompt (entry), else page;
+  * pick / recheck replies are the reply entry's `raw` object, JSON-encoded as is (ASSUMED shape
+    until lane M names its reply schema).
 Reply entries: {"kind", "reply": {key: decision}} | {"kind", "match": "<text in the user prompt>",
 "raw": {...}} | plus "raise": "BackendError"|"timeout", "done_reason": "length", "text": "<raw>".
 """
@@ -50,7 +50,8 @@ def _system_constants() -> dict[str, str]:
         m = importlib.import_module("jobscraper.apply.llm_fill")
     except ModuleNotFoundError:
         return {}
-    return {k: getattr(m, a) for k, a in (("pick", "PICK_SYSTEM"), ("recheck", "RECHECK_SYSTEM"))
+    return {k: getattr(m, a) for k, a in (("pick", "PICK_SYSTEM"), ("recheck", "RECHECK_SYSTEM"),
+                                          ("second", "SECOND_SYSTEM"), ("page", "SYSTEM"))
             if isinstance(getattr(m, a, None), str)}
 
 
@@ -103,17 +104,16 @@ class FakeFillBackend(Backend):
         return cls(replies=json.loads(Path(path).read_text(encoding="utf-8"))["calls"], **kw)
 
     def kind_of(self, system: str, user: str, temperature: Optional[float], views: list[dict]) -> str:
-        consts = _system_constants()
-        if consts.get("pick") and system.strip() == consts["pick"].strip():
-            return "pick"
-        if consts.get("recheck") and system.strip() == consts["recheck"].strip():
-            return "recheck"
+        consts = _system_constants()   # LF §6.2: SYSTEM, SECOND_SYSTEM, PICK_SYSTEM, RECHECK_SYSTEM
+        for kind in ("second", "pick", "recheck"):        # SECOND_SYSTEM starts with SYSTEM: test it first
+            if consts.get(kind) and system.strip() == consts[kind].strip():
+                return kind
         low = system.lower()
         if "pick the one option" in low:
             return "pick"
-        if "belongs to entry" in (low + user.lower()) and len(views) <= 1:
+        if low.startswith("copy, from resume entry only") or ("belongs to entry" in (low + user.lower()) and len(views) <= 1):
             return "recheck"
-        if temperature is not None and abs(temperature - 0.7) < 1e-9:
+        if "this is a check of a single field" in low or (temperature is not None and abs(temperature - 0.7) < 1e-9):
             return "second"
         if any(v.get("site_error") for v in views):
             return "corrective"

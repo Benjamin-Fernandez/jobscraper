@@ -153,6 +153,46 @@ def test_a_class_missing_a_navigation_member_is_not_a_site_navigator():
     assert not isinstance(NoSubmit(), SiteNavigator)
 
 
+def test_amended_v5_fields_default_empty_and_are_not_shared():
+    """Amendment after stage E (additive v5): resume_entries, other_employers, pre_import,
+    uploaded, transport_failed."""
+    from jobscraper.apply.contracts import AttemptContext, ResolveContext
+    r = ResolveContext(profile={}, employer_name="Example Employer")
+    assert r.resume_entries == () and r.other_employers == ()
+    kw = dict(attempt_id=1, job={}, tenant=Tenant(ats="workday", host="example.test", board="example"),
+              dry_run=True, email="", resume_path="", log=lambda s: None,
+              screenshot=lambda p, s: "", deadline=0.0)
+    a, b = AttemptContext(**kw), AttemptContext(**kw)
+    assert a.pre_import == {} and a.uploaded == {}
+    a.uploaded["cv.pdf"] = "0" * 64
+    a.pre_import["k"] = "v"
+    assert b.uploaded == {} and b.pre_import == {}, "default dicts must not be shared"
+    assert PageOutcome(step="x").transport_failed is False
+    assert ModelDecision(field_key="f", source=FillSource.KEEP).via == "page"
+
+
+class _MinimalServices:
+    backend = None
+    model = "fake"
+    rules = None
+    cfg: dict = {}
+
+    def today(self) -> str: return "2026-11-03"
+    def now(self) -> float: return 0.0
+    def deadline_left(self) -> float: return 60.0
+    def classify(self, page) -> None: return None
+    def cache_get(self, job_id, sigs, prompt_version, model, inputs_hash) -> dict: return {}
+    def cache_put(self, job_id, rows) -> None: return None
+    def log(self, line: str) -> None: return None
+
+
+def test_a_minimal_class_with_every_member_is_fill_services():
+    from jobscraper.apply.contracts import FillServices
+    assert isinstance(_MinimalServices(), FillServices)
+    body = {k: v for k, v in vars(_MinimalServices).items() if not k.startswith("__") and k != "classify"}
+    assert not isinstance(type("NoClassify", (), body)(), FillServices), "classify is required (review M6)"
+
+
 def test_site_navigator_has_no_fill_side_members():
     """D-78: navigators navigate; reading and filling are generic (LF §9)."""
     members = {n for n in dir(SiteNavigator) if not n.startswith("_")}
