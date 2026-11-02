@@ -835,18 +835,24 @@ def _date_forms(iso: str) -> list[str]:
         y, mo = m2.groups()
         return [iso, f"{mo}/{y}", f"{int(mo)}/{y}", f"{_MONTHS[int(mo) - 1]} {y}"]
     y, mo, d = m.groups()
-    name = _MONTHS[int(mo) - 1]
-    return [iso, f"{d}/{mo}/{y}", f"{int(d)}/{int(mo)}/{y}", f"{mo}/{d}/{y}",
-            f"{int(mo)}/{int(d)}/{y}", f"{int(d)} {name} {y}", f"{d} {name} {y}",
-            f"{name} {int(d)}, {y}", f"{int(d)} {name[:3]} {y}", f"{name[:3]} {int(d)}, {y}",
-            f"{d}-{mo}-{y}", f"{d}.{mo}.{y}"]
+    name, mon = _MONTHS[int(mo) - 1], _MONTHS[int(mo) - 1][:3]
+    out = [iso, f"{d}/{mo}/{y}", f"{int(d)}/{int(mo)}/{y}", f"{mo}/{d}/{y}",
+           f"{int(mo)}/{int(d)}/{y}", f"{d}-{mo}-{y}", f"{d}.{mo}.{y}",
+           f"{y}/{mo}/{d}", f"{y}.{mo}.{d}", f"{y}{mo}{d}"]
+    for dd in dict.fromkeys((str(int(d)), d)):       # "5" and "05"
+        for mm in (name, mon):                         # "March" and "Mar"
+            out += [f"{dd} {mm} {y}", f"{mm} {dd}, {y}", f"{mm} {dd} {y}",
+                    f"{dd}-{mm}-{y}"]
+    return list(dict.fromkeys(out))
 
 
-def s_values(profile: dict, account_email: str = "") -> list[str]:
+def s_values(profile: dict, account_email: str) -> list[str]:
     """The free-text S values that must never be in a prompt (§6.5, H4): contact values
     except city/country (email, backup email, phone in its usual spellings, address lines,
     postal code), the date of birth in common date forms, NRIC last 4, ORD date, race
-    "other" text, a free-text religion, and the account email. Enum S values (gender,
+    "other" text, a free-text religion, and the account email (required: under D-72
+    the ATS account's mailbox differs from contact.email; pass `rctx.account_email`,
+    review F4). Enum S values (gender,
     race, residency, NS, marital status) are ordinary words and are not listed; locks
     and G7 keep the model off those questions. Longest first; 3+ characters."""
     p = applicant.normalise(profile or {})
@@ -952,7 +958,8 @@ def facts_used_hash(refs: Iterable[str], rctx: ResolveContext, *, today: str = "
         else:
             v = None
         parts.append(ref + "=" + json.dumps(v, sort_keys=True, ensure_ascii=False, default=str))
-    key = hashlib.sha256("\n".join(s_values(profile)).encode("utf-8")).digest()
+    key = hashlib.sha256("\n".join(s_values(profile, rctx.account_email or ""))
+                         .encode("utf-8")).digest()
     return hmac.new(key, "\n".join(parts).encode("utf-8"), hashlib.sha256).hexdigest()[:16]
 
 
