@@ -13,7 +13,7 @@
 - A03 `yes_if` rows merged; Q-29 resolver exclude fix running. Not started: Q-27 architect small items (`ResolveContext.job_title`, §5.4 `backup_email`).
 
 ## Waiting on the owner
-- D-72: the owner switched the application Gmail account (address in Coordinator memory, not the repo); no backup email. Old Credential Manager entry deleted. Still needed: a 16-letter app password for the new account in `jobscraper:imap:imap.gmail.com` (the password pasted in chat was the account password: Gmail rejected it, not stored). Check: IMAP login test.
+- D-72: application Gmail switched (address in Coordinator memory); app password saved and verified (IMAP login OK, 2026-11-03).
 - MyGreenhouse sign-in: the Coordinator opened Edge on the JobScraper profile (`%LOCALAPPDATA%\JobScraper\apply-profile`, now created) at my.greenhouse.io on 2026-11-03; the owner signs in there (the earlier sign-ins went to the normal Edge).
 - `data/applicant.yaml`: a resume-prefilled draft is in the session scratchpad (`applicant.yaml`; the scope guard blocks the Coordinator writing `data/`); owner copies it and fills residency, start date, salary (+ DOB, address, NS).
 
