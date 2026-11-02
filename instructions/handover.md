@@ -8,12 +8,12 @@
 
 ## Running / ready to merge (worktrees under `.claude/worktrees/`)
 - int/Q-30 MERGED + bundle built + pushed (70169be; 752/752, web 253+1; smoke 8768 OK). Review `docs/reviews/Q-30.md`: APPROVE WITH FIXES; F1–F7 routed (Q-39, Q-40).
-- Spike S-5b (`spike/Q-23b-llm-workday`): LLM-driven real Workday applications at the 2 D-77 employers; records to the session scratchpad `s5b/<tenant>/`; feeds Q-35.
+- S-5b DONE + merged (e79745c): tenant A submitted + confirmed; tenant B account made, stopped at a required "Additional Address" (profile `address_line2` empty) → Q-41/D-80 after the owner fills it. Recordings (personal) in the session scratchpad `s5b/`. Q-35 architect running in worktree `arch-Q-35` (no shell: Coordinator commits).
 - `int/Q-36` (worktree `int-Q-36`, e465164 = personal + Q-36 lenient profile, D-79): owner's file `errors: 0` on the branch; 751/752 until tester Q-38 updates the strict oracle + adds `normalise` pins. Then merge into personal (fast-forward), push.
 - Q-39 engineer (`eng/Q-39-q30-fixes`, from int/Q-36): review F2/F6/F7. Merge after int/Q-36; rebuild the bundle (web change).
 
 ## Waiting on the owner
-- Nothing blocking. Application Gmail + app password verified (address only in Coordinator memory). MyGreenhouse signed in on the JobScraper Edge profile. `data/applicant.yaml` filled by the owner.
+- `contact.address_line2` (Q-41) and the template placeholders in `data/applicant.yaml` ("Example Pte Ltd" experience, default skills). Application Gmail + app password verified (address only in Coordinator memory). MyGreenhouse signed in on the JobScraper Edge profile. `data/applicant.yaml` filled by the owner.
 
 ## Next 1–3 actions
 1. Merge int/Q-36 (after Q-38), then Q-39 (+ bundle rebuild, tester oracles for F2/F6/F7).
