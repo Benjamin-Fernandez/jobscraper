@@ -82,6 +82,7 @@ BODY: Fast-track amendment to tier 4 (declarations). Budget ran out (36/35 calls
 **G. Open (coordinator)**
 - G1 Recommend adding `military`, `armed forces` to G7 `SENSITIVE_LABEL` (lane M `guards.py`, one constant). Without it, an NS-inclusive question that no NS `yes_if` rule matches (F5) can still reach the model.
 - G2 No NS `yes_if` rule for "served in the armed forces": it isn't true for every enum value (NS can be served in the police or civil defence), so it stays captured.
+- WRITTEN INTO DOCS (2026-11-02, follow-up): AD §5.4 + §7.5, LF §4 L3/L7 + G7 (D-88) + G2(d) (restated-fact rule: accepted, the written option stays the program's fit), QD §3 rows 4 and 14, `contracts.py` (2 additive `DeclarationLabel` members, v5). WP-Q48 and the tester WP are ready to build.
 STATUS: open
 
 ### 2026-11-02 architect → coordinator

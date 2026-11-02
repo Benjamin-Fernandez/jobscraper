@@ -43,6 +43,8 @@ CONTRACT_VERSION = 5   # 2: D-69 (no FAILED after the Submit click, ADR-0004), D
                        #    Q-45 / D-86 (still v5, additive): QuestionReason.COMPOSE_NEEDED,
                        #    AnswerSource.COMPOSED, ResolveContext.job_title, AttemptContext
                        #    .composed/.composed_files, PageOutcome.compose_needed (§19).
+                       #    Q-48 / D-87 (still v5, additive): DeclarationLabel.GOVERNMENT_EMPLOYMENT
+                       #    and .DISABILITY (neither employer-specific; apply_design §7.5).
 
 
 # --------------------------------------------------------------------------
@@ -456,6 +458,8 @@ class DeclarationLabel(str, Enum):
     PRIOR_EMPLOYMENT = "prior_employment_at_company"
     CURRENT_EMPLOYEE = "current_employee_at_company"   # D-69: deduced from experience[] with no end date
     PREVIOUSLY_APPLIED = "previously_applied"
+    GOVERNMENT_EMPLOYMENT = "government_employment"   # D-87 / Q-48: standing bool, default false
+    DISABILITY = "disability"   # D-87 / Q-48: us_self_id.disability_status, any country; label-only match
 
 
 # Declarations about THIS employer: a prefilled value (MyGreenhouse) never stands
