@@ -197,3 +197,74 @@ There is nothing to reuse as a library: build on `apply/mail.py`. The patterns w
 | M31 | https://developers.google.com/terms/api-services-user-data-policy | K |
 
 Internal: D-52, D-72, D-85 (`instructions/02_status.md`); `src/jobscraper/apply/mail.py`; `docs/research/auto_apply_brief.md` §5.
+
+---
+
+## Appendix A: R2 header spike and rules v1 notes (researcher, 2026-11-02)
+
+### A.1 R2 header spike (facts; source: `comms/outbox/coordinator.md`, entry of 2026-11-02)
+
+The Coordinator ran an owner-approved, header-only census of the application mailbox: EXAMINE plus `BODY.PEEK[HEADER.FIELDS (FROM AUTHENTICATION-RESULTS AUTO-SUBMITTED LIST-ID)]`. The script and the raw report stay outside the repo; only domains and rates are recorded here.
+
+| Item | Result |
+|---|---|
+| Special-use LIST flags | `\All`, `\Junk`, `\Sent` and `\Trash` present (names under `[Gmail]/`) |
+| Capabilities (pre-login list) | `X-GM-EXT-1` and `IDLE` advertised; `CONDSTORE` not advertised before login (§2 had it as K "advertised"; F-50 doesn't need it) |
+| Messages | 51 in All Mail, 0 in Spam |
+| Hiring-platform senders | 2 of 51 (about 4%): `myworkday.com` 1, Oleeo `<employer>.tal.net` 1. The rest is non-job mail (accounts, retail, travel) |
+| Authentication-Results on hiring-platform mail | dkim, spf and dmarc pass on 2 of 2 (100%) |
+
+**Consequences.** Oleeo joins §3: `tal.net`, with the employer as the first label of the sender's subdomain (design amendment E1, `tenant_from_subdomain`). `require_auth: true` stands, though n = 2 is weak evidence (I). §7 item 1 is only partly closed: R2 confirms Workday and Oleeo, and every other §3 sender keeps its tag.
+
+### A.2 Rules v1 (`config/mail_rules.yaml`): evidence per entry
+
+- **Platforms (26).**
+  - Confirmed by R2 headers: `workday` (`myworkday.com`), `oleeo` (`tal.net`).
+  - Snippet evidence in §3 (Sn): `greenhouse`, `smartrecruiters`, `successfactors`, `hackerrank`, `codility`, and `oracle` (but the `taleo.net` and `oraclecloud.com` hosts themselves are K).
+  - **K (unverified):** `lever`, `ashby`, `icims`, `eightfold`, `phenom`, `codesignal`, `hirevue`, `shl`, `harver` (with the pymetrics domains), `mettl` and `testgorilla`. New in v1 and also K: `workable` (`workablemail.com`, `workable.com`), `jobvite`, `pageup` (`pageuppeople.com`), `avature` (`avature.net`), and the schedulers `goodtime` (`goodtime.io`), `calendly` (`calendly.com`) and `modernloop` (`modernloop.io`).
+  - **Domain form (I):** registrable domains (`lever.co`, not `hire.lever.co`), because the header gate suffix-matches the sender's registrable domain.
+  - `oraclecloud.com` is broad: it lets any Oracle-cloud sender past gate 5, where the matcher still needs an employer signal (I).
+- **Job boards:** the §3 row, plus `jobstreet.com.sg`, `efinancialcareers.com`, `nodeflair.com`, `glints.com`, `techinasia.com` and `wellfound.com` (all K).
+- **`company_suffixes`:** the design list plus common legal and regional suffixes (`llp`, `gmbh`, `pty`, `bhd`, `sdn`, `kk`, `asia`, `apac`, `pacific`, `international` and so on) (K).
+- **`common_word_names`:** public company names that are also ordinary English words. They come from general knowledge, not from the owner's applications (O).
+- **Phrases:** every regex is I, built from §4 and K template knowledge. None has been checked against real mail; the tester's synthetic golden cases are the only check so far.
+
+### A.3 Rules v1: deliberate departures from §4 (O unless tagged)
+
+1. **Stage phrases must be invitation-shaped.** "online assessment", "coding challenge", "phone screen", "first-round interview" and "unsuccessful on this occasion" are not used bare.
+   - Why: `dominates` lets assessment and interview beat acknowledged. A process description inside an acknowledgement ("if shortlisted, you will be invited to a first-round interview") would otherwise move the status forward.
+   - So the phrases need one of three things: an invitation, a deadline, or a second-person present or past form.
+   - Lookbehinds also drop forms that start with "will", "may", "then", "be asked to", "contact you to" or "reach out to".
+2. **Conditional rejection notices** (K: common in UK and Singapore acknowledgements), such as "if you have not heard from us within 4 weeks, please assume your application has been unsuccessful".
+   - `rej.unsuccessful` and `rej.not_selected` refuse a match preceded by "if", "assume", "assume that", "take it that", "then", "days, ", "weeks, " or "date, ".
+   - Residual risk: other wordings ("…, unfortunately your application has been unsuccessful" inside the same conditional) can still hit.
+3. **"pleased to offer you".** The build-plan lookahead is widened.
+   - It refuses, within three words: interview, assessment, invitation, slot, call, chat, meeting, session, feedback, support, adjustments, and "opportunity to attend / complete / take / …".
+   - "happy to offer you" and "glad to offer you" are dropped, because they also introduce feedback or support.
+   - "pleased to offer you an interview" resolves as interview, through `int.offer_interview`.
+4. **HireVue** (MS §6.4).
+   - These are **assessment**: on-demand, one-way, digital, recorded, pre-recorded and asynchronous video interviews; "complete … video interview"; and "complete your interview by <date>".
+   - Interview phrases refuse those qualifiers (and "HireVue") within three words. They also refuse the verbs complete, record, submit, finish, take and start right after "invite you to".
+   - Live forms ("live HireVue interview", "live video interview") are **interview**.
+   - **Residual risk:** an on-demand invite whose only wording is a bare "Interview invitation" subject resolves as interview. A bare "video interview" is only a weak word, so it goes to the model.
+   - A tie-break on the sender's `kind: assessment` is the architect's call (question in the researcher outbox).
+5. **Assessment centre and superday → interview** (O: the assessors are people, live). Bare mentions are ignored; only invitations count.
+6. **Account gate.**
+   - No bare "confirm".
+   - It does contain the phrase "confirm your email (address)". That is verification wording, while acknowledgements say "this email confirms…".
+   - Password wording is subject-only, because status mail can carry a "forgot your password?" footer (I).
+7. **Kept on file.**
+   - A fixed retention period ("on file for 12 months") marks a privacy footer, so it doesn't count.
+   - "Added to our talent pool" stays kept_on_file. Only the welcome and joined forms of "talent community" trip the job_alert gate.
+8. **Gates are narrowed so that footers don't skip status mail** (I).
+   - Auto-reply and newsletter phrases are subject-only.
+   - "Job alert" counts only in the subject, or in the body as "this job alert".
+   - Outreach leaves out "found your profile" and "other roles".
+9. **portal_update** is limited to three forms: "log in … to view / see / check …", "the status of your application has changed", and "new message in your portal". "Update on your application" is a weak word, not a phrase, because neutral subjects carry no polarity (§4).
+
+### A.4 Open items
+
+- The sender domain of Careers@Gov (Singapore public service) is unknown, so it isn't listed.
+- LinkedIn Talent Hub (an ATS on `linkedin.com`) mail is skipped by the job-board gate by design (§4).
+- JobStreet now runs on SEEK, and its sending domain may be a SEEK host (K; not listed).
+- After the first real sync (WP-X1 step 3), repeat the header-only domain count to find platform senders that are still missing.
