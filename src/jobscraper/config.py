@@ -170,6 +170,17 @@ class TailorConfig:
     closed_statuses: tuple[str, ...] = ("rejected", "withdrawn")
 
 
+@dataclass(frozen=True)
+class QuestionCaptureConfig:
+    """The `question_capture:` block (questions_design §7.2, D-74): capture the
+    required questions no resolver tier answered, so the owner can answer them
+    once in Profile -> Application details."""
+    enabled: bool = True
+    llm_naming: bool = True                 # the local model names/groups non-sensitive ones; never answers
+    naming_timeout_s: float = 20
+    naming_max_per_attempt: int = 10
+
+
 @dataclass
 class Config:
     raw: dict[str, Any]
@@ -359,6 +370,15 @@ class Config:
     def tailored_dir(self) -> Path:
         """Per-job tailored resumes (gitignored; deleted per D-59)."""
         return self._path("tailored_dir", "data/tailored")
+
+    # ---------------- questions from applications (M20 lane Q) ----------------
+
+    @property
+    def question_capture(self) -> QuestionCaptureConfig:
+        """Question capture settings (questions_design §7.2); unknown keys ignored."""
+        block = self.raw.get("question_capture") or {}
+        known = {k: block[k] for k in QuestionCaptureConfig.__dataclass_fields__ if k in block}
+        return QuestionCaptureConfig(**known)
 
 
 def load_config(path: str | os.PathLike | None = None) -> Config:

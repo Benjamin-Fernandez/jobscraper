@@ -89,7 +89,9 @@ async function mountDetails(opts) {
   const Details = (await loaders['../src/components/ApplicationDetails.vue']()).default
   server = fakeServer(opts)
   vi.stubGlobal('fetch', server.fetch)
-  const wrapper = mount(Details)
+  // attachTo: jsdom only submits a <form> that is connected to the document, and "Save details" is the
+  // form's submit button (a real browser always has it connected)
+  const wrapper = mount(Details, { attachTo: document.body })
   await flushPromises()
   return wrapper
 }
@@ -128,8 +130,10 @@ suite('field tags and the meter', () => {
   it('tags a required empty field "Needed" and a sensitive one "Private: never sent to the AI"', async () => {
     const w = await mountDetails()
     const text = w.text()
-    // "Needed" on email, city and start date (the heading says "Needed before auto-apply": not counted)
-    expect(countOf(text, /\bNeeded\b(?! before)/g)).toBeGreaterThanOrEqual(3)
+    // "Needed" on email, city and start date (the heading says "Needed before auto-apply": not counted).
+    // wrapper.text() joins sibling elements with no space ("Email for applicationsNeededPrivate: ..."),
+    // so no \b word boundaries here.
+    expect(countOf(text, /Needed(?! before)/g)).toBeGreaterThanOrEqual(3)
     expect(countOf(text, /Private: never sent to the AI/g)).toBeGreaterThanOrEqual(2)   // email and postal code
   })
 
@@ -140,7 +144,7 @@ suite('field tags and the meter', () => {
       missing: [],
     })
     const w = await mountDetails({ applicant: filled })
-    expect(countOf(w.text(), /\bNeeded\b(?! before)/g)).toBe(0)
+    expect(countOf(w.text(), /Needed(?! before)/g)).toBe(0)
   })
 
   it('marks a value that came from the resume', async () => {

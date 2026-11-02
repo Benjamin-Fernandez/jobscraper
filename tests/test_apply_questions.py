@@ -285,7 +285,8 @@ def test_signature_is_stable_under_option_order_and_changes_with_kind_label_opti
     assert _sig(_cq(options=("Citizen", "PR"))) != _sig(a), "another option set is another variant"
     assert _sig(_cq(label="Visa status?")) != _sig(a)
     assert _sig(_cq(kind=K_.MULTI)) != _sig(a)
-    assert _sig(_cq(employer_norm="grab")) == _sig(a), "the employer is not part of the signature"
+    same_options = _cq(employer_norm="grab", options=("Citizen", "PR", "Other"))
+    assert _sig(same_options) == _sig(a), "the employer is not part of the signature"
 
 
 @needs(*KEYS)

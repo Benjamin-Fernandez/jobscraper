@@ -384,6 +384,25 @@ input:disabled, select:disabled { opacity: 0.6; }
   color: var(--text-2);
 }
 
+/* A field's state in words (Q-30): Needed, Private, From your resume. The words
+   carry the meaning; the colour only helps. */
+.tag {
+  display: inline-flex;
+  align-items: center;
+  font-size: var(--text-xs);
+  font-weight: 600;
+  line-height: 1.7;
+  padding: 0 var(--space-2);
+  border-radius: 999px;
+  white-space: nowrap;
+  color: var(--text-2);
+  background: var(--surface-2);
+  border: 1px solid var(--border-strong);
+}
+.tag.needed { color: var(--warn); background: var(--warn-soft); border-color: color-mix(in srgb, var(--warn) 35%, transparent); }
+.tag.private { color: var(--stage-saved); background: var(--stage-saved-soft); border-color: color-mix(in srgb, var(--stage-saved) 30%, transparent); }
+.tag.resume { color: var(--accent); background: var(--accent-soft); border-color: color-mix(in srgb, var(--accent) 30%, transparent); }
+
 .icon { flex: none; display: inline-block; vertical-align: middle; }
 
 /* Read by screen readers, not shown. */

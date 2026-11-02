@@ -28,6 +28,13 @@ def _company_tokens(name: str) -> list[str]:
     return kept or toks
 
 
+def employer_norm(name: str) -> str:
+    """The §7.5 company normalisation as one string ("Shopee Pte Ltd" ->
+    "shopee"): the key of an `extra` entry's `by_employer` override and of a
+    question sighting's employer (questions_design §6.2)."""
+    return " ".join(_company_tokens(name))
+
+
 def company_match(a: str, b: str) -> bool:
     """§7.5: both names normalised (§7.1) with legal-form and filler tokens
     dropped (only while other tokens remain); a match if equal or one token

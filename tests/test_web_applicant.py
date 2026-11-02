@@ -70,10 +70,11 @@ def test_get_returns_the_profile_the_form_the_etag_and_the_file_state():
         r = c.get("/api/applicant")
         assert r.status_code == 200, r.text
         body = r.json()
+        on_disk_etag = A.etag(path)  # inside the block: the temp dir is gone after it
     assert {"profile", "etag", "errors", "missing", "completeness", "from_resume", "sensitive",
             "form", "file"} <= set(body), sorted(body)
     assert body["profile"]["identity"]["legal_first_name"] == "Alex"
-    assert body["etag"] == A.etag(path) and len(body["etag"]) == 16
+    assert body["etag"] == on_disk_etag and len(body["etag"]) == 16
     assert body["errors"] == []
     assert isinstance(body["missing"], list) and "contact.email" not in body["missing"]
     assert set(body["completeness"]) >= {"filled", "needed"}
