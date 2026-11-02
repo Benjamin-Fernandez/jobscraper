@@ -10,12 +10,12 @@
 - Lane B `eng/M20-B-browser-greenhouse` (agent-ac5b…): B1–B6 committed (incl. MyGreenhouse prefill). Next: `git merge personal` (conflict in `config.py`: keep both append blocks; earlier attempt aborted), then B7 orchestrator, B8 CLI, B10 `apply open-profile`, B9 swap real resolver/tailor (`tailor_flow.tailor_for_apply`, `applicant.load`), B11, B12.
 - Lane V part 1 merged (V1 vault, V2 `mail set-password`/`mail test`, V3 IMAP watcher; 501/501). Next lane V: V2 `accounts` half + V4 after lane B merges; V5–V7 after spike S-5.
 - Tester Q-26 merged (487/487): fake IMAP (F4), D-70 oracles; gated helper names to confirm with lanes B/V (`keep_decision`, `choose_identity`, `workday.choose_entry`).
-- Not started: WP-A03 `yes_if` rows (researcher; Q-26), Q-27 architect small items (`ResolveContext.job_title`, §5.4 `backup_email`).
+- A03 `yes_if` rows merged; Q-29 resolver exclude fix running. Not started: Q-27 architect small items (`ResolveContext.job_title`, §5.4 `backup_email`).
 
 ## Waiting on the owner
 - D-72: the owner switched the application Gmail account (address in Coordinator memory, not the repo); no backup email. Old Credential Manager entry deleted. Still needed: a 16-letter app password for the new account in `jobscraper:imap:imap.gmail.com` (the password pasted in chat was the account password: Gmail rejected it, not stored). Check: IMAP login test.
 - MyGreenhouse sign-in inside the JobScraper Edge profile (`%LOCALAPPDATA%\JobScraper\apply-profile` does not exist yet).
-- Fill `data/applicant.yaml` from `config/applicant.example.yaml`; `applicant check` passes.
+- `data/applicant.yaml`: a resume-prefilled draft is in the session scratchpad (`applicant.yaml`; the scope guard blocks the Coordinator writing `data/`); owner copies it and fills residency, start date, salary (+ DOB, address, NS).
 
 ## Next 1–3 actions
 1. Resume lanes B, V and the tester (≤ 4 agents); researcher A03.
