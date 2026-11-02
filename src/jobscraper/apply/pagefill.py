@@ -108,6 +108,7 @@ class _Run:
     fresh: list = dc_field(default_factory=list)            # model decisions made on this page
     transport: str = ""                                     # set by a pick that failed in transport
     alias: dict = dc_field(default_factory=dict)            # re-created reader key -> the old key (F6)
+    entry_failed: dict = dc_field(default_factory=dict)     # reader key -> note: an E5 add that failed (F5)
 
 
 def fill_page(page: Any, nav: Any, ctx: AttemptContext, rctx: ResolveContext, services: Any) -> PageOutcome:
@@ -454,22 +455,25 @@ def _picker(run: _Run, pf: PageField, ans: Answer):
 
 
 def _add_entry(run: _Run, section: str, source: str) -> tuple[str, ...]:
-    """E5: click the section's Add, read the new entry, give it its own round (3-9)."""
+    """E5: click the section's Add, read the new entry, give it its own round (3-9).
+    `run.sections` is fresh here (re-read after the deletes, review F5), and the new
+    entry is found by count, not by a group id a deleted entry may have had. An Add
+    that can't be clicked or yields no entry is reported, never silent (`_add_failed`)."""
     sec = next((s for s in run.sections if s.section == section), None)
     if sec is None or not sec.add_locator:
-        return ()
-    before = {f"{s.section}#{g.index}" for s in run.sections for g in s.entries}
+        return _add_failed(run, section, "no add control")
+    count = len(sec.entries)
     if not P.click(run.page, run.page.locator(sec.add_locator).first):
-        return ()
+        return _add_failed(run, section, "add click failed")
     run.page.wait_for_timeout(500)
     run.sections = list(run.nav.entry_sections(run.page, run.ctx) or [])
-    new = [f"{s.section}#{g.index}" for s in run.sections for g in s.entries
-           if s.section == section and f"{s.section}#{g.index}" not in before]
-    if not new:
-        return ()
+    after = next((s for s in run.sections if s.section == section), None)
+    if after is None or len(after.entries) <= count:
+        return _add_failed(run, section, "no entry appeared")
+    new = [f"{section}#{g.index}" for g in sorted(after.entries, key=lambda g: g.index)[count:]]
     fields = [pf for pf in _read(run, run.sections) if pf.group in new and not _seen(run, pf)]
     if not fields:
-        return ()
+        return _add_failed(run, section, "new entry has no fields")
     decision = _decide(run, fields, run.sections, {new[0]: source})
     if decision.unknown_required:
         return decision.unknown_required
@@ -478,6 +482,24 @@ def _add_entry(run: _Run, section: str, source: str) -> tuple[str, ...]:
     for key in [pf.field.key for pf in fields]:
         if key in decision.answers:
             _apply_one(run, key, decision.answers[key], key in decision.resets)
+    return ()
+
+
+def _add_failed(run: _Run, section: str, why: str) -> tuple[str, ...]:
+    """Review F5: E5 asked for an entry the page didn't get. Always logged (the section
+    name only, no personal value). When the section is required and the page now shows
+    no entry for it, its required fields are reported fill_failed (`run.entry_failed`,
+    kept through the corrective pass) so the flow stops; a missing optional extra entry
+    (a language, a website) is reported in the log only, since the page holds nothing
+    untrue. A required section with no fields on the page is caught by the site's Next."""
+    run.services.log(f"E5: add failed in {section}: {why}")
+    sec = next((s for s in run.sections if s.section == section), None)
+    if sec is None or not sec.required or sec.entries:
+        return ()
+    for key in [k for k in run.order if k in run.fields]:
+        pf = run.fields[key]
+        if pf.field.required and pf.group.rpartition("#")[0] == section:
+            run.entry_failed[key] = "entry_add_failed"
     return ()
 
 
@@ -665,11 +687,12 @@ def _mark(run: _Run, key: str, origin: ValueOrigin) -> None:
 
 def _outcome(run: _Run, *, unknown: Sequence[str] = ()) -> PageOutcome:
     answers = dict(run.answers)
-    failed = [k for k in run.order if k in run.failed and k not in unknown]
+    why = {**run.entry_failed, **run.failed}
+    failed = [k for k in run.order if k in why and k not in unknown]
     for k in failed:
         if k in answers:
             answers[k] = _replace(answers[k], status=AnswerStatus.FILL_FAILED,
-                                  note=answers[k].note or f"fill: {run.failed[k]}")
+                                  note=answers[k].note or f"fill: {why[k]}")
     fields = [run.fields[k] for k in run.order if k in run.fields]
     return PageOutcome(step=run.step, fields=fields, answers=answers, unknown_required=tuple(unknown),
                        fill_failed=tuple(failed), model_calls=run.stats.calls,
