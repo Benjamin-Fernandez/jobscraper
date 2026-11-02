@@ -20,10 +20,13 @@ from dataclasses import dataclass, field
 from enum import Enum, IntEnum
 from typing import Any, Callable, Optional, Protocol, Sequence, Union, runtime_checkable
 
-CONTRACT_VERSION = 3   # 2: D-69 (no FAILED after the Submit click, ADR-0004), D-68 context fields
+CONTRACT_VERSION = 4   # 2: D-69 (no FAILED after the Submit click, ADR-0004), D-68 context fields
                        # 3: D-70 (additive): prefill sources/policy, PREFILLED status, account
                        #    statuses, sign-up outcomes, Workday entry, identity email, adapter
                        #    `prefill`/`read_values`, SIGNING_UP -> SIGNING_UP (backup email)
+                       # 4: D-74/D-75 (additive; questions_design.md): QuestionKind, QuestionReason,
+                       #    QuestionStatus, CapturedQuestion, EXTRA_KEY_PATTERN,
+                       #    ResolveContext.job_country, UNANSWERABLE_REQUIRED hint copy
 
 
 # --------------------------------------------------------------------------
@@ -151,7 +154,7 @@ REASON_TEXTS: dict[ReasonCode, ReasonText] = {
         "Set up the mailbox in Settings → Apply, then try again."),
     ReasonCode.UNANSWERABLE_REQUIRED: ReasonText(
         "A required question had no answer JobScraper could back up: “{detail}”.",
-        "Add the answer to Profile → Application details, or apply by hand."),
+        "Answer it under Profile → Application details, then retry."),
     ReasonCode.VALIDATION_ERROR: ReasonText(
         "The site rejected the form: {detail}.",
         "Open the posting to see the error. If it's about your details, fix them in your profile."),
@@ -451,6 +454,66 @@ class ResolveContext:
     # D-70: the address of the ATS account in use (contact.email or contact.backup_email);
     # tier-1 EMAIL answers with it when set, else with contact.email (design §10.5).
     account_email: str = ""
+    # D-75: the country a work-rights question means when its label names none
+    # ("the country where this job is located"); JobScraper's roles are in Singapore
+    # (questions_design §8.2).
+    job_country: str = "SG"
+
+
+# --------------------------------------------------------------------------
+# Questions from applications (D-74, questions_design.md §4-§7)
+# --------------------------------------------------------------------------
+
+# Keys of data/applicant.yaml `extra:` entries (questions_design §5.2, §6.1).
+EXTRA_KEY_PATTERN = r"^[a-z][a-z0-9_]{1,39}$"
+
+
+class QuestionKind(str, Enum):
+    """The widget a captured question needs, from its FieldType (questions_design §4.2)."""
+    YES_NO = "yes_no"      # single checkbox, or a bool-shaped choice (resolve.bool_shaped)
+    CHOICE = "choice"      # DROPDOWN / RADIO
+    MULTI = "multi"        # MULTI_CHOICE
+    TEXT = "text"          # TEXT, TEXTAREA, EMAIL, PHONE, URL, TYPEAHEAD
+    DATE = "date"
+    NUMBER = "number"
+
+
+class QuestionReason(str, Enum):
+    """Why a required field was captured (questions_design §4.2). Shown as a chip."""
+    NO_RULE = "no_rule"                          # no tier answered
+    UNGROUNDED = "ungrounded"                    # tier 5 failed the grounding check
+    PROFILE_GAP = "profile_gap"                  # a profile path names it, and it is empty
+    NO_OPTION_FITS = "no_option_fits"            # the profile has a value, no offered option fits
+    ATTESTATION_UNCLEAR = "attestation_unclear"  # tier 4 could not settle a declaration
+    CONFLICT = "conflict"                        # D-75: work rights differ between named countries
+
+
+class QuestionStatus(str, Enum):
+    OPEN = "open"
+    ANSWERED = "answered"
+    DISMISSED = "dismissed"    # "I'll answer this one by hand": never asked again, never retried
+
+
+@dataclass(frozen=True)
+class CapturedQuestion:
+    """One required field no tier could answer, as `apply/questions.capture`
+    returns it. Employer text only: no profile value and no answer in here."""
+    label: str                              # verbatim (<= 300 chars)
+    label_norm: str                         # plan.norm_label(label)
+    kind: QuestionKind
+    reason: QuestionReason
+    field_key: str
+    field_type: FieldType
+    required: bool = True
+    sensitive: bool = False                 # never sent to the model for naming; "Private" in the UI
+    description: str = ""                   # help text (<= 300 chars)
+    options: tuple[str, ...] = ()           # verbatim option labels (<= 50)
+    option_norms: tuple[str, ...] = ()      # norm_label of each option, same order
+    target_path: str = ""                   # profile path to fill when reason is PROFILE_GAP
+    step: str = ""
+    ats: str = ""
+    employer_norm: str = ""                 # company-normalised employer (design §7.5 company match)
+    note: str = ""                          # the resolver's note (no values)
 
 
 # --------------------------------------------------------------------------
