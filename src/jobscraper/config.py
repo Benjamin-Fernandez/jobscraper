@@ -84,10 +84,12 @@ class LlmFillConfig:
     page_timeout_s: int = 120               # one model call
     max_fields_per_call: int = 20           # chunk size outside repeated entries (§6.1)
     long_list: int = 15                     # options above this go through pick_option (§6.4)
-    keep_alive: str = "15m"                 # Ollama keeps the model loaded between steps (§13.2)
+    keep_alive: str = ""                    # Ollama keeps the model loaded between steps (§13.2);
+                                            # "" = not sent (the server's default); yaml sets "15m"
     second_opinion: bool = True             # G5 on risky required answers
     cache: bool = True                      # fill_cache replay on a retry (§13.3)
-    max_followups: int = 15                 # pick / recheck / second-opinion calls per attempt
+    max_followups: int = 25                 # pick / recheck / second-opinion calls per attempt
+    max_reveal_rounds: int = 2              # re-reads after an answer revealed new fields (§8)
     debug_dump: bool = False                # true: data/apply/<id>/prompts/NN.json (local, gitignored)
 
 
@@ -105,7 +107,8 @@ class ApplyConfig:
     action_pause_ms: int = 250              # NF-05
     step_timeout_s: int = 45
     confirm_timeout_s: int = 60             # F-37
-    attempt_timeout_s: int = 900            # NF-07; D-78 raised 420 -> 900 (llm_fill_design §13.1)
+    attempt_timeout_s: int = 420            # NF-07: Greenhouse and others; excludes the IMAP wait (D-81)
+    attempt_timeout_workday_s: int = 900    # D-81: Workday (llm_fill_design §13.1); excludes the IMAP wait
     dry_run_hold_s: int = 600               # F-37
     resume_format: str = "pdf"              # pdf | docx
     mygreenhouse: bool = True               # D-70: MyGreenhouse autofill, then fill the gaps (§9.1.1)

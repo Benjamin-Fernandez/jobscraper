@@ -147,7 +147,8 @@ apply:
   action_pause_ms: 250       # fixed pause after each field (NF-05)
   step_timeout_s: 45         # waiting for a page or step to appear
   confirm_timeout_s: 60      # F-37
-  attempt_timeout_s: 900     # whole attempt, excluding the mail wait (NF-07; D-78 raised 420 -> 900)
+  attempt_timeout_s: 420     # whole attempt, Greenhouse and others, excluding the mail wait (NF-07, D-81)
+  attempt_timeout_workday_s: 900   # Workday attempt, excluding the mail wait (D-81)
   dry_run_hold_s: 600        # F-37 dry run: keep the filled form open
   resume_format: pdf         # pdf | docx: which tailored file to upload when both exist
   mygreenhouse: true         # D-70: click "Autofill with (My)Greenhouse" when present, then fill only the gaps
@@ -161,10 +162,11 @@ apply:
     page_timeout_s: 120      # one model call
     max_fields_per_call: 20
     long_list: 15            # longer option lists go through a pick call
-    keep_alive: "15m"        # keep the model loaded between steps
+    keep_alive: "15m"        # keep the model loaded between steps (sent only when set)
     second_opinion: true
     cache: true              # replay a job's earlier pages on a retry, no model calls
-    max_followups: 15
+    max_followups: 25
+    max_reveal_rounds: 2     # re-reads after an answer revealed new fields
     debug_dump: false        # true: data/apply/<id>/prompts/NN.json (local, gitignored)
   mail:
     host: imap.gmail.com

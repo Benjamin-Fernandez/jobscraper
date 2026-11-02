@@ -803,7 +803,11 @@ class _Run:
             email=str(_profile_path(self.profile, "contact.email") or ""),
             resume_path=resume_path, log=lambda line: self.log(f"[attempt {at.id}] {line}"),
             screenshot=at.shot,
-            deadline=time.monotonic() + acfg.attempt_timeout_s, http=self.http,
+            # D-81: Workday's wizard gets its own budget; both exclude the IMAP wait.
+            deadline=time.monotonic() + (acfg.attempt_timeout_workday_s
+                                         if adapter.name == "workday"
+                                         else acfg.attempt_timeout_s),
+            http=self.http,
             applied_on_tenant=self.store.applied_on_tenant(adapter.name, tenant.host))
         rctx = self.resolve_ctx(job, tenant, adapter, resume_path)
         plan = adapter.plan_from_schema(ctx)

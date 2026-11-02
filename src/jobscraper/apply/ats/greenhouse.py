@@ -352,8 +352,12 @@ class GreenhouseAdapter:
     def choose_entry(self, page: Any, ctx: AttemptContext) -> str:
         """The site's import (D-78): the MyGreenhouse autofill of apply_design
         §9.1.1 steps 1-5 (`prefill`, unchanged) → "mygreenhouse", else "".
-        Anything but an ApplyFailure (a page signal) falls back to "": the
-        generic fill then fills every field itself."""
+        First the form's shown values go into `ctx.pre_import` (llm_fill_design
+        §3.3, review M3), so the reader can tell what the page showed before the
+        import (`site_default`) from what the import put there. Anything but an
+        ApplyFailure (a page signal) falls back to "": the generic fill then
+        fills every field itself."""
+        self._snapshot_pre_import(page, ctx)
         try:
             return self.prefill(page, ctx) or ""
         except ApplyFailure:
@@ -361,6 +365,32 @@ class GreenhouseAdapter:
         except Exception as exc:                          # noqa: BLE001 - fall back to the full fill
             ctx.log(f"mygreenhouse: skipped ({type(exc).__name__})")
             return ""
+
+    def _snapshot_pre_import(self, page: Any, ctx: AttemptContext) -> None:
+        """`ctx.pre_import[audit key] = shown text` for every non-empty field of
+        the schema plan, read before the MyGreenhouse click. Audit key = `form:`
+        + the control's html id (llm_fill_design §3.1; a single checkbox's id is
+        `<name>_1`); shown text per §3.1 ("true"/"false" for a checkbox, pill
+        texts joined for a multi-select). Never logged: the values are personal.
+        Best effort: no plan or a read error leaves the snapshot partial."""
+        plan = self._plans.get(ctx.attempt_id)
+        if plan is None:
+            return
+        fields = [f for f in plan.fields if f.type is not FieldType.HIDDEN]
+        try:
+            shown = self.read_values(page, ctx, fields)
+        except Exception:                                 # noqa: BLE001 - origins fall back to the import
+            return
+        for f in fields:
+            value = shown.get(f.key, "")
+            text = ", ".join(value) if isinstance(value, list) else str(value or "")
+            if not text:
+                continue
+            try:
+                html_id = self.locator(page, f).get_attribute("id") or ""
+            except Exception:                             # noqa: BLE001
+                html_id = ""
+            ctx.pre_import[f"form:{html_id or f.key}"] = text
 
     def step_id(self, page: Any, ctx: AttemptContext) -> str:
         """One page: the form is its own review page."""

@@ -294,22 +294,29 @@ CREATE TABLE IF NOT EXISTS question_sightings (
 );
 CREATE INDEX IF NOT EXISTS idx_sightings_attempt ON question_sightings(attempt_id);
 CREATE INDEX IF NOT EXISTS idx_sightings_question ON question_sightings(question_id);
+"""
 
--- D-78 (llm_fill_design §13.3, §14): the model's guarded decisions for one job, so a
--- retry replays earlier pages without model calls. Scope: one job, never across
--- employers; rows older than 30 days are purged at the start of an apply run.
-CREATE TABLE IF NOT EXISTS fill_cache (
+# D-78 (llm_fill_design §13.3, §14): the model's guarded decisions for one job, so a
+# retry replays earlier pages without model calls. Scope: one job, never across
+# employers; rows older than 30 days are purged at the start of an apply run. The
+# key holds the inputs the model saw (`inputs_hash`: label, options, value, section);
+# `facts_used_hash` is checked on a hit (a changed fact the decision used is a miss).
+# `decision_json` holds the ModelDecision only (a value only for resume/job/keep).
+FILL_CACHE_DDL = (
+    """CREATE TABLE IF NOT EXISTS fill_cache (
     job_id TEXT NOT NULL,
     field_sig TEXT NOT NULL,
-    facts_hash TEXT NOT NULL,
     prompt_version TEXT NOT NULL,
     model TEXT NOT NULL,
-    decision_json TEXT NOT NULL,           -- the guarded ModelDecision + Answer fields (local only)
+    inputs_hash TEXT NOT NULL,
+    facts_used_hash TEXT NOT NULL,
+    decision_json TEXT NOT NULL,
     created_at TEXT NOT NULL,
-    PRIMARY KEY (job_id, field_sig, facts_hash, prompt_version, model)
-);
-CREATE INDEX IF NOT EXISTS idx_fill_cache_created ON fill_cache(created_at);
-"""
+    PRIMARY KEY (job_id, field_sig, prompt_version, model, inputs_hash)
+)""",
+    "CREATE INDEX IF NOT EXISTS idx_fill_cache_created ON fill_cache(created_at)",
+)
+SCHEMA += "".join(stmt + ";\n" for stmt in FILL_CACHE_DDL)
 
 # The one status that does not mean "an application went out". Moving to any
 # other status stamps `applied_at` the first time, and it is never re-stamped:
@@ -394,6 +401,13 @@ class Store:
         for col in ("evidence", "shown_json", "shown_origin", "entry"):
             if col not in ans_cols:
                 self.conn.execute(f"ALTER TABLE apply_answers ADD COLUMN {col} TEXT")
+        # A pre-amendment fill_cache (keyed on facts_hash, only ever on a dev branch)
+        # is rebuilt in the §14 shape: the cache is disposable, a miss only costs a call.
+        fc_cols = {r["name"] for r in self.conn.execute("PRAGMA table_info(fill_cache)")}
+        if fc_cols and "inputs_hash" not in fc_cols:
+            self.conn.execute("DROP TABLE fill_cache")
+            for stmt in FILL_CACHE_DDL:
+                self.conn.execute(stmt)
         # The new tables come from SCHEMA's CREATE TABLE IF NOT EXISTS; record the
         # version they belong to (an upsert: an older database already has a row).
         # Never downgrade: an older build opening a newer database keeps its number.
@@ -1814,31 +1828,36 @@ class Store:
     # same job (after the owner answered a captured question) replays earlier
     # pages without model calls. Local only: `decision_json` never leaves the DB.
 
-    def fill_cache_get(self, job_id: str, sigs: Iterable[str], facts_hash: str,
-                       prompt_version: str, model: str) -> dict[str, dict[str, Any]]:
-        """{field_sig: decision} for the cached rows of this job among `sigs`
-        under the same facts, prompt version and model."""
+    def fill_cache_get(self, job_id: str, sigs: Iterable[str], prompt_version: str,
+                       model: str, inputs_hash: str) -> dict[str, dict[str, Any]]:
+        """{field_sig: {"decision": ModelDecision fields, "facts_used_hash": str}} for
+        this job's rows among `sigs` under the same prompt version, model and inputs
+        (`FillServices.cache_get`). The caller compares `facts_used_hash` with the
+        current facts; a mismatch is a miss (§13.3)."""
         sigs = list(dict.fromkeys(s for s in sigs if s))
         out: dict[str, dict[str, Any]] = {}
         for i in range(0, len(sigs), 500):                 # stay under SQLite's variable limit
             chunk = sigs[i:i + 500]
             marks = ",".join("?" * len(chunk))
             for r in self.conn.execute(
-                    f"""SELECT field_sig, decision_json FROM fill_cache
-                         WHERE job_id = ? AND facts_hash = ? AND prompt_version = ? AND model = ?
-                           AND field_sig IN ({marks})""",
-                    (job_id, facts_hash, prompt_version, model, *chunk)):
+                    f"""SELECT field_sig, facts_used_hash, decision_json FROM fill_cache
+                         WHERE job_id = ? AND prompt_version = ? AND model = ?
+                           AND inputs_hash = ? AND field_sig IN ({marks})""",
+                    (job_id, prompt_version, model, inputs_hash, *chunk)):
                 try:
-                    out[r["field_sig"]] = json.loads(r["decision_json"])
+                    decision = json.loads(r["decision_json"])
                 except ValueError:
-                    continue
+                    continue                               # a damaged row is a miss
+                out[r["field_sig"]] = {"decision": decision,
+                                       "facts_used_hash": r["facts_used_hash"]}
         return out
 
     def fill_cache_put(self, job_id: str, rows: Iterable[dict[str, Any]],
                        now: Optional[str] = None) -> int:
-        """Insert or replace cache rows. Each row: `field_sig`, `facts_hash`,
-        `prompt_version`, `model`, and `decision` (a dict, JSON-encoded here) or
-        `decision_json` (text). Commits; returns how many were written."""
+        """Insert or replace cache rows (`FillServices.cache_put`). Each row:
+        `field_sig`, `prompt_version`, `model`, `inputs_hash`, `facts_used_hash`, and
+        `decision` (the ModelDecision as a dict, JSON-encoded here) or `decision_json`
+        (text). Commits; returns how many were written."""
         now = now or utcnow()
         n = 0
         for row in rows:
@@ -1846,13 +1865,14 @@ class Store:
             if dec is None:
                 dec = json.dumps(row.get("decision") or {}, ensure_ascii=False, sort_keys=True)
             self.conn.execute(
-                """INSERT INTO fill_cache (job_id, field_sig, facts_hash, prompt_version, model,
-                       decision_json, created_at) VALUES (?,?,?,?,?,?,?)
-                   ON CONFLICT (job_id, field_sig, facts_hash, prompt_version, model)
-                   DO UPDATE SET decision_json = excluded.decision_json,
+                """INSERT INTO fill_cache (job_id, field_sig, prompt_version, model, inputs_hash,
+                       facts_used_hash, decision_json, created_at) VALUES (?,?,?,?,?,?,?,?)
+                   ON CONFLICT (job_id, field_sig, prompt_version, model, inputs_hash)
+                   DO UPDATE SET facts_used_hash = excluded.facts_used_hash,
+                                 decision_json = excluded.decision_json,
                                  created_at = excluded.created_at""",
-                (job_id, row["field_sig"], row["facts_hash"], row["prompt_version"],
-                 row["model"], dec, now))
+                (job_id, row["field_sig"], row["prompt_version"], row["model"],
+                 row["inputs_hash"], row.get("facts_used_hash") or "", dec, now))
             n += 1
         self.conn.commit()
         return n
