@@ -73,3 +73,7 @@ data/*.csv
 .claude/settings.local.json
 .claude/worktrees/
 CLAUDE.local.md
+# Atomic-write temp files (tempfile + os.replace) beside any data file: a crash
+# between the write and the replace must not leave a committable copy (Q-42).
+data/*.tmp
+data/**/*.tmp
