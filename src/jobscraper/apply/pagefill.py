@@ -58,6 +58,7 @@ from .contracts import (
 L1_KEPT_NOTE = "L1: kept, uploaded in this attempt"     # locks: the file on the page is ours
 TIMED_OUT_NOTE = "transport: timed out"
 G9_FAILED_NOTE = "G9: cleared after failed fill"
+DELETE_UNCONFIRMED_NOTE = "E3: delete not confirmed"
 MISS_NOTES = ("search_miss", "no_option")                 # widgets notes: the list had nothing to take
 UNAVAILABLE_NOTE = "transport: model unavailable"
 DEFAULT_REVEAL_ROUNDS = 2
@@ -303,24 +304,85 @@ def _time_left(run: _Run) -> None:
 
 def _apply(run: _Run, decision: Any, fields: Sequence[PageField],
            sections: Sequence[EntrySection]) -> tuple[str, ...]:
-    """Entry deletes, entry adds (a round each), then fills and G9 resets in page order.
-    Returns the unknown required keys of an added entry's round (a stop), else ()."""
-    groups = {f"{s.section}#{g.index}": g for s in sections for g in s.entries}
-    for gid in sorted(decision.deletes, key=lambda g: -_index(g)):    # bottom up: the rest stay put
-        g = groups.get(gid)
-        if g is not None and g.delete_locator:
-            P.click(run.page, run.page.locator(g.delete_locator).first)
-            run.page.wait_for_timeout(300)
-    deleted = set(decision.deletes)
-    for key in [pf.field.key for pf in fields]:
-        if key not in decision.answers or run.fields[key].group in deleted:
+    """Entry deletes (verified, review F2), entry adds (a round each), then fills and G9
+    resets in page order. Returns the unknown required keys of a stop, else ()."""
+    targets, handled = list(fields), set()
+    if decision.deletes:
+        stop, handled = _delete_entries(run, decision, fields, sections)
+        if stop:
+            return stop
+        # entries renumber and a site may re-create controls: fill from a fresh read (F5, F6)
+        targets = [pf for pf in _read(run, run.sections)
+                   if run.alias.get(pf.field.key, pf.field.key) in decision.answers]
+    for pf in targets:
+        key = pf.field.key
+        src = run.alias.get(key, key)
+        if src not in decision.answers or key in handled or src in handled:
             continue
-        _apply_one(run, key, decision.answers[key], key in decision.resets)
+        _apply_one(run, key, decision.answers[src], src in decision.resets)
     for section, source in decision.adds:
         stop = _add_entry(run, section, source)
         if stop:
             return stop
     return ()
+
+
+def _delete_entries(run: _Run, decision: Any, fields: Sequence[PageField],
+                    sections: Sequence[EntrySection]) -> tuple[tuple[str, ...], set]:
+    """E3/E6, verified (review F2). Bottom-up clicks on each group's delete control, then
+    `run.sections` is re-read. A delete counts only when the group's controls are gone
+    from the page and its section shrank as expected. A group that is still there (or
+    had no delete control) is never skipped: its required fields stop the page (unknown,
+    as E3's "no delete control" rule), its optional ones are reset (G9) or, when that
+    can't be done, flagged PREFILLED unverified. Returns (stop keys, handled keys)."""
+    groups = {f"{s.section}#{g.index}": g for s in sections for g in s.entries}
+    want = {s.section: len(s.entries) for s in sections}
+    clicked: dict[str, bool] = {}
+    for gid in sorted(decision.deletes, key=lambda g: -_index(g)):    # bottom up: the rest stay put
+        g = groups.get(gid)
+        clicked[gid] = bool(g is not None and g.delete_locator
+                            and P.click(run.page, run.page.locator(g.delete_locator).first))
+        want[gid.rpartition("#")[0]] = want.get(gid.rpartition("#")[0], 0) - 1
+        run.page.wait_for_timeout(300)
+    run.sections = list(run.nav.entry_sections(run.page, run.ctx) or [])
+    left = {s.section: len(s.entries) for s in run.sections}
+    stop: list[str] = []
+    handled: set = set()
+    for gid in decision.deletes:
+        members = [pf for pf in fields if pf.group == gid]
+        alive = {pf.field.key for pf in members if _present(run, pf)}
+        section = gid.rpartition("#")[0]
+        if clicked.get(gid) and not alive and left.get(section, 0) <= want.get(section, 0):
+            continue                                                 # confirmed gone
+        run.services.log(f"E3: delete not confirmed for {gid}")
+        for pf in members:
+            key = pf.field.key
+            handled.add(key)
+            base = run.answers.get(key) or Answer(field_key=key, value=None, tier=AnswerTier.NONE, source="",
+                                                  confidence=0.0)
+            if pf.field.required:
+                run.answers[key] = _replace(base, status=AnswerStatus.UNKNOWN, confidence=0.0,
+                                            note=DELETE_UNCONFIRMED_NOTE)
+                stop.append(key)
+                continue
+            r = W.reset_field(run.page, pf) if key in alive else None
+            if r is not None and r.ok:
+                _mark(run, key, ValueOrigin.EMPTY)
+                run.answers[key] = _replace(base, value=None, option_labels=(), status=AnswerStatus.BLANK_OPTIONAL,
+                                            confidence=0.0, note=f"{DELETE_UNCONFIRMED_NOTE}; G9: cleared")
+            else:
+                run.answers[key] = _replace(base, value=r.shown if r is not None else pf.shown, option_labels=(),
+                                            tier=AnswerTier.NONE, source=pf.origin.value,
+                                            status=AnswerStatus.PREFILLED, confidence=G.CONF_UNVERIFIED,
+                                            note=G.UNVERIFIED_NOTE)
+    return tuple(stop), handled
+
+
+def _present(run: _Run, pf: PageField) -> bool:
+    try:
+        return run.page.locator(pf.field.locator).count() > 0
+    except Exception:
+        return True                                                  # can't tell: not confirmed gone
 
 
 def _apply_one(run: _Run, key: str, ans: Answer, reset: bool) -> None:
