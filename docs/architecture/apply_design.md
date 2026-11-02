@@ -697,7 +697,7 @@ On `captcha`: if `captcha_wait_s` > 0 the tab is brought to front (`page.bring_t
 | Next | single page: `next_step` returns `is_review=True` |
 | Submit | `button[type="submit"]` whose text matches `/submit/i` |
 | Confirmation | URL contains `/confirmation`, or text matching `/thank you for applying|application (has been )?(received|submitted)|we('ve| have) received your application/i` → `confirmed:url` / `confirmed:text` |
-| Code after Submit | text matching `/security code/i` with a new text input → `code_required`; `mail_domains = ("greenhouse.io", "greenhouse-mail.io")`; `otp_pattern = r"\b([A-Za-z0-9]{8})\b"` (**pending S-4**: confirm the code format on a real message) |
+| Code after Submit | text matching `/security code/i` with a new text input → `code_required`; `mail_domains = ("greenhouse.io", "greenhouse-mail.io")`; `otp_pattern = r"\b([A-Za-z0-9]{8})\b"` superseded by **D-85**: the code is the only line (trimmed) of 6–12 letters/digits after the "security code" sentence (no digit required); zero or several candidate lines → fail closed (`llm_fill_design.md` §9.2). Revisit when S-4 or a real message shows the format |
 | Errors | visible `[aria-invalid="true"]` field labels, `.helper-text--error`, text "This field is required" → `errors`; one re-fill of those fields, then `validation_error` |
 | Account | none (`needs_account = False`) |
 
