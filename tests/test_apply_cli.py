@@ -308,6 +308,16 @@ def test_the_apply_job_kind_refuses_bad_ids_and_too_many():
     assert build("apply", {"job_ids": [f"j{i}" for i in range(20)]}), "20 is allowed"
 
 
+def test_f11_the_job_kind_refuses_the_reserved_words_show_and_open_profile():
+    build = web_jobs.cli_command()
+    for ids in (["show"], ["show", "abc123"], ["abc123", "open-profile"], ["open-profile"]):
+        try:
+            build("apply", {"job_ids": ids})
+        except ValueError:
+            continue
+        raise AssertionError(f"{ids} would run `apply show` / `open-profile` from a web job")
+
+
 def test_the_real_cli_from_the_job_kind_argv_logs_lines_without_profile_values():
     """NF-09 smoke: the web job's argv runs the real CLI; stdout (= the Developer-tab log) shows
     one line per state change and none of the applicant's values. The job's ATS is unsupported,

@@ -20,6 +20,7 @@ import dataclasses
 import hashlib
 import io
 import sqlite3
+import subprocess
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -241,24 +242,28 @@ def test_the_same_job_twice_in_one_batch_is_refused_the_second_time():
 def test_a_job_with_an_earlier_clicked_attempt_is_a_duplicate():
     w, ad, cid, jid = fake_world()
     aid = w.store.create_attempt(jid, cid, "auto", "2026-11-02T01:00:00")
-    for s in ("planning", "opening", "filling", "submitting"):
-        w.store.set_attempt_state(aid, s)
-    w.store.mark_submit_clicked(aid, "2026-11-02T01:00:00")
-    w.store.set_attempt_state(aid, "submitted_unconfirmed")
-    w.store.commit()
+    _walk_clicked(w.store, aid, "2026-11-02T01:00:00", "submitted_unconfirmed")
     r, factory, say = _one(w, ad, jid)
     assert r.reason is R.DUPLICATE and "already submitted by JobScraper" in r.reason_detail
     w.close()
 
 
+def _walk_clicked(store, aid, when, final=None):
+    """queued -> ... -> filling, the click recorded (NF-06: before submitting), -> submitting,
+    then `final` if given. The store refuses submitting without the click."""
+    for s in ("planning", "opening", "filling"):
+        store.set_attempt_state(aid, s)
+    assert store.mark_submit_clicked(aid, when) is True
+    store.set_attempt_state(aid, "submitting")
+    if final:
+        store.set_attempt_state(aid, final)
+    store.commit()
+
+
 def _clicked_today(w, cid, job_id):
     """A submit click recorded now (inside today's Singapore day) for `job_id`."""
     aid = w.store.create_attempt(job_id, cid, "auto", store_mod.utcnow())
-    for s in ("planning", "opening", "filling", "submitting"):
-        w.store.set_attempt_state(aid, s)
-    w.store.mark_submit_clicked(aid, store_mod.utcnow())
-    w.store.set_attempt_state(aid, "submitted")
-    w.store.commit()
+    _walk_clicked(w.store, aid, store_mod.utcnow(), "submitted")
 
 
 def test_the_daily_cap_refuses_in_auto_mode_and_a_dry_run_ignores_it():
@@ -314,10 +319,7 @@ def test_a_run_starts_by_closing_interrupted_attempts():
     w.store.set_attempt_state(a_open, "planning")
     w.store.set_attempt_state(a_open, "opening")
     a_clk = w.store.create_attempt(j3, cid, "auto", store_mod.utcnow())
-    for s in ("planning", "opening", "filling", "submitting"):
-        w.store.set_attempt_state(a_clk, s)
-    w.store.mark_submit_clicked(a_clk, store_mod.utcnow())
-    w.store.conn.commit()
+    _walk_clicked(w.store, a_clk, store_mod.utcnow())
     r, factory, say = _one(w, ad, jid)
     assert r.state is S.READY_TO_SUBMIT, "the stale attempts did not block this one"
     assert (w.store.attempt(a_open)["state"], w.store.attempt(a_open)["reason_code"]) == \
@@ -951,27 +953,105 @@ def _in_progress(w, cid, n, *, clicked=False):
     _, other = add_job(w.store, external_id=str(100 + n), slug="fakeco", provider="fakeats",
                        key="x", company_id=cid, url=f"https://fake.example.com/jobs/{100 + n}")
     aid = w.store.create_attempt(other, cid, "auto", store_mod.utcnow())
-    for s in ("planning", "opening", "filling"):
-        w.store.set_attempt_state(aid, s)
     if clicked:
-        w.store.mark_submit_clicked(aid, store_mod.utcnow())
-        w.store.set_attempt_state(aid, "submitting")
-    w.store.conn.commit()
+        _walk_clicked(w.store, aid, store_mod.utcnow())
+    else:
+        for s in ("planning", "opening", "filling"):
+            w.store.set_attempt_state(aid, s)
+        w.store.commit()
     return aid
 
 
-def test_f4_a_second_run_does_not_rewrite_a_live_attempt_of_another_process():
-    """Review F4 (assumes the age-based variant: an attempt started moments ago is live; if lane B
-    chooses the PID-lock variant, make `_in_progress` hold that lock instead)."""
+@contextlib.contextmanager
+def _lock_held_by_another_process(w):
+    """A real second process holding `<evidence dir>/run.lock` (the lane B run lock, review F4)."""
+    path = w.tmp / "evidence" / "run.lock"
+    src = Path(__file__).resolve().parents[1] / "src"
+    code = ("import sys; sys.path.insert(0, %r)\n"
+            "from jobscraper import apply_flow\n"
+            "lock = apply_flow.RunLock(%r)\n"
+            "print('locked' if lock.acquire() else 'busy', flush=True)\n"
+            "sys.stdin.readline()\n"
+            "lock.release()\n") % (str(src), str(path))
+    proc = subprocess.Popen([sys.executable, "-c", code], stdin=subprocess.PIPE,
+                            stdout=subprocess.PIPE, text=True)
+    try:
+        assert proc.stdout.readline().strip() == "locked", "the helper process could not take the lock"
+        yield
+    finally:
+        try:
+            proc.stdin.write("\n")
+            proc.stdin.flush()
+        except OSError:
+            pass
+        proc.wait(timeout=30)
+
+
+def test_f4_a_run_starts_nothing_and_reaps_nothing_while_another_process_holds_the_run_lock():
     for clicked, state in ((False, "filling"), (True, "submitting")):
         w, ad, cid, jid = fake_world()
         live = _in_progress(w, cid, 1, clicked=clicked)
-        r, factory, say = _one(w, ad, jid)
+        with _lock_held_by_another_process(w):
+            res, factory, say = _run(w, [jid], ad)
+        assert res == [] and factory.started == 0, "a second run must start nothing"
+        assert "another apply run is in progress; nothing was started" in say.text
         row = w.store.attempt(live)
         assert row["state"] == state and row["finished_at"] is None, \
-            f"the other run's live attempt must not be reaped under it (clicked={clicked}): {row['state']}"
-        assert r.state is S.FAILED and r.reason is R.ERROR and "in progress" in r.reason_detail
+            f"the other run's live attempt must not be rewritten (clicked={clicked}): {row['state']}"
+        assert len(w.attempt_rows()) == 1, "no attempt row was created for the refused run"
+        # the other process is gone (its lock is released): now its attempt is a dead run's
+        res, factory, say = _run(w, [jid], ad)
+        assert res and res[0].state is S.READY_TO_SUBMIT, say.text
+        closed = w.store.attempt(live)
+        assert closed["state"] == ("submitted_unconfirmed" if clicked else "failed"), closed
         w.close()
+
+
+def test_f4_the_run_lock_is_released_when_a_run_ends_even_by_an_error():
+    w, ad, cid, jid = fake_world()
+    r1, _, _ = _one(w, ad, jid)
+    assert r1.state is S.READY_TO_SUBMIT
+    ad.on_open = lambda page, ctx: (_ for _ in ()).throw(RuntimeError("boom"))
+    _, j2 = add_job(w.store, external_id="2", slug="fakeco", provider="fakeats", key="x",
+                    company_id=cid, url="https://fake.example.com/jobs/2")
+    r2, _, _ = _one(w, ad, j2)
+    assert r2.state is S.FAILED
+    ad.on_open = None
+    _, j3 = add_job(w.store, external_id="3", slug="fakeco", provider="fakeats", key="x",
+                    company_id=cid, url="https://fake.example.com/jobs/3")
+    r3, _, _ = _one(w, ad, j3)
+    assert r3.state is S.READY_TO_SUBMIT, "a finished run leaves no lock behind"
+    lock = apply_flow.RunLock(w.tmp / "evidence" / "run.lock")
+    assert lock.acquire(), "and the lock file is free"
+    lock.release()
+    w.close()
+
+
+def test_f3_a_missing_submit_button_fails_before_the_click_is_recorded():
+    w, ad, cid, jid = fake_world()
+    ad.submit_ready = lambda page: False
+    r, factory, say = _one(w, ad, jid, dry_run=False)
+    assert r.state is S.FAILED and r.reason is R.PAGE_UNRECOGNISED, (r.state, r.reason, r.reason_detail)
+    assert "submit button" in r.reason_detail and "submit" not in ad.calls
+    assert _row(w, r)["submit_clicked_at"] is None, "nothing was sent, so the job is not blocked"
+    w.close()
+
+
+def test_f5_a_failure_detail_never_carries_a_profile_value_into_the_row_or_the_result():
+    from jobscraper.apply.contracts import ApplyFailure
+    w, ad, cid, jid = fake_world()
+    ad.schema_exc = ApplyFailure(R.VALIDATION_ERROR, f"the site said {EMAIL} is not valid", step="planning")
+    r, factory, say = _one(w, ad, jid)
+    assert r.state is S.FAILED and EMAIL not in r.reason_detail and "[redacted]" in r.reason_detail
+    assert EMAIL not in " ".join(str(v) for v in _row(w, r).values())
+    assert EMAIL not in say.text
+    w.close()
+
+
+def test_f6_a_digit_value_is_redacted_even_next_to_other_digits_but_words_stay_whole():
+    assert apply_flow.redact("call +6591234567 now", ["91234567"]) == "call +65[redacted] now"
+    assert apply_flow.redact("postal S000001", ["000001"]) == "postal S[redacted]"
+    assert apply_flow.redact("captcha and cap", ["cap"]) == "captcha and [redacted]"
 
 
 def test_f4_the_flow_rechecks_duplicates_just_before_the_click():
@@ -991,7 +1071,7 @@ def test_f4_the_flow_rechecks_the_caps_just_before_the_click():
     ad.on_open = lambda page, ctx: _clicked_today(w, cid, other)      # another run sent one meanwhile
     r, factory, say = _one(w, ad, jid, dry_run=False, apply_over={"daily_cap": 1})
     assert "submit" not in ad.calls, "the cap was reached after the guards: never click"
-    assert r.state is S.FAILED and r.reason is R.CAP_REACHED
+    assert r.state is S.FAILED and r.reason is R.CAP_REACHED, (r.state, r.reason, r.reason_detail)
     assert _row(w, r)["submit_clicked_at"] is None
     w.close()
 
