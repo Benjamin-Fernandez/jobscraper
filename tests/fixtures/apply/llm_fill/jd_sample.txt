@@ -1,0 +1,3 @@
+Example Role at Example Employer (Singapore)
+We are looking for a graduate software engineer to build internal tools in Python and SQL.
+Requirements: a degree in Computer Engineering or Computer Science; Python; SQL; Git.

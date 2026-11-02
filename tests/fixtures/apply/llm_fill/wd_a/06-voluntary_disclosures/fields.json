@@ -1,0 +1,38 @@
+[
+ {
+  "label": "Gender",
+  "type": "dropdown",
+  "widget": "aria_listbox",
+  "required": true,
+  "options": [
+   "Female",
+   "I do not wish to disclose",
+   "Male"
+  ],
+  "options_sorted": true,
+  "shown": "",
+  "group": "",
+  "group_title": "",
+  "context": "",
+  "options_complete": true,
+  "automation_id": "formField-gender",
+  "parts": [],
+  "help": ""
+ },
+ {
+  "label": "I have read and consent to the processing of my personal data as set out in the privacy notice.",
+  "type": "checkbox",
+  "widget": "checkbox",
+  "required": true,
+  "options": [],
+  "options_sorted": true,
+  "shown": "false",
+  "group": "",
+  "group_title": "",
+  "context": "",
+  "options_complete": true,
+  "automation_id": "formField-acceptTermsAndAgreements",
+  "parts": [],
+  "help": ""
+ }
+]

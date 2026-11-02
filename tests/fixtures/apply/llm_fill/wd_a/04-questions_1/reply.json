@@ -1,0 +1,21 @@
+{
+ "calls": [
+  {
+   "kind": "page",
+   "reply": {
+    "|If yes, please specify": {
+     "source": "unknown",
+     "ref": "",
+     "value": "",
+     "evidence": ""
+    },
+    "|What is your expected monthly salary (SGD)?": {
+     "source": "profile",
+     "ref": "profile:pay.expected_salary",
+     "value": "5000",
+     "evidence": ""
+    }
+   }
+  }
+ ]
+}

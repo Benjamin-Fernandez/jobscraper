@@ -1,0 +1,60 @@
+[
+ {
+  "label": "Degree",
+  "type": "dropdown",
+  "widget": "aria_listbox",
+  "required": true,
+  "options": [
+   "Bachelor's Degree",
+   "Diploma"
+  ],
+  "options_sorted": true,
+  "shown": "",
+  "group": "",
+  "group_title": "",
+  "context": "",
+  "options_complete": true,
+  "automation_id": "formField-degree",
+  "parts": [],
+  "help": ""
+ },
+ {
+  "label": "Country",
+  "type": "dropdown",
+  "widget": "aria_listbox",
+  "required": true,
+  "options": [
+   "Malaysia",
+   "Singapore",
+   "United States of America"
+  ],
+  "options_sorted": true,
+  "shown": "",
+  "group": "",
+  "group_title": "",
+  "context": "",
+  "options_complete": true,
+  "automation_id": "formField-country",
+  "parts": [],
+  "help": ""
+ },
+ {
+  "label": "Phone Device Type",
+  "type": "dropdown",
+  "widget": "aria_listbox",
+  "required": true,
+  "options": [
+   "Home",
+   "Mobile"
+  ],
+  "options_sorted": true,
+  "shown": "",
+  "group": "",
+  "group_title": "",
+  "context": "",
+  "options_complete": true,
+  "automation_id": "formField-phoneType",
+  "parts": [],
+  "help": ""
+ }
+]

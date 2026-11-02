@@ -1,0 +1,111 @@
+[
+ {
+  "label": "Are you legally authorised to work in Singapore?",
+  "type": "dropdown",
+  "widget": "aria_listbox",
+  "required": true,
+  "options": [
+   "No",
+   "Yes"
+  ],
+  "options_sorted": true,
+  "shown": "",
+  "group": "",
+  "group_title": "",
+  "context": "",
+  "options_complete": true,
+  "automation_id": "formField-5eed0000000000000000000000000001",
+  "parts": [],
+  "help": ""
+ },
+ {
+  "label": "Will you now or in the future require sponsorship for an employment pass?",
+  "type": "dropdown",
+  "widget": "aria_listbox",
+  "required": true,
+  "options": [
+   "No",
+   "Yes"
+  ],
+  "options_sorted": true,
+  "shown": "",
+  "group": "",
+  "group_title": "",
+  "context": "",
+  "options_complete": true,
+  "automation_id": "formField-5eed0000000000000000000000000002",
+  "parts": [],
+  "help": ""
+ },
+ {
+  "label": "Are you a Singapore Citizen or Permanent Resident?",
+  "type": "dropdown",
+  "widget": "aria_listbox",
+  "required": true,
+  "options": [
+   "Neither",
+   "Singapore Citizen",
+   "Singapore Permanent Resident"
+  ],
+  "options_sorted": true,
+  "shown": "",
+  "group": "",
+  "group_title": "",
+  "context": "",
+  "options_complete": true,
+  "automation_id": "formField-5eed0000000000000000000000000003",
+  "parts": [],
+  "help": ""
+ },
+ {
+  "label": "Have you ever been employed by Example Employer or any of its subsidiaries?",
+  "type": "radio",
+  "widget": "radio",
+  "required": true,
+  "options": [
+   "No",
+   "Yes"
+  ],
+  "options_sorted": true,
+  "shown": "",
+  "group": "",
+  "group_title": "",
+  "context": "",
+  "options_complete": true,
+  "automation_id": "formField-5eed0000000000000000000000000004",
+  "parts": [],
+  "help": ""
+ },
+ {
+  "label": "If yes, please specify",
+  "type": "textarea",
+  "widget": "text",
+  "required": false,
+  "options": [],
+  "options_sorted": true,
+  "shown": "",
+  "group": "",
+  "group_title": "",
+  "context": "Have you ever been employed by Example Employer or any of its subsidiaries?",
+  "options_complete": true,
+  "automation_id": "formField-5eed0000000000000000000000000005",
+  "parts": [],
+  "help": ""
+ },
+ {
+  "label": "What is your expected monthly salary (SGD)?",
+  "type": "text",
+  "widget": "text",
+  "required": true,
+  "options": [],
+  "options_sorted": true,
+  "shown": "",
+  "group": "",
+  "group_title": "",
+  "context": "",
+  "options_complete": true,
+  "automation_id": "formField-5eed0000000000000000000000000010",
+  "parts": [],
+  "help": "Numbers only, for example 4500."
+ }
+]
