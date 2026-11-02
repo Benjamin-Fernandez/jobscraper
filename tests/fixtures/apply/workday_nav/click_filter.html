@@ -1,0 +1,32 @@
+<!doctype html>
+<!-- Synthetic Workday footer where a sibling `click_filter` div lies over the Next button
+     (S-5 a): a click on the button times out; the click_filter takes it. Counters on
+     body.dataset: filterClicks, buttonClicks. -->
+<html lang="en"><head><meta charset="utf-8"><title>Example Employer Careers</title>
+<style>body{font-family:sans-serif}
+.sr-only{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
+.foot{position:relative;display:inline-block;padding:4px}
+[data-automation-id="click_filter"]{position:absolute;left:0;top:0;right:0;bottom:0;z-index:10}</style></head>
+<body data-filter-clicks="0" data-button-clicks="0">
+<main><div data-automation-id="applyFlowPage">
+  <div data-automation-id="progressBar"><div data-automation-id="progressBarActiveStep">
+    <span class="sr-only">current step 2 of 7</span><span id="step-title">My Information</span></div></div>
+  <h3>My Information</h3>
+</div>
+<div data-automation-id="pageFooter"><div class="foot">
+  <div data-automation-id="click_filter"></div>
+  <button type="button" data-automation-id="pageFooterNextButton">Save and Continue</button>
+</div></div></main>
+<script>
+(function () {
+  const B = document.body, $ = s => document.querySelector(s);
+  const bump = k => { B.dataset[k] = String(+B.dataset[k] + 1); };
+  $('[data-automation-id="pageFooterNextButton"]').addEventListener('click', () => bump('buttonClicks'));
+  $('[data-automation-id="click_filter"]').addEventListener('click', () => {
+    bump('filterClicks');
+    $('#step-title').textContent = 'My Experience';
+    $('.sr-only').textContent = 'current step 3 of 7';
+  });
+})();
+</script>
+</body></html>

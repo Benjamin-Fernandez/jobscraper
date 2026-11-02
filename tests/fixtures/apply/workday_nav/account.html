@@ -1,0 +1,56 @@
+<!doctype html>
+<!-- Synthetic Workday account wall (S-5 c structure: the account form is wizard step 1 and
+     the progress bar is visible at the same time). ?mode=signup shows Create Account.
+     Counters on body.dataset: signins, signups, enters (Enter keydowns), formSubmits. -->
+<html lang="en"><head><meta charset="utf-8"><title>Example Employer Careers</title>
+<style>body{font-family:sans-serif}.hidden{display:none}
+[data-automation-id="beecatcher"]{position:absolute;left:-10000px}
+.sr-only{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}</style></head>
+<body data-signins="0" data-signups="0" data-enters="0" data-form-submits="0">
+<main>
+  <div data-automation-id="progressBar"><div data-automation-id="progressBarActiveStep">
+    <span class="sr-only">current step 1 of 7</span><span id="step-title">Create Account/Sign In</span></div></div>
+  <form id="acct" action="#" method="post">
+    <div id="signin">
+      <label for="e1">Email Address</label><input id="e1" type="text" data-automation-id="email">
+      <label for="p1">Password</label><input id="p1" type="password" data-automation-id="password">
+      <input type="text" data-automation-id="beecatcher" tabindex="-1" autocomplete="off" aria-hidden="true">
+      <div role="button" tabindex="0" data-automation-id="signInSubmitButton">Sign In</div>
+      <button type="button" data-automation-id="createAccountLink">Create Account</button>
+    </div>
+    <div id="signup" class="hidden">
+      <label for="e2">Email Address</label><input id="e2" type="text" data-automation-id="email">
+      <label for="p2">Password</label><input id="p2" type="password" data-automation-id="password">
+      <label for="p3">Verify New Password</label><input id="p3" type="password" data-automation-id="verifyPassword">
+      <input type="checkbox" data-automation-id="createAccountCheckbox" id="c1"><label for="c1">I agree</label>
+      <div role="button" tabindex="0" data-automation-id="createAccountSubmitButton">Create Account</div>
+    </div>
+  </form>
+  <div data-automation-id="applyFlowPage" class="hidden"><h3>My Information</h3></div>
+</main>
+<script>
+(function () {
+  const B = document.body, $ = s => document.querySelector(s);
+  const bump = k => { B.dataset[k] = String(+B.dataset[k] + 1); };
+  if (new URLSearchParams(location.search).get('mode') === 'signup') {
+    $('#signin').classList.add('hidden'); $('#signup').classList.remove('hidden');
+  }
+  document.addEventListener('keydown', ev => { if (ev.key === 'Enter') bump('enters'); }, true);
+  $('#acct').addEventListener('submit', ev => { ev.preventDefault(); bump('formSubmits'); });
+  const enter = () => {
+    $('#acct').classList.add('hidden');
+    $('[data-automation-id="applyFlowPage"]').classList.remove('hidden');
+    $('#step-title').textContent = 'My Information';
+    $('.sr-only').textContent = 'current step 2 of 7';
+  };
+  $('[data-automation-id="signInSubmitButton"]').addEventListener('click', () => {
+    bump('signins');
+    if ($('#e1').value && $('#p1').value) enter();
+  });
+  $('[data-automation-id="createAccountSubmitButton"]').addEventListener('click', () => {
+    bump('signups');
+    if ($('#e2').value && $('#p2').value && $('#p2').value === $('#p3').value) enter();
+  });
+})();
+</script>
+</body></html>

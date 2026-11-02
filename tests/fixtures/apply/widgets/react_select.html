@@ -1,0 +1,70 @@
+<!doctype html>
+<!-- Synthetic react-select look-alike (Greenhouse searchable selects; review Q-35-lanes-NR F1).
+     Typing filters the options by substring, so a search for "Computer Engineering" shows only
+     "Computer Engineering Technology" and a search for "Java" only "JavaScript". A chosen option
+     shows in .select__single-value and in the .select's data-value. Enter does nothing. -->
+<html lang="en"><head><meta charset="utf-8"><title>Example Employer application</title>
+<style>
+  .select { position: relative; width: 360px; }
+  .select__control { border: 1px solid #888; min-height: 32px; display: flex; align-items: center; padding: 0 6px; }
+  .select__input { border: 0; outline: 0; flex: 1; min-width: 40px; }
+  .select__menu { position: absolute; z-index: 5; background: #fff; border: 1px solid #888; left: 0; right: 0; }
+  .select__option { padding: 4px 8px; cursor: pointer; }
+</style></head>
+<body><main><div data-automation-id="applyFlowPage">
+  <h3>Education</h3>
+  <div class="field"><label for="discipline">Discipline</label>
+    <div class="select" id="sel-discipline" data-options='["Computer Engineering Technology","Mechanical Engineering","Business Administration"]'>
+      <div class="select__control"><span class="select__single-value"></span><input id="discipline" class="select__input" role="combobox" autocomplete="off" aria-expanded="false"></div>
+    </div></div>
+  <div class="field"><label for="language">Main programming language</label>
+    <div class="select" id="sel-language" data-options='["JavaScript","Python","Go"]'>
+      <div class="select__control"><span class="select__single-value"></span><input id="language" class="select__input" role="combobox" autocomplete="off" aria-expanded="false"></div>
+    </div></div>
+  <div class="field"><label for="degree">Degree</label>
+    <div class="select" id="sel-degree" data-options='["Bachelor of Engineering","Master of Engineering"]'>
+      <div class="select__control"><span class="select__single-value"></span><input id="degree" class="select__input" role="combobox" autocomplete="off" aria-expanded="false"></div>
+    </div></div>
+</div></main>
+<script>
+(function () {
+  var norm = function (s) { return (s || '').toLowerCase().replace(/\s+/g, ' ').trim(); };
+  document.querySelectorAll('.select').forEach(function (sel) {
+    var options = JSON.parse(sel.getAttribute('data-options'));
+    var input = sel.querySelector('.select__input');
+    var single = sel.querySelector('.select__single-value');
+    var menu = null;
+    sel.dataset.value = '';
+    function close() { if (menu) { menu.remove(); menu = null; } input.setAttribute('aria-expanded', 'false'); }
+    function open() {
+      close();
+      var q = norm(input.value);
+      menu = document.createElement('div');
+      menu.className = 'select__menu';
+      menu.setAttribute('role', 'listbox');
+      options.filter(function (o) { return !q || norm(o).indexOf(q) !== -1; }).forEach(function (o) {
+        var d = document.createElement('div');
+        d.className = 'select__option';
+        d.setAttribute('role', 'option');
+        d.textContent = o;
+        d.addEventListener('mousedown', function (e) {
+          e.preventDefault();
+          single.textContent = o;
+          sel.dataset.value = o;
+          input.value = '';
+          close();
+        });
+        menu.appendChild(d);
+      });
+      sel.appendChild(menu);
+      input.setAttribute('aria-expanded', 'true');
+    }
+    sel.querySelector('.select__control').addEventListener('mousedown', function () { setTimeout(open, 0); });
+    input.addEventListener('focus', open);
+    input.addEventListener('input', open);
+    input.addEventListener('blur', function () { setTimeout(close, 150); });
+    input.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); } });
+  });
+})();
+</script>
+</body></html>
