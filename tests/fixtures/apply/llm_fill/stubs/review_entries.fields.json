@@ -1,0 +1,120 @@
+[
+ {
+  "label": "Language",
+  "type": "dropdown",
+  "widget": "aria_listbox",
+  "required": true,
+  "options": [
+   "English",
+   "Japanese",
+   "Malay",
+   "Mandarin",
+   "Tamil"
+  ],
+  "options_sorted": true,
+  "shown": "English",
+  "group": "languages#1",
+  "group_title": "Languages 1",
+  "context": "",
+  "options_complete": true,
+  "automation_id": "formField-language",
+  "parts": [],
+  "help": ""
+ },
+ {
+  "label": "I am fluent in this language.",
+  "type": "checkbox",
+  "widget": "checkbox",
+  "required": false,
+  "options": [],
+  "options_sorted": true,
+  "shown": "true",
+  "group": "languages#1",
+  "group_title": "Languages 1",
+  "context": "",
+  "options_complete": true,
+  "automation_id": "formField-native",
+  "parts": [],
+  "help": ""
+ },
+ {
+  "label": "Overall",
+  "type": "dropdown",
+  "widget": "aria_listbox",
+  "required": true,
+  "options": [
+   "Advanced",
+   "Beginner",
+   "Intermediate",
+   "Native"
+  ],
+  "options_sorted": true,
+  "shown": "Native",
+  "group": "languages#1",
+  "group_title": "Languages 1",
+  "context": "",
+  "options_complete": true,
+  "automation_id": "formField-languageProficiency",
+  "parts": [],
+  "help": ""
+ },
+ {
+  "label": "Language",
+  "type": "dropdown",
+  "widget": "aria_listbox",
+  "required": true,
+  "options": [
+   "English",
+   "Japanese",
+   "Malay",
+   "Mandarin",
+   "Tamil"
+  ],
+  "options_sorted": true,
+  "shown": "Japanese",
+  "group": "languages#2",
+  "group_title": "Languages 2",
+  "context": "",
+  "options_complete": true,
+  "automation_id": "formField-language",
+  "parts": [],
+  "help": ""
+ },
+ {
+  "label": "I am fluent in this language.",
+  "type": "checkbox",
+  "widget": "checkbox",
+  "required": false,
+  "options": [],
+  "options_sorted": true,
+  "shown": "false",
+  "group": "languages#2",
+  "group_title": "Languages 2",
+  "context": "",
+  "options_complete": true,
+  "automation_id": "formField-native",
+  "parts": [],
+  "help": ""
+ },
+ {
+  "label": "Overall",
+  "type": "dropdown",
+  "widget": "aria_listbox",
+  "required": true,
+  "options": [
+   "Advanced",
+   "Beginner",
+   "Intermediate",
+   "Native"
+  ],
+  "options_sorted": true,
+  "shown": "Advanced",
+  "group": "languages#2",
+  "group_title": "Languages 2",
+  "context": "",
+  "options_complete": true,
+  "automation_id": "formField-languageProficiency",
+  "parts": [],
+  "help": ""
+ }
+]
