@@ -528,6 +528,8 @@ class _Run:
         except applicant.ApplicantError as exc:
             self.profile_error = str(exc)
         self.log = _Log(say, applicant.redaction_values(self.profile))
+        if self.acfg.captcha_wait_s > 0:              # review F7: accepted deferral, said out loud
+            self.log("apply: captcha_wait_s is not supported yet; a CAPTCHA ends the attempt at once")
         self.rules = None
         self.seen: set[str] = set()
         self._resume_text: Optional[str] = None
