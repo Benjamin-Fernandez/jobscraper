@@ -7,7 +7,7 @@
 - Merged into personal: dossier (designs, plans, tests, seeds), D-70 design delta (contracts v3), lane T (tailor, CLI `tailor`), lane P (profile + resolver, CLI `applicant check`), Q-21 oracles.
 
 ## Paused lanes (worktrees kept under `.claude/worktrees/`; resume each on its branch)
-- Lane B `eng/M20-B-browser-greenhouse` (agent-ac5b…): B1–B6 committed (incl. MyGreenhouse prefill). Next: `git merge personal` (conflict in `config.py`: keep both append blocks; earlier attempt aborted), then B7 orchestrator, B8 CLI, B10 `apply open-profile`, B9 swap real resolver/tailor (`tailor_flow.tailor_for_apply`, `applicant.load`), B11, B12.
+- Lane B built (B1–B12, `eng/M20-B-browser-greenhouse` 30b6d1d, 500/500 on branch; fixture dry run ready_to_submit, captcha fails closed). In review (Q-31 reviewer) + tester writing its test files; merge after APPROVE (bumps the live DB schema).
 - Lane V part 1 merged (V1 vault, V2 `mail set-password`/`mail test`, V3 IMAP watcher; 501/501). Next lane V: V2 `accounts` half + V4 after lane B merges; V5–V7 after spike S-5.
 - Tester Q-26 merged (487/487): fake IMAP (F4), D-70 oracles; gated helper names to confirm with lanes B/V (`keep_decision`, `choose_identity`, `workday.choose_entry`).
 - A03 `yes_if` rows merged; Q-29 resolver exclude fix running. Not started: Q-27 architect small items (`ResolveContext.job_title`, §5.4 `backup_email`).

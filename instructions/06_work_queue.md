@@ -17,7 +17,7 @@ The handover note lives in `handover.md`. This file holds only the queue and sho
 | Q-08 | Test plans: `tests/plans/apply_test_plan.md`, `tests/plans/tailor_test_plan.md` | tester (top) | Q-04, Q-05 | P0 | DONE | 0 | `05` §5 test-plan checklist |
 | Q-09 | Build plans M20 + M21: `docs/planning/apply_build_plan.md`, `tailor_build_plan.md` with lanes | planner | Q-04, Q-05 | P0 | DONE | 0 | `05` §5 build-plan checklist |
 | Q-10 | Cross-review (stage E) → READY TO BUILD | Coordinator chairs | Q-04, Q-05, Q-08, Q-09, Q-01 | P0 | DONE | 0 | zero blocking issues |
-| Q-11 | M20 build lanes (from Q-09) | software-engineer ×3 | Q-10 | P0 | IN PROGRESS | 0 | per WP `Verify:` |
+| Q-11 | M20 build lanes (from Q-09) | software-engineer ×3 | Q-10 | P0 | IN PROGRESS (T, P, V1–V3 merged; B built, in review Q-31) | 0 | per WP `Verify:` |
 | Q-12 | M19 merge + live check on a copied DB (port 8768) | Coordinator | Q-02, Q-03 | P0 | DONE | 0 | M19 gate |
 | Q-13 | Owner: fill `data/applicant.yaml` from the template; give the application email | owner | Q-04 (template) | P0 | BACKLOG | 0 | `python -m jobscraper applicant check` passes |
 | Q-14 | Owner: Gmail app password into Credential Manager (instructions from the design) | owner | Q-04 | P0 | BACKLOG | 0 | spike S-4 reads a test message |
@@ -35,6 +35,8 @@ The handover note lives in `handover.md`. This file holds only the queue and sho
 | Q-28 | Layering: foundation may import the contracts modules (D-73) | tester | — | P0 | DONE | 0 | `-k layering` green with lane V's vault.py |
 | Q-29 | Resolver: `exclude` terms ignore the one-token rule (UK/Canada labels matched SG rows; data workaround merged) | software-engineer; tester pin | — | P0 | DONE (fix merged 2026-11-03, 501/501; tester pin pending in the next tester batch) | 0 | scratch check + suite |
 | Q-30 | Design delta D-74: web Profile form (W1, W5 into M20) + F-13 questions-to-answer + tier-3 answer memory; plan WPs | architect | — | P0 | IN PROGRESS | 0 | design + WPs READY |
+| Q-31 | Lane B review (reviewer, KA-1) + its WP test files (tester: apply_flow, apply_cli, apply_e2e, greenhouse_fill) + Q-29 pin | reviewer; tester | lane B 30b6d1d | P0 | IN PROGRESS | 0 | APPROVE + suite green |
+| Q-32 | "How did you hear about us": map `sourcing.how_heard_default` onto the form's option ("Dataiku Career Site" etc.) instead of failing; fold into D-74 answer memory | researcher / lane P | Q-30 | P1 | BACKLOG | 0 | Dataiku fixture answers without a memory row |
 | Q-16 | Owner (optional): Edge sync test with `owner_sync_test.py` (spike report S-1c); if it passes, set `apply.edge_sync: true` | owner | Q-01 | P2 | BACKLOG | 0 | test password appears in the Default profile |
 | Q-15 | Docs: OVERVIEW/README/DESIGN updated for tailor and auto-apply ("never logs in anywhere" changes) | planner | M20 | P1 | BACKLOG | 0 | docs match the app |
 
