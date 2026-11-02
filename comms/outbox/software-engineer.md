@@ -335,3 +335,13 @@ TYPE: request
 RE: D-86 F9 interim; `src/jobscraper/apply/contracts.py` (QuestionReason)
 BODY: Please add `QuestionReason.COMPOSE_NEEDED = "compose_needed"` (additive, contracts v5; "a cover letter or motivation text the program can't write yet"). `questions.COMPOSE_NEEDED` picks it up with no code change (it falls back to `no_rule` until then); the QuestionCard chip text already exists. Also for Q-45: widen D-84 R4's text to "any source" (built in F2) and record D-86 F7 in LF §7 G2(e)/G4 (built: no model option on the fact route; hierarchical lists mapped by the program's leaf fit).
 STATUS: open
+
+### 2026-11-02 software-engineer (lane R) → coordinator
+TYPE: handoff
+RE: Q-35 WP-R3 `pagefill.fill_page` on lane M's merged API; branch `eng/Q-35-R-page` (16b1f91 merge int/Q-35-M, d89cf26 adapt, 3b88143 LL2 fix, 4012201 merge of the tester's R3 fixtures)
+BODY:
+- Adapted to lane M's interface changes: plain imports of `facts`/`guards`/`llm_fill`/`locks` (no lazy or in-memory loading); `s_values(profile, account_email)`; `field_sig(..., key=facts.hash_key(rctx))`; every `pick_option` call passes `deny=facts.enum_s_values(profile)` and `sensitive=` (the answer's flag for the fill-time LL3 pick, `guards.sensitive_label(pf)` for the pre-decide LL2 pick).
+- 3b88143: the pre-decide LL2 pick now follows LF §6.4 and D-86 G2(e) exactly: only a model answer on a fully read list longer than `long_list`; a fact answer never gets a model pick (the program maps it or it stays unknown). My first cut also picked for fact answers; that is gone.
+- Choices kept (accepted by the architect in ab53597): deadline -> `transport_failed` "transport: timed out" (N6a checks `deadline_left() <= 0` to end `failed(error)`); no `second`/`corrective` replies cached.
+- The tester's Q-46b failing pin targets `llm_fill.pick_option` (lane M). In R3 the fill-time picker already drops such a pick through `guards.g4_ok` before the click.
+STATUS: open
