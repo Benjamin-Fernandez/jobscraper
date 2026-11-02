@@ -170,10 +170,11 @@ def test_a_search_miss_fails_and_leaves_no_typed_text_behind():
     with _open("stubs/enter_form.html") as pg:
         if pg is None:
             return
-        pf = _by_label(pg)["Country Phone Code"]
+        pf = _by_label(pg)["Mobile Country Code"]           # outside the form: Enter is allowed
         assert _fill(pg, pf, "Atlantis (+999)") is False
-        assert pg.input_value("#enter-prompt") == ""
+        assert pg.input_value("#outside-prompt") == ""
         assert pg.locator('[data-automation-id="selectedItem"]').count() == 0
+        assert pg.evaluate("document.body.dataset.formSubmits") == "0"
 
 
 @needs(*NEEDS)
@@ -182,9 +183,28 @@ def test_a_search_driven_prompt_reads_back_the_intended_option_not_the_first_hit
     with _open("stubs/enter_form.html") as pg:
         if pg is None:
             return
-        pf = _by_label(pg)["Country Phone Code"]
+        pf = _by_label(pg)["Mobile Country Code"]           # LF §3.2 / M8: outside any form, so Enter may search
         assert _fill(pg, pf, "Malaysia (+60)") is True
         assert _value(pg, pf) == "Malaysia (+60)"
+        assert pg.evaluate("document.body.dataset.formSubmits") == "0"
+
+
+@needs(*NEEDS)
+def test_a_search_driven_prompt_inside_a_form_fails_safely_without_submitting():
+    """LF §3.2 / review M8: inside a <form> with a submit control Enter is never pressed,
+    so a search-only prompt can't be filled there: the fill reports failure, nothing is
+    submitted, and no typed text or pill is left behind."""
+    with _open("stubs/enter_form.html") as pg:
+        if pg is None:
+            return
+        pf = _by_label(pg)["Country Phone Code"]
+        assert _fill(pg, pf, "Malaysia (+60)") is False
+        assert pg.evaluate("document.body.dataset.formSubmits") == "0"
+        assert pg.evaluate("document.body.dataset.submitCount || '0'") == "0"
+        assert pg.input_value("#enter-prompt") == ""
+        assert pg.locator('#enter-prompt').locator(
+            'xpath=ancestor::*[starts-with(@data-automation-id,"formField-")][1]'
+        ).locator('[data-automation-id="selectedItem"]').count() == 0
 
 
 if WAITING[_W0:]:

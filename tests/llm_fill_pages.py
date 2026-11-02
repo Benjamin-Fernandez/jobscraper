@@ -240,6 +240,7 @@ def page_html(step: dict, *, shim: str) -> str:
     inner = "".join(body)
     if step.get("form"):
         inner = f'<form action="#" method="post">{inner}<button type="submit">Send</button></form>'
+    inner += "".join(render(f, data) for f in step.get("after_form", []))
     return f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><title>{E(EMPLOYER)} Careers</title><style>{CSS}</style></head>
 <body>
@@ -305,7 +306,7 @@ def expected(f: dict, group: str = "", group_title: str = "") -> dict | None:
 
 def expected_fields(step: dict) -> list[dict]:
     out = []
-    for item in step["body"]:
+    for item in list(step["body"]) + list(step.get("after_form", [])):
         if "section" in item:
             sid = SECTION_IDS.get(item["section"], "other")
             for i, fields in enumerate(item["entries"], 1):
@@ -505,7 +506,12 @@ STUBS = {
     "enter_form": {"title": "Enter inside a form (review M8)", "form": True, "body": [
         {"w": "prompt", "label": "Country Phone Code", "aid": "formField-countryPhoneCode", "req": True,
          "options": ["Singapore (+65)", "Malaysia (+60)"], "search": True, "id": "enter-prompt"},
-        {"w": "text", "label": "City", "aid": "formField-city", "id": "enter-text"}]},
+        {"w": "text", "label": "City", "aid": "formField-city", "id": "enter-text"}],
+        # LF §3.2 / M8: Enter is allowed only in a prompt search box OUTSIDE a form with a submit control
+        "after_form": [
+            {"w": "prompt", "label": "Mobile Country Code", "aid": "formField-mobileCountryCode", "req": True,
+             "options": ["Singapore (+65)", "Malaysia (+60)", "United States of America (+1)"], "search": True,
+             "id": "outside-prompt"}]},
 }
 
 
