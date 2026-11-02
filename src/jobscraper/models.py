@@ -4,7 +4,8 @@ from __future__ import annotations
 import hashlib
 import re
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import Any, Optional
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 # Error classes drive the retry and quarantine policy (pipeline.py, store.py).
 TRANSIENT = "transient"
@@ -165,3 +166,21 @@ def parse_company_lines(text: str) -> list[str]:
         if len(names) >= MAX_COMPANY_LINES:
             break
     return names
+
+
+# ---------------------------------------------------------------- one posting, two ids (M17)
+
+def posting_key(url: Any) -> str:
+    """A posting's URL compared loosely: the scheme, the host's case, a trailing
+    slash, a #fragment and utm_* tracking parameters do not make it another
+    posting. Anything else in the query (Greenhouse's gh_jid) does.
+
+    Lives here (not in web/data.py, where M17 put it) because the store's
+    auto-apply duplicate guard needs the same rule (apply_design.md 12.1)."""
+    raw = str(url or "").strip()
+    if not raw:
+        return ""
+    parts = urlsplit(raw)
+    query = urlencode(sorted((k, v) for k, v in parse_qsl(parts.query, keep_blank_values=True)
+                             if not k.lower().startswith("utm_")))
+    return urlunsplit(("", parts.netloc.lower(), parts.path.rstrip("/"), query, ""))
