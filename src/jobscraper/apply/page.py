@@ -764,9 +764,16 @@ def collect_options(page: Any, loc: Any, widget: str) -> tuple[list[str], bool]:
     it with Escape. Returns (options, complete): complete=False when nothing showed
     (a search-driven list whose options appear only after typing)."""
     try:
-        if not click(page, loc, timeout_ms=4000):
-            return [], False
-        opts = B._poll(page, OPEN_WAIT_MS, lambda: _visible_options(page)) or []
+        opts = []
+        for _attempt in range(2):
+            # Blur first: a site that shows a validation message on blur (Workday's
+            # inputAlert) moves the page under the click otherwise; one retry if nothing opened.
+            blur_active(page)
+            if not click(page, loc, timeout_ms=4000):
+                return [], False
+            opts = B._poll(page, OPEN_WAIT_MS, lambda: _visible_options(page)) or []
+            if opts:
+                break
         opts = [o for o in opts if not PLACEHOLDER_RE.match(o)]
         if opts and widget in ("prompt", "aria_listbox"):
             opts = expand_categories(page, loc, opts)
@@ -967,6 +974,16 @@ def _value(v: Any, *, multi: bool) -> Value:
 
 def _slug(s: str) -> str:
     return re.sub(r"[^a-z0-9]+", "_", (s or "").lower()).strip("_")[:60]
+
+
+def blur_active(page: Any) -> None:
+    """Take focus off whatever has it (the site's blur validation runs now, not
+    under the next click)."""
+    try:
+        page.evaluate("() => { const a = document.activeElement; if (a && a !== document.body && a.blur) a.blur(); }")
+        page.wait_for_timeout(50)
+    except Exception:
+        pass
 
 
 def _escape(page: Any) -> None:
