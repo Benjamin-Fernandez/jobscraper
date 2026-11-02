@@ -1,6 +1,6 @@
 # Handover note (rewrite every session; ≤ 40 lines; history goes to `docs/planning/session_log.md`)
 
-**Last session:** 2026-11-02, session 1 (stopped by the owner: "stop here for now"). **Branch/commit:** `personal`, pushed (`git log -1`). Suite 469/469.
+**Last session:** 2026-11-03, session 2 (resumed; lanes B, V, tester Q-26, researcher A03 running). **Branch/commit:** `personal`, pushed (`git log -1`). Suite 469/469.
 
 ## Where we are
 - M19 DONE. M20 (re-scoped D-70: Workday first, Greenhouse with MyGreenhouse autofill) in build.
@@ -13,6 +13,7 @@
 - Not started: WP-A03 `yes_if` rows (researcher; Q-26), Q-27 architect small items (`ResolveContext.job_title`, §5.4 `backup_email`).
 
 ## Waiting on the owner
+- Owner is changing the application Gmail account (2026-11-03): new address + its app password; delete the old Credential Manager entry only on the owner's word.
 - Real Gmail app password for the application address (the stored entry `jobscraper:imap:imap.gmail.com` is the normal password: Google rejects it). Check: IMAP login test.
 - MyGreenhouse sign-in inside the JobScraper Edge profile (`%LOCALAPPDATA%\JobScraper\apply-profile` does not exist yet).
 - Backup email spelling (`…@gmail.cm` → `.com`?).
