@@ -965,14 +965,24 @@ def _sha16(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
 
 
-def field_sig(field: PageField, qualified_label: str) -> str:
+def hash_key(rctx: ResolveContext) -> bytes:
+    """The HMAC key of every stored hash that covers a personal value (`field_sig`,
+    `facts_used_hash`): sha256 of the profile's S values and the account email, so a
+    stored hash can't be brute-forced back to a short private value (NF-02)."""
+    return hashlib.sha256("\n".join(s_values(rctx.profile or {}, rctx.account_email or ""))
+                          .encode("utf-8")).digest()
+
+
+def field_sig(field: PageField, qualified_label: str, *, key: bytes) -> str:
     """The cache key of one field (§13.3): kind, qualified label, sorted option norms,
-    group, origin and the shown value, hashed (the shown value is never stored)."""
+    group, origin and the shown value, as an HMAC with `hash_key(rctx)` (D-86, review F8:
+    a site-prefilled phone or postal code can't be recovered from the stored key)."""
     f = field.field
     opts = sorted(norm_label(o.label) for o in f.options)
     shown = _shown_text(field.shown)
-    return _sha16("\n".join([f.type.value, qualified_label, "\x1f".join(opts), field.group,
-                             field.origin.value, norm_label(shown)]))
+    msg = "\n".join([f.type.value, qualified_label, "\x1f".join(opts), field.group,
+                     field.origin.value, norm_label(shown)])
+    return hmac.new(key, msg.encode("utf-8"), hashlib.sha256).hexdigest()[:16]
 
 
 def inputs_hash(redacted_resume: str, jd_text: str) -> str:
@@ -1000,9 +1010,7 @@ def facts_used_hash(refs: Iterable[str], rctx: ResolveContext, *, today: str = "
         else:
             v = None
         parts.append(ref + "=" + json.dumps(v, sort_keys=True, ensure_ascii=False, default=str))
-    key = hashlib.sha256("\n".join(s_values(profile, rctx.account_email or ""))
-                         .encode("utf-8")).digest()
-    return hmac.new(key, "\n".join(parts).encode("utf-8"), hashlib.sha256).hexdigest()[:16]
+    return hmac.new(hash_key(rctx), "\n".join(parts).encode("utf-8"), hashlib.sha256).hexdigest()[:16]
 
 
 def is_choice(field: FieldLike) -> bool:
