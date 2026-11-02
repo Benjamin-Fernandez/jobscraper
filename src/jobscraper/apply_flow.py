@@ -74,13 +74,17 @@ check_attempt_table()
 
 def redact(line: str, values: Sequence[str]) -> str:
     """`line` with every value replaced by "[redacted]", case-insensitive,
-    longest first (a full address before one of its words). A value matches
-    only as a whole run of characters (not inside a longer word), so a short
-    profile value such as a grade type does not eat the word "captcha"."""
+    longest first (a full address before one of its words). A purely
+    alphabetic value matches only as a whole word, so a short profile value
+    such as a grade type does not eat the word "captcha"; a value with a digit
+    or any other character (a phone, a postal code, an email) matches anywhere,
+    so 91234567 is caught inside +6591234567 (review F6)."""
     for v in sorted({str(v).strip() for v in values if v and len(str(v).strip()) >= 3},
                     key=lambda s: (-len(s), s)):
-        line = re.sub(r"(?<![0-9A-Za-z])" + re.escape(v) + r"(?![0-9A-Za-z])", REDACTED,
-                      line, flags=re.I)
+        pat = re.escape(v)
+        if re.fullmatch(r"[A-Za-z ]+", v):
+            pat = r"(?<![A-Za-z])" + pat + r"(?![A-Za-z])"
+        line = re.sub(pat, REDACTED, line, flags=re.I)
     return line
 
 
@@ -524,6 +528,8 @@ class _Run:
         except applicant.ApplicantError as exc:
             self.profile_error = str(exc)
         self.log = _Log(say, applicant.redaction_values(self.profile))
+        if self.acfg.captcha_wait_s > 0:              # review F7: accepted deferral, said out loud
+            self.log("apply: captcha_wait_s is not supported yet; a CAPTCHA ends the attempt at once")
         self.rules = None
         self.seen: set[str] = set()
         self._resume_text: Optional[str] = None
