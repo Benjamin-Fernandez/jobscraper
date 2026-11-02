@@ -356,7 +356,7 @@ def _canon_willing(v: Any) -> Any:
     v = _canon_bool(v)
     if isinstance(v, str):
         token = re.sub(r"[\s\-_]+", "_", v.strip().lower()).replace(".", "").replace("/", "")
-        if token.strip("_") in _NOTHING_WORDS | {""}:
+        if token.strip("_") in _NOTHING_WORDS:
             return None
     return v
 
