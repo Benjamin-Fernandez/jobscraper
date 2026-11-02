@@ -60,6 +60,10 @@ SGT = _dt.timezone(_dt.timedelta(hours=8))
 class ApplicantError(Exception):
     """The profile file cannot be read, or a save was refused (invalid)."""
 
+    # The etag of the bytes that could not be read (`load_with_etag`); "" when
+    # there were none. Set by `load_with_etag`, so a caller can still report it.
+    etag: str = ""
+
     def __init__(self, message: str, errors: Optional[list["FieldError"]] = None):
         super().__init__(message)
         self.errors = list(errors or [])
@@ -439,37 +443,65 @@ def normalise(profile: Any) -> Any:
 # Load / save
 # --------------------------------------------------------------------------
 
+def _etag_of(data: Optional[bytes]) -> str:
+    """The first 16 hex of the SHA-256 of `data`; "" for no file (None)."""
+    return "" if data is None else hashlib.sha256(data).hexdigest()[:16]
+
+
+def load_with_etag(path: str | os.PathLike) -> tuple[dict, str]:
+    """(the profile at `path`, its etag), both taken from ONE read of the file
+    (Q-30 F6). Reading the profile and the etag in two steps lets a hand edit or
+    a CLI write land between them: the form would hold the old profile with the
+    new etag, and its next save would overwrite that edit without a 409.
+
+    The profile is normalised (`normalise`) and {} for a file that does not
+    exist (etag ""). Raises ApplicantError on bytes that cannot be read or
+    parsed or are not a mapping; the error's `.etag` is then the etag of the
+    bytes that were read, so the Profile tab can still show it."""
+    p = Path(path)
+    data: Optional[bytes] = None
+    try:
+        try:
+            data = p.read_bytes()
+        except FileNotFoundError:
+            return {}, ""
+        except OSError as exc:
+            raise ApplicantError(f"cannot read {p.name}: {type(exc).__name__}") from exc
+        try:
+            parsed = yaml.safe_load(data.decode("utf-8"))
+        except (UnicodeDecodeError, yaml.YAMLError) as exc:
+            raise ApplicantError(f"cannot read {p.name}: {type(exc).__name__}") from exc
+        if parsed is None:
+            return {}, _etag_of(data)
+        if not isinstance(parsed, dict):
+            raise ApplicantError(f"{p.name} must be a mapping, got {type(parsed).__name__}")
+        return normalise(parsed), _etag_of(data)
+    except ApplicantError as exc:
+        exc.etag = _etag_of(data)
+        raise
+
+
 def load(path: str | os.PathLike) -> dict:
     """The profile at `path`, normalised (`normalise`); {} if the file does not
     exist. Raises ApplicantError on YAML that cannot be read or is not a mapping."""
-    p = Path(path)
-    if not p.exists():
-        return {}
-    try:
-        with open(p, "r", encoding="utf-8") as fh:
-            data = yaml.safe_load(fh)
-    except (OSError, yaml.YAMLError) as exc:
-        raise ApplicantError(f"cannot read {p.name}: {type(exc).__name__}") from exc
-    if data is None:
-        return {}
-    if not isinstance(data, dict):
-        raise ApplicantError(f"{p.name} must be a mapping, got {type(data).__name__}")
-    return normalise(data)
+    return load_with_etag(path)[0]
 
 
 COMMENTED_BACKUP_NAME = "applicant.commented-backup.yaml"   # matches data/applicant*.yaml (gitignored)
+PREVIOUS_NAME = "applicant.prev.yaml"                       # ditto: the rolling previous copy
 
 
 def etag(path: str | os.PathLike) -> str:
     """The lost-update guard (questions_design §3.1): the first 16 hex of the
     SHA-256 of the file's bytes, "" when the file is absent. The Profile form
-    and the Questions card send it back; a mismatch is a 409, nothing saved."""
+    and the Questions card send it back; a mismatch is a 409, nothing saved.
+    When the profile is read too, use `load_with_etag` (one read, one answer)."""
     p = Path(path)
     try:
         data = p.read_bytes()
     except FileNotFoundError:
         return ""
-    return hashlib.sha256(data).hexdigest()[:16]
+    return _etag_of(data)
 
 
 def has_comments(path: str | os.PathLike) -> bool:
@@ -487,7 +519,44 @@ def commented_backup_path(path: str | os.PathLike) -> Path:
     return Path(path).with_name(COMMENTED_BACKUP_NAME)
 
 
-def save(path: str | os.PathLike, profile: dict, *, keep_commented_copy: bool = True) -> None:
+def previous_path(path: str | os.PathLike) -> Path:
+    """Where the rolling previous copy goes: beside the profile, so it stays
+    inside the gitignored `data/applicant*.yaml` set (NF-01)."""
+    return Path(path).with_name(PREVIOUS_NAME)
+
+
+def _keep_previous(p: Path, new_bytes: bytes) -> None:
+    """Q-30 F7: before a write replaces `p`, keep what is there as
+    `applicant.prev.yaml` (atomically, so a failed copy never costs the copy
+    already kept). One rolling copy: the version before the last change.
+
+    Nothing is rolled when the write would not change the file: the owner who
+    presses Save twice must not push the real previous version out."""
+    try:
+        old = p.read_bytes()
+    except FileNotFoundError:
+        return                                  # a first save: nothing to keep
+    if old == new_bytes:
+        return
+    prev = previous_path(p)
+    if prev == p:
+        return
+    # ".yaml" ends the temp name too, so a crash that leaves it is still gitignored.
+    fd, tmp = tempfile.mkstemp(prefix=prev.stem + ".", suffix=".yaml", dir=str(prev.parent))
+    try:
+        with os.fdopen(fd, "wb") as fh:
+            fh.write(old)
+        os.replace(tmp, prev)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
+
+def save(path: str | os.PathLike, profile: dict, *, keep_commented_copy: bool = True,
+         keep_previous: bool = True) -> None:
     """Normalise (`normalise`, Q-36), validate, then write atomically (tempfile in
     the same folder + os.replace). The file always holds the canonical spellings.
 
@@ -495,22 +564,30 @@ def save(path: str | os.PathLike, profile: dict, *, keep_commented_copy: bool = 
     is invalid. Key order is kept (`sort_keys=False`); YAML comments are not.
     So the first save over a file that has comments first copies it to
     `applicant.commented-backup.yaml` (once: an existing copy is never
-    overwritten), and the owner keeps their notes (questions_design §3.1)."""
+    overwritten), and the owner keeps their notes (questions_design §3.1).
+
+    Every save that changes the file also keeps the version it replaces as
+    `applicant.prev.yaml` (`keep_previous`, Q-30 F7). The form PUTs the whole
+    profile, so a partial one (a UI bug, a stale tab) is valid and replaces the
+    file; the file is gitignored, so git has no copy either (NF-01)."""
     profile = normalise(profile)
     errors = validate(profile)
     if errors:
         raise ApplicantError(f"{len(errors)} invalid field(s): "
                              + ", ".join(e.path for e in errors), errors)
+    text = yaml.safe_dump(profile, sort_keys=False, allow_unicode=True)
     p = Path(path)
     p.parent.mkdir(parents=True, exist_ok=True)
     if keep_commented_copy and p.is_file() and has_comments(p):
         backup = commented_backup_path(p)
         if not backup.exists():
             shutil.copy2(p, backup)
+    if keep_previous:
+        _keep_previous(p, text.encode("utf-8"))
     fd, tmp = tempfile.mkstemp(prefix=p.name + ".", suffix=".tmp", dir=str(p.parent))
     try:
         with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as fh:
-            yaml.safe_dump(profile, fh, sort_keys=False, allow_unicode=True)
+            fh.write(text)
         os.replace(tmp, p)
     except BaseException:
         try:
