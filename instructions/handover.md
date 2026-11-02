@@ -1,26 +1,27 @@
 # Handover note (rewrite every session; ≤ 40 lines; history goes to `docs/planning/session_log.md`)
 
-**Last session:** 2026-11-03, session 2 (continued). **Branch/commit:** `personal`, pushed (`git log -1`). Suite on personal 813/813 Python, web 279 + 1 skipped.
+**Last session:** 2026-11-02/03, session 2 (paused by the owner; no agents running). **Branch/commit:** `personal`, pushed (`git log -1`). Suite 920/920 Python, web 279 + 1 skipped.
 
 ## Where we are
-- M19 DONE. M20 (D-70: Workday first, Greenhouse with MyGreenhouse autofill) in build. D-77: the owner allowed real accounts + automatic submission at Kyndryl (DevOps Engineer) and PayPal (Software Engineer). D-78: the local LLM fills every form generically (resume first, "import from resume" always, adapters = navigation only).
-- Merged into personal: dossier, D-70 delta, lanes T (tailor), P (profile + resolver), V part 1 (vault, mail CLI, IMAP watcher), B (browser + Greenhouse + review fixes, Q-31 tests), Q-21/Q-26/Q-28 tests, Q-29 resolver fix, Q-30 design (contracts v4), S-5 signed-out spike.
+- M19 DONE. M20: D-78 LLM-driven form filler (ADR-0006, `docs/architecture/llm_fill_design.md`, `llm_fill_build_plan.md`, contracts v5). Design READY (stage E + re-check; D-81..D-86).
+- Merged this session: int/Q-30 (Profile form + questions), Q-36 lenient profile (D-79), Q-39 review fixes + `data/*.tmp` ignore, S-5b spike, Q-35 design, tester T0/T1/T3 + T2 core + T4 lane-N oracles, lanes N (N1–N5) + R (R1–R2) with review fixes (090daf8). Live DB backed up to `%LOCALAPPDATA%\JobScraper\backups\jobscraper-pre-Q35NR-20261102-1415.db` before the SCHEMA 4 merge.
+- Live app: Workday attempts stop as `unsupported_ats` (no fill loop until N6a). Greenhouse emailed-code path is live (D-85; a lone footer word after the code sentence → fails closed).
+- S-5b: tenant A (wd1) submitted + confirmed. Tenant B (wd5): account exists, stopped at My Information; the owner has since filled `address_line2` → Q-41 READY.
 
-## Running / ready to merge (worktrees under `.claude/worktrees/`)
-- Merged + pushed this session: int/Q-30 (Profile form + questions), int/Q-36 (lenient profile, D-79), int/Q-39 (review F2/F6/F7 + `data/*.tmp` ignore), S-5b spike, Q-35 design (contracts v5). personal 813/813, web 279+1.
-- S-5b: tenant A submitted + confirmed; tenant B account made, stopped at a required "Additional Address" → Q-41/D-80 once the owner fills `address_line2` (resume from My Information with `spikes/llm_fill/drive.py`; recordings + tenants.json in the session scratchpad `s5b/`).
-- Q-35 (D-78 LLM filler): stage E READY WITH FIXES (`docs/reviews/Q-35-design.md`). Design READY (re-check 8755a95; D-84 = re-check R1–R4, built in lane M). T0/T1/T3 merged (37cd1fd). Lanes N (N1–N5) + R (R1–R2) built → `int/Q-35-NR` (worktree `int-Q-35-NR`): tester adding lane-N oracles + fixing the M8 widget test there; review committed (9330374, APPROVE WITH FIXES: F1 HIGH lane R, F2/F5/F8 lane N, F3/F4/F7 oracles); lanes R and N fixing on their own branches → re-merge into int/Q-35-NR; merge to personal only after the F4 oracle (Greenhouse emailed-code path goes live). Lane M M1–M5 built (`eng/Q-35-M-llmfill` a4f1c8c, scratch-checked only) → reviewer reviewing it (review file uncommitted in lane M's worktree `agent-a4c24933cbd328c18`: Coordinator commits); tester owes T2. Architect questions from lane M (in its outbox) wait for a slot; Q5 not started. Before merging int/Q-35-NR: back up the live DB (SCHEMA_VERSION 4). Fixture deny-list (personal, never commit): session scratchpad `fixture_denylist.txt`, env `JOBSCRAPER_FIXTURE_DENYLIST`. Next: R3 (resume lane R once lane M pins `guards.Decision`) → N6a → N6b → gate. Researcher WP-A04 (`country_bool` rows, review F5) needed before the gate.
-
-## Waiting on the owner
-- Nothing blocking. 2026-11-02: owner uploaded a new resume; on their request the Coordinator re-ran `profile` (profile_version 4, 52 skills) and the tailor's master parse, and rewrote `data/applicant.yaml` experience/skills/education start from it (backup `data/applicant.prev.yaml`); `address_line2` filled by the owner → Q-41 READY. Application Gmail + app password verified (address only in Coordinator memory). MyGreenhouse signed in on the JobScraper Edge profile. `data/applicant.yaml` filled by the owner.
+## Not merged (branches kept; worktrees under `.claude/worktrees/`)
+- Lane M `eng/Q-35-M-llmfill` b79df03 (worktree `agent-a4c24933cbd328c18`): M1–M5, review `docs/reviews/Q-35-lane-M.md` F1–F9 fixed, WP-Q5 built. Needs: tester pins for the review probes (in its outbox) + M5 capture/G-table oracles; architect adds `QuestionReason.COMPOSE_NEEDED` (rows saved as `no_rule` + note until then); merge; vitest + bundle rebuild (QuestionCard.vue changed).
+- Lane R R3 `eng/Q-35-R-page` adc8f08 (first cut of `pagefill.fill_page`, unreviewed): needs the 3 tester fixture gaps (its outbox), lane M's interface changes (`s_values(profile, account_email)`, `field_sig(key=facts.hash_key(rctx))`, pick `sensitive=`/`deny=`), then review. Its choices to confirm at review: deadline → `transport_failed` "transport: timed out"; cache stores no second/corrective replies.
 
 ## Next 1–3 actions
-1. Merge lanes as they pass; then N6a/N6b; A04 when an agent slot frees. Merge T0/T1/T3, N1–N5, R1–R2 as they pass (T1 fixtures: grep for personal data before merging). Q-41 once the owner fills `address_line2`.
-2. S-5b report → Q-35 architect redesign around D-78 (generic LLM filler; folds in review F1/F3/F4 = Q-40, F1 before WP-Q1b) → lane V V2 accounts half, V4–V7 adjusted, WP-Q1b question capture in `apply_flow.py`, WP-F1 Workday fixtures.
-3. M20 gate: Greenhouse dry runs + the 2 real Workday submissions (D-77).
-- Backlog: Q-27 (`ResolveContext.job_title`, §5.4 `backup_email`), Q-32 (how-heard option mapping), Q-34 (web reaper run lock, M21), Q-15 docs (planner pastes `questions_build_plan.md` into `apply_build_plan.md`, PRD F-13 + D-75), QD text per D-76, S-5 report → `docs/architecture/spikes/S-5_workday.md`.
+1. Tester: lane-M probe pins + M5/G2–G12 oracles + R3 fixture gaps + T5 + `test_apply_flow_llm.py` (open list in `comms/outbox/tester.md`). Architect: COMPOSE_NEEDED + Q-45 (cover-letter compose, design gaps). Merge lane M, then R3 (after review), then N6a (lane N's F7 note) → N6b.
+2. Q-41: resume the S-5b tooling at tenant B, two-phase per D-83 (fill to Review, stop, Coordinator reads answers row by row, then Submit). Use the CURRENT resume (changed 2026-11-02: StraitsX, no Tencent) and replace the earlier upload.
+3. M20 gate: 5 Greenhouse dry runs + owner-approved Workday postings (D-83). Backlog: Q-44 refresh-from-resume, Q-43, Q-34, Q-32, Q-27, A04 (`country_bool` rows, before the gate), Q-15 docs.
+
+## Owner notes
+- 2026-11-02: new resume uploaded. On the owner's request the Coordinator re-ran `profile` (profile_version 4) and the master parse, and rewrote `data/applicant.yaml` experience/skills/education start (backup `data/applicant.prev.yaml`). Optional for the owner: job locations, Cantonese levels.
+- Application Gmail + app password verified (address only in Coordinator memory). MyGreenhouse signed in on the JobScraper Edge profile.
 
 ## Watch out
-- Agent worktrees start from master: briefs say `git switch -c <branch> personal`. Architect/researcher agents have no shell.
-- Live app on 8765 runs from this checkout; dev instances use 8768 with a copied DB. Before every push: grep the diff for personal data (public repo).
+- Agent worktrees start from master: briefs say `git switch -c <branch> personal`. Architect/researcher agents have no shell (Coordinator commits).
+- Before every push: deny-list scan (session scratchpad `fixture_denylist.txt`, env `JOBSCRAPER_FIXTURE_DENYLIST`; personal, never commit). Live app on 8765; dev on 8768 with a DB copy.
 - The scope guard blocks the Coordinator from writing `data/`; the auto-mode classifier blocks editing `.claude/scopes.json`.

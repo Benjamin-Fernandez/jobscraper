@@ -14,3 +14,9 @@ One entry per session. Older handover notes end up here, so `handover.md` stays 
 - Lane T (tailor) and lane P (profile + resolver) merged; Q-21 oracles + guards; suite 469/469.
 - Owner gave the application email (kept out of the repo; Coordinator memory). Stored IMAP secret is not an app password; MyGreenhouse sign-in landed outside the JobScraper profile.
 - Owner stopped the session: lanes B, V, tester paused with work committed on their branches (see handover).
+
+## 2026-11-02/03 · session 2 (continued, paused by the owner)
+- Merged + pushed: int/Q-30 (D-74 Profile form + F-13 questions, D-75, tier-3 memory; review APPROVE WITH FIXES), Q-36 lenient profile (D-79), Q-39 review fixes F2/F6/F7 + `data/*.tmp` gitignore (Q-42 defect pin), S-5b spike (LLM-driven Workday: tenant A submitted + confirmed, tenant B fail-closed on a required field), Q-35 D-78 design (ADR-0006, contracts v5) + amendment + re-check READY, tester T0/T1/T3/T2-core/T4-lane-N, lanes N + R with review fixes (920/920).
+- Decisions D-79 (lenient profile), D-80 (finish tenant B with spike tooling), D-81 (NF-07 Workday deviation + conditions), D-82 (locks stay deterministic), D-83 (gate count 5 GH dry runs; audit read row by row; fresh owner approval for gate postings), D-84 (re-check R1–R4), D-85 (Greenhouse code pattern), D-86 (lane M F7/F8 tightenings, F9 interim compose_needed).
+- Owner: new resume; profile re-derived and applicant.yaml experience/skills rebuilt on request; address_line2 filled.
+- Open at pause: lane M (b79df03) and R3 (adc8f08) unmerged; Q-41, Q-44, Q-45 queued.
