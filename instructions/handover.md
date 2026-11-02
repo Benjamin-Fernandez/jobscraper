@@ -13,10 +13,8 @@
 - Not started: WP-A03 `yes_if` rows (researcher; Q-26), Q-27 architect small items (`ResolveContext.job_title`, §5.4 `backup_email`).
 
 ## Waiting on the owner
-- Owner is changing the application Gmail account (2026-11-03): new address + its app password; delete the old Credential Manager entry only on the owner's word.
-- Real Gmail app password for the application address (the stored entry `jobscraper:imap:imap.gmail.com` is the normal password: Google rejects it). Check: IMAP login test.
+- D-72: the owner switched the application Gmail account (address in Coordinator memory, not the repo); no backup email. Old Credential Manager entry deleted. Still needed: a 16-letter app password for the new account in `jobscraper:imap:imap.gmail.com` (the password pasted in chat was the account password: Gmail rejected it, not stored). Check: IMAP login test.
 - MyGreenhouse sign-in inside the JobScraper Edge profile (`%LOCALAPPDATA%\JobScraper\apply-profile` does not exist yet).
-- Backup email spelling (`…@gmail.cm` → `.com`?).
 - Fill `data/applicant.yaml` from `config/applicant.example.yaml`; `applicant check` passes.
 
 ## Next 1–3 actions
