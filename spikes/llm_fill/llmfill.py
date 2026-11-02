@@ -38,10 +38,24 @@ SENSITIVE = {
     "singapore_status.marital_status", "singapore_status.nric_last4",
     "us_self_id.eeo_gender", "us_self_id.eeo_race_ethnicity", "us_self_id.veteran_status",
     "us_self_id.disability_status", "declarations.health_disclosure",
+    "singapore_status.nationality",                 # lane M review: never in a prompt
 }
 SENSITIVE_LABEL = re.compile(
     r"date of birth|birth ?date|\bdob\b|gender|\bsex\b|race|ethnic|religio|nric|"
-    r"national id|identity (card|number)|disabilit|veteran|marital|pronoun", re.I)
+    r"national id|identity (card|number)|disabilit|veteran|marital|pronoun|nationality|citizen|"
+    r"permanent resident|residency|national service", re.I)
+# lane M review: an emergency contact / referee is never the applicant
+OTHER_PERSON = re.compile(r"emergency|next of kin|referee|reference (name|contact|person)|\breferences?\b", re.I)
+LABEL_KEY = [
+    (r"citizen|permanent resident|residency", "singapore_status.residency_status"),
+    (r"nationality", "singapore_status.nationality"),
+    (r"date of birth|birth ?date|\bdob\b", "identity.date_of_birth"),
+    (r"gender|\bsex\b", "identity.gender"), (r"race|ethnic", "singapore_status.race"),
+    (r"religio", "singapore_status.religion"), (r"marital", "singapore_status.marital_status"),
+    (r"disabilit", "us_self_id.disability_status"), (r"veteran", "us_self_id.veteran_status"),
+    (r"national service", "singapore_status.ns_status"),
+]
+SPECIFY = re.compile(r"please specify|if other|if yes,? (please )?specify|specify", re.I)
 
 STANDING = """STANDING FACTS (always true for this applicant; owner decisions D-55, D-75):
 - Declarations: every declaration question is answered "No": politically exposed person (PEP), conflict of interest, audit independence conflict, shareholding in the company, relatives working at the company, criminal record/convictions, bankruptcy, regulatory or disciplinary action, non-compete or restrictive agreement.
@@ -444,16 +458,31 @@ SYN = {
     "not_a_veteran": ["not a protected veteran", "not a veteran", "i am not"],
     "indian": ["indian"], "chinese": ["chinese"], "malay": ["malay"], "eurasian": ["eurasian"],
     "completed": ["completed"], "serving": ["serving"], "exempted": ["exempt"],
+    "sg": ["singapore", "singaporean"],
 }
+COUNTRY = {"sg": "singapore"}
 
 
-def map_sensitive(value: Any, options: Optional[list[str]]) -> str:
-    """The profile's sensitive value -> an option, deterministically (never inferred)."""
+def map_sensitive(value: Any, options: Optional[list[str]], label: str = "", key: str = "") -> str:
+    """The profile's sensitive value -> an option, deterministically (never inferred).
+    Yes/No questions about citizenship/nationality are decided from the label: Yes only
+    when the label names the applicant's country AND status (citizen, PR)."""
     if isinstance(value, bool):
         value = "yes" if value else "no"
     v = str(value or "").strip()
     if not options:
         return v
+    yn = {_norm(o).split(" ")[0] for o in options} >= {"yes", "no"} and len(options) <= 4
+    if yn and key in ("singapore_status.residency_status", "singapore_status.nationality"):
+        lab = _norm(label)
+        if "singapore" not in lab:
+            return ""                                   # another country: not decidable here
+        if key.endswith("nationality"):
+            ans = "yes" if v.lower() == "sg" and ("citizen" in lab or "national" in lab) else ""
+        else:
+            words = {"citizen": ["citizen"], "pr": ["permanent resident", " pr"]}.get(v.lower(), [v.lower()])
+            ans = "yes" if any(w.strip() in lab for w in words) else "no"
+        return next((o for o in options if _norm(o).split(" ")[0] == ans), "") if ans else ""
     want = SYN.get(v.lower(), [v.lower()])
     nopts = [(o, _norm(o)) for o in options]
     for w in want:                                  # option starting with the word
@@ -480,10 +509,25 @@ def guard(fields: list[dict], answers: dict, sens: dict, corpus: str) -> tuple[l
         key, ev = str(a.get("profile_key", "") or ""), str(a.get("evidence", "") or "")
         d = {**_pub(f), "value": val, "source": src, "profile_key": key, "evidence": ev,
              "action": "fill", "flags": []}
+        if OTHER_PERSON.search(f"{f['label']} {f.get('section') or ''}"):
+            # lane M: an emergency contact / referee never gets the applicant's own details
+            if key.startswith(("contact.", "identity.")) or src in ("profile", "resume"):
+                d["flags"].append("other_person_field")
+                d["value"], d["source"] = "", "unknown"
+        if SPECIFY.search(f["label"] or "") and src == "resume":
+            # lane M: a "please specify" after a sensitive question is not answered from the resume
+            d["flags"].append("specify_not_from_resume")
+            d["value"], d["source"] = "", "unknown"
         sensitive = SENSITIVE_LABEL.search(f["label"] or "") or key in SENSITIVE
-        if sensitive and f["kind"] != "checkbox":
+        if sensitive and f["kind"] != "checkbox" and "other_person_field" not in d["flags"]:
+            if key not in SENSITIVE:                      # program picks the key from the label
+                lab = f["label"] or ""
+                for rx, k in LABEL_KEY:
+                    if re.search(rx, lab, re.I):
+                        key = d["profile_key"] = k
+                        break
             if key in SENSITIVE and sens.get(key) not in (None, ""):
-                mapped = map_sensitive(sens[key], f.get("options"))
+                mapped = map_sensitive(sens[key], f.get("options"), f["label"] or "", key)
                 d["value"], d["source"] = mapped, "profile" if mapped else "unknown"
                 d["flags"].append("sensitive_from_profile" if mapped else "sensitive_no_option_match")
                 d["evidence"] = f"<{key}>"

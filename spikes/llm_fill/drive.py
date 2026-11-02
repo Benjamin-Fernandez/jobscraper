@@ -37,7 +37,8 @@ from jobscraper.apply.contracts import PasswordRules   # noqa: E402
 MAIN = Path(os.environ.get("JOBSCRAPER_MAIN", HERE.parent.parent))
 OUT = Path(os.environ["S5B_OUT"])
 PROFILE = MAIN / "data" / "applicant.yaml"
-RESUME = MAIN / "data" / "resume.pdf"
+RESUME = MAIN / "data" / "resume.pdf"                    # the model's resume text (full, untrimmed)
+UPLOAD = Path(os.environ.get("S5B_UPLOAD") or RESUME)    # the file attached (e.g. a tailored PDF, D-70)
 
 
 def _email() -> str:
@@ -298,7 +299,7 @@ def cmd_page(c: Ctx, nofill: bool = False, extra: str = ""):
     decisions, stops = L.guard(fields, answers, sens, corpus)
     for d in decisions:
         if d["kind"] == "file":
-            L.file_decision(page, d, title, str(RESUME))
+            L.file_decision(page, d, title, str(UPLOAD))
             if d["action"] == "skip" and d["required"]:
                 stops.append(f"required file slot that is not the resume: {d['label']!r}")
     if not nofill:
