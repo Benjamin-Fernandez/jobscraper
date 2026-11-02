@@ -349,6 +349,18 @@ def _canon_bool(v: Any) -> Any:
     return v
 
 
+def _canon_willing(v: Any) -> Any:
+    """`declarations.willing_to_sign_nda` (D-91): yes / no read as booleans, but
+    nil / none / NA / blank mean UNSET (None), never "No": a willingness answer is not a
+    "nothing to declare" fact."""
+    v = _canon_bool(v)
+    if isinstance(v, str):
+        token = re.sub(r"[\s\-_]+", "_", v.strip().lower()).replace(".", "").replace("/", "")
+        if token.strip("_") in _NOTHING_WORDS | {""}:
+            return None
+    return v
+
+
 def _canon_declaration_bool(v: Any) -> Any:
     """`_canon_bool`, plus nil / none / NA / N/A / not applicable -> False: a
     standing declaration with nothing to declare is a "No" (D-87)."""
@@ -444,6 +456,7 @@ def normalise(profile: Any) -> Any:
     for path in BOOLS:
         _set_at(out, path,
                 _canon_declaration_bool if path in DECLARATION_BOOLS else _canon_bool)
+    _set_at(out, "declarations.willing_to_sign_nda", _canon_willing)
     for block in ("authorised_to_work", "requires_sponsorship"):
         m = _get(out, f"singapore_status.{block}")
         if isinstance(m, dict):

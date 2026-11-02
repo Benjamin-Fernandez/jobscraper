@@ -209,6 +209,9 @@ def _rule_lock(pf: PageField, label_norm: str, rctx: ResolveContext,
 
 # ---------------------------------------------------------------- L3, L7
 
+strip_ns_exclusion = declarations.strip_ns_exclusions     # the one NS-exclusion rule (F10)
+
+
 def _declaration_lock(pf: PageField, label_norm: str, rctx: ResolveContext) -> Optional[Answer]:
     """L3 / L7: the tier-4 declaration answer. `declarations.answer()` owns every gate
     (D-90: field type, status frame, known polarity incl. the D-91 freedom forms, this

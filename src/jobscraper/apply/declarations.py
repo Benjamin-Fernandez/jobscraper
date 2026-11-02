@@ -244,10 +244,10 @@ _NDA_OBJECTS = (("nda",), ("ndas",), ("non", "disclosure"), ("nondisclosure",),
                 ("confidentiality", "agreement"), ("confidentiality", "agreements"),
                 ("confidentiality", "obligation"), ("confidentiality", "obligations"))
 _NDA_CONSENT = frozenset({"willing", "willingness", "agree", "agrees", "consent", "consents",
-                          "accept", "accepts", "comply", "abide", "prepared", "comfortable",
-                          "sign", "signing"})
+                          "accept", "accepts", "comply", "abide", "prepared", "sign", "signing"})
 _NDA_CONSENT_RUNS = (("able", "to", "sign"), ("will", "you", "sign"), ("would", "you", "sign"),
-                     ("can", "you", "sign"), ("happy", "to"), ("open", "to"))
+                     ("can", "you", "sign"))
+# (comfortable / happy to / open to are willingness words but not consent to sign: D-90a)
 # Disability, status frames only (D-90 (5)).
 _DISABILITY_FRAMES = (("do", "you", "have"), ("have", "you", "ever", "had"),
                       ("are", "you", "a", "person", "with"), ("do", "you", "consider", "yourself"),
@@ -430,7 +430,8 @@ def classify_all(label_norm: str, description_norm: str = "",
         spans = _spans(label_toks if lab is L.DISABILITY else text, phrases)
         if spans:
             found[lab] = spans
-    employer_ref = names_employer(label_toks, tuple(employer_names), raw_label)
+    names = tuple(n for n in employer_names if n)
+    employer_ref = names_employer(label_toks, names, raw_label)
     gov_spans = found.get(L.GOVERNMENT_EMPLOYMENT, [])
 
     def covered(lab: DeclarationLabel, a1: int, b1: int) -> bool:
@@ -448,7 +449,10 @@ def classify_all(label_norm: str, description_norm: str = "",
                if all(covered(lab, a1, b1) for a1, b1 in spans)}
     hits = set(found) - dropped
     unsure = False
-    if not employer_ref and hits & {L.PRIOR_EMPLOYMENT, L.CURRENT_EMPLOYEE}:
+    # A caller that knows the employer (tier 4, L3, the capture checks) is strict; one that
+    # passes no names keeps the class (the conservative side for the employer-specific
+    # checks) and `answer()` still refuses it unless the label names the employer.
+    if names and not employer_ref and hits & {L.PRIOR_EMPLOYMENT, L.CURRENT_EMPLOYEE}:
         hits -= {L.PRIOR_EMPLOYMENT, L.CURRENT_EMPLOYEE}
         unsure = True
     if {L.CURRENT_EMPLOYEE, L.PRIOR_EMPLOYMENT} <= hits:
@@ -472,6 +476,8 @@ def classify_all(label_norm: str, description_norm: str = "",
                     or any(_has_run(label_toks, r) for r in _DISABILITY_FRAMES))):
         hits.discard(L.DISABILITY)
         unsure = True
+    if hits and _compound_unclassified(label_toks):
+        unsure = True                                  # review F7
     if hits and _willing(label_toks):
         if L.NON_COMPETE in hits and _nda_consent(label_toks, found.get(L.NON_COMPETE, [])):
             hits.discard(L.NON_COMPETE)          # D-91: the one exempt object
@@ -479,6 +485,24 @@ def classify_all(label_norm: str, description_norm: str = "",
         else:
             unsure = True
     return frozenset(hits), unsure
+
+
+def _compound_unclassified(label_toks: list[str]) -> bool:
+    """Review F7: a question that joins a second question ("..., or are you able to work
+    night shifts?") whose clause matches no declaration class is not answered for the
+    classified clause alone. A bare "are you" lead-in is not a clause."""
+    cuts = [i for i in range(1, len(label_toks) - 2)
+            if label_toks[i] in ("or", "and") and label_toks[i + 1] in QUESTION_STARTERS
+            and label_toks[i + 2] in ("you", "we", "they", "i", "there", "it")]
+    if not cuts:
+        return False
+    bounds = [0, *cuts, len(label_toks)]
+    for a, b in list(zip(bounds, bounds[1:]))[1:]:       # a lead-in clause is the same topic (F1)
+        clause = label_toks[a:b]
+        if len(clause) >= 5 and not (ATTESTATION_MARKERS & set(clause)) \
+                and not any(_spans(clause, ph) for ph in _PHRASE_TOKENS.values()):
+            return True
+    return False
 
 
 def _nda_consent(label_toks: list[str], non_compete_spans: list[tuple[int, int]]) -> bool:
@@ -684,6 +708,9 @@ def answer(label, f: FormField, ctx: ResolveContext) -> Answer:
     gate = _field_gate(f)                    # D-90 gate 1: the field can carry a Yes/No
     if gate:
         return _ended(f, label.value, gate)
+    if label in (L.PRIOR_EMPLOYMENT, L.CURRENT_EMPLOYEE) \
+            and not names_this_employer(f.label or "", employer_names_of(ctx)):
+        return _ended(f, label.value, "question does not name this employer")   # D-90 (4)
     if label is L.HEALTH:
         return _health_answer(f)
     value = truth(label, ctx.profile, ctx.employer_name, ctx.employer_aliases,
@@ -796,7 +823,7 @@ def _bool_answer(f: FormField, name: str, value: Optional[bool], note: str = "",
             if not _freedom_inverts(label_norm, cls):
                 return _ended(f, name, "negated declaration question")
             value = not value
-        if cls is not L.NDA_WILLINGNESS and not _status_frame(toks):
+        elif cls is not L.NDA_WILLINGNESS and not _status_frame(toks):
             return _ended(f, name, "not a status question")
         fit = fit_bool(f, value)
     if fit is None:
@@ -835,3 +862,6 @@ def _disability_answer(f: FormField, value: Optional[bool]) -> Answer:
             return _ended(f, name, "no offered option fits the declaration")
         return _answer(f, name, fit)
     return _bool_answer(f, name, value, cls=L.DISABILITY)
+
+
+_strip_ns_exclusions = strip_ns_exclusions      # the old private name, kept for callers
