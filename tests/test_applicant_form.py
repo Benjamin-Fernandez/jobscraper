@@ -356,10 +356,28 @@ def test_a_lowercase_country_key_and_a_non_bool_default_are_errors():
     assert any(e.path.startswith("singapore_status.authorised_to_work") for e in errs), errs
     assert any("default" in e.message and "2-letter" in e.message for e in errs), \
         "the message becomes 'keys must be 2-letter ISO country codes or default'"
+    # Q-36 (D-78) supersedes QD 8.1's strictness for the words yes/no/true/false: those are read as
+    # a bool (pinned below). A word or number that is not a boolean is still an error.
+    for bad in ("maybe", 3):
+        p = profile()
+        p["singapore_status"]["requires_sponsorship"] = {"SG": False, "default": bad}
+        errs = _errs(p)
+        assert any(e.path == "singapore_status.requires_sponsorship.default" for e in errs), \
+            (bad, errs)
+
+
+@needs("jobscraper.applicant:work_rights")
+def test_a_quoted_yes_or_no_in_a_work_rights_map_is_read_as_a_bool_q36():
+    """D-78 / Q-36: no rigid manual entry. `default: "yes"` is not an error; `normalise` (and so
+    `load` and `save`) turns it into True, and `work_rights` then answers from it."""
+    A = _A()
     p = profile()
     p["singapore_status"]["requires_sponsorship"] = {"SG": False, "default": "yes"}
-    errs = _errs(p)
-    assert any(e.path.startswith("singapore_status.requires_sponsorship") for e in errs), errs
+    assert _errs(p) == []
+    got = A.normalise(p)["singapore_status"]["requires_sponsorship"]
+    assert got == {"SG": False, "default": True} and got["default"] is True, got
+    assert A.work_rights(A.normalise(p), "FR")[1] is True, "FR falls to the map default, now True"
+    assert A.work_rights(A.normalise(p), "SG")[1] is False
 
 
 @needs("jobscraper.applicant:work_rights")
