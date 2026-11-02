@@ -13,6 +13,7 @@
     python -m jobscraper sync        reconcile watchlist.yaml into the database
     python -m jobscraper purge       delete job descriptions past their time to live
     python -m jobscraper applicant   check the applicant profile for application forms
+    python -m jobscraper mail        store the mailbox app password, test the mailbox
 """
 from __future__ import annotations
 
@@ -697,6 +698,87 @@ def cmd_applicant(args) -> int:
     return 0 if not errors and not missing else 1
 
 
+def cmd_mail(args) -> int:
+    """M20 lane V (apply_design §11.4, §11.5, §14.1): the read-only mailbox
+    that verification mail is fetched from.
+
+    `mail set-password [--backup]` prompts with getpass and stores the app
+    password in the vault as `jobscraper:imap:<host>` under the mailbox's
+    username; `--host/--user` override the settings and are saved into them
+    (the username lives only in the settings table, never in config.yaml).
+    `mail test [--backup] [--find-from DOMAIN]` logs in, EXAMINEs INBOX and
+    prints the message count; `--find-from` prints only the time of the newest
+    message from that domain. Neither prints the username, the password, a
+    subject or a body: the web `mailtest` job's log shows this output.
+    """
+    import getpass
+    from . import vault
+    from .apply import mail
+    from .apply.contracts import Secret
+
+    cfg, store = _boot_v2(args)
+    try:
+        backup = bool(getattr(args, "backup", False))
+        pre = "apply.mail_backup." if backup else "apply.mail."
+        which = "backup mailbox" if backup else "mailbox"
+        if args.mail_cmd == "set-password":
+            if args.host:
+                store.set_setting(pre + "host", args.host.strip().lower())
+            if args.user:
+                store.set_setting(pre + "username", args.user.strip())
+            settings = mail.effective_settings(cfg, store.get_setting)
+            box = mail.mailbox_settings(settings, backup=backup)
+            if not (box.host and box.username):
+                print(f"mail: the {which} has no host or username yet; pass --host and "
+                      "--user (saved to settings)", file=sys.stderr)
+                return 1
+            pw = "".join(getpass.getpass(f"App password for the {which} on {box.host}: ")
+                         .split())                    # Gmail shows it in groups of 4
+            if not pw:
+                print("mail: no password entered; nothing stored", file=sys.stderr)
+                return 1
+            try:
+                vault.put(vault.imap_service(box.host), box.username, Secret(pw))
+            except vault.VaultError as exc:
+                print(f"mail: {exc}", file=sys.stderr)
+                return 1
+            print(f"stored the {which} app password for {box.host} in Credential Manager")
+            print("check it with: python -m jobscraper mail test" + (" --backup" if backup else ""))
+            return 0
+
+        # mail test
+        settings = mail.effective_settings(cfg, store.get_setting)
+        if backup and not mail.backup_is_separate(settings):
+            print("no separate backup mailbox is set (apply.mail_backup): the backup "
+                  "address is read from the main mailbox; testing that")
+            backup = False
+        box = mail.mailbox_settings(settings, backup=backup)
+        if not (box.host and box.username):
+            print(f"mail: the {which} is not set up (host or username missing); "
+                  "run `python -m jobscraper mail set-password --host H --user U`",
+                  file=sys.stderr)
+            return 1
+        pw = mail.mailbox_password(box)
+        if pw is None:
+            print(f"mail: no app password stored for the {which} on {box.host}; run "
+                  "`python -m jobscraper mail set-password`" + (" --backup" if backup else ""),
+                  file=sys.stderr)
+            return 1
+        try:
+            out = mail.test_connection(box.host, box.port, box.username, pw)
+            print(f"Connected, read-only ({box.host}:{box.port}): {out.removeprefix('ok: ')}")
+            if args.find_from:
+                when = mail.newest_from(box.host, box.port, box.username, pw, args.find_from)
+                print(f"found from {args.find_from} at {when} UTC" if when
+                      else f"no message from {args.find_from} in INBOX or Spam")
+        except mail.MailError as exc:
+            print(f"mail: {exc}", file=sys.stderr)
+            return 1
+        return 0
+    finally:
+        store.close()
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="jobscraper",
                                 description="Weekly careers-site monitor")
@@ -795,6 +877,22 @@ def build_parser() -> argparse.ArgumentParser:
     tl_p.add_argument("--force", action="store_true",
                       help="tailor again even if a current file exists")
     tl_p.set_defaults(fn=cmd_tailor)
+
+    # --- mail (M20 lane V)
+    ml = sub.add_parser("mail", help="the read-only mailbox for verification emails")
+    ml_sub = ml.add_subparsers(dest="mail_cmd", required=True)
+    mls = ml_sub.add_parser("set-password", help="store the mailbox app password "
+                                                 "(prompted, never echoed)")
+    mls.add_argument("--backup", action="store_true",
+                     help="the mailbox of contact.backup_email (apply.mail_backup)")
+    mls.add_argument("--host", help="IMAP host, saved to settings (default: settings)")
+    mls.add_argument("--user", help="IMAP username, saved to settings (default: settings)")
+    mlt = ml_sub.add_parser("test", help="log in read-only and count INBOX messages")
+    mlt.add_argument("--backup", action="store_true",
+                     help="test the backup mailbox (apply.mail_backup)")
+    mlt.add_argument("--find-from", metavar="DOMAIN",
+                     help="also print the time of the newest message from DOMAIN")
+    ml.set_defaults(fn=cmd_mail)
     return p
 
 
