@@ -6,7 +6,7 @@ const BASE = 'api/'
 // An API failure that keeps its HTTP status, so a tab can say something useful
 // about a 409 or a 422 instead of printing the raw response.
 export class ApiError extends Error {
-  constructor(status, statusText, detail) {
+  constructor(status, statusText, detail, body = null) {
     // FastAPI's own 404 says "Not Found" twice; say it once.
     const quiet = detail === undefined || detail === '' || detail === statusText
     const shown = quiet ? '' : ` - ${typeof detail === 'string' ? detail : JSON.stringify(detail)}`
@@ -14,6 +14,9 @@ export class ApiError extends Error {
     this.name = 'ApiError'
     this.status = status
     this.detail = detail
+    // The whole JSON answer, for the routes whose 409/422 carry more than a
+    // `detail` (the applicant form's `errors`, a retry's `job_ids`; U-block).
+    this.body = body
   }
 }
 
@@ -21,9 +24,11 @@ async function request(path, init) {
   const res = await fetch(BASE + path, init)
   if (!res.ok) {
     let detail = ''
-    try { detail = (await res.json()).detail ?? '' } catch { /* not JSON */ }
-    throw new ApiError(res.status, res.statusText, detail)
+    let body = null
+    try { body = await res.json(); detail = body?.detail ?? '' } catch { /* not JSON */ }
+    throw new ApiError(res.status, res.statusText, detail, body)
   }
+  if (res.status === 204) return null   // dismiss answers with no body
   return res.json()
 }
 
@@ -235,3 +240,60 @@ export function getCompanyHealth() {
 
 // The same list as a CSV file (the browser downloads it).
 export const COMPANY_EXPORT_URL = 'api/companies/export.csv'
+
+// ---- Q-30 (D-74): Application details and Questions from applications ----
+// The shapes are fixed in docs/architecture/questions_design.md section 9.
+
+// {profile, etag, errors:[{path,message}], missing:[path], completeness:{filled,needed},
+//  from_resume:[path], sensitive:[path], form:[group], file:{exists, has_comments, error}}
+export function getApplicant() {
+  return request('applicant')
+}
+
+// {profile, etag}. 200 is the same shape as GET with the new etag; 409 is
+// {detail:'changed'|'unreadable'}; 422 is {detail:'invalid', errors:[{path,message}]}.
+export function saveApplicant(profile, etag) {
+  return sendJson('applicant', 'PUT', { profile, etag })
+}
+
+// {mode:'auto'|'dry_run', groups:[...], ready:[{job_id,attempt_id,company,title}],
+//  waiting:[...], busy}. `status` is open, answered or all.
+export function getQuestions(status = 'open') {
+  return request(`questions?status=${encodeURIComponent(status)}`)
+}
+
+// body: {key, etag, employer?, value?, picks?}. 200 {answered, ready, etag}; 404 unknown
+// key; 409 changed/unreadable; 422 invalid.
+export function answerQuestion(body) {
+  return sendJson('questions/answer', 'POST', body)
+}
+
+// "I'll answer this one by hand": 204, no body.
+export function dismissQuestion(key) {
+  return request(`questions/${encodeURIComponent(key)}/dismiss`, { method: 'POST' })
+}
+
+// Run the apply job again for jobs that stopped on a question now answered.
+// 202 + job; 409 {detail:'busy'}; 422 {detail:'not_ready', job_ids}.
+export function retryQuestions(jobIds) {
+  return sendJson('questions/retry', 'POST', { job_ids: jobIds })
+}
+
+// What a failed applicant/questions call means, in one shape: the HTTP status,
+// a short `code` ('changed', 'unreadable', 'invalid', 'busy', 'not_ready', ...),
+// and the per-field `errors` and `job_ids` the body may carry. The detail may
+// arrive as a bare string or nested ({detail:{detail:'invalid', errors}}).
+export function problemOf(e) {
+  if (!(e instanceof ApiError)) return { status: 0, code: '', errors: [], jobIds: [], text: describeError(e) }
+  const inner = e.detail && typeof e.detail === 'object' && !Array.isArray(e.detail) ? e.detail : null
+  const code = typeof e.detail === 'string' ? e.detail : String(inner?.detail ?? '')
+  const errors = e.body?.errors ?? inner?.errors ?? []
+  const jobIds = e.body?.job_ids ?? inner?.job_ids ?? []
+  return {
+    status: e.status,
+    code,
+    errors: Array.isArray(errors) ? errors.filter(x => x && typeof x.path === 'string') : [],
+    jobIds: Array.isArray(jobIds) ? jobIds : [],
+    text: describeError(e),
+  }
+}
