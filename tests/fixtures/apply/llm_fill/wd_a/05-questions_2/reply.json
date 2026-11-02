@@ -1,0 +1,15 @@
+{
+ "calls": [
+  {
+   "kind": "page",
+   "reply": {
+    "|What is your earliest available start date?": {
+     "source": "profile",
+     "ref": "profile:availability.earliest_start_date",
+     "value": "2026-01-05",
+     "evidence": ""
+    }
+   }
+  }
+ ]
+}

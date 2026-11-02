@@ -1,0 +1,18 @@
+[
+ {
+  "label": "Given Name(s)",
+  "type": "text",
+  "widget": "text",
+  "required": true,
+  "options": [],
+  "options_sorted": true,
+  "shown": "Alex",
+  "group": "",
+  "group_title": "",
+  "context": "",
+  "options_complete": true,
+  "automation_id": "formField-legalName--firstName",
+  "parts": [],
+  "help": ""
+ }
+]

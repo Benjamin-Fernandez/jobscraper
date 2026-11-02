@@ -1,0 +1,50 @@
+[
+ {
+  "label": "Resume/CV",
+  "type": "file",
+  "widget": "file",
+  "required": true,
+  "options": [],
+  "options_sorted": true,
+  "shown": "Imported_Resume_Old.pdf",
+  "group": "",
+  "group_title": "",
+  "context": "",
+  "options_complete": true,
+  "automation_id": "formField-resumeAttachments",
+  "parts": [],
+  "help": ""
+ },
+ {
+  "label": "Transcript",
+  "type": "file",
+  "widget": "file",
+  "required": false,
+  "options": [],
+  "options_sorted": true,
+  "shown": "",
+  "group": "",
+  "group_title": "",
+  "context": "",
+  "options_complete": true,
+  "automation_id": "formField-transcript",
+  "parts": [],
+  "help": ""
+ },
+ {
+  "label": "Cover Letter",
+  "type": "file",
+  "widget": "file",
+  "required": true,
+  "options": [],
+  "options_sorted": true,
+  "shown": "",
+  "group": "",
+  "group_title": "",
+  "context": "",
+  "options_complete": true,
+  "automation_id": "formField-coverLetter",
+  "parts": [],
+  "help": ""
+ }
+]

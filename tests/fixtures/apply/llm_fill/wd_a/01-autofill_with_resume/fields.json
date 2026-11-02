@@ -1,0 +1,18 @@
+[
+ {
+  "label": "Upload a file (5MB max)",
+  "type": "file",
+  "widget": "file",
+  "required": true,
+  "options": [],
+  "options_sorted": true,
+  "shown": "",
+  "group": "",
+  "group_title": "",
+  "context": "",
+  "options_complete": true,
+  "automation_id": "formField-resumeAttachments",
+  "parts": [],
+  "help": ""
+ }
+]

@@ -1,0 +1,18 @@
+Alex Testcase | Singapore | alex.testcase@example.com | Mobile: +65 9123 4567
+1 Example Road, Singapore 000001
+
+EXPERIENCE
+Software Engineering Intern, Example Logistics Pte Ltd, Singapore (May 2024 - Aug 2024)
+- Built REST APIs in Python and Postgres for shipment tracking.
+Data Intern, Sample Analytics (Jan 2025 - Jun 2025)
+- Automated weekly reports with SQL and Python.
+
+PROJECTS
+Campus Robot League - built a line-following robot in C++ for the university league.
+
+EDUCATION
+Nanyang Example University, Bachelor of Engineering (Computer Engineering), 2021 - 2025, CAP 4.20/5.00
+
+SKILLS
+Python, SQL, PostgreSQL, Git
+Languages: English, Mandarin

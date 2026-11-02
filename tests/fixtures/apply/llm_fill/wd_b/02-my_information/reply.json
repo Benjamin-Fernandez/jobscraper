@@ -1,0 +1,100 @@
+{
+ "calls": [
+  {
+   "kind": "page",
+   "reply": {
+    "|How Did You Hear About Us?": {
+     "source": "standing",
+     "ref": "standing:how_heard",
+     "value": "Company careers website",
+     "evidence": ""
+    },
+    "|Have you previously worked for Example Employer?": {
+     "source": "standing",
+     "ref": "standing:worked_here",
+     "value": "No",
+     "evidence": ""
+    },
+    "|Country": {
+     "source": "profile",
+     "ref": "profile:contact.country",
+     "value": "Singapore",
+     "evidence": ""
+    },
+    "|Given Name(s)": {
+     "source": "profile",
+     "ref": "profile:identity.legal_first_name",
+     "value": "Alex",
+     "evidence": ""
+    },
+    "|Family Name": {
+     "source": "profile",
+     "ref": "profile:identity.legal_last_name",
+     "value": "Testcase",
+     "evidence": ""
+    },
+    "|I have a preferred name": {
+     "source": "unknown",
+     "ref": "",
+     "value": "",
+     "evidence": ""
+    },
+    "|Address Line 1": {
+     "source": "profile",
+     "ref": "profile:contact.address_line1",
+     "value": "",
+     "evidence": ""
+    },
+    "|Postal Code": {
+     "source": "profile",
+     "ref": "profile:contact.postal_code",
+     "value": "",
+     "evidence": ""
+    },
+    "|City": {
+     "source": "profile",
+     "ref": "profile:contact.city",
+     "value": "Singapore",
+     "evidence": ""
+    },
+    "|Phone Device Type": {
+     "source": "resume",
+     "ref": "",
+     "value": "Mobile",
+     "evidence": "Mobile"
+    },
+    "|Country Phone Code": {
+     "source": "profile",
+     "ref": "profile:contact.phone_country_code",
+     "value": "",
+     "evidence": ""
+    },
+    "|Phone Number": {
+     "source": "profile",
+     "ref": "profile:contact.phone_number",
+     "value": "",
+     "evidence": ""
+    },
+    "|Phone Extension": {
+     "source": "unknown",
+     "ref": "",
+     "value": "",
+     "evidence": ""
+    },
+    "|Address Line 2": {
+     "source": "profile",
+     "ref": "profile:contact.address_line2",
+     "value": "",
+     "evidence": ""
+    }
+   }
+  },
+  {
+   "kind": "pick",
+   "match": "How Did You Hear About Us?",
+   "raw": {
+    "choice": "Company Website > Careers Page"
+   }
+  }
+ ]
+}
