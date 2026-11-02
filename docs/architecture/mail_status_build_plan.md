@@ -70,7 +70,12 @@ Architect, 2026-11-02. Design: `mail_status_design.md` (**MS §n**); ADR-0007. C
 - **Inputs:** MS §7, §8, §6.5.
 - **Files:** `tests/test_mail_match.py`, `tests/test_mail_transition.py`, `tests/test_mail_model.py`.
 - **Do:**
-  - **Matcher:** each signal alone and combined; two applications at one employer separated by role and by req id, and left ambiguous without either; employers across two companies (tie → AMBIGUOUS); a common-word name in the body only → no signal; a Workday tenant from the local part; thread first; a saved role matched.
+  - **Matcher:** each signal alone and combined; two applications at one employer separated by role and by req id, and left ambiguous without either; employers across two companies (tie → AMBIGUOUS); a common-word name in the body only → no signal; a Workday tenant from the local part; thread first; a saved role matched. **E1:**
+    - an Oleeo sender `examplebank.tal.net` matches "Example Bank" by compact name, with no attempt row;
+    - a Workday local part equal to the compact company name matches;
+    - `tal.net` itself (not a strict subdomain) gives no tenant;
+    - `tenants_from_hosts` takes the tenant from a `*.myworkdayjobs.com` posting URL and a `*.tal.net` careers URL;
+    - a loader error when both tenant flags are true.
   - **Transitions:** every row of the MS §8 table, including 4 (candidates dropping out), 6 (owner newer), 7 (reopen versus terminal), 9 (backwards → NONE, no suggestion), and 11a–e in order; `to_apply → applied` gives AUTO.
   - **Model parse:** a valid reply, bad JSON, a category outside the enum, an empty quote, a quote not in the message → UNKNOWN; the prompt holds the email only (no profile value) and every URL appears as `[link]`; `SCHEMA` enum == `Category` values.
 - **Verify:** `python tests/run_tests.py -k mail_match` and `-k mail_transition` and `-k mail_model`
@@ -141,7 +146,7 @@ Architect, 2026-11-02. Design: `mail_status_design.md` (**MS §n**); ADR-0007. C
 #### WP-S1 · Rules file loader, gates, classifier
 - **STATUS:** READY. **Files:** `src/jobscraper/mailstatus/rules.py`. **Inputs:** MS §6.1–§6.4. **Depends on:** S0, T1 (`rules_min.yaml`).
 - **Do:**
-  - `load_rules(path) -> Rules` (frozen dataclass; compiled patterns) raising `RulesError(entry_id, message)`;
+  - `load_rules(path) -> Rules` (frozen dataclass; compiled patterns) raising `RulesError(entry_id, message)`. **E1:** the platform keys `tenant_from_local_part`, `tenant_from_subdomain` (at most one true) and `tenant_sites` (MS §6.1) are validated and kept;
   - `platform_of(h, rules) -> str`;
   - `header_gate(h, rules, *, own: frozenset[str], window_start: str, threads: frozenset[str], employer_regs: frozenset[str]) -> Optional[Reason]`;
   - `content_gate(h, body, rules, *, in_matched_thread: bool) -> Optional[Reason]`;
@@ -154,7 +159,7 @@ Architect, 2026-11-02. Design: `mail_status_design.md` (**MS §n**); ADR-0007. C
 
 #### WP-S2 · Matcher
 - **STATUS:** READY. **Files:** `src/jobscraper/mailstatus/match.py`. **Inputs:** MS §7. **Depends on:** S0, S1 (`Rules`).
-- **Do:** `norm_company(name, suffixes)`, `norm_role(title)`, `variants(app, rules)`, `match(h, body, apps: Sequence[AppCandidate], rules) -> MatchResult` per the six decision steps; `signals` listed in `Signal` order.
+- **Do:** `norm_company(name, suffixes)`, `norm_role(title)`, `compact(s)`, `variants(app, rules)`, `tenants_from_hosts(hosts, rules) -> tuple[str, ...]` (E1), `match(h, body, apps: Sequence[AppCandidate], rules) -> MatchResult` per the six decision steps; `signals` listed in `Signal` order. **E1:** the `tenant` signal covers `tenant_from_local_part` and `tenant_from_subdomain`, compared in compact form against `app.tenants` and every company variant (MS §7).
 - **Verify:** `python tests/run_tests.py -k mail_match`
 - **Done when:** T3 matcher half green. **Requirements:** F-50j.
 
@@ -211,7 +216,7 @@ Architect, 2026-11-02. Design: `mail_status_design.md` (**MS §n**); ADR-0007. C
 
 #### WP-F1 · Store block
 - **STATUS:** READY. **Files:** `src/jobscraper/store.py`. **Inputs:** MS §9, §8. **Depends on:** —.
-- **Do:** the five tables in `SCHEMA` (appended); `SCHEMA_VERSION = 5`; every method in the MS §9 table; `_write_status`, factored out of `set_application_status`, which then calls it and commits (same behaviour); `mail_run_begin` with `BEGIN IMMEDIATE`; `application_events` with `by` and `evidence_id`; the cascades.
+- **Do:** the five tables in `SCHEMA` (appended); `SCHEMA_VERSION = 5`; every method in the MS §9 table; `_write_status`, factored out of `set_application_status`, which then calls it and commits (same behaviour); `mail_run_begin` with `BEGIN IMMEDIATE`; `application_events` with `by` and `evidence_id`; the cascades. **E1:** `mail_match_context` returns raw `tenant_hosts`: the attempt `tenant_host` values plus the hosts of `jobs.url`, `applications.url` and `companies.careers_url`, so hand-made applications get tenants (MS §9).
 - **Verify:** `python tests/run_tests.py -k store_mail` (and the full suite: `python tests/run_tests.py`)
 - **Done when:** T5 store half green; the full suite green. **Requirements:** F-50c, e, l–n, s.
 
@@ -258,12 +263,12 @@ Architect, 2026-11-02. Design: `mail_status_design.md` (**MS §n**); ADR-0007. C
 
 #### WP-R1 · `config/mail_rules.yaml` v1
 - **STATUS:** READY after the Coordinator grants the scope (ADR-0007 action 3). **Inputs:** MS §6.1 schema, §6.4; MB §3–§4.
-- **Do:** platforms (every MB §3 row, with `kind`), job boards, company suffixes, common-word names, bulk, the four gate lists, the phrases per category (MB §4 high-precision column as regexes; HireVue on-demand under assessment, live under interview; "pleased to offer you" with `(?!\s+(an?\s+)?(interview|assessment))`), weak words, `dominates` per MS §6.1. Public data only.
+- **Do:** platforms (every MB §3 row, with `kind`; **E1:** Workday with `tenant_from_local_part: true, tenant_sites: [myworkdayjobs.com]`, and Oleeo `{id: oleeo, kind: ats, domains: [tal.net], tenant_from_subdomain: true, tenant_sites: [tal.net]}`, found by R2), job boards, company suffixes, common-word names, bulk, the four gate lists, the phrases per category (MB §4 high-precision column as regexes; HireVue on-demand under assessment, live under interview; "pleased to offer you" with `(?!\s+(an?\s+)?(interview|assessment))`), weak words, `dominates` per MS §6.1. Public data only.
 - **Verify:** `python tests/run_tests.py -k mail_rules` (the real-file half of T2)
 - **Done when:** the file loads and every golden case passes.
 
 #### WP-R2 · Header-only sender and authentication spike (owner consent required; MB §7 item 1)
-- **STATUS:** BLOCKED on the owner's consent. Run by the Coordinator.
+- **STATUS:** DONE (Coordinator, 2026-11-02; results in `comms/outbox/coordinator.md`): special-use flags present, X-GM-EXT-1 advertised, every ATS sender passed DKIM, SPF and DMARC (`require_auth: true` stands), Oleeo `*.tal.net` found (E1).
 - **Do:** with the owner's go-ahead, a header-only count over the application mailbox: From registrable domains with counts, and the share of `AuthResult.PASS` per platform. No subject, address or content enters the repo; the result is a table in `docs/research/mail_status_brief.md` (appendix) with domains and percentages only.
 - **Feeds:** R1 curation; the `require_auth` default (MS §15 R2).
 - **Done when:** the appendix is committed and R1 is updated.

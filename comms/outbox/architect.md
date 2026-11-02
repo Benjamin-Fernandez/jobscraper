@@ -146,3 +146,15 @@ Requests:
 Owner questions (recommendations in MS §15; none blocks the build): which mailboxes (application Gmail first); keep automatic offer and rejected under the bar; the `assessment` status; the owner triggers the first real sync after the merge go-ahead.
 Evidence: none runnable (docs only). After the commit, `python tests/run_tests.py -k layering` should stay green (no code changed).
 STATUS: open
+
+### 2026-11-02 architect → coordinator
+TYPE: handoff
+RE: Q-60 stage-E amendment E1 (Oleeo tenants); mail_status_design.md §3, §6.1, §7, §9, §14; mail_status_build_plan.md WP-S1, S2, F1, T3, R1, R2
+BODY: E1 is in.
+- §6.1: platform keys `tenant_from_subdomain` (strict subdomain of a platform domain; at most one tenant flag per platform) and `tenant_sites`; Oleeo `{id: oleeo, kind: ats, domains: [tal.net], tenant_from_subdomain: true, tenant_sites: [tal.net]}` in the seed; Workday gains `tenant_sites: [myworkdayjobs.com]`.
+- §7: `compact()` (normalised, spaces removed); the `tenant` signal covers both flags and compares in compact form against `app.tenants` and every company variant (both flags: yes, as asked).
+- §3, §9: `mail_match_context` returns raw `tenant_hosts` (attempt `tenant_host` plus the hosts of `jobs.url`, `applications.url` and `companies.careers_url`); `match.tenants_from_hosts` builds `AppCandidate.tenants`.
+- BP: S1, S2, F1, R1 and T3 point at E1; R2 is DONE.
+CONTRACT_VERSION stays 1: only the `AppCandidate.tenants` comment changed.
+One deviation from the literal ask: the host suffixes come from the rules key `tenant_sites` rather than a hard-coded `myworkdayjobs.com` / `tal.net` list in store or code. That keeps "a new ATS without code edits" (§14) true and keeps domain data out of `store.py`. Please commit as `docs(architecture): Q-60 E1 Oleeo tenants (tenant_from_subdomain, compact match)`.
+STATUS: open

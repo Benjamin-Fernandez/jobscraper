@@ -355,7 +355,9 @@ class AppCandidate:
     company_names: tuple[str, ...]     # applications.company, companies.name (raw)
     role: str                          # applications.role or jobs.title (raw)
     employer_domains: tuple[str, ...]  # registrable; careers_url and a non-ATS posting host
-    tenants: tuple[str, ...]           # Workday tenants (first host label), lower-case
+    tenants: tuple[str, ...]           # lower-case first host labels: apply_attempts.tenant_host, plus any
+                                       # jobs.url / applications.url / companies.careers_url host under a
+                                       # rules `tenant_sites` suffix (match.tenants_from_hosts; E1)
     board_slugs: tuple[str, ...]       # companies.slug for greenhouse/lever/ashby
     req_ids: tuple[str, ...]           # jobs.external_id with a digit, >= 5 characters
     threads: tuple[str, ...]           # gm_thrid of messages already matched to it
@@ -578,7 +580,8 @@ After the scans, for rows `outcome = pending_model`, `retries < 3` and `processe
 version: 1
 platforms:                        # sender domains that carry hiring mail for many employers
   - {id: greenhouse, kind: ats, domains: [greenhouse-mail.io, greenhouse.io]}
-  - {id: workday, kind: ats, domains: [myworkday.com], tenant_from_local_part: true}
+  - {id: workday, kind: ats, domains: [myworkday.com], tenant_from_local_part: true, tenant_sites: [myworkdayjobs.com]}
+  - {id: oleeo, kind: ats, domains: [tal.net], tenant_from_subdomain: true, tenant_sites: [tal.net]}
   - {id: hirevue, kind: assessment, domains: [hirevue.com]}
 job_boards: [linkedin.com, indeed.com, indeedemail.com, jobstreet.com, mycareersfuture.gov.sg, glassdoor.com]
 company_suffixes: [pte, ltd, limited, private, inc, llc, plc, corp, corporation, co, company, group, holdings, singapore, sg]
@@ -605,6 +608,11 @@ dominates:                         # when several categories hit, the key beats 
   posting_closed: [acknowledged, kept_on_file]
   kept_on_file: [acknowledged]
 ```
+
+**Platform entry (E1):** `{id, kind: ats|assessment|scheduler, domains: [...], tenant_from_local_part: false, tenant_from_subdomain: false, tenant_sites: []}`.
+- `tenant_from_local_part`: the sender's local part names the employer (Workday: `<tenant>@myworkday.com`).
+- `tenant_from_subdomain`: the first label of `from_domain`, when that host is a strict subdomain of one of the platform's `domains`, names the employer (Oleeo: `examplebank.tal.net`). At most one of the two may be true.
+- `tenant_sites`: career-site host suffixes whose first label is the same tenant (Workday `*.myworkdayjobs.com`, Oleeo `*.tal.net`). They are used to derive `AppCandidate.tenants` from posting and careers URLs (§7).
 
 **Phrase entry:** `{id, re, in: any|subject|body (default any), calendar: false}`. `id` is unique across the file and matches `[a-z0-9_.]+`. `re` is compiled with `re.IGNORECASE` and wrapped as `(?<!\w)(?:re)(?!\w)`. `calendar: true` hits only when the body has a `METHOD:REQUEST` calendar part. **Weak** entries are plain words (same wrapping): they never decide anything; they only mark `status_words` (worth asking the model). **Validation** (`RulesError` naming the file and entry → sync code `rules_invalid`): `version == 1`, known keys only, category keys ⊆ `Category`, `dominates` keys and values ⊆ category keys, every regex compiles, domains lower-case without `@`, ids unique. Every sync is a new process, so an edit applies at the next check without a restart. Seed content: the brief's §3 and §4 tables (researcher WP-R1).
 
@@ -660,7 +668,9 @@ quote: the shortest sentence from the email that shows the category, copied exac
 
 **Candidates:** every application (terminal ones included, so a late email about a closed application doesn't attach to a sibling), from `store.mail_match_context()`.
 
-**Normalisation:** `norm_company(name)`: NFKD, accents stripped, casefold, `&` → `and`, punctuation → space, trailing `company_suffixes` tokens removed repeatedly ("Example Holdings Pte Ltd" → "example"). The variants of an application's employer are its `company_names`, its `board_slugs` (hyphens → spaces), its `tenants`, and the first label of each employer domain, all normalised. `norm_role(title)`: casefold, punctuation → space, collapsed, with bracketed suffixes such as "(m/f/d)" removed.
+**Normalisation:** `norm_company(name)`: NFKD, accents stripped, casefold, `&` → `and`, punctuation → space, trailing `company_suffixes` tokens removed repeatedly ("Example Holdings Pte Ltd" → "example"). The variants of an application's employer are its `company_names`, its `board_slugs` (hyphens → spaces), its `tenants`, and the first label of each employer domain, all normalised. `norm_role(title)`: casefold, punctuation → space, collapsed, with bracketed suffixes such as "(m/f/d)" removed. `compact(s)` = `norm_company(s)` with every space removed (and, for a tenant, hyphens and underscores too). "Example Bank" → `examplebank`.
+
+**Tenants (E1).** `match.tenants_from_hosts(hosts, rules) -> tuple[str, ...]`: for each host from `mail_match_context` (the attempt `tenant_host`, and the hosts of `jobs.url`, `applications.url` and `companies.careers_url`), take its lower-case first label when the host is a strict subdomain of a platform's `tenant_sites` suffix. The flow calls it when building each `AppCandidate`, so applications made by hand, with no attempt row, still get their tenant.
 
 **Signals per application:**
 
@@ -668,7 +678,7 @@ quote: the shortest sentence from the email that shows the category, copied exac
 |---|---|---|
 | `thread` | `gm_thrid ∈ app.threads` | decides alone |
 | `employer_domain` | `from_reg` or a Reply-To domain ∈ `app.employer_domains` | strong |
-| `tenant` | the platform has `tenant_from_local_part` and `from_local` ∈ `app.tenants` | strong |
+| `tenant` | the sender's platform has `tenant_from_local_part` (tenant = `compact(from_local)`) or `tenant_from_subdomain` (tenant = `compact` of the first label of `from_domain`, strict subdomain only). The tenant equals `compact(t)` for some `t` ∈ `app.tenants`, **or** the compact form of any company variant. The compact comparison applies to **both** kinds, because Workday local parts are often the compact employer name too | strong |
 | `name_in_sender` | a variant occurs as whole words in `norm(from_name)` | strong |
 | `name_in_subject` | a variant occurs in `norm(subject)` | strong |
 | `name_in_body` | a variant occurs in the normalised text. Variants of one token under 5 characters, or listed in `common_word_names`, count only in the raw text with the original capitalisation | weak |
@@ -802,7 +812,7 @@ CREATE TABLE IF NOT EXISTS mail_sync_runs (    -- the lease and the last result
 | `mail_accounts(enabled_only=False)`, `mail_account(id)`, `mail_account_add(address, *, host, port, vault_service, shared_with_apply, consent_version, first_sync_from, now) -> int`, `mail_account_set(id, **fields)`, `mail_account_delete(id)` | `add` on an existing address raises `ValueError`; `delete` per §4 |
 | `mail_cursor(account_id, role)`, `mail_cursor_set(cursor: dict)` | upsert |
 | `mail_seen_many(account_id, gm_msgids) -> set[str]` | |
-| `mail_match_context() -> list[dict]` | the `AppCandidate` fields in one query (applications ⟕ jobs ⟕ companies, distinct `apply_attempts.tenant_host`, owner and last event times, threads from `mail_messages`) |
+| `mail_match_context() -> list[dict]` | the `AppCandidate` fields in one query (applications ⟕ jobs ⟕ companies, owner and last event times, threads from `mail_messages`). Instead of `tenants` it returns raw `tenant_hosts`: the distinct `apply_attempts.tenant_host` values plus the hosts of `jobs.url`, `applications.url` and `companies.careers_url` (E1). The flow turns them into `tenants` with `match.tenants_from_hosts` |
 | `mail_record(*, account_id, message: dict, cursor: dict, change: dict \| None, evidence: dict \| None, now) -> dict` | **one transaction**; the re-check inside (§5.4 step 8); returns `{outcome, event_id, evidence_id}`. Uses a non-committing `_write_status(job_id, status, at, by, applied_at)` that `set_application_status` is refactored to call too |
 | `mail_pending(account_id, now, retry_days)`, `mail_resolve_pending(account_id, gm_msgid, message, change, evidence, now)` | update, not insert; same single transaction |
 | `mail_suggestions()`, `mail_accept(id, job_id, now) -> (bool, code)`, `mail_dismiss(id, now)`, `mail_undo(id, now) -> (bool, code)`, `mail_evidence_for(job_ids) -> dict` | §8. Codes: `ok`, `changed`, `not_latest`, `not_found`, `not_open` |
@@ -957,7 +967,7 @@ No retry storm: per account, at most one connect attempt per timer tick, with ba
 ## 14. Extension walkthrough
 
 **A new ATS sender** (example: a platform sending as `noreply@mail.newats.example`), in 4 steps and no code edits:
-1. Add `{id: newats, kind: ats, domains: [newats.example]}` under `platforms` in `config/mail_rules.yaml`. If the local part names the employer, as Workday's does, add `tenant_from_local_part: true`.
+1. Add `{id: newats, kind: ats, domains: [newats.example]}` under `platforms` in `config/mail_rules.yaml`. If the local part names the employer, as Workday's does, add `tenant_from_local_part: true`. If the sender's subdomain names the employer, as Oleeo's `<employer>.tal.net` does, add `tenant_from_subdomain: true`. If the career sites live under `<tenant>.<suffix>`, add `tenant_sites: [<suffix>]`.
 2. Add a synthetic golden case: `tests/fixtures/mail/golden/newats_ack.eml` plus its expected row in `tests/fixtures/mail/golden.yaml` (`category`, `match`, `change`).
 3. Run `python tests/run_tests.py -k mail_rules`. It validates the file and runs every golden case.
 4. Done. The next sync is a new process that loads the file, so no restart is needed.
