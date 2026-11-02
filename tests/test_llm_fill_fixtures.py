@@ -296,3 +296,13 @@ def test_the_shim_opens_lists_shows_errors_and_walks_the_wizard():
     finally:
         browser.close()
         pw.stop()
+
+
+def test_the_secret_scan_matches_digit_runs_not_all_digits_joined():
+    """Lane M's defect report (2026-11-03): the scan joined every digit of a prompt, so six
+    `experience[0]` refs and a `1500` read as the sample postal code "000001"."""
+    schema = '"enum": ["profile:experience[0].a", "profile:experience[0].b", "profile:experience[0].c", '              '"profile:experience[0].d", "profile:experience[0].e", "profile:experience[0].f"], "maxLength": 1500'
+    assert find_secrets(schema, ["000001"]) == []
+    assert find_secrets("call +65 9123 4567 today", ["91234567"]) == ["91234567"]
+    assert find_secrets("postal 000001.", ["000001"]) == ["000001"]
+    assert find_secrets("Alex.Testcase@Example.com", ["alex.testcase@example.com"]) == ["alex.testcase@example.com"]

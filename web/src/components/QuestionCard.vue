@@ -32,6 +32,7 @@ const REASONS = {
   no_option_fits: "Your saved answer isn't one of this form's options",
   attestation_unclear: "A declaration JobScraper couldn't classify",
   conflict: 'Your work rights differ between the countries asked',
+  compose_needed: "Needs a cover letter or motivation text JobScraper can't write yet",
 }
 // Fields that are one control per value; the rest fall back to the question's own kind.
 const NOT_FOR_GAP = new Set(['entries', 'fixed', 'salary', 'country_bool_map'])
@@ -95,6 +96,9 @@ function start() {
   return d
 }
 const draft = reactive(start())
+// Variants that had a saved pick when the card opened: clearing one sends [] so the
+// server drops its picks (review Q-30 F3, LF §12.2); untouched empty variants are not sent.
+const hadPick = Object.fromEntries(Object.entries(draft.picks).map(([k, p]) => [k, p.length > 0]))
 const mine = ref('')   // the card's own complaint (nothing chosen yet)
 
 const pickOf = v => (g.value.kind === 'choice' ? draft.picks[v.question_id]?.[0] ?? null : draft.picks[v.question_id] ?? [])
@@ -120,7 +124,7 @@ function save() {
   const body = { key: g.value.key }
   if (draft.employer && !g.value.target_path) body.employer = draft.employer
   if (isPick.value) {
-    body.picks = Object.fromEntries(Object.entries(draft.picks).filter(([, p]) => p.length))
+    body.picks = Object.fromEntries(Object.entries(draft.picks).filter(([k, p]) => p.length || hadPick[k]))
   } else {
     body.value = typeof draft.value === 'string' ? draft.value.trim() : draft.value
   }
