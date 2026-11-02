@@ -559,6 +559,12 @@ class GreenhouseAdapter:
         """One page: the form is its own review page."""
         return StepResult(step="application", is_review=True, errors=self.visible_errors(page))
 
+    def submit_ready(self, page: Any) -> bool:
+        """A visible Submit button is on the page (checked before the click is
+        recorded, so a missing button fails instead of counting as sent)."""
+        btn = page.locator('button[type="submit"]').filter(has_text=SUBMIT_TEXT)
+        return any(_safe_visible(btn.nth(i)) for i in range(min(btn.count(), 5)))
+
     def submit(self, page: Any, ctx: AttemptContext) -> None:
         btn = page.locator('button[type="submit"]').filter(has_text=SUBMIT_TEXT)
         if not btn.count():

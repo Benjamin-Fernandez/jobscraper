@@ -716,7 +716,10 @@ class _Run:
             adapter, ctx = self.body(at, job)
         except ApplyFailure as exc:
             self.seen.add(job_id)
-            self.fail(at, exc.reason, exc.detail, exc.step)
+            if at.clicked:                                # NF-06: never failed after the click
+                self.unconfirmed(at, f"{exc.reason.value} after submit")
+            else:
+                self.fail(at, exc.reason, exc.detail, exc.step)
         except Exception as exc:                          # noqa: BLE001 - any bug ends the attempt
             if at.clicked:
                 self.unconfirmed(at, f"error after submit ({type(exc).__name__})")
@@ -915,6 +918,12 @@ class _Run:
     def submit(self, page: Any, ctx: AttemptContext, adapter: Any, at: _Attempt,
                job: dict[str, Any]) -> None:
         at.shot(page, "review")
+        # No button, no click: a missing Submit fails before anything is
+        # recorded (review F3), instead of a clicked-but-unsent attempt.
+        ready = getattr(adapter, "submit_ready", None)
+        if ready is not None and not ready(page):
+            raise ApplyFailure(ReasonCode.PAGE_UNRECOGNISED, f"{adapter.name}: submit button",
+                               step="review")
         # The click is recorded and committed BEFORE it happens (NF-06),
         # after a last duplicate + cap check (review F4).
         self.claim_click(at, job)
