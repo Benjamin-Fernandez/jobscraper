@@ -413,3 +413,21 @@ def test_pipeline_user_titles_recheck_the_prefilter_not_the_model():
     rep = _run(cfg, st, backend=judge, now=shift(T0, days=2))
     assert rep.stats["prefilter_evaluated"] == 2 and rep.stats["shortlisted"] == 2
     assert judge.calls == 1, "the earlier decisions are reused, not re-judged"
+
+
+def test_probation_failures_never_abort_a_batch_d66():
+    """D-66: only the regular due companies speak for the network. Six quarantined
+    boards on probation failing beside ten healthy due ones is not an outage."""
+    cfg, st = _world(16)
+    dead = {f"co{i:02d}" for i in range(11, 17)}
+    _run(cfg, st, dry_run=True)                           # syncs the watchlist into the DB
+    for c in st.companies():
+        if c.key in dead:
+            st.quarantine(c.id, probation_due_run=1)
+
+    def fetch(client, company):
+        return (fail_fetcher if company.key in dead else ok_fetcher)(client, company)
+    rep = _run(cfg, st, fetcher=fetch)
+    assert (len(rep.probation), len(rep.due)) == (6, 10), (rep.probation, rep.due)
+    assert rep.status == "ok", "probation failures must not abort the batch"
+    assert rep.failed == 6

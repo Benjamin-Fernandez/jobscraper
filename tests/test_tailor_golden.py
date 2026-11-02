@@ -35,7 +35,7 @@ ALIASES = FIX / "aliases_golden.yaml"
 CASES = ("case_a", "case_b", "case_c")
 
 # Number tokens exactly as validator §8.1 defines them (commas inside digit groups removed).
-NUM = re.compile(r"\d+(?:[.,]\d+)*(?:%|[kKmMbB]\b|x\b)?")
+NUM = re.compile(r"(?<![A-Za-z\d])\d+(?:[.,]\d+)*(?:%|[kKmMbB]\b|x\b)?")   # standalone numbers only: "p95" is a fact token (D-69)
 
 _WAITING: list[tuple[str, str]] = []
 
