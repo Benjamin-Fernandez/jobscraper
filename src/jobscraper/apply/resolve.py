@@ -40,7 +40,7 @@ from .contracts import (
     Option, ResolveContext,
 )
 from . import declarations
-from .plan import norm_label, phrase_match_tokens, tokens
+from .plan import contains_run, norm_label, phrase_match_tokens, tokens
 
 MemoryLookup = Callable[[str, str, str], Optional[str]]
 
@@ -167,8 +167,15 @@ class Rule:
         return bool(self.parent)
 
     def score(self, label_toks: Sequence[str]) -> int:
-        """Token count of the longest matching synonym; 0 if an exclude matches."""
-        if any(phrase_match_tokens(x, label_toks) for x in self.exclude):
+        """Token count of the longest matching synonym; 0 if an exclude matches.
+
+        An exclude matches when its tokens occur in the label as a run, with no
+        label-length limit: the one-token rule (§7.1) exists to stop a short
+        synonym ("email") over-matching a long label, but an exclude only ever
+        removes a candidate, so the long-label case is the one it must catch
+        ("... authorised to work in the UK" must not fall to the Singapore row
+        on a one-token `uk`). Q-29."""
+        if any(contains_run(label_toks, x) for x in self.exclude):
             return 0
         return max((len(s) for s in self.synonyms if phrase_match_tokens(s, label_toks)),
                    default=0)

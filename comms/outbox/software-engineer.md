@@ -84,3 +84,10 @@ QUESTIONS / REQUESTS:
 - R1 (tester/architect): `tests/test_layering.py::test_foundation_modules_import_no_stage_or_orchestrator` fails on this branch: `vault.py -> ['apply']`, because vault.py imports `Secret`, `PasswordRules` from `apply.contracts` as AD §10.1 specifies (the signatures take/return `Secret`). The rule should exempt `CONTRACTS` for foundation modules, as `WEB_MAY_IMPORT` does for web/ (contracts are standard-library data shapes). Until then the suite is 1 short after lane V merges.
 KNOWN LIMITS: no real-mailbox run (owner's address is changing; the stored entry is not an app password). Each poll reconnect re-scans; `seen` avoids re-fetching within one connection only.
 STATUS: open
+
+### 2026-11-02 software-engineer → coordinator
+TYPE: handoff
+RE: Q-29, branch `eng/Q-29-exclude-match`
+BODY: `Rule.score` (`src/jobscraper/apply/resolve.py`) now tests `exclude` with `contains_run` (any label length) instead of `phrase_match_tokens`; synonym scoring is unchanged. Full suite 501/501.
+REQUEST (tester): pin it in a test: with a rule whose `exclude` is a one-token phrase (e.g. `uk`) and a label of 5+ tokens containing it ("Are you legally authorised to work in the UK"), `Rule.score` is 0 and tier 2 does not answer; and with the repo `config/questions.yaml` minus its `in <country>` excludes the same label still does not resolve to `authorised_to_work.SG`.
+STATUS: open
