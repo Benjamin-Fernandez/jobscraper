@@ -207,6 +207,58 @@ def test_a_search_driven_prompt_inside_a_form_fails_safely_without_submitting():
         ).locator('[data-automation-id="selectedItem"]').count() == 0
 
 
+
+# ------------------------------------------------------------------ review Q-35-lanes-NR F1 (HIGH)
+
+def _open_apply(rel: str):
+    """Like `_open`, but serving tests/fixtures/apply (the widget stubs live outside llm_fill/)."""
+    from contextlib import contextmanager
+    from llm_fill_support import FixtureDir, browser_page
+
+    @contextmanager
+    def cm():
+        got = browser_page()
+        if got is None:
+            yield None
+            return
+        pw, browser, pg = got
+        try:
+            with FixtureDir(Path(__file__).resolve().parent / "fixtures" / "apply") as srv:
+                pg.goto(srv.url(rel))
+                yield pg
+        finally:
+            browser.close()
+            pw.stop()
+    return cm()
+
+
+@needs(*NEEDS, "jobscraper.apply.widgets:fill_field")
+def test_a_react_select_never_settles_on_an_option_that_only_contains_the_words():
+    """Review F1 (HIGH): LL3 / M14: a searchable list takes an exact match, else `pick`. A search
+    for "Computer Engineering" that shows only "Computer Engineering Technology" must not be
+    clicked and reported ok: the fill fails (`search_miss`), `pick` is asked, nothing is chosen.
+    Same for "Java" vs "JavaScript". Failing pin until lane R's F1 fix."""
+    from jobscraper.apply import widgets as W
+    with _open_apply("widgets/react_select.html") as pg:
+        if pg is None:
+            return
+        f = _by_label(pg)
+        asked: list[tuple[str, list[str]]] = []
+
+        def pick(want, options):
+            asked.append((want, list(options)))
+            return ""                                      # the model declines: no equal option
+        for label, want, sel in (("Discipline", "Computer Engineering", "#sel-discipline"),
+                                 ("Main programming language", "Java", "#sel-language")):
+            got = W.fill_field(pg, f[label], want, pick=pick)
+            chosen = pg.evaluate(f"document.querySelector('{sel}').dataset.value")
+            assert chosen == "", f"{label}: the page now shows {chosen!r} for the decided {want!r}"
+            assert got.ok is False and got.note == "search_miss", (label, got)
+            assert any(a[0] == want for a in asked), f"{label}: pick was not asked"
+        got = W.fill_field(pg, f["Degree"], "Bachelor of Engineering", pick=pick)
+        assert got.ok is True and pg.evaluate("document.querySelector('#sel-degree').dataset.value")             == "Bachelor of Engineering", "an exact option still fills"
+
+
 if WAITING[_W0:]:
     print(f"[test_apply_widgets] {len(WAITING[_W0:])} oracle tests wait for modules not built yet: "
           + ", ".join(sorted({m for _n, m in WAITING[_W0:]})))
