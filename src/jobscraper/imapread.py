@@ -399,6 +399,10 @@ class ScanPlan:
     validity: int                   # the UIDVALIDITY the cursor carries from now on
     last_uid: int                   # the position before this scan (0 when none applies)
     last_scan_at: str               # carried on each header's cursor_after
+    # FIRST and RESCAN: the SINCE search only finds where to start; the messages
+    # are then `UID <smallest>:*`, so the cursor stays UID-ordered with no gap,
+    # and mail moved in with an older date still meets the header gate (too_old).
+    from_smallest: bool = False
 
 
 def _since(stamp: str) -> str:
@@ -414,17 +418,20 @@ def plan_scan(cursor: Optional[Cursor], uidvalidity: int, uidnext: int,
     (`uidvalidity`, `uidnext`). Pure (MS §5.3).
 
     - no cursor: SEARCH SINCE the day before `window_start` (SINCE compares whole
-      days); the header gate drops what is older than the window.
+      days), then every UID from the smallest found; the header gate drops what
+      is older than the window.
     - same validity and `uidnext <= last + 1`: nothing to read.
     - same validity: SEARCH `UID last+1:*`, and every UID <= last is dropped,
       because `*` always matches the highest UID even when it is below last+1.
     - validity changed: the old UIDs mean nothing. SEARCH SINCE the day before
-      the last scan (or the window); X-GM-MSGID dedupe drops what was processed.
+      the last scan (or the window), then every UID from the smallest found;
+      X-GM-MSGID dedupe drops what was processed.
     `now` is unused by the plan itself; it is the stamp `scan` gives end cursors.
     """
     del now
     if cursor is None:
-        return ScanPlan(PLAN_FIRST, ("SINCE", _since(window_start)), 0, uidvalidity, 0, "")
+        return ScanPlan(PLAN_FIRST, ("SINCE", _since(window_start)), 0, uidvalidity, 0, "",
+                        from_smallest=True)
     if int(cursor.validity) == int(uidvalidity):
         last = int(cursor.last_uid)
         if uidnext and uidnext <= last + 1:
@@ -432,7 +439,8 @@ def plan_scan(cursor: Optional[Cursor], uidvalidity: int, uidnext: int,
         return ScanPlan(PLAN_RANGE, ("UID", f"{last + 1}:*"), last, uidvalidity, last,
                         cursor.last_scan_at)
     since = cursor.last_scan_at if _parse_time(cursor.last_scan_at) else window_start
-    return ScanPlan(PLAN_RESCAN, ("SINCE", _since(since)), 0, uidvalidity, 0, cursor.last_scan_at)
+    return ScanPlan(PLAN_RESCAN, ("SINCE", _since(since)), 0, uidvalidity, 0, cursor.last_scan_at,
+                    from_smallest=True)
 
 
 # ---------------------------------------------------------------- FETCH responses
@@ -891,7 +899,11 @@ class ImapTransport:
             base = Cursor(account_id, role, mailbox, plan.validity, plan.last_uid, plan.last_scan_at)
             if plan.kind == PLAN_NOTHING:
                 return ScanResult((), replace(base, last_scan_at=now), True)
-            uids = sorted({u for u in self._search(plan.search) if u > plan.after_uid})
+            found = self._search(plan.search)
+            if plan.from_smallest and found:
+                start = min(found)
+                found = [u for u in self._search(("UID", f"{start}:*")) if u >= start]
+            uids = sorted({u for u in found if u > plan.after_uid})
             taken = uids[:max(0, int(limit))]
             headers: list[MailHeader] = []
             for chunk in _chunks(taken, FETCH_CHUNK):
