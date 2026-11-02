@@ -694,7 +694,8 @@ class _Run:
         ctx = AttemptContext(
             attempt_id=at.id, job=job, tenant=tenant, dry_run=self.dry_run,
             email=str(_profile_path(self.profile, "contact.email") or ""),
-            resume_path=resume_path, log=self.log, screenshot=at.shot,
+            resume_path=resume_path, log=lambda line: self.log(f"[attempt {at.id}] {line}"),
+            screenshot=at.shot,
             deadline=time.monotonic() + acfg.attempt_timeout_s, http=self.http)
         rctx = self.resolve_ctx(job, tenant, adapter, resume_path)
         plan = adapter.plan_from_schema(ctx)

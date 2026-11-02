@@ -22,6 +22,7 @@ from urllib.parse import urlsplit
 
 from .. import browser as B
 from ..classify import PageSignal, classify, visible_text
+from ..plan import any_phrase
 from ..contracts import (
     Answer, ApplyFailure, AttemptContext, Canonical, FieldType, FormField, FormPlan, Option,
     PasswordRules, ReasonCode, Secret, StepResult, Tenant,
@@ -120,25 +121,13 @@ def html_to_text(s: Any) -> str:
     return "\n".join(" ".join(line.split()) for line in text.splitlines() if line.strip())
 
 
-def _tokens(label: str) -> list[str]:
-    """Label tokens for the §9.1.2 phrase match: lower case, runs of anything
-    but [a-z0-9+#'] are one break. (A local stand-in for `plan.norm_label`, which
-    lane P owns; the two agree on these link labels. WP-B9 may switch to it.)"""
-    text = html_to_text(label).lower().replace("(required)", " ").replace("(optional)", " ")
-    return [t.strip("'") for t in re.split(r"[^a-z0-9+#']+", text) if t.strip("'")]
-
-
-def _phrase_match(phrase: str, tokens: list[str]) -> bool:
-    want = phrase.split()
-    if len(want) == 1 and len(tokens) > 4:            # §7.1 one-token rule
-        return False
-    return any(tokens[i:i + len(want)] == want for i in range(len(tokens) - len(want) + 1))
-
-
 def link_canonical(label: str) -> Optional[Canonical]:
-    """LINKEDIN / GITHUB / WEBSITE when exactly one of them phrase-matches."""
-    toks = _tokens(label)
-    hits = [c for c, phrases in LINK_PHRASES if any(_phrase_match(p, toks) for p in phrases)]
+    """LINKEDIN / GITHUB / WEBSITE when exactly one of them phrase-matches the
+    label (§9.1.2, D-70): `plan.any_phrase`, i.e. §7.1 normalisation and the
+    one-token rule ("LinkedIn URL" is tagged; "Please share your LinkedIn
+    profile or another link to your work" is not; "LinkedIn or GitHub" is two
+    canonicals, so none)."""
+    hits = [c for c, phrases in LINK_PHRASES if any_phrase(phrases, label)]
     return hits[0] if len(hits) == 1 else None
 
 
