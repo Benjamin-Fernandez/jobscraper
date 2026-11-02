@@ -8,6 +8,8 @@
 #   skip:        {gate: header|content, reason: <Reason>}, or null
 #   category:    the rule classifier's Category; status_words: the Verdict flag
 #   conflict:    the categories behind a "conflict:a+b" rule verdict
+#   rule_category: the category of the deciding phrase when it differs from `category`
+#                (D-92: an `interview` hit from a `kind: assessment` sender is `assessment`)
 #   match:       {kind, job_id} or {kind: ambiguous, candidates: [...]} (MS 7)
 #   change:      {kind, reason, to} from transition.decide (MS 8); to: null = check the portal/email.
 #                A reason list means any of them: an ambiguous match that settles as NONE takes
@@ -250,13 +252,14 @@ cases:
     gm_msgid: "1800000000000001012"
     gm_thrid: "1800000000000001012"
     auth: pass
-    tags: [hirevue_live]
+    tags: [hirevue_live, d92_assessment_vendor]
     expect:
       skip: null
-      category: interview
+      category: assessment
       status_words: true
+      rule_category: interview
       match: {kind: strong, job_id: ex-swe}
-      change: {kind: auto, reason: forward, to: interviewing}
+      change: {kind: auto, reason: forward, to: assessment}
   - file: int_calendar_invite.eml
     folder: all
     labels: []

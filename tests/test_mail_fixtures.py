@@ -30,6 +30,7 @@ from mail_support import (  # noqa: E402
     GMAIL_HOST, GMAIL_LOGIN_ERRORS, GOLDEN_DIR, GOLDEN_YAML, LAYOUTS, LOGIN_ERROR_ECHOING_USER,
     MAIL, PLAIN_CAPABILITIES, RULES_MIN, FakeMailServer, auth_result, body_text,
     design_contracts, eml, golden, golden_cases, message, mutf7, parse_fetch, reg_domain,
+    schema_errors,
 )
 
 CATEGORIES = ("acknowledged", "assessment", "interview", "offer", "rejected", "withdrawn",
@@ -229,63 +230,6 @@ def test_mail_fixtures_body_text_replaces_urls_and_reads_html_and_calendars():
 
 
 # ------------------------------------------------------------------ rules_min.yaml (MS 6.1)
-
-_TOP = {"version", "platforms", "job_boards", "company_suffixes", "common_word_names", "bulk",
-        "gates", "categories", "dominates"}
-_PLATFORM = {"id", "kind", "domains", "tenant_from_local_part", "tenant_from_subdomain", "tenant_sites"}
-_PHRASE = {"id", "re", "in", "calendar"}
-_GATES = {"auto_reply", "account", "job_alert", "outreach"}
-
-
-def schema_errors(doc: dict, category_values: set[str]) -> list[str]:
-    """A reference reading of the MS 6.1 validation rules (shared with test_mail_rules)."""
-    err = []
-    if doc.get("version") != 1:
-        err.append("version")
-    err += [f"unknown key {k}" for k in set(doc) - _TOP]
-    ids: list[str] = []
-    for p in doc.get("platforms", []):
-        err += [f"platform {p.get('id')}: key {k}" for k in set(p) - _PLATFORM]
-        if p.get("kind") not in ("ats", "assessment", "scheduler"):
-            err.append(f"platform {p.get('id')}: kind")
-        if p.get("tenant_from_local_part") and p.get("tenant_from_subdomain"):
-            err.append(f"platform {p.get('id')}: both tenant flags")
-        for d in list(p.get("domains", [])) + list(p.get("tenant_sites", [])):
-            if d != d.lower() or "@" in d:
-                err.append(f"platform {p.get('id')}: domain {d}")
-        ids.append(p.get("id"))
-    for d in doc.get("job_boards", []):
-        if d != d.lower() or "@" in d:
-            err.append(f"job board {d}")
-
-    def phrases(where, entries):
-        for e in entries:
-            err.extend(f"{where} {e.get('id')}: key {k}" for k in set(e) - _PHRASE)
-            if not re.fullmatch(r"[a-z0-9_.]+", str(e.get("id", ""))):
-                err.append(f"{where}: id {e.get('id')!r}")
-            if e.get("in", "any") not in ("any", "subject", "body"):
-                err.append(f"{where} {e.get('id')}: in")
-            try:
-                re.compile(r"(?<!\w)(?:" + e["re"] + r")(?!\w)", re.I)
-            except (re.error, KeyError):
-                err.append(f"{where} {e.get('id')}: regex")
-            ids.append(e.get("id"))
-    for g, entries in (doc.get("gates") or {}).items():
-        if g not in _GATES:
-            err.append(f"gate {g}")
-        phrases(f"gates.{g}", entries)
-    cats = doc.get("categories") or {}
-    err += [f"category {k}" for k in set(cats) - (category_values - {"no_change", "unknown"})]
-    for k, spec in cats.items():
-        err += [f"category {k}: key {x}" for x in set(spec) - {"phrases", "weak"}]
-        phrases(f"categories.{k}", spec.get("phrases", []))
-    for k, vs in (doc.get("dominates") or {}).items():
-        if k not in cats or not set(vs) <= set(cats):
-            err.append(f"dominates {k}")
-    dup = {i for i in ids if ids.count(i) > 1}
-    err += [f"duplicate id {i}" for i in sorted(dup)]
-    return err
-
 
 def test_mail_fixtures_rules_min_is_valid_and_has_the_e1_platforms():
     doc = yaml.safe_load(RULES_MIN.read_text(encoding="utf-8"))

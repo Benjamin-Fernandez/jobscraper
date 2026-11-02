@@ -63,6 +63,7 @@ categories:
       - {id: int.phone_screen, re: "phone screen"}
       - {id: int.first_round, re: "first-round interview"}
       - {id: int.live_video, re: "live video interview"}
+      - {id: int.assessment_centre, re: "(invite|invited) you to (attend )?(an?|the|our) (assessment (centre|center|day)|superday)"}
       - {id: int.calendar, re: "interview", calendar: true}
   offer:
     phrases:

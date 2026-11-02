@@ -34,6 +34,7 @@ import base64
 import contextlib
 import email
 import imaplib
+import os
 import re
 import socket
 import sys
@@ -54,7 +55,9 @@ MAIL = ROOT / "tests" / "fixtures" / "mail"
 GOLDEN_DIR = MAIL / "golden"
 GOLDEN_YAML = MAIL / "golden.yaml"
 RULES_MIN = MAIL / "rules_min.yaml"
-REAL_RULES = ROOT / "config" / "mail_rules.yaml"
+# JOBSCRAPER_TEST_MAIL_RULES points the real-file half at a draft rules file (the researcher's,
+# before it is committed); unset, it is the committed config/mail_rules.yaml.
+REAL_RULES = Path(os.environ.get("JOBSCRAPER_TEST_MAIL_RULES") or ROOT / "config" / "mail_rules.yaml")
 DESIGN = ROOT / "docs" / "architecture" / "mail_status_design.md"
 TIME_FMT = "%Y-%m-%dT%H:%M:%S"
 GMAIL_HOST, GMAIL_PORT = "imap.gmail.com", 993
@@ -247,6 +250,65 @@ def to_utc_text(dt: datetime) -> str:
     return dt.astimezone(timezone.utc).strftime(TIME_FMT)
 
 
+# ------------------------------------------------------------------ rules file schema (MS 6.1)
+
+_TOP = {"version", "platforms", "job_boards", "company_suffixes", "common_word_names", "bulk",
+        "gates", "categories", "dominates"}
+_PLATFORM = {"id", "kind", "domains", "tenant_from_local_part", "tenant_from_subdomain", "tenant_sites"}
+_PHRASE = {"id", "re", "in", "calendar"}
+_GATES = {"auto_reply", "account", "job_alert", "outreach"}
+
+
+def schema_errors(doc: dict, category_values: set[str]) -> list[str]:
+    """A reference reading of the MS 6.1 validation rules (shared with test_mail_rules)."""
+    err = []
+    if doc.get("version") != 1:
+        err.append("version")
+    err += [f"unknown key {k}" for k in set(doc) - _TOP]
+    ids: list[str] = []
+    for p in doc.get("platforms", []):
+        err += [f"platform {p.get('id')}: key {k}" for k in set(p) - _PLATFORM]
+        if p.get("kind") not in ("ats", "assessment", "scheduler"):
+            err.append(f"platform {p.get('id')}: kind")
+        if p.get("tenant_from_local_part") and p.get("tenant_from_subdomain"):
+            err.append(f"platform {p.get('id')}: both tenant flags")
+        for d in list(p.get("domains", [])) + list(p.get("tenant_sites", [])):
+            if d != d.lower() or "@" in d:
+                err.append(f"platform {p.get('id')}: domain {d}")
+        ids.append(p.get("id"))
+    for d in doc.get("job_boards", []):
+        if d != d.lower() or "@" in d:
+            err.append(f"job board {d}")
+
+    def phrases(where, entries):
+        for e in entries:
+            err.extend(f"{where} {e.get('id')}: key {k}" for k in set(e) - _PHRASE)
+            if not re.fullmatch(r"[a-z0-9_.]+", str(e.get("id", ""))):
+                err.append(f"{where}: id {e.get('id')!r}")
+            if e.get("in", "any") not in ("any", "subject", "body"):
+                err.append(f"{where} {e.get('id')}: in")
+            try:
+                re.compile(r"(?<!\w)(?:" + e["re"] + r")(?!\w)", re.I)
+            except (re.error, KeyError):
+                err.append(f"{where} {e.get('id')}: regex")
+            ids.append(e.get("id"))
+    for g, entries in (doc.get("gates") or {}).items():
+        if g not in _GATES:
+            err.append(f"gate {g}")
+        phrases(f"gates.{g}", entries)
+    cats = doc.get("categories") or {}
+    err += [f"category {k}" for k in set(cats) - (category_values - {"no_change", "unknown"})]
+    for k, spec in cats.items():
+        err += [f"category {k}: key {x}" for x in set(spec) - {"phrases", "weak"}]
+        phrases(f"categories.{k}", spec.get("phrases", []))
+    for k, vs in (doc.get("dominates") or {}).items():
+        if k not in cats or not set(vs) <= set(cats):
+            err.append(f"dominates {k}")
+    dup = {i for i in ids if ids.count(i) > 1}
+    err += [f"duplicate id {i}" for i in sorted(dup)]
+    return err
+
+
 # ------------------------------------------------------------------ contract builders
 
 def _contracts():
@@ -323,6 +385,79 @@ def app_candidate(d: dict, tenants_fn: Optional[Callable[[Iterable[str]], tuple]
 
 def golden_apps(tenants_fn=None) -> tuple:
     return tuple(app_candidate(a, tenants_fn) for a in golden()["apps"])
+
+
+_CAL = ("BEGIN:VCALENDAR\nVERSION:2.0\nMETHOD:REQUEST\nBEGIN:VEVENT\nUID:unit@synthetic.test\n"
+        "DTSTART:20261110T060000Z\nSUMMARY:Meeting\nEND:VEVENT\nEND:VCALENDAR\n")
+
+
+def make_eml(frm: str, subject: str, body: str, *, headers: Optional[dict] = None,
+             date: str = "Mon, 26 Oct 2026 09:00:00 +0000", html: bool = False,
+             calendar: bool = False, auth: str = "pass") -> bytes:
+    """A small synthetic message for unit cases. `frm` is 'Name <local@domain>'; `auth`
+    'pass' adds Gmail's dmarc=pass Authentication-Results for the From domain."""
+    lines = []
+    dom = frm.rsplit("@", 1)[1].rstrip(">").strip()
+    if auth == "pass":
+        lines.append(f"Authentication-Results: mx.google.com; dkim=pass header.i=@{reg_domain(dom)}; "
+                     f"spf=pass smtp.mailfrom={dom}; dmarc=pass header.from={reg_domain(dom)}")
+    elif auth == "fail":
+        lines.append(f"Authentication-Results: mx.google.com; dkim=fail header.i=@{dom}; "
+                     f"dmarc=fail header.from={dom}")
+    lines += [f"From: {frm}", "To: Alex Applicant <alex.applicant@inbox.example>"]
+    lines += [f"{k}: {v}" for k, v in (headers or {}).items()]
+    lines += [f"Subject: {subject}", f"Date: {date}", "Message-ID: <unit@synthetic.test>",
+              "MIME-Version: 1.0"]
+    if calendar:
+        lines.append('Content-Type: multipart/alternative; boundary="b1"')
+        payload = (f'\n--b1\nContent-Type: text/plain; charset="utf-8"\n\n{body}\n--b1\n'
+                   f'Content-Type: text/calendar; method=REQUEST\n\n{_CAL}\n--b1--\n')
+    else:
+        lines.append(f'Content-Type: text/{"html" if html else "plain"}; charset="utf-8"')
+        lines.append("Content-Transfer-Encoding: 8bit")
+        payload = body
+    return ("\n".join(lines) + "\n\n" + payload).encode("utf-8")
+
+
+def unit_header(frm: str, subject: str, body: str = "", *, role: str = "all", gm_thrid: str = "9",
+                labels=(), headers=None, date: str = "Mon, 26 Oct 2026 09:00:00 +0000",
+                auth: str = "pass", calendar: bool = False, html: bool = False):
+    """(MailHeader, MailBody) for an inline unit case."""
+    raw = make_eml(frm, subject, body, headers=headers, date=date, auth=auth,
+                   calendar=calendar, html=html)
+    h = header_from_eml(raw, role=role, gm_msgid="7", gm_thrid=gm_thrid, labels=labels)
+    return h, body_from_eml(raw)
+
+
+def norm_quote(s: str) -> str:
+    """MS 6.5's normalisation for quote checks: casefold, whitespace collapsed, "…" removed."""
+    return " ".join(s.replace("…", " ").casefold().split())
+
+
+# ------------------------------------------------------------------ assumed stage call shapes
+# Build plan WP-S1..S3 names. Each oracle calls the stage through these, so a different
+# spelling is a one-line change here.
+
+def load(path: Path = RULES_MIN):
+    from jobscraper.mailstatus import rules
+    return rules.load_rules(path)
+
+
+def tenants_fn(rules_obj):
+    from jobscraper.mailstatus import match
+    return lambda hosts: match.tenants_from_hosts(tuple(hosts), rules_obj)
+
+
+def decide(app, verdict, m, h, policy, candidates=()):
+    """transition.decide. For an AMBIGUOUS match the oracles pass the first candidate as `app`
+    and every candidate (in the matcher's order) as `candidates` (ASSUMED; MS 8 row 4)."""
+    from jobscraper.mailstatus import transition
+    return transition.decide(app, verdict, m, h, policy, candidates=tuple(candidates))
+
+
+def build_policy(statuses=None, raw=None):
+    from jobscraper.mailstatus import transition
+    return transition.build_policy(tuple(statuses or golden_statuses()), dict(raw or golden_policy_raw()))
 
 
 # ------------------------------------------------------------------ the fake IMAP server
@@ -960,5 +1095,5 @@ def assert_live(primary: str, start: int, module_name: str) -> None:
     if missing(primary):
         print(f"[{module_name}] waiting for {primary}")
         return
-    mine = WAITING[start:]
+    mine = [(n, w) for n, w in WAITING[start:] if w == primary or w.startswith(primary + ":")]
     assert not mine, f"{primary} exists but these oracles still wait: {mine}"
