@@ -20,6 +20,57 @@ export function clone(value) {
   return value === undefined ? undefined : JSON.parse(JSON.stringify(value))
 }
 
+// ---- merging unsaved edits onto a fresh copy of the file (Q-30 F2) ----
+
+const sameValue = (a, b) => JSON.stringify(a) === JSON.stringify(b)
+const isBox = v => v !== null && typeof v === 'object'
+
+// Can the edit at one key be merged below it, leaf by leaf? Both sides must be
+// mappings, or lists that still hold every entry they had (the owner changed or
+// added entries; removing one shifts the rest, so that list is taken whole). A
+// section the owner created from nothing merges into the file's copy of it when
+// that is a mapping too.
+function canMerge(before, mine, theirs) {
+  if (!isBox(mine) || !isBox(theirs) || Array.isArray(mine) !== Array.isArray(theirs)) return false
+  if (before === undefined) return !Array.isArray(mine)
+  if (!isBox(before) || Array.isArray(before) !== Array.isArray(mine)) return false
+  return !Array.isArray(mine) || (mine.length >= before.length && theirs.length >= before.length)
+}
+
+function applyKey(before, mine, out, key) {
+  if (sameValue(before[key], mine[key])) return              // not edited here
+  if (canMerge(before[key], mine[key], out[key])) {
+    applyEdits(before[key] ?? {}, mine[key], out[key])
+  } else if (sameValue(out[key], before[key])) {             // the file did not change it
+    if (mine[key] === undefined) delete out[key]
+    else out[key] = clone(mine[key])
+  }
+  // else: edited here and saved differently elsewhere. The value saved
+  // elsewhere is the newer, deliberate one (a question answered just now); it
+  // is kept and shows in the form, so nothing disappears unseen.
+}
+
+function applyEdits(before, mine, out) {
+  if (Array.isArray(mine)) {
+    for (let i = 0; i < before.length; i++) applyKey(before, mine, out, i)
+    for (const added of mine.slice(before.length)) out.push(clone(added))   // entries the owner added
+    return
+  }
+  for (const key of new Set([...Object.keys(before), ...Object.keys(mine)])) applyKey(before, mine, out, key)
+}
+
+// A copy of `theirs` (the profile as the file holds it now) with the owner's
+// unsaved edits applied: the leaves where `mine` (the draft) differs from
+// `before` (the profile the draft was made from). A leaf that was not edited
+// here comes from the file, so saving one thing never writes back an old value
+// of another that was saved elsewhere, such as a profile-gap answer from the
+// Questions card. A list merges per entry; one the owner shortened is taken whole.
+export function mergeEdits(before, mine, theirs) {
+  const out = clone(theirs ?? {})
+  applyEdits(before ?? {}, mine ?? {}, out)
+  return out
+}
+
 export function getAt(obj, path) {
   let cur = obj
   for (const t of tokens(path)) {
