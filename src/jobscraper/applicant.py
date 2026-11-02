@@ -12,6 +12,10 @@ the orchestrator all read the profile, so this file imports nothing above
 
 What it owns:
   - load / save / validate (§5.2 rules, every error names its dotted path)
+  - normalise (Q-36, D-78): the owner types "Male", "non-binary", `no`, "per
+    month", an unquoted 2020-03-15 or "Mar 2020"; `load` turns each into the
+    canonical form once, so the resolver, the tailor and the form API only ever
+    see canonical values
   - missing_for_apply / completeness (F-11: auto-apply refuses an incomplete
     profile, and the Profile tab shows a meter)
   - llm_extract (the allow-list of non-sensitive facts a model may see, §5.3)
@@ -24,6 +28,7 @@ Sensitive ("S") paths (§5.3) never reach a prompt and never reach a log.
 from __future__ import annotations
 
 import calendar
+import copy
 import datetime as _dt
 import hashlib
 import os
@@ -153,6 +158,32 @@ LIST_ENUMS: dict[str, tuple[str, ...]] = {
     "languages[].written": ("native", "fluent", "professional", "basic"),
 }
 
+# Q-36 (D-78): natural spellings that are not just a case/space/hyphen variant of
+# an allowed value. Keys are already lower-case with spaces and hyphens turned
+# into underscores ("per month" -> "per_month"); a "." is dropped too ("p.a.").
+_PERIOD_SYNONYMS: dict[str, str] = {
+    "month": "monthly", "per_month": "monthly", "monthly": "monthly", "mth": "monthly",
+    "year": "annual", "yearly": "annual", "annual": "annual",
+    "per_annum": "annual", "pa": "annual",
+}
+ENUM_SYNONYMS: dict[str, dict[str, str]] = {
+    "pay.expected_salary.period": _PERIOD_SYNONYMS,
+    "pay.current_salary.period": _PERIOD_SYNONYMS,
+}
+# Any enum that has a "decline" value reads these as "decline" (same key form).
+_DECLINE_SYNONYMS = frozenset({"prefer_not_to_say", "rather_not_say"})
+# A quoted word for a plain boolean field (an unquoted yes/no is already a bool).
+_TRUE_WORDS = frozenset({"yes", "true"})
+_FALSE_WORDS = frozenset({"no", "false"})
+# Month names for "Mar 2020" / "March 2020" (the first three letters, or "sept").
+_MONTH_NAMES: dict[str, int] = {
+    name: i for i, names in enumerate(
+        (("jan", "january"), ("feb", "february"), ("mar", "march"), ("apr", "april"),
+         ("may",), ("jun", "june"), ("jul", "july"), ("aug", "august"),
+         ("sep", "sept", "september"), ("oct", "october"), ("nov", "november"),
+         ("dec", "december")), start=1)
+    for name in names}
+
 BOOLS: tuple[str, ...] = (
     "availability.willing_to_relocate",
     "pay.expected_salary.negotiable",
@@ -257,12 +288,160 @@ def _walk(value: Any, path: str = ""):
 
 
 # --------------------------------------------------------------------------
+# Normalisation (Q-36, D-78)
+# --------------------------------------------------------------------------
+
+def _canon_enum(v: Any, allowed: tuple[str, ...],
+                synonyms: Optional[dict[str, str]] = None) -> Any:
+    """The canonical spelling of an enum value, or `v` untouched when it still
+    does not map (validate then reports it).
+
+    Accepted on top of the exact spelling: any case and surrounding spaces
+    ("Male "), spaces or hyphens for underscores ("non-binary", "not applicable"),
+    the path's synonyms (pay periods), "prefer not to say" for "decline", and a
+    YAML boolean for a yes/no enum (`disability_status: no` is read by YAML as
+    False, not "no")."""
+    if isinstance(v, bool):
+        return ("yes" if v else "no") if {"yes", "no"} <= set(allowed) else v
+    if not isinstance(v, str):
+        return v
+    token = re.sub(r"[\s\-_]+", "_", v.strip().lower()).strip("_")
+    if token in allowed:
+        return token
+    if synonyms:
+        hit = synonyms.get(token) or synonyms.get(token.replace(".", ""))
+        if hit in allowed:
+            return hit
+    if "decline" in allowed and token in _DECLINE_SYNONYMS:
+        return "decline"
+    return v
+
+
+def _canon_bool(v: Any) -> Any:
+    """True/False for a quoted "yes"/"true"/"no"/"false" (any case, spaces
+    around); anything else is returned as it is."""
+    if isinstance(v, str):
+        word = v.strip().lower()
+        if word in _TRUE_WORDS:
+            return True
+        if word in _FALSE_WORDS:
+            return False
+    return v
+
+
+_YEAR_MONTH_RE = re.compile(r"^(\d{4})/(\d{1,2})$")                 # 2020/03
+_MONTH_YEAR_RE = re.compile(r"^(\d{1,2})/(\d{4})$")                 # 03/2020
+_NAME_YEAR_RE = re.compile(r"^([A-Za-z]{3,9})\.?[\s,\-]*(\d{4})$")  # Mar 2020, March 2020
+_DAY_MONTH_YEAR_RE = re.compile(r"^(\d{1,2})/(\d{1,2})/(\d{4})$")   # 15/03/2020
+
+
+def _canon_date(v: Any, formats: tuple[str, ...]) -> Any:
+    """The canonical text of a date field, or `v` untouched when it does not map.
+
+    `formats` is what the field accepts ("month" = YYYY-MM, "day" = YYYY-MM-DD).
+    A YAML date or datetime (an unquoted 2020-03-15) becomes its ISO day, or
+    YYYY-MM when the field is month-only. Text: an already valid value is kept
+    (trimmed); a day given to a month-only field is cut to the month; for a
+    month field "2020/03", "03/2020", "Mar 2020" and "March 2020" read as
+    YYYY-MM; for a day field "15/03/2020" reads as day/month/year (Singapore
+    order) and a real date. Other slash forms ("03/04/20", "2020/03/04") are
+    ambiguous and stay as typed, so validate reports them."""
+    if isinstance(v, _dt.datetime):
+        v = v.date()
+    if isinstance(v, _dt.date):
+        return v.isoformat() if "day" in formats else f"{v.year:04d}-{v.month:02d}"
+    if not isinstance(v, str):
+        return v
+    s = v.strip()
+    if _parse_date(s, formats) is not None:
+        return s
+    if "month" in formats:
+        day = _parse_date(s, ("day",))
+        if day is not None:                        # "day" is not accepted: cut to the month
+            return f"{day[0]:04d}-{day[1]:02d}"
+        year = month = None
+        m = _YEAR_MONTH_RE.match(s)
+        if m:
+            year, month = int(m.group(1)), int(m.group(2))
+        else:
+            m = _MONTH_YEAR_RE.match(s)
+            if m:
+                year, month = int(m.group(2)), int(m.group(1))
+            else:
+                m = _NAME_YEAR_RE.match(s)
+                if m and m.group(1).lower() in _MONTH_NAMES:
+                    year, month = int(m.group(2)), _MONTH_NAMES[m.group(1).lower()]
+        if year is not None and 1 <= month <= 12:
+            return f"{year:04d}-{month:02d}"
+    if "day" in formats:
+        m = _DAY_MONTH_YEAR_RE.match(s)
+        if m:
+            iso = f"{int(m.group(3)):04d}-{int(m.group(2)):02d}-{int(m.group(1)):02d}"
+            if _parse_date(iso, ("day",)) is not None:
+                return iso
+    return v
+
+
+def _set_at(profile: dict, path: str, fn) -> None:
+    """Replace the value at a dotted `path` with `fn(value)`, in place, when
+    every step down to it is a mapping and the key is there."""
+    *parents, leaf = path.split(".")
+    cur: Any = profile
+    for part in parents:
+        cur = cur.get(part) if isinstance(cur, dict) else None
+    if isinstance(cur, dict) and leaf in cur:
+        cur[leaf] = fn(cur[leaf])
+
+
+def normalise(profile: Any) -> Any:
+    """A copy of `profile` with every enum, plain boolean and date field in its
+    canonical form (`_canon_enum`, `_canon_bool`, `_canon_date`); the argument is
+    not changed. A value that still does not map is left as it is, for validate
+    to report. Idempotent. `load`, `validate` and `save` all call it, so a
+    profile typed by hand, edited in the form or built in code reads the same
+    everywhere. Numbers, text and URLs are not touched.
+
+    Entry dates (`education[]`, `experience[]`) keep a full day when one is given
+    (D-68 A-4: computed_facts reads it); only a month-only field such as
+    `singapore_status.ord_date` is cut to YYYY-MM."""
+    if not isinstance(profile, dict):
+        return profile
+    out = copy.deepcopy(profile)
+    for path, allowed in ENUMS.items():
+        _set_at(out, path,
+                lambda v, a=allowed, s=ENUM_SYNONYMS.get(path): _canon_enum(v, a, s))
+    for path in BOOLS:
+        _set_at(out, path, _canon_bool)
+    for block in ("authorised_to_work", "requires_sponsorship"):
+        m = _get(out, f"singapore_status.{block}")
+        if isinstance(m, dict):
+            for k in m:
+                m[k] = _canon_bool(m[k])
+    for path, formats in DATE_FIELDS.items():
+        _set_at(out, path, lambda v, f=formats: _canon_date(v, f))
+    for spec, allowed in LIST_ENUMS.items():
+        lst_name, key = spec.split("[].")
+        entries = out.get(lst_name)
+        for entry in entries if isinstance(entries, list) else []:
+            if isinstance(entry, dict) and key in entry:
+                entry[key] = _canon_enum(entry[key], allowed)
+    for lst_name in ("education", "experience"):
+        entries = out.get(lst_name)
+        for entry in entries if isinstance(entries, list) else []:
+            if isinstance(entry, dict):
+                for key in ("start", "end"):
+                    if key in entry:
+                        entry[key] = _canon_date(entry[key], ENTRY_DATE_FORMATS)
+    return out
+
+
+# --------------------------------------------------------------------------
 # Load / save
 # --------------------------------------------------------------------------
 
 def load(path: str | os.PathLike) -> dict:
-    """The profile at `path`; {} if the file does not exist. Raises
-    ApplicantError on YAML that cannot be read or is not a mapping."""
+    """The profile at `path`, normalised (`normalise`); {} if the file does not
+    exist. Raises ApplicantError on YAML that cannot be read or is not a mapping."""
     p = Path(path)
     if not p.exists():
         return {}
@@ -275,7 +454,7 @@ def load(path: str | os.PathLike) -> dict:
         return {}
     if not isinstance(data, dict):
         raise ApplicantError(f"{p.name} must be a mapping, got {type(data).__name__}")
-    return data
+    return normalise(data)
 
 
 COMMENTED_BACKUP_NAME = "applicant.commented-backup.yaml"   # matches data/applicant*.yaml (gitignored)
@@ -309,13 +488,15 @@ def commented_backup_path(path: str | os.PathLike) -> Path:
 
 
 def save(path: str | os.PathLike, profile: dict, *, keep_commented_copy: bool = True) -> None:
-    """Validate, then write atomically (tempfile in the same folder + os.replace).
+    """Normalise (`normalise`, Q-36), validate, then write atomically (tempfile in
+    the same folder + os.replace). The file always holds the canonical spellings.
 
     Raises ApplicantError (with `.errors`) and writes nothing when the profile
     is invalid. Key order is kept (`sort_keys=False`); YAML comments are not.
     So the first save over a file that has comments first copies it to
     `applicant.commented-backup.yaml` (once: an existing copy is never
     overwritten), and the owner keeps their notes (questions_design §3.1)."""
+    profile = normalise(profile)
     errors = validate(profile)
     if errors:
         raise ApplicantError(f"{len(errors)} invalid field(s): "
@@ -346,7 +527,10 @@ def save(path: str | os.PathLike, profile: dict, *, keep_commented_copy: bool = 
 def validate(profile: dict) -> list[FieldError]:
     """Every rule in apply_design §5.2. Empty values are not errors here (a
     required one shows up in `missing_for_apply`); a value that is present
-    must be well-formed. Messages name the rule and never repeat the value."""
+    must be well-formed. Messages name the rule and never repeat the value.
+
+    Enum values are checked after `normalise` (Q-36), so "Male" or `no` pass and
+    only a value that still maps to nothing is reported, with the allowed list."""
     errs: list[FieldError] = []
 
     def err(path: str, message: str) -> None:
@@ -354,6 +538,7 @@ def validate(profile: dict) -> list[FieldError]:
 
     if not isinstance(profile, dict):
         return [FieldError("", "the profile must be a mapping")]
+    profile = normalise(profile)
 
     version = profile.get("version")
     if version is not None and version != SCHEMA_VERSION:
