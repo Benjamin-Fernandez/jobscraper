@@ -340,12 +340,23 @@ def find_code(text: str, otp_pattern: Optional[str]) -> Optional[str]:
     """The first line containing "code", searched with that line and the next (§11.1).
 
     Blank lines are dropped first, so "next" is the next line with text: plain
-    mails put the code in its own paragraph ("...this code:", blank, "K7P2M9QX")."""
-    pat = re.compile(otp_pattern or DEFAULT_OTP)
+    mails put the code in its own paragraph ("...this code:", blank, "K7P2M9QX").
+
+    A whole-line pattern (it starts with `^` and ends with `$`; Greenhouse, D-85)
+    is matched instead against every trimmed line after that "code" line: exactly
+    one matching line gives the code; none or several give None (fail closed, no
+    guess: a word such as "security" in the sentence is never a candidate)."""
+    raw = otp_pattern or DEFAULT_OTP
+    pat = re.compile(raw)
     lines = [l for l in text.splitlines() if l.strip()]
     for i, line in enumerate(lines):
         if not CODE_LINE.search(line):
             continue
+        if raw.startswith("^") and raw.endswith("$"):
+            hits = [m for m in (pat.fullmatch(l.strip()) for l in lines[i + 1:]) if m]
+            if len(hits) != 1:
+                return None
+            return hits[0].group(1) if hits[0].groups() else hits[0].group(0)
         m = pat.search("\n".join(lines[i:i + 2]))
         if m:
             return m.group(1) if m.groups() else m.group(0)

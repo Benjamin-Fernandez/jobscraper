@@ -884,10 +884,11 @@ def cmd_accounts(args) -> int:
                 print("accounts export-edge --confirm: no export file to delete", file=sys.stderr)
                 return 1
             newest = exports[-1]
-            # The rows the export held: not yet exported, and a password in the vault.
+            # Exactly the accounts the file lists (review F8): one created after the
+            # export was written is not in Edge and stays unexported.
+            listed = vault.export_accounts(newest)
             ids = [r["id"] for r in store.accounts_to_export()
-                   if vault.get(r["vault_service"] or vault.service_for(r["ats"], r["tenant_host"]),
-                                r["email"]) is not None]
+                   if ((r["tenant_host"] or "").lower(), (r["email"] or "").lower()) in listed]
             vault.delete_export(newest)
             store.mark_exported(ids, utcnow())
             print(f"deleted {newest.name}; {len(ids)} account(s) marked as imported into Edge")

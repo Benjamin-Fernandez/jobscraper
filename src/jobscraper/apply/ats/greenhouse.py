@@ -145,7 +145,10 @@ class GreenhouseAdapter:
     needs_account = False
     password_rules = PasswordRules()
     mail_domains = ("greenhouse.io", "greenhouse-mail.io")
-    otp_pattern = r"\b([A-Za-z0-9]{8})\b"          # pending S-4
+    # D-85: the security code is alone on its line (trimmed), 6-12 letters/digits, and
+    # the only such line after the "code" sentence; none or several -> no code (no
+    # guess). A whole-line pattern (^...$) selects that rule in `mail.find_code`.
+    otp_pattern = r"^([A-Za-z0-9]{6,12})$"
     # The site prefill this adapter may apply (D-70 §9.1.1); apply_flow reads it
     # to defer the planning-time unanswerable check until after the prefill.
     prefill_source = "mygreenhouse"
@@ -367,30 +370,29 @@ class GreenhouseAdapter:
             return ""
 
     def _snapshot_pre_import(self, page: Any, ctx: AttemptContext) -> None:
-        """`ctx.pre_import[audit key] = shown text` for every non-empty field of
-        the schema plan, read before the MyGreenhouse click. Audit key = `form:`
-        + the control's html id (llm_fill_design §3.1; a single checkbox's id is
-        `<name>_1`); shown text per §3.1 ("true"/"false" for a checkbox, pill
-        texts joined for a multi-select). Never logged: the values are personal.
-        Best effort: no plan or a read error leaves the snapshot partial."""
-        plan = self._plans.get(ctx.attempt_id)
-        if plan is None:
-            return
-        fields = [f for f in plan.fields if f.type is not FieldType.HIDDEN]
+        """`ctx.pre_import[audit key] = shown text` for every non-empty field,
+        read before the MyGreenhouse click (llm_fill_design §3.3, review M3).
+        Read with the generic reader and keyed with its own `audit_keys(...,
+        "form")` (review F5), so `read_page(pre_import=...)` after the import
+        finds exactly these keys; lists are not opened. The text is the reader's
+        shown value as `read_page` compares it (a list joined with "; ").
+        Skipped when no import can happen (MyGreenhouse off or no button: the
+        origins are `site_default` then anyway). Never logged: the values are
+        personal. Best effort: a read error leaves the snapshot empty."""
         try:
-            shown = self.read_values(page, ctx, fields)
+            if not B.options_for(page).mygreenhouse or self._autofill_button(page) is None:
+                return
+            from .. import page as reader                 # lane R (WP-R1); lazy like entry_sections
+            fields = reader.read_page(page, scope=self.scope(page, ctx), options=False, step="form")
+            keys = reader.audit_keys(page, fields, "form")
         except Exception:                                 # noqa: BLE001 - origins fall back to the import
             return
-        for f in fields:
-            value = shown.get(f.key, "")
-            text = ", ".join(value) if isinstance(value, list) else str(value or "")
-            if not text:
-                continue
-            try:
-                html_id = self.locator(page, f).get_attribute("id") or ""
-            except Exception:                             # noqa: BLE001
-                html_id = ""
-            ctx.pre_import[f"form:{html_id or f.key}"] = text
+        for pf in fields:
+            shown = pf.shown
+            text = "; ".join(str(x) for x in shown) if isinstance(shown, list) else str(shown or "")
+            akey = keys.get(pf.field.key, "")
+            if text.strip() and akey:
+                ctx.pre_import[akey] = text
 
     def step_id(self, page: Any, ctx: AttemptContext) -> str:
         """One page: the form is its own review page."""

@@ -237,3 +237,31 @@ TYPE: question
 RE: Q-35 WP-R3 `pagefill.fill_page` - the `guards.decide` result shape is not pinned (LF §7, §8 pinned-signature table)
 BODY: LF §8 pins `guards.decide(...) -> Decision` but not `Decision`'s fields, and `llm_fill.Chunk` is pinned only as a NamedTuple. R3 reads the answers, the stop list and the entry actions from it. Proposal (lane M builds it, R3 reads it): `Decision(answers: dict[str, Answer], unknown_required: tuple[str, ...], deletes: tuple[str, ...]  # group ids (E3, E6), adds: tuple[tuple[str, str], ...]  # (section, source entry id) (E5), resets: tuple[str, ...]  # field keys G9 clears/resets/unticks)`, with `Answer.note` naming the G9 action. A pin in contracts or LF §8 avoids lanes M and R guessing; R3 waits for it (or for lane M's M3).
 STATUS: open
+
+### 2026-11-03 software-engineer → coordinator
+TYPE: handoff
+RE: Q-35 lane N review fixes F2, F5, F8 (`docs/reviews/Q-35-lanes-NR.md`), branch `eng/Q-35-N-workday`
+BODY: Fixed in 2fd4b90 (src only).
+- F2: Workday `next_step` returns `is_review` (no click) whenever a Submit button is visible (`submit_ready`), or the nav button's text or aria-label contains "submit". Otherwise it clicks only a button whose text or aria-label reads Save and Continue / Next (`NEXT_NAME`); an unlabelled or other label → `page_unrecognised` "workday: next button unlabelled or unexpected", nothing clicked.
+- F5: Greenhouse `_snapshot_pre_import` now reads with lane R's `page.read_page(page, scope=..., options=False, step="form")` and keys with `page.audit_keys(page, fields, "form")`. Text = the shown value as `read_page` compares it (a list joined "; "). Skipped when MyGreenhouse is off or has no button. This answers my earlier open question.
+- F8: new `vault.export_accounts(path) -> {(host, email_lower)}` reads the export's url/username columns (the password column is never printed); `accounts export-edge --confirm` marks only the not-yet-exported rows the newest file lists.
+- Evidence: scratch checks on local stubs (headless Edge): empty label → page_unrecognised, 0 clicks; aria-label "Next" → clicked; "Continue" → page_unrecognised; a Submit elsewhere or on the nav button → review, 0 clicks. Pre-import keys equal the reader's audit keys; after a stub import the unchanged pre-filled field is `site_default` and the changed one `mygreenhouse`. Export with 2 accounts, a 3rd created after the export, `--confirm` → 2 marked, 3rd not; no password in the output. Suite: before merging the tester's newest oracles `python tests/run_tests.py` -> 869/869 passed. After merging `int/Q-35-NR` (b6ce72f..da82193) and 081b338 (the snapshot is best effort on a page it can't read): 909/913 passed. The 4 reds are 2 Greenhouse oracles that pin the pre-F5 snapshot (request to tester below), the Greenhouse `otp_pattern` failing pin (question below), and lane R's F1 react-select failing pin (not lane N). `-k workday_nav` 13/13, `-k accounts` 16/17 (the otp pin), `test_accounts_cli` 6/6 (F8 pin green), `-k greenhouse_nav` 4/6, `-k layering` 10/10.
+STATUS: open
+
+### 2026-11-03 software-engineer → coordinator
+TYPE: request
+RE: Q-35 WP-N6a, review F7 (Workday integration order)
+BODY: For the N6a engineer: on Workday the Start Your Application dialog comes before the account form, so the flow must run open → `nav.choose_entry` → `account_wall` / `account()` (today `account_wall` runs right after `open`). `check_email` reopens the posting with `adapter.open()`, which lands on the dialog again; call `choose_entry` again after that reopen, before looking for the sign-in wall. Also remove in N6a: the interim `unsupported_ats` guard for Workday in `apply_flow.body`, and `workday._click` once lane R's `page.click` is in use. Add a flow oracle for the order.
+STATUS: open
+
+### 2026-11-03 software-engineer → tester
+TYPE: request
+RE: Q-35 review F5, `tests/test_greenhouse_nav.py` (2 oracles pin the pre-F5 snapshot)
+BODY: `test_choose_entry_snapshots_the_form_before_the_mygreenhouse_click` and the first half of `test_choose_entry_falls_back_on_a_prefill_crash_and_propagates_a_page_signal` expect the snapshot from the schema plan via `read_values` with keys `form:<html id>`. Review F5 (Coordinator-directed) replaced that: `_snapshot_pre_import` now calls `jobscraper.apply.page.read_page(page, scope=nav.scope(...), options=False, step="form")` and `page.audit_keys(page, fields, "form")`, stores `audit key -> shown text` (a list joined "; ", as `read_page` compares it; non-empty only), and runs only when `B.options_for(page).mygreenhouse` is on and `_autofill_button(page)` finds a button; any exception leaves `pre_import` empty and `prefill` still runs. Suggested rewrite: monkeypatch `jobscraper.apply.page.read_page` / `audit_keys` (or use a real stub page with a MyGreenhouse button, as in my scratch check) and `GreenhouseAdapter._autofill_button`; assert the order (snapshot before `prefill`), keys equal `audit_keys` output, never logged. The CAPTCHA-propagation half and `test_choose_entry_without_a_plan_still_runs_prefill` pass as they are.
+STATUS: open
+
+### 2026-11-03 software-engineer → coordinator
+TYPE: question
+RE: `test_apply_flow_accounts::test_the_greenhouse_code_pattern_reads_the_code_not_a_word` (tester failing pin); AD §4.2 / §9.1 table `otp_pattern` "pending S-4"
+BODY: Greenhouse `otp_pattern = r"\b([A-Za-z0-9]{8})\b"` is the design's value; on "...into the security code field..." `find_code` returns "security". Fixing it picks the code format, which S-4 was to confirm, so I left it. Two one-line options (both pass the pin): (a) a code has a digit: `r"\b(?=[A-Za-z]*\d)([A-Za-z0-9]{8})\b"`; (b) the code is alone on its line: `r"(?m)^\s*([A-Za-z0-9]{8})\s*$"`. Say which (or the architect's choice) and I apply it in `apply/ats/greenhouse.py`.
+STATUS: open
