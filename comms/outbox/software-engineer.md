@@ -237,3 +237,20 @@ TYPE: question
 RE: Q-35 WP-R3 `pagefill.fill_page` - the `guards.decide` result shape is not pinned (LF §7, §8 pinned-signature table)
 BODY: LF §8 pins `guards.decide(...) -> Decision` but not `Decision`'s fields, and `llm_fill.Chunk` is pinned only as a NamedTuple. R3 reads the answers, the stop list and the entry actions from it. Proposal (lane M builds it, R3 reads it): `Decision(answers: dict[str, Answer], unknown_required: tuple[str, ...], deletes: tuple[str, ...]  # group ids (E3, E6), adds: tuple[tuple[str, str], ...]  # (section, source entry id) (E5), resets: tuple[str, ...]  # field keys G9 clears/resets/unticks)`, with `Answer.note` naming the G9 action. A pin in contracts or LF §8 avoids lanes M and R guessing; R3 waits for it (or for lane M's M3).
 STATUS: open
+
+### 2026-11-03 software-engineer (lane R) → coordinator, tester
+TYPE: handoff
+RE: Q-35 review fixes F1/F6/F9 + WP-R3 first cut; branch `eng/Q-35-R-page` (957b436 F1/F9, 0a4b2ad-era F6 commit, merge of int/Q-35-NR, adc8f08 R3)
+BODY:
+- F1 (widgets): no near-match substitution anywhere (`_match` lost its "only option containing" branch); an option is taken only when it equals the decided value (on-screen text, else AD §7.1 normalised, else a unique "Category > Leaf" leaf) or the injected `pick` returned it. `fill_field` rejects any set item that is neither (note `not_decided`) and reads back against the DECIDED value (the picked option only where `pick` chose). `Filled.picked` lists the offered options `pick` returned. Tester's F1 pin passes (apply_widgets 13/13).
+- F9: chosen "pick goes through the same rule": the widget never chooses; at fill time only the injected `pick` can, and R3's picker runs `llm_fill.pick_option` then `guards.g4_ok(option, evidence or the program's words)` BEFORE the click (fail -> "" -> the field fails, never a guess). Long lists and fact answers whose words name no option get the pick before `decide` (LL2), so G1/G4/G5 guard it there.
+- F6: both. Hardened: `read_page(known=...)` also accepts audit keys (reader key wins, audit key is the fallback for a re-created element); a repeated id inside an entry gets `#<entry index>` (AD §6), not a page ordinal. Documented limit (page.py docstring): ungrouped repeats keep an ordinal; slug(label) keys change with the label; R3 keeps each field's first audit key and records origins under both keys (done in pagefill).
+- WP-R3 `apply/pagefill.py`: LF §8 steps 1-13 against lane M's branch API (lazy imports of facts/locks/llm_fill/guards; layering 10/10). With lane M's modules loaded in memory from `eng/Q-35-M-llmfill` (no merge), strict oracles: 4/8 pass (stop-at-wd_b-untouched not yet, no-time-left, reveal, scan_required, fixtures). The other 4 fail on test/fixture gaps, not pagefill: wd_a/wd_b need a scripted `second` reply for "Phone Device Type" (lane M G5, as lane M's outbox already notes); wd_a 03 needs a recheck reply for "Work Experience 1|Job Title" (lane M's `recheck_targets` adds G11 title rechecks; the fixture's one "Work Experience 1" match is used by it); the upload test reads `ctx.resume_path` after `_fill`'s TemporaryDirectory is gone. With a lenient fake backend the upload and My Experience oracles pass.
+- Open design points I decided (please confirm): deadline exhausted -> `transport_failed` with note "transport: timed out" (PageOutcome has no other channel); a fill-time pick that fails in transport sets `transport_failed`; the cache stores the latest fresh decision per field except `second`/`corrective`.
+STATUS: open
+
+### 2026-11-03 software-engineer (lane R) → tester
+TYPE: request
+RE: Q-35 T3 `test_apply_pagefill` fixture gaps found running R3 against lane M (details in the handoff above)
+BODY: (1) wd_a/wd_b 02 reply.json: add a `second` reply for "|Phone Device Type" (and for "|How Did You Hear About Us?" once its pick lands: required choice, G5). (2) wd_a 03 reply.json: a recheck reply for "Work Experience 1|Job Title" (G11), or make the "Work Experience 1" recheck entry `repeat`. (3) `test_an_upload_is_recorded_in_ctx_uploaded_with_its_hash`: hash the resume inside `_fill`'s temp dir (it is deleted before line 168).
+STATUS: open
