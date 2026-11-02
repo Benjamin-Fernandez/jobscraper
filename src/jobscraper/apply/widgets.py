@@ -34,9 +34,15 @@ Rules (LF §3.2, review Q-35 M8, M14), all MUST:
     submit-once guard, NF-06).
 
 `pick`: the caller's option chooser for words that equal no option exactly
-(`llm_fill.pick_option`, LF §6.4); it gets (wanted words, visible options) and
-returns one of the options or "". Without it only exact (normalised) matches,
-or the leaf of a "Category > Leaf" path, are chosen. No model call here (NF-04).
+(LF §6.4 LL2/LL3); it gets (wanted words, visible options) and returns one of the
+options or "". A widget never substitutes an option on its own (review Q-35-NR
+F1): it takes the option equal to the decided value (normalised), or the leaf of
+a "Category > Leaf" option equal to it, else only what `pick` returned; the
+read-back must then equal the decided value, or the picked option where `pick`
+chose. F9: the pick runs at fill time, after the guards, so the caller's `pick`
+must carry the guard: R3 passes `llm_fill.pick_option` followed by the G4 check
+(an option failing G4 -> ""), which validates the option before the click;
+`Filled.picked` lists what `pick` chose for the audit. No model call here (NF-04).
 """
 from __future__ import annotations
 
@@ -83,7 +89,9 @@ class Filled:
     ok: bool
     shown: Value
     error: str = ""
-    note: str = ""             # unchanged | no_control | no_option | search_miss | readback | site_error | unsupported
+    note: str = ""             # unchanged | no_control | no_option | search_miss | readback | site_error
+                               # | unsupported | not_decided
+    picked: tuple[str, ...] = ()   # options the caller's `pick` chose (F9: for the audit and a re-check)
 
 
 # ------------------------------------------------------------------ public API
@@ -119,8 +127,15 @@ def fill_field(page: Any, pf: PageField, value: Value, *, pick: Optional[Picker]
     except Exception:
         pass
     note = ""
+    picks: list[str] = []
+
+    def recording(want: str, options: Sequence[str]) -> str:
+        got = pick(want, options) if pick is not None else ""
+        if got and any(B.norm_text(o) == B.norm_text(got) for o in options):
+            picks.append(got)                 # only an offered option counts as picked
+        return got
     try:
-        chosen = fam.fill(page, loc, value, pf, pick)
+        chosen = fam.fill(page, loc, value, pf, recording if pick is not None else None)
     except FillMiss as miss:
         chosen, note = None, miss.note
     except Exception:
@@ -128,13 +143,28 @@ def fill_field(page: Any, pf: PageField, value: Value, *, pick: Optional[Picker]
     _blur(page, loc)
     B.pause(page)
     shown, err = read(page, pf), error(page, pf)
+    picked = tuple(picks)
     if chosen is None:
-        return Filled(False, shown, err, note=note or "no_option")
+        return Filled(False, shown, err, note=note or "no_option", picked=picked)
+    if not _decided(pf, chosen, value, picked):
+        return Filled(False, shown, err, note="not_decided", picked=picked)   # F1: never a substitute
     if err:
-        return Filled(False, shown, err, note="site_error")
-    if not same(pf, shown, chosen):
-        return Filled(False, shown, err, note="readback")
-    return Filled(True, shown)
+        return Filled(False, shown, err, note="site_error", picked=picked)
+    # F1: the page must show the decided value (or, item by item, what `pick` chose)
+    if not same(pf, shown, chosen if picked else value):
+        return Filled(False, shown, err, note="readback", picked=picked)
+    return Filled(True, shown, picked=picked)
+
+
+def _decided(pf: PageField, chosen: Value, value: Value, picked: Sequence[str]) -> bool:
+    """Every item a family set is the decided value's item (normalised; a
+    "Category > Leaf" by its leaf) or an option the caller's `pick` returned."""
+    if pf.field.type in (FieldType.MULTI_CHOICE,) or isinstance(chosen, list):
+        allowed = {_choice_norm(v) for v in _as_list(value)} | {_choice_norm(p) for p in picked}
+        return all(_choice_norm(c) in allowed for c in _as_list(chosen))
+    if same(pf, chosen, value):
+        return True
+    return any(_choice_norm(chosen) == _choice_norm(p) for p in picked)
 
 
 def reset_field(page: Any, pf: PageField) -> Filled:
@@ -396,8 +426,9 @@ def _prompt_add(page: Any, loc: Any, want: str, pf: PageField, pick: Optional[Pi
 
 def _fill_react(page: Any, loc: Any, value: Value, pf: PageField, pick: Optional[Picker]) -> Value:
     """react-select (Greenhouse, AD §8.2): type the first 30 characters, pick the
-    option equal to the words (else the only one containing them, else `pick`).
-    Multi: wrong chips removed first. Never presses Enter."""
+    option equal to the words (normalised), else the caller's `pick`; never an
+    option merely containing them (review F1). Multi: wrong chips removed first.
+    Never presses Enter."""
     multi = pf.field.type is FieldType.MULTI_CHOICE
     wants = [w for w in (_as_list(value) if multi else [_as_text(value)]) if w.strip()]
     if not wants:
@@ -438,7 +469,7 @@ def _react_pick(page: Any, loc: Any, want: str, pick: Optional[Picker]) -> str:
         loc.press_sequentially(leaf[:30], delay=delay)
         opts = page.locator(B.REACT_SELECT_OPTIONS)
         texts = B._poll(page, SEARCH_WAIT_MS, lambda: [t for t in B._texts(opts) if t.strip()]) or []
-        choice = _match(leaf, texts, pick, contains=True)
+        choice = _match(leaf, texts, pick)
         if not choice:
             B._abandon(loc)
             return ""
@@ -879,24 +910,25 @@ def _choose_in_open_list(page: Any, want: str, pick: Optional[Picker]) -> str:
     return choice
 
 
-def _match(want: str, options: Sequence[str], pick: Optional[Picker], *, contains: bool = False) -> str:
-    """The option equal to `want` (normalised), else the option whose "Category > Leaf"
-    leaf equals it, else (with `contains`) the only option containing it, else
-    `pick(want, options)` when it returns one of the options."""
+def _match(want: str, options: Sequence[str], pick: Optional[Picker]) -> str:
+    """The option equal to `want` (on-screen text, else the only one equal under AD §7.1
+    normalisation, as `same` reads back), else the only option whose "Category > Leaf"
+    leaf equals it, else `pick(want, options)` when it returns one of the options.
+    Never a near match ("Computer Engineering Technology" for "Computer Engineering",
+    "JavaScript" for "Java"): that is the caller's pick or a miss (review F1)."""
     if not want or not options:
         return ""
     w = B.norm_text(want)
     for o in options:
         if B.norm_text(o) == w:
             return o
-    leaf = B.norm_text(want.split(" > ")[-1])
-    hits = [o for o in options if B.norm_text(o.split(" > ")[-1]) == leaf]
+    hits = [o for o in options if _value_norm(o) == _value_norm(want)]
     if len(hits) == 1:
         return hits[0]
-    if contains:
-        hits = [o for o in options if w and w in B.norm_text(o)]
-        if len(hits) == 1:
-            return hits[0]
+    leaf = _choice_norm(want)
+    hits = [o for o in options if _choice_norm(o) == leaf]
+    if len(hits) == 1:
+        return hits[0]
     if pick is not None:
         try:
             got = pick(want, list(options))
