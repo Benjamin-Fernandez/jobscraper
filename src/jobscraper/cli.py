@@ -795,7 +795,6 @@ def _account_tenant(url: str):
     navigators' own `match_url` decides (apply_design §10.4: Workday forms A
     and B, one canonical host per tenant)."""
     from .apply.ats import REGISTRY
-    from .apply.contracts import Tenant
 
     for name, nav in REGISTRY.items():
         if not getattr(nav, "needs_account", False):
@@ -803,12 +802,6 @@ def _account_tenant(url: str):
         tenant = nav.match_url(url)
         if tenant is not None:
             return name, tenant
-    # Until the Workday navigator is registered (WP-N2): apply_design §9.4.1 form A.
-    m = re.match(r"^https?://(?P<tenant>[\w-]+)\.(?P<wd>wd\d+)\.myworkdayjobs\.com"
-                 r"(?:/[a-z]{2}[-_][a-z]{2})?/(?P<site>[^/?#]+)", url or "", re.I)
-    if m:
-        host = f"{m['tenant']}.{m['wd']}.myworkdayjobs.com".lower()
-        return "workday", Tenant("workday", host, m["tenant"].lower(), site=m["site"])
     return None
 
 
