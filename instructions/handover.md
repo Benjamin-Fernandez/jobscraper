@@ -1,27 +1,26 @@
 # Handover note (rewrite every session; ≤ 40 lines; history goes to `docs/planning/session_log.md`)
 
-**Last session:** 2026-11-02, session 3 (resumed; agents: tester on `int/Q-35-M`, lane R R3 adapt, architect Q-48 on `arch/Q-48-declarations` (worktree `arch-Q-35`)). **Branch/commit:** `personal`, pushed (`git log -1`). Suite 920/920 Python, web 279 + 1 skipped.
+**Last session:** 2026-11-02, session 3, paused by the owner. All agents stopped; every worktree clean. **Branch/commit:** `personal`, pushed (`git log -1`).
 
 ## Where we are
-- M19 DONE. M20: D-78 LLM-driven form filler (ADR-0006, `docs/architecture/llm_fill_design.md`, `llm_fill_build_plan.md`, contracts v5). Design READY (stage E + re-check; D-81..D-86).
-- Merged this session: int/Q-30 (Profile form + questions), Q-36 lenient profile (D-79), Q-39 review fixes + `data/*.tmp` ignore, S-5b spike, Q-35 design, tester T0/T1/T3 + T2 core + T4 lane-N oracles, lanes N (N1–N5) + R (R1–R2) with review fixes (090daf8). Live DB backed up to `%LOCALAPPDATA%\JobScraper\backups\jobscraper-pre-Q35NR-20261102-1415.db` before the SCHEMA 4 merge.
-- Live app: Workday attempts stop as `unsupported_ats` (no fill loop until N6a). Greenhouse emailed-code path is live (D-85; a lone footer word after the code sentence → fails closed).
-- D-77 done: tenant A (S-5b) and tenant B (Q-41, 2026-11-02: Review read row by row, one Submit, "Applied"; merged 59967d7). Defects found: Q-46 (a–e), Q-47; owner rule D-87 (declaration-type questions → No; memory `declarations-default-no`) → Q-48.
+- M19 DONE. M20: D-78 LLM form filler. Design READY plus amendments D-87..D-91 (declarations). D-77 done: tenant A (S-5b) and tenant B (Q-41, "Applied").
+- Live app unchanged by the build: Workday stops as `unsupported_ats`; Greenhouse path live. Known live defect until Q-48 merges: prior-employment phrases answer questions that don't name the employer (review F4); dry-run audits are read row by row before any real submit (D-83).
+- Owner profile: job locations Singapore ×3 set. After Q-48 merges, the Coordinator writes the owner's values: `declarations.government_employment: false`, `declarations.willing_to_sign_nda: true` (owner asked, D-87/D-91). Memory `declarations-default-no`.
 
-## Not merged (branches kept; worktrees under `.claude/worktrees/`)
-- `int/Q-35-M` 3a99dce (worktree `int-Q-35-M`) = lane M b79df03 + architect COMPOSE_NEEDED/Q-45 design (ab53597). The tester is committing pins there (incl. the QuestionReason set pin, Q-46 a–c). Then merge into personal; vitest + bundle rebuild (QuestionCard.vue changed). Lane M then switches `no_rule`+note → COMPOSE_NEEDED.
-- Lane R R3 `eng/Q-35-R-page` 2add8ee: review F1–F6, F8, F9 fixed (+F10 part), suite 1015/1017 (2 = How-heard G2e on Workday "Parent > Leaf" options → lane M fit fix). Re-review of the fix commits running. Left for N6a: F7 attempt-wide follow-up budget, F10 audit rows only for applied answers, R3 review note N1 (deadline_left vs model_unavailable); F11 LOW.
+## Branches (not merged into personal; worktrees under `.claude/worktrees/`)
+- `int/Q-35-M` 3aadc13 (worktree `int-Q-35-M`): lane M + WP-Q48 first build + all tester pins; 1007/1024, the 17 = WP-Q48 fix-round pins.
+- `eng/Q-48-declarations` 8393f98 (worktree `agent-aaa227e35c71208c5`): fix round for review `docs/reviews/Q-48-and-lane-M-fixes.md` F1–F10 + D-90/D-90a/D-91. Stopped while running its final full suite: UNVERIFIED. Includes lane M 19495da.
+- `eng/Q-35-M-llmfill` e2414c5 (worktree `agent-a4c24933cbd328c18`): hierarchical how-heard fit (`resolve.how_heard_fit`, `path_hits`); verified 72/72 llm_fill, 19/19 pagefill with lane R. Touches `deterministic_pick` (possible overlap with WP-Q48 F9).
+- `eng/Q-35-R-page` 2add8ee (worktree `agent-ae3916b4525b736d9`): R3 + review fixes F1–F6, F8, F9 (F10 part); 1015/1017 before lane M's fit fix. Re-review of the fix commits not done (stopped).
+- `arch/Q-48-declarations` 549e511 (worktree `arch-Q-35`): D-87..D-91 spec; already in int via eng/Q-48 merges up to edc7a04; merge the rest.
 
 ## Next 1–3 actions
-1. Tester report → merge `int/Q-35-M`. Architect Q-48 report → commit on `arch/Q-48-declarations` → engineer WP + tester WP. R3 review → merge. N6a (lane N F7 note + Q-46 e) → N6b.
-2. After Q-48 builds: the Coordinator writes the owner's D-87 values into `data/applicant.yaml` (owner asked; values only there).
-3. M20 gate: 5 Greenhouse dry runs + owner-approved Workday postings (D-83). Backlog: Q-44 refresh-from-resume, Q-43, Q-34, Q-32, Q-27, A04 (`country_bool` rows, before the gate), Q-15 docs.
-
-## Owner notes
-- 2026-11-02: new resume uploaded. On the owner's request the Coordinator re-ran `profile` (profile_version 4) and the master parse, and rewrote `data/applicant.yaml` experience/skills/education start (backup `data/applicant.prev.yaml`). Job locations = Singapore ×3 (owner, Q-41). Optional: Cantonese levels.
-- Application Gmail + app password verified (address only in Coordinator memory). MyGreenhouse signed in on the JobScraper Edge profile.
+1. WP-Q48: run the full suite on 8393f98 (merge int 3aadc13 + arch 549e511 if not yet in); make the 17 pins pass; then re-review (Q-48 review F1–F10, D-90/91).
+2. Merge into int/Q-35-M: e2414c5 (lane M fit), eng/Q-48-declarations, then lane R after its re-review (resume the R3 reviewer: `docs/reviews/Q-35-R3.md`, append "Re-review (fixes)"). Full suite → merge int into personal; vitest + bundle rebuild (QuestionCard.vue); smoke on 8768; write the owner's D-87/D-91 values; push.
+3. N6a (carry-overs: R3 F7 attempt-wide follow-up budget, F10 audit rows for applied answers, N1 deadline vs model_unavailable, Q-46 e Workday Next wait, FillServices builder name for `test_apply_flow_llm`) → N6b → M20 gate (D-83). Backlog: Q-47, Q-44, Q-45 build, Q-43, Q-34, Q-32, Q-27, A04, Q-15, review F7 (compound question).
 
 ## Watch out
-- Agent worktrees start from master: briefs say `git switch -c <branch> personal`. Architect/researcher agents have no shell (Coordinator commits).
-- Before every push: deny-list scan (session scratchpad `fixture_denylist.txt`, env `JOBSCRAPER_FIXTURE_DENYLIST`; personal, never commit). Live app on 8765; dev on 8768 with a DB copy.
-- The scope guard blocks the Coordinator from writing `data/`; the auto-mode classifier blocks editing `.claude/scopes.json`.
+- Agent worktrees start from master: briefs say `git switch -c <branch> <base>`. Architect/researcher have no shell (Coordinator commits).
+- Before every push: deny-list scan (scratchpad `fixture_denylist.txt`; never commit it). Employer names → "Acme" or tenant labels. Live app 8765; dev 8768 with a DB copy.
+- Concurrent full-suite runs slow everything and may flake `test_filter` (K-3).
+- The scope guard blocks the Coordinator from writing `data/`; owner-requested profile edits go via a surgical Python replace.
