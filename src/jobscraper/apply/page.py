@@ -12,6 +12,7 @@ groups, and value provenance.
     field_errors(page, *, scope) -> {reader key: error text}  ("" = not tied to a field)
     entry_sections(page, scope) -> list[EntrySection]          the generic default
     page_text(page, scope) -> str                              visible text (review check, L1)
+    scan_required(page, scope) -> keys                         required fields empty or in error (H7)
     audit_keys(page, fields, step) -> {reader key: "<step>:<site id>[#n]"}  (AD §6)
     click(page, loc) -> str                                    click with the Workday
                                                                click_filter fallbacks
@@ -39,6 +40,7 @@ from __future__ import annotations
 
 import random
 import re
+from dataclasses import replace as _replace
 from typing import Any, Iterable, Mapping, Optional, Sequence
 
 from . import browser as B
@@ -623,7 +625,8 @@ def locator(page: Any, field: Any) -> Any:
 
 def read_page(page: Any, *, scope: str = "", sections: Sequence[EntrySection] = (),
               origin: Any = "", known: Optional[Mapping[str, Any]] = None, step: str = "",
-              options: bool = True, rng: Optional[random.Random] = None) -> list[PageField]:
+              pre_import: Optional[Mapping[str, str]] = None, options: bool = True,
+              rng: Optional[random.Random] = None) -> list[PageField]:
     """Every visible, enabled field inside `scope` (CSS; "" = the page minus header,
     nav, footer and the banner/navigation/contentinfo landmarks), in page order.
 
@@ -633,6 +636,9 @@ def read_page(page: Any, *, scope: str = "", sections: Sequence[EntrySection] = 
     ValueOrigin value `choose_entry` returned; "" = `site_default`. A field whose
     key is in `known` keeps that origin instead (a re-read: OURS for what we
     typed, the first read's origin for the rest). Empty values are EMPTY.
+    `pre_import` (review M3; `AttemptContext.pre_import`, keyed by audit key
+    `<step>:<site id>[#n]`, so pass `step`): a value equal to what the form showed
+    before the import is `site_default`, not the import's.
     `options=False` skips opening lists (their options stay empty).
     `rng`: the source of the per-read key token (tests pass a seeded one).
     A page that can't be evaluated (navigating, closed) raises Playwright's error.
@@ -666,7 +672,23 @@ def read_page(page: Any, *, scope: str = "", sections: Sequence[EntrySection] = 
             options_complete=complete, error=r.get("error", "")))
         if field.label:
             last_label[ctx_key] = field.label
+    if pre_import and site is not ValueOrigin.SITE_DEFAULT:
+        akeys = audit_keys(page, out, step)
+        out = [_replace(pf, origin=ValueOrigin.SITE_DEFAULT)
+               if (pf.origin is site and pf.field.key not in known
+                   and akeys.get(pf.field.key) in pre_import
+                   and B.norm_text(_text(pf.shown)) == B.norm_text(pre_import[akeys[pf.field.key]]))
+               else pf for pf in out]
     return out
+
+
+def scan_required(page: Any, scope: str = "") -> tuple[str, ...]:
+    """Keys of the visible required fields that are empty (an unticked required box
+    counts) or show a site error now: the deterministic check before Next and before
+    Submit (LF §8 step 12, "Before Submit"; review H7). Lists are not opened."""
+    fields = read_page(page, scope=scope, options=False)
+    return tuple(pf.field.key for pf in fields
+                 if pf.field.required and (_is_empty(pf.field.type, pf.shown) or pf.error))
 
 
 def field_errors(page: Any, *, scope: str = "") -> dict[str, str]:
@@ -960,6 +982,10 @@ def _origin_of(key: str, kind: FieldType, shown: Value, known: Mapping[str, Any]
             o = site
         return site if o is ValueOrigin.EMPTY else o
     return site
+
+
+def _text(v: Value) -> str:
+    return "; ".join(str(x) for x in v) if isinstance(v, list) else str(v or "")
 
 
 def _value(v: Any, *, multi: bool) -> Value:
