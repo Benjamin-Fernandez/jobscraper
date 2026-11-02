@@ -240,7 +240,7 @@ def test_f8_field_sig_is_keyed():
 @needs(*NEEDS)
 def test_f9_a_required_compose_field_stops_the_page_and_is_captured_per_posting():
     from jobscraper.apply import questions as Q
-    from jobscraper.apply.contracts import FieldType as FT
+    from jobscraper.apply.contracts import FieldType as FT, QuestionReason
     import llm_fill_t2 as T
     fields = [_pf("cl", "Cover Letter", FT.FILE), _pf("why", "Why do you want to join us?", FT.TEXTAREA)]
     caps = {}
@@ -252,7 +252,7 @@ def test_f9_a_required_compose_field_stops_the_page_and_is_captured_per_posting(
         assert set(got) == {"cl", "why"}, set(got)
         for c in got.values():
             assert c.note.startswith("compose_needed"), c.note
-            assert c.reason.value in ("compose_needed", "no_rule"), c.reason   # tighten once the enum exists
+            assert c.reason is QuestionReason.COMPOSE_NEEDED, c.reason          # contracts v5, LF §19
             assert "compose @" in c.label_norm, c.label_norm
         caps[jd] = got
     a, b = caps.values()
