@@ -407,8 +407,12 @@ def _apply_one(run: _Run, key: str, ans: Answer, reset: bool) -> None:
             return
         path = str(ans.value or "")
         r = W.fill_field(run.page, pf, path, force=True)          # H6: replace what we didn't upload
-        if r.ok:
-            run.ctx.uploaded[Path(path).name] = hashlib.sha256(Path(path).read_bytes()).hexdigest()
+        try:
+            digest = hashlib.sha256(Path(path).read_bytes()).hexdigest() if r.ok else ""
+        except OSError:                                   # review F10: an unreadable file is a failed upload
+            digest = ""
+        if r.ok and digest:
+            run.ctx.uploaded[Path(path).name] = digest
             _mark(run, key, ValueOrigin.OURS)
         else:
             run.failed[key] = r.note or "readback"
