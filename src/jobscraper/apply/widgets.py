@@ -8,8 +8,9 @@ to this file, not to a site module). Ported from the S-5b prototype
 `drive.py` wd_click), reusing the `browser.py` primitives.
 
     FAMILIES[name] = Family(detect, options, fill, read, reset)   the registry, in ORDER
-    fill(page, pf, value, *, pick=None, force=False) -> Filled
-    reset(page, pf) -> Filled        empty / placeholder / untick (review H3, LF §7 G9)
+    fill(page, pf, value, *, pick=None, force=False) -> bool    read back equal, no site error
+    reset(page, pf) -> bool          empty / placeholder / untick (review H3, LF §7 G9)
+    fill_field / reset_field         the same, returning Filled (read-back value + reason)
     read(page, pf) -> Value          what the field shows now
     error(page, pf) -> str           the site's error text for the field now
     same(pf, shown, value) -> bool   normalised equality (dates by role, multi as sets)
@@ -88,7 +89,19 @@ class Filled:
 # ------------------------------------------------------------------ public API
 
 def fill(page: Any, pf: PageField, value: Value, *, pick: Optional[Picker] = None,
-         force: bool = False) -> Filled:
+         force: bool = False) -> bool:
+    """True only when the field then shows `value` (normalised) and no site error
+    (LF §3.2, review M14). `fill_field` gives the read-back and the reason."""
+    return fill_field(page, pf, value, pick=pick, force=force).ok
+
+
+def reset(page: Any, pf: PageField) -> bool:
+    """True when the field reads back empty afterwards (`reset_field` for details)."""
+    return reset_field(page, pf).ok
+
+
+def fill_field(page: Any, pf: PageField, value: Value, *, pick: Optional[Picker] = None,
+               force: bool = False) -> Filled:
     """Put `value` into the field and read it back (LF §3.2, review M14). A field that
     already shows the value without an error is left alone unless `force` (a file
     this attempt did not upload is replaced, review H6)."""
@@ -124,7 +137,7 @@ def fill(page: Any, pf: PageField, value: Value, *, pick: Optional[Picker] = Non
     return Filled(True, shown)
 
 
-def reset(page: Any, pf: PageField) -> Filled:
+def reset_field(page: Any, pf: PageField) -> Filled:
     """Back to empty (LF §3.2, §7 G9; review H3): text cleared, a list back to its
     placeholder, pills and chips removed, boxes unticked, a file removed. ok only
     when the read-back is empty; a widget with no empty state (a radio group, a
