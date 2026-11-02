@@ -67,6 +67,7 @@ SENSITIVE_LABEL: tuple[str, ...] = (
     "identity number", "passport", "disability", "disabled", "veteran", "marital", "pronoun",
     "pronouns", "citizen", "citizenship", "permanent resident", "pr", "resident status",
     "residency status", "residence status", "nationality", "national service", "ns", "ord",
+    "military", "armed forces",                      # D-88: NS-inclusive questions
 )
 CONTACT_WORDS: tuple[str, ...] = (
     "address", "street", "unit", "postal", "zip", "postcode", "phone", "mobile", "email",
@@ -538,7 +539,8 @@ def _fact_field(c: _Ctx, pf: PageField, d: ModelDecision) -> Answer:
                         return _answer_unknown(pf, "G5: second opinion off")
                     if not agree:
                         return _answer_unknown(pf, "G5: second opinion disagrees")
-        elif _text_of(mv).strip() and not same_value(mv, pv, pf):
+        elif _text_of(mv).strip() and not same_value(option_for(pf, mv) or mv, pv, pf):
+            # an option named by its leaf ("Category > Leaf") is the same option
             return _answer_unknown(pf, "G2d: model value differs from the fact",
                                    sensitive=fact.private)
         return _model_row(c, pf, pv, _source_of(ref), conf=CONF_FACT, sensitive=fact.private)
