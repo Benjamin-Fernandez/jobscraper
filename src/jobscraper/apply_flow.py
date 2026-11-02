@@ -34,7 +34,7 @@ from pathlib import Path
 from typing import Any, Callable, Optional, Sequence
 from urllib.parse import urlsplit
 
-from . import applicant
+from . import applicant, tailor_flow
 from .apply import browser as B
 from .apply import resolve as R
 from .apply.classify import PageSignal, classify
@@ -195,6 +195,7 @@ class _Attempt:
         self.answers: dict[str, Answer] = {}
         self.recorded: set[str] = set()
         self.page = None
+        self.tailored_id: Optional[int] = None
 
     # -- state
 
@@ -332,6 +333,8 @@ class _Run:
         self.log = _Log(say, applicant.redaction_values(self.profile))
         self.rules = None
         self.seen: set[str] = set()
+        self._resume_text: Optional[str] = None
+        self._aliases = None
 
     # -- browser
 
@@ -371,27 +374,70 @@ class _Run:
         if self.store.attempts_in_flight(exclude_id=at.id):
             raise ApplyFailure(ReasonCode.ERROR, "another application is in progress")
 
-    # -- resume (stub until WP-B9: the original resume)
+    # -- resume (TD §12: the tailored file, else the original)
 
     def resume(self, at: _Attempt, job: dict[str, Any]) -> str:
-        path = applicant.resume_file(self.profile, self.cfg.resume_dir)
-        if path is None:
+        """`tailoring` when the tailor is on: the current tailored file (or a
+        fresh one) in `apply.resume_format`; any tailor failure falls back to
+        the original resume with a log line (never a failed attempt)."""
+        original = applicant.resume_file(self.profile, self.cfg.resume_dir)
+        if original is None:
             raise ApplyFailure(ReasonCode.PROFILE_INCOMPLETE, "documents.resume")
-        self.store.update_attempt(at.id, resume_file=path.name, resume_sha256=sha256_file(path),
-                                  resume_source="original")
-        return str(path)
+        if self.cfg.tailor.enabled:
+            at.to(S.TAILORING, step="tailoring")
+            try:
+                res = tailor_flow.tailor_for_apply(self.cfg, self.store, job["job_id"],
+                                                   backend=self.backend, say=None)
+                path = tailor_flow.upload_path(res, self.acfg.resume_format)
+                note = res.error or "no tailored file"
+            except Exception as exc:                      # noqa: BLE001 - the original still works
+                res, path, note = None, None, type(exc).__name__
+            if path:
+                p = Path(path)
+                at.tailored_id = res.tailored_id
+                self.store.update_attempt(at.id, resume_file=p.name, resume_sha256=sha256_file(p),
+                                          resume_source="tailored", tailored_id=res.tailored_id)
+                self.log(f"[attempt {at.id}] resume: tailored ({p.suffix.lstrip('.')}), "
+                         f"coverage {res.coverage_before:.0%} -> {res.coverage_after:.0%}")
+                return str(p)
+            self.log(f"[attempt {at.id}] resume: original ({note[:120]})")
+        self.store.update_attempt(at.id, resume_file=original.name,
+                                  resume_sha256=sha256_file(original), resume_source="original")
+        return str(original)
 
     # -- resolution (§7)
+
+    def resume_text(self, resume_path: str) -> str:
+        """The grounding corpus (§7.7, D-68): the tailor's parsed master, else
+        the text extracted from the resume file; "" if neither can be read."""
+        if self._resume_text is None:
+            text = tailor_flow.master_text(self.cfg)
+            if not text:
+                original = applicant.resume_file(self.profile, self.cfg.resume_dir)
+                try:
+                    from .profile import resume_ingest
+                    text = resume_ingest.extract_text(original) if original else ""
+                except Exception:                         # noqa: BLE001 - an empty corpus fails closed
+                    text = ""
+            self._resume_text = text or ""
+        return self._resume_text
 
     def resolve_ctx(self, job: dict[str, Any], tenant: Any, adapter: Any,
                     resume_path: str) -> ResolveContext:
         aliases = tuple(dict.fromkeys(a for a in (job.get("company_key"), tenant.board)
                                       if a and a != job.get("company")))
+        if self._aliases is None:
+            self._aliases = tailor_flow.alias_groups(self.cfg)
+        groups, ambiguous = self._aliases
+        # ResolveContext has no job title yet (Q-27): the company only.
         return ResolveContext(
             profile=self.profile, employer_name=str(job.get("company") or ""),
             employer_aliases=aliases,
             previously_applied=self.store.applied_to_company(job.get("company_id"), job["job_id"]),
-            jd_text=str(job.get("jd_text") or ""), resume_path=resume_path, ats=adapter.name)
+            jd_text=str(job.get("jd_text") or ""), resume_text=self.resume_text(resume_path),
+            resume_path=resume_path, ats=adapter.name, alias_groups=groups,
+            alias_ambiguous=ambiguous,
+            account_email=str(_profile_path(self.profile, "contact.email") or ""))
 
     def resolve(self, fields: Sequence[FormField], rctx: ResolveContext,
                 at: _Attempt) -> dict[str, Answer]:
@@ -613,7 +659,9 @@ class _Run:
             at.to(S.SUBMITTED_UNCONFIRMED, detail=note, end_url=end_url)
 
     def after_submitted(self, at: _Attempt) -> None:
-        """The tailored file was sent (WP-B9)."""
+        """The tailored file that was uploaded is now `sent` (TD §12)."""
+        if at.tailored_id is not None:
+            self.store.mark_tailored_sent(at.tailored_id)
 
     def await_confirmation(self, page: Any, ctx: AttemptContext, adapter: Any):
         """(confirmation signal, "") or (None, note) within `confirm_timeout_s`."""
