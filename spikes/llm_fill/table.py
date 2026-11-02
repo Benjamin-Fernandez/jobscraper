@@ -10,12 +10,17 @@ import re
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "src"))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import llmfill as L      # noqa: E402  (SENSITIVE keys / labels)
+
 
 def main(run_dir, *only):
     ans = json.loads((Path(run_dir) / "answers.json").read_text(encoding="utf-8"))
     last = {}
     for stem in sorted(ans):
-        last[ans[stem]["title"]] = ans[stem]
+        if isinstance(ans[stem], dict) and "title" in ans[stem]:     # skip the "review" record
+            last[ans[stem]["title"]] = ans[stem]
     for title, page in last.items():
         if only and not any(o.lower() in title.lower() for o in only):
             continue
@@ -29,8 +34,10 @@ def main(run_dir, *only):
                 src = "site prefill kept"
             elif d.get("profile_key"):
                 src = f"{src}:{d['profile_key']}"
-            if any(str(f).startswith("sensitive_from_profile") for f in d.get("flags") or []):
-                src = f"program:{d.get('profile_key')}"
+            if (any(str(f).startswith("sensitive") for f in d.get("flags") or [])
+                    or d.get("profile_key") in L.SENSITIVE or L.SENSITIVE_LABEL.search(str(d.get("label") or ""))):
+                v = "(S value withheld)" if v else ""      # S fields: source only, never the value
+                src = f"profile S {d.get('profile_key')}" if d.get("profile_key") else src
             act = d.get("action")
             if act in ("skip", "clear"):
                 v = f"(empty; {act})"
