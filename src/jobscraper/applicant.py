@@ -961,6 +961,62 @@ def form_json() -> list[dict]:
     return out
 
 
+_SET_PART = re.compile(r"([^.\[\]]+)|\[(\d+)\]")
+
+
+def get_path(profile: Any, path: str) -> Any:
+    """The value at a dotted path with list indices ("education[0].grade"), or None."""
+    cur = profile
+    for name, idx in _SET_PART.findall(path):
+        if idx:
+            i = int(idx)
+            if not isinstance(cur, list) or i >= len(cur):
+                return None
+            cur = cur[i]
+        else:
+            if not isinstance(cur, dict):
+                return None
+            cur = cur.get(name)
+    return cur
+
+
+def set_path(profile: dict, path: str, value: Any) -> None:
+    """Write `value` at a dotted path, creating the mappings on the way; a
+    list index past the end appends empty entries ("education[0].grade" on an
+    empty list creates the first entry). Raises ValueError when a part of the
+    path holds something else (a string where a mapping should be)."""
+    parts = _SET_PART.findall(path)
+    if not parts:
+        raise ValueError("empty path")
+    cur: Any = profile
+    for i, (name, idx) in enumerate(parts):
+        last = i == len(parts) - 1
+        nxt_is_index = not last and bool(parts[i + 1][1])
+        fresh: Any = [] if nxt_is_index else {}
+        if idx:
+            n = int(idx)
+            if not isinstance(cur, list):
+                raise ValueError(f"{path}: not a list")
+            while len(cur) <= n:
+                cur.append({})
+            if last:
+                cur[n] = value
+            elif not isinstance(cur[n], (dict, list)):
+                cur[n] = fresh
+            cur = cur[n] if not last else cur
+        else:
+            if not isinstance(cur, dict):
+                raise ValueError(f"{path}: not a mapping")
+            if last:
+                cur[name] = value
+            else:
+                if cur.get(name) is None:
+                    cur[name] = fresh
+                elif not isinstance(cur[name], (dict, list)):
+                    raise ValueError(f"{path}: not a mapping")
+                cur = cur[name]
+
+
 def walk_leaves(value: Any):
     """(dotted path with [i] indices, leaf value) for every leaf of a profile."""
     yield from _walk(value)

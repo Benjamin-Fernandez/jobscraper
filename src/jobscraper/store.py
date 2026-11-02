@@ -1667,6 +1667,22 @@ class Store:
         return [self._question_dict(r) for r in self.conn.execute(
             "SELECT * FROM questions WHERE key = ? ORDER BY id", (key,))]
 
+    def question_employers(self, key: str) -> list[dict[str, str]]:
+        """The employers that asked a group, by first sighting: [{name,
+        employer_norm}] (name = the company's display name, else the
+        normalised one). An employer-scoped answer is keyed by employer_norm."""
+        out: dict[str, dict[str, str]] = {}
+        for r in self.conn.execute(
+                """SELECT c.name AS company, s.employer_norm FROM question_sightings s
+                     JOIN questions q ON q.id = s.question_id
+                     LEFT JOIN jobs j ON j.job_id = s.job_id
+                     LEFT JOIN companies c ON c.id = COALESCE(s.company_id, j.company_id)
+                    WHERE q.key = ? ORDER BY s.seen_at, s.id""", (key,)):
+            name = r["company"] or r["employer_norm"] or ""
+            if name and name not in out:
+                out[name] = {"name": name, "employer_norm": r["employer_norm"] or ""}
+        return list(out.values())
+
     def set_questions_status(self, key: str, status: str, now: str) -> int:
         """Set every row of a group to `status`; `answered` stamps answered_at.
         Returns the number of rows changed."""
