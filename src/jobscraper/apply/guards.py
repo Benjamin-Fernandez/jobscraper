@@ -504,6 +504,18 @@ def _label_match_extra(ref: str, pf: PageField, rctx: ResolveContext) -> bool:
         for x in labels)
 
 
+def _restates_fact(pf: PageField, mv: Any, fact: Fact) -> bool:
+    """G2(d) restated fact (Q-48, LF §8 G2d): on a choice field that is not Yes/No, a model
+    value that is not an offered option but equals (normalised) the cited non-private
+    fact's own value means "map this fact"; the caller writes the program's fit (D-86 F7).
+    Private facts never qualify (G7 and the locks cover them)."""
+    if fact.private or not fact.value or not is_choice(pf) or yes_no(pf) \
+            or not _text_of(mv).strip():
+        return False
+    offered = option_for(pf, mv) is not None and pf.options_complete
+    return not offered and same_value(mv, fact.value, pf)
+
+
 def _fact_field(c: _Ctx, pf: PageField, d: ModelDecision) -> Answer:
     """G2 (+G7, G5) for a decision that cites a fact."""
     ref = d.ref or ""
@@ -531,7 +543,8 @@ def _fact_field(c: _Ctx, pf: PageField, d: ModelDecision) -> Answer:
                 if fact.private:
                     return _answer_unknown(pf, "G2d: private fact without a matching rule",
                                            sensitive=True)
-                if not _text_of(mv).strip() or not same_value(option_for(pf, mv) or mv, pv, pf):
+                if (not _text_of(mv).strip() or not same_value(option_for(pf, mv) or mv, pv, pf)) \
+                        and not _restates_fact(pf, mv, fact):
                     return _answer_unknown(pf, "G2d: model and fact disagree")
                 if yes_no(pf):                                  # D-84 R2
                     agree = _second_agrees(c, pf, pv)
@@ -539,7 +552,8 @@ def _fact_field(c: _Ctx, pf: PageField, d: ModelDecision) -> Answer:
                         return _answer_unknown(pf, "G5: second opinion off")
                     if not agree:
                         return _answer_unknown(pf, "G5: second opinion disagrees")
-        elif _text_of(mv).strip() and not same_value(option_for(pf, mv) or mv, pv, pf):
+        elif _text_of(mv).strip() and not same_value(option_for(pf, mv) or mv, pv, pf) \
+                and not _restates_fact(pf, mv, fact):
             # an option named by its leaf ("Category > Leaf") is the same option
             return _answer_unknown(pf, "G2d: model value differs from the fact",
                                    sensitive=fact.private)
