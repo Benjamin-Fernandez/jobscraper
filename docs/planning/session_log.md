@@ -20,3 +20,9 @@ One entry per session. Older handover notes end up here, so `handover.md` stays 
 - Decisions D-79 (lenient profile), D-80 (finish tenant B with spike tooling), D-81 (NF-07 Workday deviation + conditions), D-82 (locks stay deterministic), D-83 (gate count 5 GH dry runs; audit read row by row; fresh owner approval for gate postings), D-84 (re-check R1–R4), D-85 (Greenhouse code pattern), D-86 (lane M F7/F8 tightenings, F9 interim compose_needed).
 - Owner: new resume; profile re-derived and applicant.yaml experience/skills rebuilt on request; address_line2 filled.
 - Open at pause: lane M (b79df03) and R3 (adc8f08) unmerged; Q-41, Q-44, Q-45 queued.
+
+## 2026-11-02 · Q-60 session (separate Coordinator session, branch `int/Q-60-mail-status`; paused by the owner)
+- Owner request D-90: application status from email (opt-in Gmail, incremental from the last processed message, automatic status updates), on a separate branch. Ran in parallel with the session-3 Coordinator on `personal`; IDs Q-60/D-90+/F-50 chosen to avoid collisions; all work in worktree `feat-Q-60`.
+- Stage A brief (researcher; IMAP app password recommended over Gmail API OAuth: 7-day Testing-mode token expiry), stage B design + BP + ADR-0007 (architect), stage E by the Coordinator (READY; amendment E1 Oleeo `tal.net` tenants), R2 header-only scan of the application mailbox with owner consent (special-use folders present; ATS mail dkim/spf/dmarc pass; Oleeo found), rules v1 (researcher), S0 + T0 merged into int.
+- Decisions D-90, D-91, D-92. Owner answers: application Gmail first; header scan yes.
+- Paused mid-build: lanes S, I, F and the tester stopped on the owner's word; state in the handover Q-60 block.
