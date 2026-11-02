@@ -94,8 +94,13 @@ async function reloadKeepingEdits() {
     return
   }
   const next = clone(res.profile ?? {})
+  const changed = (a, b) => JSON.stringify(a) !== JSON.stringify(b)
   for (const key of Object.keys(mine)) {
-    if (key !== 'extra' && JSON.stringify(mine[key]) !== JSON.stringify(before[key])) next[key] = mine[key]
+    if (key !== 'extra' && changed(mine[key], before[key])) next[key] = mine[key]
+  }
+  // The answers section is merged per answer: the new one stays, an edited one is kept.
+  for (const [k, entry] of Object.entries(mine.extra ?? {})) {
+    if (changed(entry, before.extra?.[k])) next.extra = { ...(next.extra ?? {}), [k]: entry }
   }
   data.value = res
   draft.value = next
@@ -192,8 +197,10 @@ function setExtra(key, scope, v) {
   else if (entry.kind === 'multi') setAt(draft.value, `${base}.picks`, v)
   else setAt(draft.value, `${base}.value`, v)
 }
-const seenOptions = (entry, scope) => scopeOf(entry, scope).seen ?? entry.seen ?? []
-const employerName = norm => norm.replace(/\b\w/g, c => c.toUpperCase())
+// Options are stored normalised (lower case); show them capitalised, keep the stored value.
+const titled = norm => String(norm).replace(/\b\w/g, c => c.toUpperCase())
+const seenOptions = (entry, scope) => (scopeOf(entry, scope).seen ?? entry.seen ?? []).map(n => [n, titled(n)])
+const employerName = titled
 async function removeAnswer(key) {
   delete draft.value.extra[key]
   if (!Object.keys(draft.value.extra).length) delete draft.value.extra
