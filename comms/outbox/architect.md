@@ -10,6 +10,81 @@ BODY: <concise message>
 STATUS: open
 -->
 
+### 2026-11-02 architect → coordinator, engineer, tester (Q-48, D-87)
+TYPE: handoff
+RE: Q-48, D-87 (extends D-55), KA-2; AD §5.4, §7.5; LF §4 L3/L5/L7; QD §3 rows 4 and 14; contracts v5 (additive)
+BODY: Fast-track amendment to tier 4 (declarations). Budget ran out (36/35 calls) before the doc fold-in: **this entry is the amendment of record** until AD §7.5, LF §4, QD §3 and `contracts.py` carry it (about 5 edits, no new design). No S values below; labels are employer text.
+
+**A. Decisions**
+- A1 Keep the key `declarations.non_compete`, widened to "any agreement that limits the work you can do". Same fact, same owner answer; a rename changes a `DeclarationLabel` value (breaking, ADR) and needs a D-79 migration for no behaviour gain. Only the form label and the example comment change.
+- A2 New standing class and key `government_employment` (bool, default false).
+- A3 Disability: no new key. `us_self_id.disability_status` is the disability answer for every country (one value, nothing to drift). A new tier-4 class `disability` (label-only match) reads it: S, filled by the program, `sensitive=True`, locked before the model (L3; G7 already lists disability).
+- A4 Agreement rule: when a label matches 2+ classes, all of them **standing** (`pep`, `conflict_audit_independence`, `criminal_record`, `bankruptcy`, `regulatory_disciplinary`, `non_compete`, `government_employment`) and all truth values equal → that value. A set holding an employer-specific class, `health` or `disability` stays AMBIGUOUS: D-70's prefill overwrite and L6's skip key off one employer-specific class, so they stay untouched.
+- A5 Checkboxes: the agreement rule does **not** apply to a single CHECKBOX; a multi-class box stays AMBIGUOUS (required → unknown `attestation_unclear`, optional → blank). ADR-0003: a tick is a signed statement, and token rules can't tell the polarity of each class ("I have no conflict of interest and am bound by a non-compete" has one negation and mixed polarity). Single-class boxes keep today's rule; with the new phrases "I confirm I am not bound by any restrictive agreement" is single-class `non_compete` → ticked.
+- A6 L7 stays (negated Yes/No → unknown) with two changes: (a) NS-exclusion runs ("not including national service") are removed before the negation test (L7 and `is_negated`); (b) `declarations.answer()` applies L7 itself on non-checkbox fields, so the Greenhouse resolver path fails closed too (the wider tier 4 would otherwise map "Are you free of any non-compete?" → `fit_bool(False)` → "No").
+- A7 R1 longest match: a class's hit is dropped when every span it matched lies inside a longer matched span of another class. This changes nothing in today's table (no cross-class nesting). It lets "worked for the government" beat prior_employment's "worked for", "employed by the government" beat "employed by", and pep's "senior government official" beat "government official".
+- A8 D-79: for `declarations.<bool>` paths only, `nil`, `none`, `na`, `n_a`, `not_applicable` (key form) read as false. `us_self_id.disability_status`: `none`, `nil`, `no_disability`, `not_disabled` → `no`.
+
+**B. Classifier (AD §7.5)**
+- B1 `non_compete` phrases (replace the row): non compete, non competes, noncompete, non competition, non solicitation, non solicit, nonsolicitation, non disclosure, nondisclosure, nda, ndas, confidentiality agreement, confidentiality agreements, confidentiality obligation, confidentiality obligations, restrictive covenant, restrictive covenants, restrictive agreement, restrictive agreements, restraint of trade, garden leave, bound by any agreement, agreement that restricts, agreements that restrict, agreement that would restrict, agreement restricting, agreements restricting, agreement that prevents, agreement that would prevent, agreement that prohibits, agreement that would prohibit, stock option agreement, stock option agreements, stock option or restricted stock, restricted stock grant, restricted stock agreement, restricted stock unit agreement, stock grant agreement, equity grant agreement. ("subject to any restrictions" is left out on purpose: work-rights questions use it.)
+- B2 `government_employment` phrases: civil service, civil servant, civil servants, public service, public servant, public sector, public officer, government service, government employee, government employees, government employment, government agency, government agencies, government ministry, government department, government body, government bodies, statutory board, statutory boards, government official, public official, worked for the government, worked for government, worked for a government, worked for any government, worked in the government, worked in government, work for the government, working for the government, employed by the government, employed by government, employed by a government, employed by any government, employed in the government, employed in government, have you worked in government, have you worked in the government, have you worked in the public sector, have you worked in the public service, have you worked in the civil service.
+  - MILITARY terms (used by the rule below; not class phrases): military, armed forces, armed services, defence force, defence forces, defense force, army, navy, air force, national service, ns, nsf, nsman, saf, conscription, uniformed service, uniformed services.
+  - NS exclusion: an exclusion run (excluding, exclude, excludes, except, other than, apart from, aside from, besides, save for, not including, not counting, does not include, do not include) with an NS term starting within the next 4 tokens, or an NS term followed within 3 tokens by not included / excluded / not counted / does not count. NS terms: national service, full time national service, ns, nsf, mandatory military service, compulsory military service, mandatory national service, military service, mandatory service, compulsory service, conscription.
+  - UNSURE phrases: government linked, glc, glcs, government owned, state owned, state enterprise.
+  - Rule (gov = a B2 hit after R1; mil = a MILITARY hit; excl = NS exclusion; unsure = an UNSURE hit): (gov or mil) and excl and not unsure → `government_employment`. Gov and not mil and not unsure → `government_employment` (the owner reads "worked for the government" as not counting NS). Gov with (mil and no excl) or with unsure → **AMBIGUOUS** (unknown, never No). Mil, no excl, no gov → no `government_employment`: an NS-inclusive question belongs to L5 / `ns_status`, and tier 4 doesn't answer it unless another class matches.
+  - Against `pep`: R1 makes "senior government official" pep only; "public office" stays pep. "Held public office or worked in the civil service?" → {pep, government_employment} → A4 → No; if the profile's two values differ → AMBIGUOUS (a real disagreement).
+- B3 `disability` (matched on the **label only**: EEO preambles in descriptions mention disability): disability, disabilities, disabled, person with disability, persons with disabilities, people with disabilities, pwd, pwds, handicap, handicapped. A label that also says veteran, gender, race, ethnic, ethnicity, religion or marital → AMBIGUOUS.
+- B4 `classify_all(label_norm, description_norm="") -> tuple[frozenset[DeclarationLabel], bool]` (classes, unsure): phrase hits → R1 → D-69 pair → B2 rule. `classify()` is built on it: unsure → AMBIGUOUS; 1 class → it; 2+ → AMBIGUOUS; 0 → attestation marker → AMBIGUOUS, else None (unchanged contract for callers).
+
+**C. Rules (AD §7.5)**
+- `government_employment`: `declarations.government_employment` (default false); joins `_PLAIN_BOOLS`.
+- `disability`: `no` → False, `yes` → True, `decline`/absent → None. A bool on a bool-shaped field → `fit_bool`; another choice → `fit_enum` with `DISABILITY_VALUE_MAP` = the EEO disability entry plus "no": no disability, i do not have a disability, i don't have a disability, i do not have any disability, not a person with disability, i am not a person with disability; "yes": i am a person with disability, person with disability. A single checkbox uses today's negation rule. None → the decline option when offered; else required → unknown, optional → blank (notes "disability: declined, no decline option" / "no offered option fits the declaration").
+- Agreement (inside `answer()` when label is AMBIGUOUS): `classes, unsure = classify_all(norm_label(f.label), norm_label(f.description))`; when not unsure, 2+ classes, all in `STANDING_DECLARATIONS`, `f.type` not CHECKBOX and all `truth()` equal → `fit_bool` of that value; `rule_id` and the source suffix = the sorted class values joined by `+` (e.g. `conflict_audit_independence+non_compete`), note `agreed: <classes>`, `sensitive=True`, 0.95. Otherwise unchanged (`attestation not recognised`).
+- L7 in `answer()` (A6b): a non-checkbox field whose label is negated (not, never, no, none, neither, free of, without; NS-exclusion runs removed first) → `_ended`, note "negated declaration question".
+- `health`: unchanged.
+
+**D. Profile schema**
+- `config/applicant.example.yaml`: `disability_status: decline  # no | yes | decline. Answers every disability question, in any country (D-87)`; `non_compete: false  # any agreement that limits the work you can do: non-compete, non-solicitation, NDA or confidentiality, stock option or restricted stock terms`; new `government_employment: false  # ever worked for the government, public sector, a statutory board or the military, not counting National Service` (after `non_compete`).
+- `applicant.py`: `BOOLS += "declarations.government_employment"`; A8 synonyms. Form rows (QD §3 rows 4 and 14 follow):
+  - `_I("declarations.non_compete", "Are you bound by any agreement that limits the work you can do, such as a non-compete, non-solicitation, NDA or stock grant terms?", "bool")`
+  - `_I("declarations.government_employment", "Have you ever worked for the government, public sector or military, not counting National Service?", "bool", help="Questions that include National Service use your National Service status instead.")` (after non_compete)
+  - `_I("us_self_id.disability_status", "Disability status", "enum", _enum_opts("us_self_id.disability_status"), help="Used for every disability question, in any country, not only US forms.")`
+
+**E. Engineer WP-Q48 (one lane; `apply/declarations.py`, `applicant.py`, `config/applicant.example.yaml`)**
+- E1 (architect, with the doc fold-in): `DeclarationLabel.GOVERNMENT_EMPLOYMENT = "government_employment"`, `DeclarationLabel.DISABILITY = "disability"`; v5 additive; not in `EMPLOYER_SPECIFIC_DECLARATIONS`.
+- E2 `declarations.py`: B1–B4, R1, `STANDING_DECLARATIONS`, C rules, L7 in `answer()`, NS-exclusion strip in `is_negated`.
+- E3 `applicant.py`: BOOLS, A8, the D form rows. E4 the example yaml lines.
+- E5 At lane M's merge (`locks.py`): L3 must pass AMBIGUOUS to `declarations.answer()` rather than end it itself, and L7 must use the declarations negation helper. One check, no new code if it already delegates.
+- Verify: `python tests/run_tests.py -k declarations`, `-k applicant`, then the full suite.
+
+**F. Tester oracles (employer "Acme"; the example profile defaults, plus a fixture `disability_status: no`)**
+- F1 Optional Yes/No: "Have you signed or accepted any agreement, or are you otherwise subject to any restrictions, that 1) will restrict the job responsibilities you may perform or 2) prohibit you from working for Acme, e.g. non-competition agreement, non-disclosure agreement, non-solicitation agreement, stock option or restricted stock grant agreement with your current or former employers or pursuant to applicable government conflict of interest restrictions?" → `classify` AMBIGUOUS; `classify_all` ({non_compete, conflict_audit_independence}, False); `answer` FILLED "No", tier DECLARATION, rule_id `conflict_audit_independence+non_compete`, sensitive.
+- F2 F1 with `conflict_audit_independence: true` → optional blank_optional; required → unknown (LF reason `attestation_unclear`).
+- F3 "Have you ever worked for the Government (excluding mandatory military service)?" → `government_employment` (prior_employment dropped by R1) → "No".
+- F4 "Have you ever worked for the government, not including National Service?" → `government_employment`, L7 doesn't fire → "No".
+- F5 "Have you served in the armed forces?" → `classify` None (not this lock).
+- F6 "Have you ever been employed by the government or served in the military?" → AMBIGUOUS → required unknown.
+- F7 "Have you ever worked for a government-linked company?" → AMBIGUOUS.
+- F8 "Are you, or have you ever been, a senior government official?" → pep only → "No"; still pep-only with `government_employment: true`.
+- F9 "Have you held public office or worked in the civil service?" → "No" (agreement); with `pep: true` → AMBIGUOUS.
+- F10 "Are you a person with disability (PWD)?" Yes/No → "No"; with `decline` and a "Prefer not to say" option → that option; `decline`, no decline option: required → unknown, optional → blank.
+- F11 Label "Disability status", options "Yes, I have a disability (or previously had a disability)" / "No, I do not have a disability and have not had one in the past" / "I do not want to answer" → the "No, I do not have…" option.
+- F12 Label "Gender" with a description that mentions disability → not `disability`.
+- F13 "Do you have any disability or medical condition that may affect your work?" → AMBIGUOUS → optional blank / required unknown.
+- F14 "Do you have any medical condition we should know about?" required with a decline option → the decline option; optional → blank (health unchanged).
+- F15 Required single checkbox "I confirm I am not bound by any restrictive agreement" → ticked ("true").
+- F16 Required single checkbox "I confirm I have no conflict of interest and am not bound by any non-compete" → unknown (A5).
+- F17 "Are you free of any non-compete agreement?" Yes/No → unknown (L7, resolver path too).
+- F18 "Have you previously worked for us or any government agency?" → AMBIGUOUS (employer-specific in the set).
+- F19 Regression: every pre-D-87 classify oracle unchanged (R1 changes nothing on the old table).
+- F20 normalise: `government_employment: "NA"` / `"nil"` → false; key missing → false; `disability_status: "none"` → "no".
+
+**G. Open (coordinator)**
+- G1 Recommend adding `military`, `armed forces` to G7 `SENSITIVE_LABEL` (lane M `guards.py`, one constant). Without it, an NS-inclusive question that no NS `yes_if` rule matches (F5) can still reach the model.
+- G2 No NS `yes_if` rule for "served in the armed forces": it isn't true for every enum value (NS can be served in the police or civil defence), so it stays captured.
+- WRITTEN INTO DOCS (2026-11-02, follow-up): AD §5.4 + §7.5, LF §4 L3/L7 + G7 (D-88) + G2(d) (restated-fact rule: accepted, the written option stays the program's fit), QD §3 rows 4 and 14, `contracts.py` (2 additive `DeclarationLabel` members, v5). WP-Q48 and the tester WP are ready to build.
+STATUS: open
+
 ### 2026-11-02 architect → coordinator
 TYPE: handoff
 RE: Q-04, Q-05; F-10–F-12, F-20–F-25, F-30–F-40, NF-01–NF-09
