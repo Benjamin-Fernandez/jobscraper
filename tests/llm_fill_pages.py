@@ -474,7 +474,33 @@ STEPS = {
 CATS40 = [{"cat": c, "items": [f"{c} {k}" for k in ("Alpha", "Bravo", "Charlie", "Delta", "Echo", "Foxtrot", "Golf")]}
           for c in ("Job Board", "Social Media", "Company Website", "Referral", "Event")] + \
          ["Career Fair", "Other", "Newspaper", "Radio", "University"]
+REVIEW_STUBS = {
+    # R3 review F1 + pick arguments: an optional search-driven prompt with a site pill our search
+    # misses, and one whose search needs a pick between two suggestions
+    "review_optional_prompt": {"title": "Optional prompts (R3 review F1)", "body": [
+        {"w": "prompt", "label": "Primary programming language", "aid": "formField-primaryLanguage",
+         "options": ["Java", "Kotlin"], "search": True, "value": "Java"},
+        {"w": "prompt", "label": "Strongest skill", "aid": "formField-strongestSkill",
+         "options": ["Python (Programming Language)", "Python 3", "PyTorch"], "search": True}]},
+    # F4: a required search-driven prompt our search misses
+    "review_required_prompt": {"title": "Required prompt (R3 review F4)", "body": [
+        {"w": "prompt", "label": "Main programming language", "aid": "formField-mainLanguage", "req": True,
+         "options": ["Java", "Kotlin"], "search": True}]},
+    # F2 / F5: a junk entry to delete and a missing profile entry to add at the same index
+    "review_entries": {"title": "Languages (R3 review F2, F5)", "body": [
+        {"section": "Languages", "entries": [_lang("English", "Native"), _lang("Japanese", "Advanced")],
+         "template": _lang("", "")}]},
+    # F6: a revealed field takes the page ordinal of a field that still exists
+    "review_collide": {"title": "Audit key collision (R3 review F6)", "body": [
+        {"w": "text", "label": "Favourite tool", "aid": "formField-tool1"},
+        {"w": "radio", "label": "Do you have any relatives working at Acme?", "aid": "formField-relatives",
+         "req": True, "options": YN, "id": "rel-group2", "reveal": {"when": "Yes", "show": "tool-mid"}},
+        {"w": "text", "label": "Favourite tool", "aid": "formField-tool2", "hidden_until": "tool-mid"},
+        {"w": "text", "label": "Favourite tool", "aid": "formField-tool3"}]},
+}
+
 STUBS = {
+    **REVIEW_STUBS,
     "prompt_categories": {"title": "Categories", "body": [
         {"w": "prompt", "label": "How Did You Hear About Us?", "aid": "formField-source", "req": True, "options": CATS40}]},
     "listbox_error": {"title": "Listbox read-back", "body": [

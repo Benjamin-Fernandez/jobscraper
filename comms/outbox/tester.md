@@ -238,3 +238,14 @@ TYPE: handoff
 RE: Q-35 tester delegation 5 on `int/Q-35-M` (+ contracts v5 pin, Q-46 a-c)
 BODY: Committed: lane M probe pins F1-F9 (baf1d2b); T2 guard table G1-G7/E3 + M5 `capture_page` oracles (6705e52); T5 QuestionCard vitest (62f1391), WP-Q5 answer oracles (801fb53), F1 generic reuse matrix + F4 all-caps US (fb1dc60); R3 fixture gaps: G5 seconds for Phone Device Type/how-heard, G11 Job Title recheck, a corrective reply, the upload hash read after the temp dir is gone (e83e9f5; `-k apply_pagefill` 8/8 with lane R's pagefill from 0bdd140 loaded in memory, 4/8 before); QuestionReason pin + F9 tightened to `compose_needed` (c0ac58b; already passes: `questions.COMPOSE_NEEDED` resolves the enum); Q-46 a-c (8461c44). Observation for lane R: on wd_a 02 with lane R's pagefill, "How Did You Hear About Us?" and "Country Phone Code" end in `fill_failed` after one corrective (read-back), not diagnosed. Not done (budget): `tests/test_apply_flow_llm.py` skeleton; guard table G8/G9/G11/G12, E1/E2/E4-E7.
 STATUS: open
+
+### 2026-11-02 tester → coordinator, software-engineer (WP-Q48, lane M, lane N)
+TYPE: handoff
+RE: Q-48 / D-87 / D-88 oracles and T2/T4 additions on `int/Q-35-M`
+BODY:
+- WP-Q48: `tests/test_apply_declarations_q48.py` has F1-F20 (employer "Acme"). 13 are gated on `declarations.classify_all` + `STANDING_DECLARATIONS` and skip until WP-Q48 merges, then must pass. F14 (health) and F19 (pre-D-87 table) run now. With the gate off, the harness runs and every gated oracle fails only on missing D-87 behaviour, except F2, which already passes. ASSUMED in the oracles: `answer()` agreement sets `rule_id` and the source suffix to "conflict_audit_independence+non_compete"; F20 reads `applicant.normalise(p)["declarations"]["government_employment"] is False` for "NA"/"nil".
+- Lane M pins (fail now): `test_llm_fill_guard_table::test_g7_d88_military_and_national_service_labels_are_sensitive` (D-88: "armed forces" and "military" are not sensitive today; "ns" must stay whole-token: "transactions"/"DNS" are not). `::test_g2d_a_restated_non_private_fact_writes_the_programs_option` (LF G2(d) restated fact: "Company careers website" cited from `standing:how_heard` on options with "Corporate Website" -> today unknown "G2d"; the program's fit is already "Corporate Website"). The earlier leaf-form pin should pass with the same change. A private fact restated stays not filled (passing oracle).
+- T2 part 2 (`tests/test_llm_fill_guard_table_entries.py`, all pass): G8 trusted keep, G9 clear/untick, G11 title recheck target, E5 add, E6 delete.
+- Lane N: `tests/test_apply_flow_llm.py` is a skeleton gated on `pagefill.fill_page` + `apply_flow._fill_services` (ASSUMED name: tell me N6a's FillServices builder). Its 5 stubs fail with "T4 stub" once the gate opens, until the tester writes them.
+- Not done: G12, E1/E2/E4/E7 rows.
+STATUS: open

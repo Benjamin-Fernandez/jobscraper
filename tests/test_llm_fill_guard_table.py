@@ -164,6 +164,72 @@ def test_g7_sensitive_labels_match_whole_words():
     assert G.sensitive_label(P._pf("d", "How do you embrace change?")) is False
 
 
+@needs(*NEEDS, "jobscraper.apply.llm_fill:pick_option")
+def test_g7_d88_military_and_national_service_labels_are_sensitive():
+    """Failing pin until lane M adds D-88 to `guards.SENSITIVE_LABEL` (LF §7 G7; Q-48): military,
+    armed forces, national service, and `ns` as a whole token only. An NS-inclusive question no
+    NS rule answers ends unknown "G7" and no pick prompt carries a value for it."""
+    from jobscraper.apply import guards as G, llm_fill as L
+    from jobscraper.apply.contracts import AnswerStatus as AS, FieldType as FT
+    import llm_fill_t2 as T
+    from llm_fill_support import FakeFillBackend
+    P = _h()
+    for label in ("Have you served in the armed forces?", "Military service status",
+                  "Have you completed National Service?", "NS status"):
+        assert G.sensitive_label(P._pf("a", label)) is True, label
+    for label in ("Describe your experience with transactions", "Do you know DNS?"):
+        assert G.sensitive_label(P._pf("b", label)) is False, label
+    q = P._pf("m", "Have you served in the armed forces?", FT.RADIO, options=("Yes", "No"))
+    d, _ = P._decide([q], [P._md("m", "resume", "Yes", evidence="Python, SQL, PostgreSQL, Git")],
+                     second=lambda pf: P._md("m", "resume", "Yes", evidence="Python, SQL, PostgreSQL, Git"))
+    a = d.answers["m"]
+    assert a.status is AS.UNKNOWN and a.note.startswith("G7") and a.sensitive, (a.status, a.note)
+    fb = FakeFillBackend(replies=[{"kind": "pick", "repeat": True, "raw": {"choice": "Yes"}}])
+    assert L.pick_option(fb, q, "Yes", ["Yes", "No"], s_values=T.secrets()) is None and fb.calls == []
+
+
+HOW_HEARD_OPTS = ("Corporate Website", "LinkedIn", "Referral", "Other")
+
+
+@needs(*NEEDS)
+def test_g2d_a_restated_non_private_fact_writes_the_programs_option():
+    """Failing pin until lane M builds LF §7 G2(d) "restated fact" (D-87 follow-up): on a
+    non-Yes/No choice, a model value equal (normalised) to the cited fact's own value means "map
+    this fact"; the written option is the program's fit (S-5b how-heard: "Company careers website"
+    -> "Corporate Website"). Another option is still a disagreement."""
+    from jobscraper.apply import facts as F, guards as G
+    from jobscraper.apply.contracts import AnswerStatus as AS, FieldType as FT
+    import llm_fill_t2 as T
+    P = _h()
+    hh = P._pf("h", "How did you hear about this job?", FT.DROPDOWN, options=HOW_HEARD_OPTS)
+    fit = F.fact_value("standing:how_heard", hh, T.rctx(), T.rules(), today=T.TODAY)
+    assert fit is not None and fit[0] == "Corporate Website", fit          # the program's own mapping
+    for mv in ("", "Corporate Website", "Company careers website", "company careers website"):
+        d, _ = P._decide([hh], [P._md("h", "standing", mv, ref="standing:how_heard")])
+        a = d.answers["h"]
+        assert a.status is AS.FILLED and a.value == "Corporate Website" and a.confidence == G.CONF_FACT, \
+            (mv, a.status, a.note)
+    d, _ = P._decide([hh], [P._md("h", "standing", "LinkedIn", ref="standing:how_heard")])
+    assert d.answers["h"].status is AS.UNKNOWN and d.answers["h"].note.startswith("G2d")
+
+
+@needs(*NEEDS)
+def test_g2d_a_private_fact_never_counts_as_restated():
+    from jobscraper.apply import facts as F
+    from jobscraper.apply.contracts import AnswerStatus as AS, FieldType as FT
+    import llm_fill_t2 as T
+    P = _h()
+    ctx = T.rctx()
+    cat = F.fact_catalogue(ctx.profile, ctx, today=T.TODAY)
+    ref = "profile:singapore_status.residency_status"
+    fact = next(f for f in cat if f.ref == ref)
+    assert fact.private
+    q = P._pf("r", "Which best describes you?", FT.DROPDOWN, options=("Singapore Citizen", "Permanent Resident", "Foreigner"))
+    raw = str(getattr(fact, "value", "") or "")
+    d, _ = P._decide([q], [P._md("r", "profile", raw, ref=ref)], second=lambda pf: P._md("r", "profile", raw, ref=ref))
+    assert d.answers["r"].status is not AS.FILLED, (raw and "value set", d.answers["r"].note)
+
+
 @needs(*NEEDS, "jobscraper.apply.contracts:EntrySection")
 def test_e3_a_junk_entry_is_deleted_and_its_fields_are_skipped():
     from jobscraper.apply import facts as F, guards as G, locks
