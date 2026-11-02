@@ -77,6 +77,21 @@ class ApplyMailConfig:
 
 
 @dataclass(frozen=True)
+class LlmFillConfig:
+    """`apply.llm_fill` (llm_fill_design §13.4, D-78): the local model that fills
+    every page. Nothing here is personal; prompts never hold S values."""
+    num_ctx: int = 32768
+    page_timeout_s: int = 120               # one model call
+    max_fields_per_call: int = 20           # chunk size outside repeated entries (§6.1)
+    long_list: int = 15                     # options above this go through pick_option (§6.4)
+    keep_alive: str = "15m"                 # Ollama keeps the model loaded between steps (§13.2)
+    second_opinion: bool = True             # G5 on risky required answers
+    cache: bool = True                      # fill_cache replay on a retry (§13.3)
+    max_followups: int = 15                 # pick / recheck / second-opinion calls per attempt
+    debug_dump: bool = False                # true: data/apply/<id>/prompts/NN.json (local, gitignored)
+
+
+@dataclass(frozen=True)
 class ApplyConfig:
     mode: str = "dry_run"                   # auto | dry_run
     daily_cap: int = 10                     # D-61
@@ -90,14 +105,17 @@ class ApplyConfig:
     action_pause_ms: int = 250              # NF-05
     step_timeout_s: int = 45
     confirm_timeout_s: int = 60             # F-37
-    attempt_timeout_s: int = 420            # NF-07
+    attempt_timeout_s: int = 900            # NF-07; D-78 raised 420 -> 900 (llm_fill_design §13.1)
     dry_run_hold_s: int = 600               # F-37
     resume_format: str = "pdf"              # pdf | docx
     mygreenhouse: bool = True               # D-70: MyGreenhouse autofill, then fill the gaps (§9.1.1)
     mygreenhouse_wait_s: int = 20
-    workday_entry: str = "auto"             # D-70 §9.4.2: auto | manual (lane V)
+    workday_entry: str = "auto"             # D-78: auto = Autofill with Resume when offered, else
+                                            # Apply Manually | manual (llm_fill_design §9.1)
     max_wizard_steps: int = 15
     llm_text_temperature: float = 0.3
+    fill: str = "llm"                       # D-78: llm | rules (the pre-D-78 path, removed by WP-C1)
+    llm_fill: LlmFillConfig = LlmFillConfig()
     mail: ApplyMailConfig = ApplyMailConfig()
     # D-70 §11.5: the mailbox for contact.backup_email; host "" = the same mailbox as `mail`.
     mail_backup: ApplyMailConfig = ApplyMailConfig(host="")
@@ -111,7 +129,8 @@ class ApplyConfig:
         def block(key: str) -> dict[str, Any]:
             return raw.get(key) if isinstance(raw.get(key), dict) else {}
         backup = {"host": "", **block("mail_backup")}
-        return cls(**_coerce(cls, raw, skip={"mail", "mail_backup"}),
+        return cls(**_coerce(cls, raw, skip={"mail", "mail_backup", "llm_fill"}),
+                   llm_fill=LlmFillConfig(**_coerce(LlmFillConfig, block("llm_fill"))),
                    mail=ApplyMailConfig(**_coerce(ApplyMailConfig, block("mail"))),
                    mail_backup=ApplyMailConfig(**_coerce(ApplyMailConfig, backup)))
 

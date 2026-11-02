@@ -23,7 +23,7 @@ from typing import Any, Iterable, Optional
 
 from .models import RawJob, WatchedCompany, posting_key
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4   # 4: D-78 fill_cache + apply_answers evidence/shown_json/shown_origin/entry
 
 # A posting closes after this many successful fetches in a row leave it out (H1-1).
 CLOSE_AFTER_MISSES = 2
@@ -294,6 +294,21 @@ CREATE TABLE IF NOT EXISTS question_sightings (
 );
 CREATE INDEX IF NOT EXISTS idx_sightings_attempt ON question_sightings(attempt_id);
 CREATE INDEX IF NOT EXISTS idx_sightings_question ON question_sightings(question_id);
+
+-- D-78 (llm_fill_design §13.3, §14): the model's guarded decisions for one job, so a
+-- retry replays earlier pages without model calls. Scope: one job, never across
+-- employers; rows older than 30 days are purged at the start of an apply run.
+CREATE TABLE IF NOT EXISTS fill_cache (
+    job_id TEXT NOT NULL,
+    field_sig TEXT NOT NULL,
+    facts_hash TEXT NOT NULL,
+    prompt_version TEXT NOT NULL,
+    model TEXT NOT NULL,
+    decision_json TEXT NOT NULL,           -- the guarded ModelDecision + Answer fields (local only)
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (job_id, field_sig, facts_hash, prompt_version, model)
+);
+CREATE INDEX IF NOT EXISTS idx_fill_cache_created ON fill_cache(created_at);
 """
 
 # The one status that does not mean "an application went out". Moving to any
@@ -373,6 +388,12 @@ class Store:
         ev_cols = {r["name"] for r in self.conn.execute("PRAGMA table_info(app_events)")}
         if "by" not in ev_cols:
             self.conn.execute("ALTER TABLE app_events ADD COLUMN by TEXT")
+        # D-78 (llm_fill_design §14): the audit says what the field showed, who put it
+        # there, the model's quote and the repeated entry it belongs to.
+        ans_cols = {r["name"] for r in self.conn.execute("PRAGMA table_info(apply_answers)")}
+        for col in ("evidence", "shown_json", "shown_origin", "entry"):
+            if col not in ans_cols:
+                self.conn.execute(f"ALTER TABLE apply_answers ADD COLUMN {col} TEXT")
         # The new tables come from SCHEMA's CREATE TABLE IF NOT EXISTS; record the
         # version they belong to (an upsert: an older database already has a row).
         # Never downgrade: an older build opening a newer database keeps its number.
@@ -1381,12 +1402,15 @@ class Store:
     _ANSWER_COLUMNS = ("step", "field_key", "label", "label_norm", "field_type", "required",
                        "section", "options_json", "value_json", "tier", "source",
                        "confidence", "status", "rule_id", "model", "prompt_hash", "note",
-                       "sensitive", "recorded_at")
+                       "sensitive", "recorded_at",
+                       "evidence", "shown_json", "shown_origin", "entry")   # D-78, §14
 
     def add_answers(self, attempt_id: int, rows: Iterable[dict[str, Any]]) -> int:
         """Append audit rows (apply_design §7.8). Each row is a dict with the
-        `apply_answers` columns; `options_json` / `value_json` may be given as
-        Python values (they are JSON-encoded here). Does not commit."""
+        `apply_answers` columns; `options_json` / `value_json` / `shown_json` may
+        be given as Python values (they are JSON-encoded here); a missing D-78
+        column (`evidence`, `shown_json`, `shown_origin`, `entry`) is NULL.
+        Does not commit."""
         n = 0
         cols = ", ".join(("attempt_id",) + self._ANSWER_COLUMNS)
         marks = ",".join("?" * (len(self._ANSWER_COLUMNS) + 1))
@@ -1394,7 +1418,8 @@ class Store:
             vals = []
             for c in self._ANSWER_COLUMNS:
                 v = row.get(c)
-                if c in ("options_json", "value_json") and v is not None and not isinstance(v, str):
+                if c in ("options_json", "value_json", "shown_json") and v is not None \
+                        and not isinstance(v, str):
                     v = json.dumps(v, ensure_ascii=False)
                 elif c in ("required", "sensitive"):
                     v = int(bool(v))
@@ -1782,6 +1807,62 @@ class Store:
                 "last_seen_at": max(r["last_seen_at"] for r in grp),
             })
         return out
+
+    # ---------------- apply, D-78 (lane N): the model's decision cache ----------------
+    #
+    # llm_fill_design §13.3, §14. One job's guarded decisions, so a retry of the
+    # same job (after the owner answered a captured question) replays earlier
+    # pages without model calls. Local only: `decision_json` never leaves the DB.
+
+    def fill_cache_get(self, job_id: str, sigs: Iterable[str], facts_hash: str,
+                       prompt_version: str, model: str) -> dict[str, dict[str, Any]]:
+        """{field_sig: decision} for the cached rows of this job among `sigs`
+        under the same facts, prompt version and model."""
+        sigs = list(dict.fromkeys(s for s in sigs if s))
+        out: dict[str, dict[str, Any]] = {}
+        for i in range(0, len(sigs), 500):                 # stay under SQLite's variable limit
+            chunk = sigs[i:i + 500]
+            marks = ",".join("?" * len(chunk))
+            for r in self.conn.execute(
+                    f"""SELECT field_sig, decision_json FROM fill_cache
+                         WHERE job_id = ? AND facts_hash = ? AND prompt_version = ? AND model = ?
+                           AND field_sig IN ({marks})""",
+                    (job_id, facts_hash, prompt_version, model, *chunk)):
+                try:
+                    out[r["field_sig"]] = json.loads(r["decision_json"])
+                except ValueError:
+                    continue
+        return out
+
+    def fill_cache_put(self, job_id: str, rows: Iterable[dict[str, Any]],
+                       now: Optional[str] = None) -> int:
+        """Insert or replace cache rows. Each row: `field_sig`, `facts_hash`,
+        `prompt_version`, `model`, and `decision` (a dict, JSON-encoded here) or
+        `decision_json` (text). Commits; returns how many were written."""
+        now = now or utcnow()
+        n = 0
+        for row in rows:
+            dec = row.get("decision_json")
+            if dec is None:
+                dec = json.dumps(row.get("decision") or {}, ensure_ascii=False, sort_keys=True)
+            self.conn.execute(
+                """INSERT INTO fill_cache (job_id, field_sig, facts_hash, prompt_version, model,
+                       decision_json, created_at) VALUES (?,?,?,?,?,?,?)
+                   ON CONFLICT (job_id, field_sig, facts_hash, prompt_version, model)
+                   DO UPDATE SET decision_json = excluded.decision_json,
+                                 created_at = excluded.created_at""",
+                (job_id, row["field_sig"], row["facts_hash"], row["prompt_version"],
+                 row["model"], dec, now))
+            n += 1
+        self.conn.commit()
+        return n
+
+    def fill_cache_purge(self, before: str) -> int:
+        """Delete cache rows created before `before` (UTC text; apply_flow passes
+        now - 30 days at run start). Commits; returns how many."""
+        cur = self.conn.execute("DELETE FROM fill_cache WHERE created_at < ?", (before,))
+        self.conn.commit()
+        return cur.rowcount
 
 # ---------------- apply (M20): the attempt state machine as plain strings ----------------
 #

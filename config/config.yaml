@@ -147,14 +147,25 @@ apply:
   action_pause_ms: 250       # fixed pause after each field (NF-05)
   step_timeout_s: 45         # waiting for a page or step to appear
   confirm_timeout_s: 60      # F-37
-  attempt_timeout_s: 420     # whole attempt, excluding the mail wait (NF-07)
+  attempt_timeout_s: 900     # whole attempt, excluding the mail wait (NF-07; D-78 raised 420 -> 900)
   dry_run_hold_s: 600        # F-37 dry run: keep the filled form open
   resume_format: pdf         # pdf | docx: which tailored file to upload when both exist
   mygreenhouse: true         # D-70: click "Autofill with (My)Greenhouse" when present, then fill only the gaps
   mygreenhouse_wait_s: 20
-  workday_entry: auto        # D-70: auto = last application on a tenant applied to before, else Apply Manually | manual
+  workday_entry: auto        # D-78: auto = Autofill with Resume when offered, else Apply Manually | manual
   max_wizard_steps: 15
   llm_text_temperature: 0.3
+  fill: llm                  # D-78: the local model fills every page | rules (the pre-D-78 path)
+  llm_fill:                  # docs/architecture/llm_fill_design.md §13.4
+    num_ctx: 32768
+    page_timeout_s: 120      # one model call
+    max_fields_per_call: 20
+    long_list: 15            # longer option lists go through a pick call
+    keep_alive: "15m"        # keep the model loaded between steps
+    second_opinion: true
+    cache: true              # replay a job's earlier pages on a retry, no model calls
+    max_followups: 15
+    debug_dump: false        # true: data/apply/<id>/prompts/NN.json (local, gitignored)
   mail:
     host: imap.gmail.com
     port: 993
