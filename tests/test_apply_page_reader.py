@@ -4,9 +4,8 @@ Skip-clean: each oracle is defined only once `jobscraper.apply.page` has what it
 headless Edge on the synthetic fixtures (tests/fixtures/apply/llm_fill, built by
 tests/llm_fill_pages.py) served on 127.0.0.1; without a browser they print a note and pass.
 
-ASSUMED call shapes (build plan WP-R1), all in `_read` / `_sections` below:
-  page.read_page(page, *, scope, sections, origin) -> list[PageField]
-  page.entry_sections(page, scope) -> list[EntrySection]
+Call shapes: LF §8 pinned `page.read_page(page, *, scope, sections, origin: ValueOrigin, rng=None)`;
+ASSUMED (build plan WP-R1, the generic default): `page.entry_sections(page, scope) -> list[EntrySection]`.
 """
 from __future__ import annotations
 
@@ -33,7 +32,7 @@ def _sections(pg):
     return P.entry_sections(pg, SCOPE)
 
 
-def _read(pg, origin: str = "resume_import"):
+def _read(pg, origin: ValueOrigin = ValueOrigin.RESUME_IMPORT):
     from jobscraper.apply import page as P
     return P.read_page(pg, scope=SCOPE, sections=_sections(pg), origin=origin)
 
@@ -111,7 +110,7 @@ def test_first_read_marks_site_values_with_the_import_origin_and_empties_as_empt
     with _open("wd_a/02-my_information/page.html") as pg:
         if pg is None:
             return
-        for pf in _read(pg, origin="resume_import"):
+        for pf in _read(pg, origin=ValueOrigin.RESUME_IMPORT):
             want = ValueOrigin.RESUME_IMPORT if pf.shown not in ("", [], None, "false") else None
             if want:
                 assert pf.origin is want, pf.field.label

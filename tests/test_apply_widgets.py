@@ -139,6 +139,43 @@ def test_enter_is_never_pressed_inside_a_form_with_a_submit_control():
         assert pg.evaluate("document.body.dataset.formSubmits") == "0"
 
 
+def _reset(pg, pf) -> bool:
+    from jobscraper.apply import widgets as W
+    return W.reset(pg, pf)
+
+
+@needs(*NEEDS, "jobscraper.apply.widgets:reset")
+def test_reset_empties_text_listbox_and_prompt_but_not_a_radio_group():
+    """LF §3.2 / review H3 (G9): `reset` returns False when the widget can't be emptied."""
+    with _open("wd_a/03-my_experience/page.html") as pg:
+        if pg is None:
+            return
+        f = _by_label(pg, "Work Experience 2")
+        assert _reset(pg, f["Location"]) is True and _value(pg, f["Location"]) in ("", None)
+        edu = _by_label(pg, "Education 1")
+        assert _reset(pg, edu["Field of Study"]) is True and _value(pg, edu["Field of Study"]) in ("", None, [])
+    with _open("wd_a/02-my_information/page.html") as pg:
+        if pg is None:
+            return
+        f = _by_label(pg)
+        assert _reset(pg, f["Country"]) is True and _value(pg, f["Country"]) in ("", None)
+        q = "Have you previously worked for Example Employer?"
+        assert _fill(pg, f[q], "No") is True
+        assert _reset(pg, f[q]) is False, "a radio group can't go back to empty"
+
+
+@needs(*NEEDS)
+def test_a_search_miss_fails_and_leaves_no_typed_text_behind():
+    """Review M14: an optional search miss clears the typed text."""
+    with _open("stubs/enter_form.html") as pg:
+        if pg is None:
+            return
+        pf = _by_label(pg)["Country Phone Code"]
+        assert _fill(pg, pf, "Atlantis (+999)") is False
+        assert pg.input_value("#enter-prompt") == ""
+        assert pg.locator('[data-automation-id="selectedItem"]').count() == 0
+
+
 @needs(*NEEDS)
 def test_a_search_driven_prompt_reads_back_the_intended_option_not_the_first_hit():
     """Review M14: every family reads back equal to the intended value."""
