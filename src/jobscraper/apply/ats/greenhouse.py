@@ -376,9 +376,9 @@ class GreenhouseAdapter:
         Skipped when no import can happen (MyGreenhouse off or no button: the
         origins are `site_default` then anyway). Never logged: the values are
         personal. Best effort: a read error leaves the snapshot empty."""
-        if not B.options_for(page).mygreenhouse or self._autofill_button(page) is None:
-            return
         try:
+            if not B.options_for(page).mygreenhouse or self._autofill_button(page) is None:
+                return
             from .. import page as reader                 # lane R (WP-R1); lazy like entry_sections
             fields = reader.read_page(page, scope=self.scope(page, ctx), options=False, step="form")
             keys = reader.audit_keys(page, fields, "form")
