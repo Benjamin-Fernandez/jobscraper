@@ -292,7 +292,9 @@ def test_extra_validation_names_each_bad_field():
     assert any("Visa Status!" in e.path or "Visa Status!" in e.message for e in _errs(_with(bad_key))),         "the error names the key"
 
     bad(lambda ex: ex["visa_status"].update(picks=["not offered"]), "extra.visa_status.picks")      # picks not within seen
-    bad(lambda ex: ex["visa_status"].update(picks=[]), "extra.visa_status.picks")                   # choice needs a pick
+    # a choice needs a base pick, unless it has employer-scoped answers (D-76 item 3, tested below)
+    bad(lambda ex: (ex["visa_status"].pop("by_employer", None), ex["visa_status"].update(picks=[])),
+        "extra.visa_status.picks")
     bad(lambda ex: ex["has_driving_licence"].update(value="yes"), "extra.has_driving_licence.value")
     bad(lambda ex: ex["years_with_python"].update(value="three"), "extra.years_with_python.value")
     bad(lambda ex: ex["available_from"].update(value="02/02/2026"), "extra.available_from.value")
@@ -308,6 +310,15 @@ def test_extra_validation_names_each_bad_field():
         {"shopee": {"value": None, "picks": ["citizen", "gone"], "seen": ["citizen"]}}),
         "extra.visa_status.by_employer")
     bad(lambda ex: ex["visa_status"].update(by_employer=["shopee"]), "extra.visa_status.by_employer")
+
+
+@needs("jobscraper.applicant:FORM")
+def test_a_choice_with_employer_answers_may_have_empty_base_picks_d76():
+    """D-76 item 3: a choice question's first answer may be employer-scoped only."""
+    p = profile_with_extra()
+    assert p["extra"]["visa_status"].get("by_employer"), "the sample entry has employer-scoped answers"
+    p["extra"]["visa_status"]["picks"] = []
+    assert not [e for e in _errs(p) if e.path.startswith("extra.visa_status")], _errs(p)
 
 
 def _with(mutate) -> dict:

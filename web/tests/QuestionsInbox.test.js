@@ -254,7 +254,8 @@ suite('ready applications and the retry confirm', () => {
     const post = server.calls.find(c => c.method === 'POST' && c.url === 'api/questions/retry')
     expect(post.body).toEqual({ job_ids: ['j1', 'j2'] })
     expect(w.text()).not.toContain('Send 2 applications now?')
-    expect(w.text()).toContain('Started. Dry run: everything is filled in and nothing is sent.')
+    // QD 10.2 "Retry started (dry run)" is a toast (header: toasts go through toast.js), not inline text
+    expect(toast.current?.message).toBe('Started. Dry run: everything is filled in and nothing is sent.')
   })
 
   it('in auto mode Retry asks first: "Send <n> applications now?", and Not now sends nothing', async () => {
@@ -296,7 +297,12 @@ suite('empty and answered states', () => {
   it('shows the empty state when nothing is waiting', async () => {
     const w = await mountInbox(questions([]))
     expect(w.text()).toContain('Questions from applications')
-    expect(w.text()).toContain("No questions waiting. When an application asks something JobScraper can't answer, it shows up here.")
+    // two sentences in two paragraphs (title + hint); wrapper.text() joins them with no space
+    const text = w.text()
+    const title = text.indexOf('No questions waiting.')
+    const hint = text.indexOf("When an application asks something JobScraper can't answer, it shows up here.")
+    expect(title, 'the empty-state title').toBeGreaterThanOrEqual(0)
+    expect(hint, 'the empty-state hint').toBeGreaterThan(title)
   })
 
   it('lists answered questions in a collapsible "Answered questions (<n>)" with Change answer', async () => {
