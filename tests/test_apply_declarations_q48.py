@@ -192,6 +192,32 @@ def test_f18_this_employer_or_the_government_stays_ambiguous():
     _ended(a, True)
 
 
+D89_GOVERNMENT = (
+    "Have you worked for the government?",
+    "Have you previously worked for the government?",
+    "Are you currently employed by the government?",
+    "Do you currently work for the government?",
+    "Have you previously been employed by a government agency?",
+    "Have you worked for any government body in the past?",
+)
+
+
+@needs(*Q48)
+def test_d89_plain_government_questions_are_government_employment_and_answer_no():
+    D = _D()
+    for label in D89_GOVERNMENT:
+        lab, a = _ans(label)
+        assert lab is DL.GOVERNMENT_EMPLOYMENT, (label, lab)
+        _filled(a, "No")
+        assert a.rule_id == "government_employment", (label, a.rule_id)
+    assert D.classify(_n("Have you worked for Acme before?"), "") is DL.PRIOR_EMPLOYMENT
+    assert D.classify(_n("Have you previously worked for us or any government agency?"), "") is D.AMBIGUOUS
+    for label in ("Have you served in the armed forces or done national service?",
+                  "Have you served in the military, including National Service?"):
+        classes, _unsure = D.classify_all(_n(label), "")
+        assert DL.GOVERNMENT_EMPLOYMENT not in classes, (label, classes)
+
+
 # ------------------------------------------------------------------ disability (B3)
 
 @needs(*Q48)
