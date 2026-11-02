@@ -576,7 +576,9 @@ def _required_scan(run: _Run) -> tuple[str, ...]:
             return decision.unknown_required
         run.services.classify(run.page)
         _time_left(run)
-        _apply(run, decision, fresh, run.sections)
+        stop = _apply(run, decision, fresh, run.sections)
+        if stop:                                          # review F9: an added entry's stop counts
+            return stop
         hits = set(P.scan_required(run.page, run.scope))
     unknown = []
     for key in hits:
