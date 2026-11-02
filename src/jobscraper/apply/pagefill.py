@@ -64,7 +64,10 @@ UNAVAILABLE_NOTE = "transport: model unavailable"
 DEFAULT_REVEAL_ROUNDS = 2
 DEFAULT_FOLLOWUPS = 25
 DEFAULT_LONG_LIST = 15
-NO_CACHE_VIAS = ("second", "corrective")                 # page-specific: never replayed
+# Never replayed (§13.3; review F8): a second opinion counts one run as two, a corrective
+# reply answers one page's site error, and a replayed recheck row ("cache:recheck") would
+# meet the generic copy rule, while `recheck_targets` asks again anyway.
+NO_CACHE_VIAS = ("second", "corrective", "recheck")
 FACT_SOURCES = frozenset({FillSource.PROFILE, FillSource.EXTRA, FillSource.STANDING})
 
 
@@ -109,6 +112,7 @@ class _Run:
     transport: str = ""                                     # set by a pick that failed in transport
     alias: dict = dc_field(default_factory=dict)            # re-created reader key -> the old key (F6)
     entry_failed: dict = dc_field(default_factory=dict)     # reader key -> note: an E5 add that failed (F5)
+    corrected: set = dc_field(default_factory=set)          # keys the corrective pass re-asked (F8)
 
 
 def fill_page(page: Any, nav: Any, ctx: AttemptContext, rctx: ResolveContext, services: Any) -> PageOutcome:
@@ -534,6 +538,7 @@ def _corrective(run: _Run) -> None:
     fields = [pf for pf in _read(run, run.sections) if pf.field.key in targets]
     if not fields:
         return
+    run.corrected |= {pf.field.key for pf in fields}      # F8: their first decision is not cached
     fields = [pf if pf.error else _replace(pf, error=errors.get(pf.field.key) or "not accepted") for pf in fields]
     locked = K.lock_page(fields, run.rctx, run.services.rules, today=run.today,
                          uploaded=run.ctx.uploaded, page_text=P.page_text(run.page, run.scope))
@@ -661,8 +666,12 @@ def _cache_put(run: _Run) -> None:
         return
     latest: dict[str, ModelDecision] = {}
     for d in run.fresh:
-        if d.via not in NO_CACHE_VIAS:
-            latest[d.field_key] = d
+        if d.via in NO_CACHE_VIAS or d.field_key in run.corrected:
+            continue                                      # F8: not a decision the site refused
+        if d.via == "pick" and not d.value:
+            latest.pop(d.field_key, None)                 # F8: no negative pick rows
+            continue
+        latest[d.field_key] = d
     rows = []
     for key, d in latest.items():
         sig = run.sigs.get(key)
