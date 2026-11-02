@@ -239,10 +239,10 @@ def _decide(run: _Run, fields: Sequence[PageField], sections: Sequence[EntrySect
 
 
 def _long_list_picks(run: _Run, fields: Sequence[PageField], decisions: list) -> list:
-    """LL2 (§6.4): an answer on a fully read list whose words name no option gets a
-    `pick` call when the list is longer than `long_list` (the model saw no enum) or the
-    answer cites a fact (the words are the fact's, not an option; guards path G2e).
-    decide then guards the picked option (G1, G4, G5)."""
+    """LL2 (§6.4): a model answer on a fully read list longer than `long_list` (the model
+    saw no enum) whose words name no option gets a `pick` call; decide then guards the
+    picked option (G1, G4, G5). A fact answer never does: the program maps a fact onto an
+    option itself or it stays unknown (D-86, G2(e)); short lists were an enum already."""
     long_list = int(run.cfg.get("long_list", DEFAULT_LONG_LIST))
     by_key = {pf.field.key: pf for pf in fields}
     out = []
@@ -250,7 +250,7 @@ def _long_list_picks(run: _Run, fields: Sequence[PageField], decisions: list) ->
     for key, d in latest.items():
         pf = by_key.get(key)
         if (pf is None or not G.is_choice(pf) or not pf.options_complete
-                or not (len(pf.field.options) > long_list or d.source in FACT_SOURCES)
+                or len(pf.field.options) <= long_list or d.source in FACT_SOURCES
                 or not isinstance(d.value, str) or not d.value.strip()
                 or G.option_for(pf, d.value) is not None or not _followup_ok(run)):
             continue
