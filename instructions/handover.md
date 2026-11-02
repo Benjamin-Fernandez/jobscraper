@@ -10,7 +10,7 @@
 
 ## Not merged (branches kept; worktrees under `.claude/worktrees/`)
 - `int/Q-35-M` 3a99dce (worktree `int-Q-35-M`) = lane M b79df03 + architect COMPOSE_NEEDED/Q-45 design (ab53597). The tester is committing pins there (incl. the QuestionReason set pin, Q-46 a–c). Then merge into personal; vitest + bundle rebuild (QuestionCard.vue changed). Lane M then switches `no_rule`+note → COMPOSE_NEEDED.
-- Lane R R3 `eng/Q-35-R-page` adc8f08 (first cut of `pagefill.fill_page`, unreviewed): needs the 3 tester fixture gaps (its outbox), lane M's interface changes (`s_values(profile, account_email)`, `field_sig(key=facts.hash_key(rctx))`, pick `sensitive=`/`deny=`), then review. Its choices to confirm at review: deadline → `transport_failed` "transport: timed out"; cache stores no second/corrective replies.
+- Lane R R3 `eng/Q-35-R-page` 93d02fc: adapted to lane M's API, pagefill 8/8, widgets 13/13, suite 973/980 (the 7 = lane M pins). Under review (`docs/reviews/Q-35-R3.md`). Its two wd_a step-02 fill_failed causes are lane M's (phone-code deny list; how-heard FILLED without a fitting option), sent to lane M.
 
 ## Next 1–3 actions
 1. Tester report → merge `int/Q-35-M`. Architect Q-48 report → commit on `arch/Q-48-declarations` → engineer WP + tester WP. R3 review → merge. N6a (lane N F7 note + Q-46 e) → N6b.
