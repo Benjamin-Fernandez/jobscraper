@@ -8,7 +8,7 @@
 
 - **Now:** paused by the owner (2026-11-02). M20 build of the D-78 LLM form filler: design READY; merged lanes N + R (navigation, accounts, page reader, widgets) + tester oracles, 920/920, pushed (090daf8). Live app: Workday attempts still stop as `unsupported_ats`. S-5b: tenant A submitted + confirmed.
 - **Next:** lane M (built + review-fixed, `eng/Q-35-M-llmfill` b79df03) → tester pins + architect COMPOSE_NEEDED → merge; R3 review + fixtures; N6a → N6b → M20 gate (5 Greenhouse dry runs + owner-approved Workday postings, D-83). Q-41 tenant B (owner filled the address) two-phase per D-83. Q-45 cover-letter compose design. Q-44 refresh-from-resume.
-- **Blocked on the owner:** nothing. (Profile rebuilt from the new resume on the owner's request 2026-11-02; optional: job locations, Cantonese levels.)
+- **Blocked on the owner:** nothing. (Profile rebuilt from the new resume 2026-11-02; job locations = Singapore ×3 from the owner for Q-41; optional: Cantonese levels.) Q-41 leg 2 running to Review; new defects Q-46 (entry Location from contact.city; ungrounded skill picks), Q-47 (tailor page trim).
 
 ## 1. Milestones
 
