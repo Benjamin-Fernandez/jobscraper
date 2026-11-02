@@ -14,6 +14,7 @@ ROOT = Path(__file__).resolve().parents[1]
 PRIVATE = [
     "data/applicant.yaml",                 # applicant profile (F-10)
     "data/applicant.backup.yaml",
+    "data/applicant.commented-backup.yaml",   # the first web save of a commented file keeps a copy (Q-30, QD 3.1)
     "data/master_resume.json",             # parsed resume (F-20)
     "data/tailored/x/Alex_Testcase_Resume.docx",   # tailored files (F-24)
     "data/tailored/x/Alex_Testcase_Resume.pdf",

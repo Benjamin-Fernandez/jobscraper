@@ -1,0 +1,75 @@
+# SYNTHETIC `extra:` block for the Q-30 oracles (questions_design.md 6.1): one answered entry per
+# kind (yes_no, choice, multi, text, date, number), one sensitive entry, and one entry with a
+# `by_employer` override. An invented person's invented answers: nothing here is real.
+# Tests merge this under the top level of tests/fixtures/apply/applicant.sample.yaml
+# (tests/questions_support.py: profile_with_extra). Valid under questions_design 6.1.
+extra:
+  visa_status:                     # choice, with an employer override
+    title: Visa status
+    description: ""
+    kind: choice
+    sensitive: false
+    labels:
+      - what is your visa status
+      - current work pass type
+    value: null
+    picks: [singapore citizen]
+    seen: [singapore citizen, permanent resident, employment pass]
+    by_employer:
+      shopee: {value: null, picks: [citizen], seen: [citizen, pr, others]}
+
+  has_driving_licence:             # yes_no
+    title: Driving licence
+    description: Whether the applicant holds a driving licence.
+    kind: yes_no
+    sensitive: false
+    labels:
+      - do you hold a valid driving licence
+    value: true
+
+  work_arrangements:               # multi
+    title: Work arrangements
+    description: ""
+    kind: multi
+    sensitive: false
+    labels:
+      - which work arrangements suit you
+    value: null
+    picks: [hybrid, on site]
+    seen: [hybrid, on site, remote]
+
+  favourite_language:              # text
+    title: Favourite language
+    description: ""
+    kind: text
+    sensitive: false
+    labels:
+      - what is your favourite programming language
+    value: Python
+
+  available_from:                  # date
+    title: Available from
+    description: ""
+    kind: date
+    sensitive: false
+    labels:
+      - when can you start
+    value: "2026-02-02"
+
+  years_with_python:               # number
+    title: Years with Python
+    description: ""
+    kind: number
+    sensitive: false
+    labels:
+      - how many years of python experience do you have
+    value: 3
+
+  mother_tongue:                   # text, sensitive (shown Private, never sent to the model)
+    title: Mother tongue
+    description: ""
+    kind: text
+    sensitive: true
+    labels:
+      - what is your mother tongue
+    value: Mandarin
