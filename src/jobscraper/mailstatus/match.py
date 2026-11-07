@@ -122,7 +122,7 @@ def variants(app: AppCandidate, rules: Rules) -> tuple[str, ...]:
 
 
 def employer_domains(hosts: Iterable[Optional[str]], rules: Rules) -> tuple[str, ...]:
-    """D-104 (a), review F1: the employer domains among `hosts` (registrable
+    """D-154 (a), review F1: the employer domains among `hosts` (registrable
     domains, hosts or full URLs), lower-case, de-duplicated, in order. A host that
     is, or sits under, a rules platform domain, a `tenant_sites` suffix or a job
     board is dropped: "acmebank.tal.net" or "tal.net" is Oleeo's, not Acme Bank's
@@ -186,13 +186,13 @@ class _Mail:
         self.sender_core = sender_core(h.from_name, rules.company_suffixes)
         self.subject = norm(self.subject_raw)
         self.text = norm(self.text_raw)
-        # For names that count only as written (D-104 c): accents dropped, case kept.
+        # For names that count only as written (D-154 c): accents dropped, case kept.
         self.sender_folded = _fold(h.from_name or "")
         self.subject_folded = _fold(self.subject_raw)
         self.text_folded = _fold(self.text_raw)
         self.lines = [set(norm(line).split())
                       for line in (self.subject_raw, *self.text_raw.splitlines()) if line.strip()]
-        # D-104 (b), review F2: Gmail authenticates From only, so Reply-To names the
+        # D-154 (b), review F2: Gmail authenticates From only, so Reply-To names the
         # employer only on authenticated platform mail (an ATS relaying for it).
         from_platform = sender_platform(h, rules) is not None
         reply_to = h.reply_to_regs if from_platform and h.auth == AuthResult.PASS else ()
@@ -278,7 +278,7 @@ def _evaluate(app: AppCandidate, mail: _Mail) -> tuple[tuple[Signal, ...], int, 
     """(signals in `Signal` order, employer strength: 2 strong, 1 weak, 0 none,
     capped: the only employer evidence is a restricted name).
 
-    D-104 (c), review F3: a variant listed in `common_word_names`, or a single
+    D-154 (c), review F3: a variant listed in `common_word_names`, or a single
     token under 5 characters, matches only as written (capitalisation kept) and
     is never strong, in the sender name, the subject or the body: a
     common-word employer name such as "Acme", used as an ordinary word in a
@@ -376,7 +376,7 @@ def match(h: MailHeader, body: Optional[MailBody], apps: Sequence[AppCandidate],
         if _company_count(emp, rules) > 1:
             return several(emp)
     # 4. Role or requisition id separates applications at one employer. When the
-    # only employer evidence is a restricted name (D-104 c), the role can't make it
+    # only employer evidence is a restricted name (D-154 c), the role can't make it
     # strong: a common-word employer name such as "Acme" in a subject plus a
     # common title still names someone else.
     roles = [a for a in emp if {Signal.ROLE, Signal.REQ_ID} & set(sig[a.job_id])]

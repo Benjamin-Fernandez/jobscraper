@@ -1,6 +1,6 @@
 """F-50 status transitions: what an email does to an application (MS section 8).
 
-Design: docs/architecture/mail_status_design.md (MS) section 8 and D-91 c.
+Design: docs/architecture/mail_status_design.md (MS) section 8 and D-151 c.
 Requirements F-50l, F-50m (the change the store writes and undoes).
 
 Pure: `decide` turns a verdict, a match and the application's current state
@@ -8,7 +8,7 @@ into a `Change`; the store writes it in one transaction and re-checks the
 status there (MS 5.4 step 8). Forward-only: backwards, same-status and
 owner-newer mail change nothing and raise no suggestion, because late
 acknowledgements and assessment reminders after an interview are common
-(MS 8, "how D-91 c is read"). Only a confident, unique, rule-tier match is
+(MS 8, "how D-151 c is read"). Only a confident, unique, rule-tier match is
 automatic; every other forward move becomes a suggestion.
 """
 from __future__ import annotations
@@ -76,7 +76,7 @@ _TRUE = frozenset({"true", "yes", "1", "on", "y", "t"})
 
 
 def as_bool(value: Any, default: bool) -> bool:
-    """D-104 (g): a config boolean. `bool("false")` is True, so a quoted YAML
+    """D-154 (g): a config boolean. `bool("false")` is True, so a quoted YAML
     'false' / 'no' / '0' would otherwise turn a safety switch on or off by
     accident. Anything unreadable keeps `default` (for require_auth: on)."""
     if isinstance(value, bool):

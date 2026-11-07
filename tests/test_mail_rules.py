@@ -462,7 +462,7 @@ def test_mail_rules_quote_is_the_hit_sentence_at_most_200_characters():
 
 @needs(RULES)
 def test_mail_rules_d92_assessment_vendors_never_decide_interview():
-    """D-92 (1): a rule-tier `interview` verdict from a `kind: assessment` platform is read
+    """D-152 (1): a rule-tier `interview` verdict from a `kind: assessment` platform is read
     as `assessment`; the same words from the employer stay `interview`. (2) An assessment
     centre or superday is `interview`. (3) "confirm your email" may be an account phrase."""
     c, R = _c(), _r()

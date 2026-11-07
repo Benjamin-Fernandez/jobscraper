@@ -1,4 +1,4 @@
-"""WP-T3 oracles: status transitions (mail_status_design.md 8, D-91 c; build plan WP-T3,
+"""WP-T3 oracles: status transitions (mail_status_design.md 8, D-151 c; build plan WP-T3,
 WP-S3). Verify: `python tests/run_tests.py -k mail_transition`. Every row of the MS 8 table,
 in order; the golden change rows run in test_mail_rules.
 

@@ -441,7 +441,7 @@ def _mailbox_files(src: Path) -> list[Path]:
 
 
 def test_mail_modules_never_write_the_mailbox():
-    """F-50g / D-91 d: imapread.py, mailstatus/**, mailstatus_flow.py and
+    """F-50g / D-151 d: imapread.py, mailstatus/**, mailstatus_flow.py and
     apply/mail.py read mail and nothing else (MS 2.2 rule 5, 5.6)."""
     files = _mailbox_files(SRC)
     assert SRC / "apply" / "mail.py" in files, "apply/mail.py moved: update MAILBOX_MODULES"

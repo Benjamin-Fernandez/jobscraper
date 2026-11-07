@@ -43,7 +43,7 @@ SCHEMA = {"type": "object",
 MAX_TOKENS = 200
 SEED = 7
 TEMPERATURE = 0
-QUOTE_MIN_CHARS = 15     # D-104 (d): a model quote shorter than this, or
+QUOTE_MIN_CHARS = 15     # D-154 (d): a model quote shorter than this, or
 QUOTE_MIN_WORDS = 3      # with fewer words, proves nothing
 ELLIPSIS = "…"
 
@@ -112,7 +112,7 @@ def parse(reply: Any, h: MailHeader, body: Optional[MailBody], model_id: str = "
     needle = norm_quote(raw_quote)
     if not needle:
         return unusable("empty_quote")
-    # D-104 (d), review F6: one letter "occurs" in any email; the owner judges by
+    # D-154 (d), review F6: one letter "occurs" in any email; the owner judges by
     # the quote, so it must be a real phrase.
     if len(needle) < QUOTE_MIN_CHARS or len(needle.split()) < QUOTE_MIN_WORDS:
         return unusable("short_quote")

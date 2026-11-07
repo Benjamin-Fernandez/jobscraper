@@ -2,7 +2,7 @@
 
 Design: docs/architecture/mail_status_design.md (MS) section 6.1 (the rules file
 and its validation), 6.2 (gates), 6.3 (classifier and quote), 6.4 (domain
-decisions, carried by the phrases themselves) and decision D-92 (an assessment
+decisions, carried by the phrases themselves) and decision D-152 (an assessment
 vendor never decides `interview`). Requirements F-50h, F-50i, F-50k, F-50t.
 
 Pure: the only I/O is reading the YAML file in `load_rules`. The flow hands in a
@@ -304,7 +304,7 @@ def domain_matches(domain: str, base: str) -> bool:
 
 def sender_platform(h: MailHeader, rules: Rules) -> Optional[Platform]:
     """The platform the From address belongs to (From only: the tenant signal and
-    D-92 read the sender, and Reply-To is the employer's address on most ATS mail)."""
+    D-152 read the sender, and Reply-To is the employer's address on most ATS mail)."""
     for domain in (h.from_domain, h.from_reg):
         for p in rules.platforms:
             if any(domain_matches(domain, d) for d in p.domains):
@@ -319,7 +319,7 @@ def platform_of(h: MailHeader, rules: Rules) -> str:
 
 
 def is_shared_domain(domain: str, rules: Rules) -> bool:
-    """D-104 (a), review F1: a domain that is, or sits under, a platform domain, a
+    """D-154 (a), review F1: a domain that is, or sits under, a platform domain, a
     `tenant_sites` suffix or a job board carries mail for many employers, so it is
     never one employer's domain ("tal.net" from acmebank.tal.net would otherwise
     match every other Oleeo tenant's mail). On those hosts the employer comes only
@@ -367,7 +367,7 @@ def header_gate(h: MailHeader, rules: Rules, *, own: frozenset[str], window_star
     in_thread = bool(h.gm_thrid) and h.gm_thrid in threads
     platform_mail = any(domain_matches(d, b) for d in senders
                         for p in rules.platforms for b in p.domains)
-    # D-104 (a): a platform, careers-site or job-board domain is never an employer's.
+    # D-154 (a): a platform, careers-site or job-board domain is never an employer's.
     regs = employer_regs_only(employer_regs, rules)
     employer_mail = any(r in regs for r in (h.from_reg, *h.reply_to_regs) if r)
     if not (platform_mail or employer_mail or in_thread):
@@ -428,7 +428,7 @@ def classify(h: MailHeader, body: Optional[MailBody], rules: Rules) -> Verdict:
             p, source, start, end = first[w]
             quote = quote_around(text if source == "text" else subject, start, end)
             category = w
-            # D-92: an assessment vendor's "interview" is a one-way recorded one.
+            # D-152: an assessment vendor's "interview" is a one-way recorded one.
             if w is Category.INTERVIEW:
                 vendor = sender_platform(h, rules)
                 if vendor is not None and vendor.kind == "assessment":

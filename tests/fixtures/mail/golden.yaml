@@ -9,7 +9,7 @@
 #   category:    the rule classifier's Category; status_words: the Verdict flag
 #   conflict:    the categories behind a "conflict:a+b" rule verdict
 #   rule_category: the category of the deciding phrase when it differs from `category`
-#                (D-92: an `interview` hit from a `kind: assessment` sender is `assessment`)
+#                (D-152: an `interview` hit from a `kind: assessment` sender is `assessment`)
 #   match:       {kind, job_id} or {kind: ambiguous, candidates: [...]} (MS 7)
 #   change:      {kind, reason, to} from transition.decide (MS 8); to: null = check the portal/email.
 #                A reason list means any of them: an ambiguous match that settles as NONE takes

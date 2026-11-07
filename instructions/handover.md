@@ -4,12 +4,12 @@
 
 ## Q-60 email status (branch `int/Q-60-mail-status`, worktree `.claude/worktrees/feat-Q-60`; resumed 2026-11-07)
 - Owner asked (D-90→D-150): opt-in Gmail; while the app runs, read mail after the last processed one → update application status. IMAP app password, read-only, forward-only automatic updates. Application Gmail first. Merge into `personal` only with the owner's go-ahead; the first real sync from the owner's click.
-- IDs: Q-60 reserves D-150..D-169 (D-155); old D-90/91/92/103/104 → D-150..D-154, sweep at X1.
-- On int e2b3998: design + rules v1 + lanes S, I (with review fixes D-104 F1–F8 + T4 punctuation) + tester T0–T4 + review pins. Full suite 1040/1040, `-k mail_` 108/108 (5409278). Review `docs/reviews/Q-60-stage-imap-ui.md`.
+- IDs: Q-60 reserves D-150..D-169 (D-155); old D-90/91/92/103/104 renamed to D-150..D-154 everywhere except dated outbox/session-log history.
+- On int e2b3998: design + rules v1 + lanes S, I (with review fixes D-154 F1–F8 + T4 punctuation) + tester T0–T4 + review pins. Full suite 1040/1040, `-k mail_` 108/108 (5409278). Review `docs/reviews/Q-60-stage-imap-ui.md`.
 - Lane F merged (136d44c): store + schema 5, `mailstatus_flow.py`, CLI `mail`, web timer `web/mailsync.py` + `routers/mail.py`. `-k mail_` 109/109, layering 13/13. D-156 settles lane F's open questions.
 - Review of lane F: `docs/reviews/Q-60-flow.md` APPROVE WITH FIXES (FL-1 MAJOR poison mail wedges a mailbox; FL-2 no tests; FL-3..10 minor). Re-review: F1–F8 closed except F3 residual (5+ char names). Decisions D-157 (supersedes D-156 (2)). P1 docs committed 6fa1570. Full suite 1041/1041 at 136d44c.
 - Merged on int 5b91824: lane S D-157 h/i (+ "Careers at" addendum), MS amendment a485cc7 (D-158), lane F FL-1..FL-10 + D-158, tester T5/T6 + D-156/157/158 pins + neutral names. `-k mail` 185/190: 2 contract pins (MS §3 + COUNT_KEYS, architect + tester), 1 supersede test outdated by FL-7 (tester), 2 backfilled pins (lane F diagnosing).
-- Next: merge those three small fixes → full suite; ID sweep (old D-90/91/92/103/104 outside docs/architecture → D-150..D-154); X1 (vitest needs `npm ci` in feat-Q-60; dev 8768 with DB copy + `JOBSCRAPER_MAIL_SYNC=0`); owner go-ahead → first real sync from the owner's click → back up live DB (schema 4→5) → merge personal → build bundle in main checkout.
+- Next: merge those three small fixes → full suite; X1 (vitest needs `npm ci` in feat-Q-60; dev 8768 with DB copy + `JOBSCRAPER_MAIL_SYNC=0`); owner go-ahead → first real sync from the owner's click → back up live DB (schema 4→5) → merge personal → build bundle in main checkout.
 
 ## Where we are
 - M19 DONE. M20: D-78 LLM-driven form filler (ADR-0006, `docs/architecture/llm_fill_design.md`, `llm_fill_build_plan.md`, contracts v5). Design READY (stage E + re-check; D-81..D-86).

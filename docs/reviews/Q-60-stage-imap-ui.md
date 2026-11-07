@@ -4,13 +4,13 @@
 `mailstatus/{rules,match,transition,model}.py` (contracts.py read, not changed in this range), `imapread.py`, `apply/mail.py`,
 `web/src/components/Mail*.vue`, `tabs/{Settings,Applications}.vue`, `api.js`, `stages.js`, `style.css`. Lane F (store, flow, CLI,
 routes) is not built yet; it is mentioned only where the merged interfaces make it easy to get wrong.
-**Spec:** `docs/architecture/mail_status_design.md` (MS) §3, §5.2–§5.7, §6, §7 incl. E1, §8, §11.3, §13; ADR-0007; D-90..D-92 (Q-60 IDs).
+**Spec:** `docs/architecture/mail_status_design.md` (MS) §3, §5.2–§5.7, §6, §7 incl. E1, §8, §11.3, §13; ADR-0007; D-150..D-152 (Q-60 IDs).
 **Reviewer:** reviewer agent, 2026-11-07. Read-only; reproductions were run as python scripts against the worktree with `PYTHONPATH=src`
 (synthetic `acme.example` mail only, no network, no mailbox).
 
 ## Verdict: APPROVE WITH FIXES
 
-The read-only transport, the gate order, the classifier, the quote check, D-92 and transition rows 1–11 all match the spec. I could
+The read-only transport, the gate order, the classifier, the quote check, D-152 and transition rows 1–11 all match the spec. I could
 not make any path write to the mailbox or leak server text. **But three matcher paths turn mail about a different application into
 an automatic status change.** The decision code is correct, but the signals it gets are too strong. F1 is a BLOCKER: it has to be
 fixed (and pinned) before lane F wires `mail_match_context` and the flow merges into `int`. F2 and F3 need architect amendments
@@ -91,9 +91,9 @@ fixed (and pinned) before lane F wires `mail_match_context` and the flow merges 
   evidence quote that the owner judges by is meaningless. **Fix (lane S; spec allows it):** require a minimum, such as ≥ 3 words or
   ≥ 15 characters, else `model:short_quote`.
 
-### F7 MINOR (doc): D-92 conflicts with the MS §6.4 row "a live video interview booked through HireVue is interview"
+### F7 MINOR (doc): D-152 conflicts with the MS §6.4 row "a live video interview booked through HireVue is interview"
 - **Reproduced:** `noreply@hirevue.com` sending "invite you to a live video interview with the hiring manager" → `assessment`
-  (`rules.py:410-414`). That is correct per D-92, which was decided later. **Fix (architect):** amend the §6.4 row to point to D-92.
+  (`rules.py:410-414`). That is correct per D-152, which was decided later. **Fix (architect):** amend the §6.4 row to point to D-152.
 
 ### F8 MINOR (UI): stale state after a 409, and the password field is cleared before the consent check
 - `MailSuggestions.vue:63-66` and `MailEvidence.vue:41-44`: after a 409 the copy is right (it matches §11.3), but the list and the
@@ -125,7 +125,7 @@ fixed (and pinned) before lane F wires `mail_match_context` and the flow merges 
 - **Gates (§6.2):** order too_old → own_mail → auto_reply → job_board → not_job_mail → bulk; the matched thread exempts bulk.
   The content gate skips outreach in a matched thread. An empty `received_at` → too_old (fail-closed).
 - **Classifier:** portal_update dropped beside other hits; unique-dominator winner; `conflict:a+b` → UNKNOWN with status_words;
-  the quote is the sentence holding the hit, ≤ QUOTE_MAX; D-92 applied after the winner.
+  the quote is the sentence holding the hit, ≤ QUOTE_MAX; D-152 applied after the winner.
 - **Matcher:** the 6 steps in order. E1: `compact` folds spaces/hyphens. `tenant_from_subdomain` is strict (`x@tal.net` → "",
   `x@acmebank.tal.net` → `acmebank`). `common_word_names` and short names count in the body only as written. A name in the body
   only → WEAK → `weak_match` suggestion.

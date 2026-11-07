@@ -7,7 +7,7 @@ a foundation module may use (D-73). The mailstatus stage never touches IMAP; the
 flow hands it the `MailHeader`s and `MailBody`s made here. `apply/mail.py` (F-36)
 uses the helpers below too, so there is one copy of each.
 
-Read-only by construction (F-50g, D-91 d, MS §5.6). Every command goes through
+Read-only by construction (F-50g, D-151 d, MS §5.6). Every command goes through
 `_ReadOnly`, which offers only LOGIN, CAPABILITY, LIST, EXAMINE (a read-only
 open), UID SEARCH, UID FETCH, NOOP and LOGOUT. There is no way through it to
 store flags, copy, move, expunge or append, or to open a mailbox for writing,
