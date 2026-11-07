@@ -370,7 +370,10 @@ def test_fill_llm_dry_run_fills_the_greenhouse_form_with_a_scripted_model_and_st
     assert s["files"]["resume"] == "resume.pdf", "D2: the hidden resume input is attached"
     rows = run.answers()
     assert not [a for a in rows.values() if a["status"] in ("unknown", "ungrounded", "fill_failed")]
-    assert rows["first_name"]["source"] == "llm" or rows["first_name"]["status"] == "filled"
+    # audit key = `<step>:<automation id or html id or slug(label)>` (llm_fill_design §3.1 "Key"): the
+    # LLM loop's single Greenhouse page is the step "form"
+    for key in ("form:first_name", "form:last_name", "form:email", "form:phone", "form:resume"):
+        assert rows[key]["status"] == "filled", (key, sorted(rows))
     assert {c.kind for c in fb.calls} <= {"page", "pick", "second", "corrective"}
     fb.assert_no_secrets(sample_secrets())
     assert run.fx.only_local(), run.fx.requests
