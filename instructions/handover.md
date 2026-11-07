@@ -4,7 +4,7 @@
 
 ## Q-60 email + Q-72: MERGED (c20332a, 4c6133f)
 - Settings → Email updates (opt-in Gmail, IMAP app password, read-only, 10-min timer; `JOBSCRAPER_MAIL_SYNC=0` for dev copies). D-150..D-161.
-- Owner to do (live app): Inbox → All runs → "Not interested" → Acme DevOps Engineer → Applied; then connect Gmail → Check now → accept "Rejected".
+- Live since 2026-11-07 (owner asked the Coordinator to do it, D-163): tenant-B DevOps application marked Applied, Gmail connected (account 1, password reused from Credential Manager), first sync 19 scanned / 1 to review, "Rejected" accepted. Live DB backup `data/jobscraper.pre-owner-mail-2026-11-07.db`.
 
 ## UX (jobscraper-89): Q-70/Q-71 (e5d939e) and wave 3 MERGED into `personal` 2026-11-07 (da515d2, bundle 129e8ef, pushed)
 - Wave 3 = Q-75 lanes I+J (local times, Inbox shortcuts + ? sheet, page polish), Q-76 application detail (JobDetail + auto-apply attempts on rows), Q-44/Q-73 (resume summary card, log under Details, "Update your application details" from the resume; D-106 dates). Verified: Python 1323/1323, vitest 623 + 1 expected fail, smoke 8774 on a DB copy (17/17 GET, all tabs, no console errors), browser pass incl. 390px and a Q-44 save on a scratch applicant file.
