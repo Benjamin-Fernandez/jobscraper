@@ -6,7 +6,7 @@
     "|How Did You Hear About Us?": {
      "source": "standing",
      "ref": "standing:how_heard",
-     "value": "Company careers website",
+     "value": "",
      "evidence": ""
     },
     "|Have you previously worked for Example Employer?": {
@@ -94,6 +94,48 @@
    "match": "How Did You Hear About Us?",
    "raw": {
     "choice": "Company Website > Careers Page"
+   }
+  },
+  {
+   "kind": "corrective",
+   "repeat": true,
+   "reply": {
+    "|How Did You Hear About Us?": {
+     "source": "standing",
+     "ref": "standing:how_heard",
+     "value": "",
+     "evidence": ""
+    },
+    "|Country Phone Code": {
+     "source": "profile",
+     "ref": "profile:contact.phone_country_code",
+     "value": "",
+     "evidence": ""
+    }
+   }
+  },
+  {
+   "kind": "second",
+   "repeat": true,
+   "reply": {
+    "|Phone Device Type": {
+     "source": "resume",
+     "ref": "",
+     "value": "Mobile",
+     "evidence": "Mobile"
+    }
+   }
+  },
+  {
+   "kind": "second",
+   "repeat": true,
+   "reply": {
+    "|How Did You Hear About Us?": {
+     "source": "standing",
+     "ref": "standing:how_heard",
+     "value": "Company careers website",
+     "evidence": ""
+    }
    }
   }
  ]

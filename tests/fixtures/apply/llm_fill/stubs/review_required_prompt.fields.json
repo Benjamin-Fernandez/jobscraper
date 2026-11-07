@@ -1,0 +1,18 @@
+[
+ {
+  "label": "Main programming language",
+  "type": "typeahead",
+  "widget": "prompt",
+  "required": true,
+  "options": [],
+  "options_sorted": true,
+  "shown": "",
+  "group": "",
+  "group_title": "",
+  "context": "",
+  "options_complete": false,
+  "automation_id": "formField-mainLanguage",
+  "parts": [],
+  "help": ""
+ }
+]

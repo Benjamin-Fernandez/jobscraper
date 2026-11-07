@@ -55,7 +55,8 @@ class Backend:
                  format: Optional[dict] = None,
                  temperature: Optional[float] = None,
                  seed: Optional[int] = None,
-                 top_k: Optional[int] = None) -> Completion:
+                 top_k: Optional[int] = None,
+                 keep_alive: Any = None) -> Completion:
         """`schema`, when given, is a JSON schema the answer must follow;
         `timeout` caps this call's seconds below the transport's own.
 
@@ -64,8 +65,16 @@ class Backend:
         thing as `schema`; `format` wins when both are given; neither = plain
         "json"); `temperature=None` means 0; `seed` and `top_k` reach the
         model only when given. The resolver's two-run agreement check and the
-        tailor's sampling need these."""
+        tailor's sampling need these. `keep_alive` (D-78 form filling,
+        llm_fill_design §13.2) is how long the model stays loaded after the call
+        ("15m"); sent only when given."""
         raise BackendError(self.unavailable_reason or "no model transport configured")
+
+    def warm(self, keep_alive: Any = None) -> None:
+        """Load the model before it is needed (llm_fill_design §13.1). A transport
+        with nothing to load only checks that it can answer."""
+        if not self.available:
+            raise BackendError(self.unavailable_reason or "no model transport configured")
 
 
 class OffBackend(Backend):
@@ -162,7 +171,8 @@ class OllamaBackend(Backend):
                  format: Optional[dict] = None,
                  temperature: Optional[float] = None,
                  seed: Optional[int] = None,
-                 top_k: Optional[int] = None) -> Completion:
+                 top_k: Optional[int] = None,
+                 keep_alive: Any = None) -> Completion:
         if not self.available:
             raise BackendError(self.unavailable_reason)
         body = {
@@ -182,6 +192,8 @@ class OllamaBackend(Backend):
             body["options"]["top_k"] = top_k
         if self._has_thinking():
             body["think"] = False
+        if keep_alive is not None:
+            body["keep_alive"] = keep_alive
         try:
             resp = self._http.post(f"{self.url}/api/chat", json=body,
                                    timeout=min(self.timeout, timeout) if timeout
@@ -203,6 +215,33 @@ class OllamaBackend(Backend):
                           prompt_eval_ns=_i(data.get("prompt_eval_duration")),
                           eval_ns=_i(data.get("eval_duration")),
                           done_reason=str(data.get("done_reason") or ""))
+
+    def warm(self, keep_alive: Any = None) -> None:
+        """Load the model now (a cold load costs ~33 s, S-5b) so the first form page
+        doesn't pay for it. Ollama loads a model on a generate request with no
+        prompt; `keep_alive` (sent only when given) holds it loaded."""
+        if not self.available:
+            raise BackendError(self.unavailable_reason)
+        body: dict[str, Any] = {"model": self.model_id}
+        if keep_alive is not None:
+            body["keep_alive"] = keep_alive
+        try:
+            resp = self._http.post(f"{self.url}/api/generate", json=body, timeout=self.timeout)
+        except Exception as exc:
+            raise BackendError(f"Ollama warm-up failed: {type(exc).__name__}: {exc}")
+        if resp.status_code != 200:
+            raise BackendError(f"Ollama returned HTTP {resp.status_code} on warm-up")
+
+
+def warm(backend: Backend, keep_alive: Any = None) -> None:
+    """Load `backend`'s model before an apply attempt opens the browser (D-81): a
+    failure here (Ollama not running, model not pulled) raises BackendError, so the
+    attempt ends `model_unavailable` before Edge opens (llm_fill_design §11)."""
+    fn = getattr(backend, "warm", None)
+    if callable(fn):
+        fn(keep_alive)
+    elif not getattr(backend, "available", False):
+        raise BackendError(getattr(backend, "unavailable_reason", "") or "no model transport")
 
 
 def build(budget: dict[str, Any]) -> Backend:

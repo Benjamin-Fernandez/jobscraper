@@ -19,7 +19,7 @@ import json
 import sqlite3
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, Iterable, Optional
+from typing import Any, Iterable, Optional, Sequence
 from urllib.parse import urlsplit
 
 from .models import RawJob, WatchedCompany, posting_key
@@ -1829,16 +1829,38 @@ class Store:
                 out[name] = {"name": name, "employer_norm": r["employer_norm"] or ""}
         return list(out.values())
 
-    def set_questions_status(self, key: str, status: str, now: str) -> int:
-        """Set every row of a group to `status`; `answered` stamps answered_at.
-        Returns the number of rows changed."""
+    def set_questions_status(self, key: str, status: str, now: str, *,
+                             ids: Optional[Sequence[int]] = None) -> int:
+        """Set the rows of a group to `status`: every row, or only the rows in `ids`
+        (review Q-30 F3, LF §12.2: only the variants that got a pick, or that the
+        employer asked, become answered; a group is answered when all rows are).
+        `answered` stamps answered_at. Returns the number of rows changed."""
         if status not in self._QUESTION_STATUSES:
             raise ValueError(f"unknown question status {status!r}")
-        cur = self.conn.execute(
-            "UPDATE questions SET status = ?, answered_at = CASE WHEN ? = 'answered' "
-            "THEN ? ELSE answered_at END WHERE key = ?", (status, status, now, key))
+        sql = ("UPDATE questions SET status = ?, answered_at = CASE WHEN ? = 'answered' "
+               "THEN ? ELSE answered_at END WHERE key = ?")
+        args: list[Any] = [status, status, now, key]
+        if ids is not None:
+            id_list = [int(i) for i in ids]
+            if not id_list:
+                return 0
+            sql += f" AND id IN ({','.join('?' * len(id_list))})"
+            args += id_list
+        cur = self.conn.execute(sql, args)
         self.conn.commit()
         return cur.rowcount
+
+    def question_row_employers(self, key: str) -> dict[int, list[str]]:
+        """Row id -> the employer_norms of its sightings (a group's rows by employer)."""
+        out: dict[int, list[str]] = {}
+        for r in self.conn.execute(
+                """SELECT s.question_id, s.employer_norm FROM question_sightings s
+                     JOIN questions q ON q.id = s.question_id
+                    WHERE q.key = ? ORDER BY s.seen_at, s.id""", (key,)):
+            lst = out.setdefault(int(r["question_id"]), [])
+            if (r["employer_norm"] or "") not in lst:
+                lst.append(r["employer_norm"] or "")
+        return out
 
     def retry_candidates(self) -> list[dict[str, Any]]:
         """Jobs whose newest attempt failed `unanswerable_required` with at least

@@ -40,6 +40,11 @@ CONTRACT_VERSION = 5   # 2: D-69 (no FAILED after the Submit click, ADR-0004), D
                        #    Amended after stage E (still v5, additive only): ResolveContext
                        #    .resume_entries/.other_employers, AttemptContext.pre_import/.uploaded,
                        #    PageOutcome.transport_failed, FillServices (incl. the clock).
+                       #    Q-45 / D-86 (still v5, additive): QuestionReason.COMPOSE_NEEDED,
+                       #    AnswerSource.COMPOSED, ResolveContext.job_title, AttemptContext
+                       #    .composed/.composed_files, PageOutcome.compose_needed (§19).
+                       #    Q-48 / D-87 (still v5, additive): DeclarationLabel.GOVERNMENT_EMPLOYMENT
+                       #    and .DISABILITY (neither employer-specific; apply_design §7.5).
 
 
 # --------------------------------------------------------------------------
@@ -380,6 +385,8 @@ class AnswerSource(str, Enum):
     RESUME = "resume"                # the model wrote the value from the resume text (grounded)
     JOB = "job"                      # the model wrote the value from the job posting (grounded)
     RESUME_IMPORT = "resume_import"  # kept as shown: the site's own resume import put it there
+    COMPOSED = "composed"            # Q-45: a cover letter / motivation text the tailor composed and
+                                     # checked (llm_fill_design §19); the audit row holds the text
 
 
 PREFILL_SOURCES = frozenset({AnswerSource.MYGREENHOUSE, AnswerSource.WORKDAY_LAST_APPLICATION,
@@ -452,6 +459,9 @@ class DeclarationLabel(str, Enum):
     PRIOR_EMPLOYMENT = "prior_employment_at_company"
     CURRENT_EMPLOYEE = "current_employee_at_company"   # D-69: deduced from experience[] with no end date
     PREVIOUSLY_APPLIED = "previously_applied"
+    GOVERNMENT_EMPLOYMENT = "government_employment"   # D-87 / Q-48: standing bool, default false
+    DISABILITY = "disability"   # D-87 / Q-48: us_self_id.disability_status, any country; label-only match
+    NDA_WILLINGNESS = "nda_willingness"   # D-91 / Q-48: declarations.willing_to_sign_nda; not standing
 
 
 # Declarations about THIS employer: a prefilled value (MyGreenhouse) never stands
@@ -498,6 +508,8 @@ class ResolveContext:
     # D-78 (§7 G12): employers other than this one (watchlist names, sightings' employers) whose
     # names must not appear in a kept or cited free-text answer here. Names only.
     other_employers: tuple[str, ...] = ()
+    # Q-27 / Q-45: the posting's title (JOB block, composed texts). "" when unknown.
+    job_title: str = ""
     # D-105 (q74_model_sees_sensitive.md §2): True only when config `apply.model_sees_sensitive`
     # is on AND the backend is local (backends.is_local). Then prompts (and the grounding
     # corpus the prompt's answer is checked against) may carry S values; logs never do, and
@@ -532,6 +544,9 @@ class QuestionReason(str, Enum):
     NO_OPTION_FITS = "no_option_fits"            # the profile has a value, no offered option fits
     ATTESTATION_UNCLEAR = "attestation_unclear"  # tier 4 could not settle a declaration
     CONFLICT = "conflict"                        # D-75: work rights differ between named countries
+    COMPOSE_NEEDED = "compose_needed"            # D-86 F9 / Q-45: a required cover letter or motivation
+                                                 # text JobScraper didn't write (composing off, or the draft
+                                                 # failed its fact check); chip copy: llm_fill_design §19.6
 
 
 class QuestionStatus(str, Enum):
@@ -674,6 +689,11 @@ class AttemptContext:
     # D-78 (§4 L1): files this attempt uploaded, file name -> SHA-256 hex. An attachment not in
     # here is never kept, even with the same name.
     uploaded: dict[str, str] = field(default_factory=dict)
+    # Q-45 (§19): texts for compose targets, audit key -> text (the owner's saved answer or a
+    # checked composition), set by apply_flow between two fill_page passes; `composed_files`
+    # = audit key -> the file written from that text for a FILE target (upload it). Never logged.
+    composed: dict[str, str] = field(default_factory=dict)
+    composed_files: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass
@@ -890,6 +910,9 @@ class PageOutcome:
     # True when a model call failed in transport (BackendError, timeout, a reply still cut or
     # malformed after its one retry): the flow ends FAILED/model_unavailable, nothing captured (§11).
     transport_failed: bool = False
+    # Q-45 (§19): required compose targets with no text in ctx.composed. Like a stop, nothing on
+    # the page was changed; apply_flow gets the texts and runs fill_page again on the same step.
+    compose_needed: tuple[str, ...] = ()
 
 
 @runtime_checkable
