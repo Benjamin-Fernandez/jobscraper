@@ -16,6 +16,8 @@ from urllib.parse import urlparse
 from fastapi import APIRouter, Depends, HTTPException, Path, Request
 from pydantic import BaseModel, Field, field_validator
 
+from jobscraper.apply.contracts import (REASON_TEXTS, STATE_TEXTS, TERMINAL_STATES,
+                                        AttemptState, ReasonCode)
 from jobscraper.config import Config
 from jobscraper.web.data import load_shortlist
 from jobscraper.web.deps import get_config, open_store
@@ -70,6 +72,7 @@ def list_applications(request: Request,
         # evidence, so the History timeline can quote it and offer Undo.
         evidence_for = getattr(store, "mail_evidence_for", None)
         evidence = evidence_for([r["job_id"] for r in rows]) if callable(evidence_for) else {}
+        latest = store.last_attempts()      # one query for every row (Q-76), never N+1
     for row in rows:
         for event in row["events"]:
             event.setdefault("by", None)
@@ -80,7 +83,71 @@ def list_applications(request: Request,
         row["role"] = row.get("role") or job.get("title")
         row["url"] = row.get("url") or job.get("url")
         row["run_no"] = job.get("run_no")
+        last = latest.get(row["job_id"])
+        row["last_attempt"] = attempt_view(last) if last else None
+        row["attempts"] = int(last["attempts"]) if last else 0
+        # What the detail panel shows; null once the job left the shortlist.
+        row["posting"] = ({k: job.get(k) for k in _POSTING_KEYS} if job else None)
     return rows
+
+
+# The shortlist fields the Applications detail needs beyond the row itself.
+_POSTING_KEYS = ("reason", "matched_skills", "yoe_min", "decided_at", "closed")
+
+# Failed attempts that wait for the owner's answer rather than ending for good.
+_NEEDS_INPUT = {ReasonCode.UNANSWERABLE_REQUIRED.value, ReasonCode.PROFILE_INCOMPLETE.value}
+
+
+def attempt_view(row: dict[str, Any]) -> dict[str, Any]:
+    """One apply_attempts row as the SPA sees it (Q-76 N11).
+
+    `kind` is what the pill shows; `text`/`hint` are the owner-facing copy from
+    the contract. It leaves out `job_log`, `end_url`, `tenant_host` and
+    `resume_sha256`, so the payload carries no path or URL. An old row with an
+    unknown reason never raises: it reads as `stopped` with no text.
+    """
+    state = str(row.get("state") or "")
+    reason = row.get("reason_code")
+    text = hint = ""
+    try:
+        st = AttemptState(state)
+    except ValueError:
+        st = None
+    if st is AttemptState.FAILED:
+        kind = ("needs_input" if reason in _NEEDS_INPUT
+                else "cancelled" if reason == ReasonCode.CANCELLED.value else "stopped")
+        try:
+            copy = REASON_TEXTS[ReasonCode(str(reason))]
+            text = copy.text.format(detail=row.get("reason_detail") or "")
+            hint = copy.hint
+        except (ValueError, KeyError, IndexError):
+            kind = "stopped"
+    elif st is AttemptState.SUBMITTED:
+        kind = "sent"
+    elif st is AttemptState.SUBMITTED_UNCONFIRMED:
+        kind = "unconfirmed"
+    elif st is AttemptState.READY_TO_SUBMIT:
+        kind = "dry_run"
+    elif st is not None and st not in TERMINAL_STATES:
+        kind = "running"
+    else:
+        kind = "stopped"
+    if st in (AttemptState.SUBMITTED_UNCONFIRMED, AttemptState.READY_TO_SUBMIT):
+        text, hint = STATE_TEXTS[st].text, STATE_TEXTS[st].hint
+    return {"id": row.get("id"), "mode": row.get("mode"), "state": state, "kind": kind,
+            "reason_code": reason, "text": text, "hint": hint,
+            "queued_at": row.get("queued_at"), "finished_at": row.get("finished_at"),
+            "submit_clicked_at": row.get("submit_clicked_at"),
+            "resume_source": row.get("resume_source")}
+
+
+@router.get("/applications/{job_id}/attempts")
+def list_attempts(request: Request, job_id: str = JOB_ID) -> list[dict[str, Any]]:
+    """Every auto-apply attempt for a job, newest first. `[]` when there is none:
+    an application need not have any, so this is never a 404."""
+    with open_store(request) as store:
+        rows = store.attempts_for_job(job_id)
+    return [attempt_view(r) for r in reversed(rows)]
 
 
 def _mail_view(ev: Optional[dict[str, Any]]) -> Optional[dict[str, Any]]:
