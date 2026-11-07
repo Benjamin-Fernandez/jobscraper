@@ -52,9 +52,12 @@ async function quiet(turns = 4) {
   }
 }
 
-// Flush (a turn at a time) until `done()` holds; fails loudly instead of hanging.
-async function until(done, max = 200) {
-  for (let i = 0; i < max && !done(); i++) await flushPromises()
+// Flush (a turn at a time) until `done()` holds; fails loudly instead of hanging. The
+// deadline is real time (performance.now is not faked): a lazily imported tab chunk
+// lands whenever the machine gets to it, not after a fixed number of flushes.
+async function until(done, ms = 8000) {
+  const end = performance.now() + ms
+  while (!done() && performance.now() < end) await flushPromises()
   expect(done()).toBe(true)
 }
 
@@ -197,11 +200,15 @@ describe('the shell hears jobs a tab starts, and a returning page (C1)', () => {
     expect(toast.current.message).toBe('Run finished. New roles are in the Inbox.')
   })
 
-  it('the page becoming visible asks the server for the current job; hidden does not', async () => {
+  it('the page becoming visible asks the server for the current job; hidden does not', { timeout: 20000 }, async () => {
     // Deterministic under CPU load: never read a count until the app has gone quiet
     // (no new request over several macrotask turns), and wait on the request itself,
     // not on a fixed number of microtask flushes.
     await mountApp()
+    // The open tab (Profile) is a lazily imported chunk with a job poll of its own on
+    // mount. Under load it can land after the first flushes, and its poll would be
+    // counted as the "visible" one - so wait for the tab itself, then for quiet.
+    await until(() => Boolean(document.querySelector('.profile-tab')))
     await quiet()
     const hidden = jobPolls()
     Object.defineProperty(document, 'visibilityState', { value: 'hidden', configurable: true })
