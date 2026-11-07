@@ -2,7 +2,8 @@
 
 Architect, 2026-11-02, branch `int/Q-60-mail-status`. Stage B. Input: `docs/research/mail_status_brief.md` (cited **MB §n**). ADR: `adr/0007-mail-status-imap.md`. Build plan: `mail_status_build_plan.md` (**BP**). Status: READY for stage-E review.
 
-**Changelog.** 2026-11-07 (2): aligned with D-157 (a)–(j) and D-156 (1), (3)–(5) from the lane F review (`docs/reviews/Q-60-flow.md`): §2.3 (PRD §7.2), §3 (additive, as built by lane S: `AppCandidate.first_event_at`, `Reason.BACKFILLED` in `SUGGEST_REASONS`, its `REASON_TEXTS` entry; `CONTRACT_VERSION` stays 1), §5.1, §5.4, §5.5, §6.5, §7, §8, §9, §10.1–§10.4, §11.1, §11.4 (new), §12, §15 R3. D-157 (e) supersedes D-156 (2): owner triggers ignore `retry_after`. Still READY.
+**Changelog.** 2026-11-07 (3): §3 adds `Reason.INTERNAL` (in `SKIP_REASONS`, with its `REASON_TEXTS` entry) and the count key `errors`, as built by lane F (int 5b91824; D-158 1); the "pending" note in §5.4 is gone. Still READY.
+2026-11-07 (2): aligned with D-157 (a)–(j) and D-156 (1), (3)–(5) from the lane F review (`docs/reviews/Q-60-flow.md`): §2.3 (PRD §7.2), §3 (additive, as built by lane S: `AppCandidate.first_event_at`, `Reason.BACKFILLED` in `SUGGEST_REASONS`, its `REASON_TEXTS` entry; `CONTRACT_VERSION` stays 1), §5.1, §5.4, §5.5, §6.5, §7, §8, §9, §10.1–§10.4, §11.1, §11.4 (new), §12, §15 R3. D-157 (e) supersedes D-156 (2): owner triggers ignore `retry_after`. Still READY.
 2026-11-07: aligned with D-153 (§8 row 2) and D-154 (a)–(g), as built in the lane S and lane I fix rounds (§5.6, §6.2–§6.5, §7, §8, §10.4, §11.3, §12, §13). Q-60 decision IDs renumbered to D-150..D-154 per D-155's map. Contracts (§3) unchanged.
 
 **In one paragraph.** With the owner's opt-in per mailbox, JobScraper reads one or more Gmail accounts over IMAP, read-only, using an app password from Credential Manager. While the web app runs, a timer starts `python -m jobscraper mail sync` as a separate process at start-up and then every 10 minutes. Each sync goes through every message after the stored cursor in All Mail and Spam. It reads headers first and fetches a body only for mail from a hiring platform or a tracked employer. It matches the message to one tracked application, classifies it with phrase rules (falling back to the local Qwen only for matched mail the rules can't sort), and then either moves the application forward automatically or leaves a suggestion. Every change carries a short quote from the email as evidence and can be undone. Nothing is ever written to the mailbox, no link is opened, and nothing from mail reaches a log.
@@ -38,7 +39,7 @@ Architect, 2026-11-02, branch `int/Q-60-mail-status`. Stage B. Input: `docs/rese
 
 **D-154 trace** (review `docs/reviews/Q-60-stage-imap-ui.md`): (a) F1 → §6.2 item 5, §7 "Employer domains". (b) F2 → §6.2 "Reply-To", §7 `employer_domain`. (c) F3 → §7 "Restricted names", decision step 4. (d) F6 → §6.5, §13. (e) F7 → §6.3, §6.4 (D-152). (f) F4 → §5.6, §12; F5 → §5.6, §13; F8 → §11.3. (g) → §8 "Text booleans", §10.4. **D-153** → §8 row 2.
 
-**D-157 trace** (review `docs/reviews/Q-60-flow.md`): (a) FL-1 → §5.4 "Per-message isolation", §12 "Header fields" and row "Unexpected exception", §9 `_text()` (the `internal` reason and `errors` count await a §3 addition, outbox). (b) FL-3 → §9 `mail_record`, §12 row "Mailbox disconnected during a sync". (c) FL-4 → §10.1 Timer, §10.2, §15 R3. (d) FL-5 → §5.5. (e) FL-6 → §5.1, §10.1, §12. (f) FL-7 → §8 Accept / dismiss, §9 `mail_suggestions`. (g) FL-8 → §11.4. (h) FL-9 → §8 row 6, §3 (`first_event_at`, `backfilled`). (i) F3 residual → §7 "Sender display name". (j) FL-10 → §8 "Who wrote it". **D-156:** (1) → §8 "Text booleans", §10.4. (2) superseded by D-157 (e). (3) → §5.4 step 6, §6.5. (4) → §8 rows 2–4. (5) → §10.3, §11.1 "Command results".
+**D-157 trace** (review `docs/reviews/Q-60-flow.md`): (a) FL-1 → §5.4 "Per-message isolation", §12 "Header fields" and row "Unexpected exception", §9 `_text()`, §3 (`Reason.INTERNAL`, count `errors`; D-158 1). (b) FL-3 → §9 `mail_record`, §12 row "Mailbox disconnected during a sync". (c) FL-4 → §10.1 Timer, §10.2, §15 R3. (d) FL-5 → §5.5. (e) FL-6 → §5.1, §10.1, §12. (f) FL-7 → §8 Accept / dismiss, §9 `mail_suggestions`. (g) FL-8 → §11.4. (h) FL-9 → §8 row 6, §3 (`first_event_at`, `backfilled`). (i) F3 residual → §7 "Sender display name". (j) FL-10 → §8 "Who wrote it". **D-156:** (1) → §8 "Text booleans", §10.4. (2) superseded by D-157 (e). (3) → §5.4 step 6, §6.5. (4) → §8 rows 2–4. (5) → §10.3, §11.1 "Command results".
 
 ---
 
@@ -215,11 +216,14 @@ class Reason(str, enum.Enum):          # mail_messages.reason, mail_evidence.rea
     BACKFILLED = "backfilled"                  # owner_newer, but the application was entered after the email (D-157 h)
     # pending
     MODEL_DEFERRED = "model_deferred"
+    # skipped by the flow, not a gate: processing this one message failed (D-157 a, D-158 1)
+    INTERNAL = "internal"
 
 
 SKIP_REASONS = frozenset({Reason.TOO_OLD, Reason.OWN_MAIL, Reason.AUTO_REPLY,
                           Reason.JOB_BOARD, Reason.NOT_JOB_MAIL, Reason.BULK,
-                          Reason.ACCOUNT_MAIL, Reason.JOB_ALERT, Reason.OUTREACH})
+                          Reason.ACCOUNT_MAIL, Reason.JOB_ALERT, Reason.OUTREACH,
+                          Reason.INTERNAL})
 SUGGEST_REASONS = frozenset({Reason.MODEL_TIER, Reason.WEAK_MATCH,
                              Reason.SEVERAL_APPLICATIONS, Reason.REOPEN,
                              Reason.CLOSED_ROLE, Reason.KEPT_ON_FILE, Reason.SUGGEST_ONLY,
@@ -416,7 +420,8 @@ class Policy:
 # ---------------------------------------------------------------- reports
 
 COUNT_KEYS = ("scanned", "duplicates", "skipped", "bodies", "matched", "applied",
-              "suggested", "unmatched", "pending_model", "model_calls")
+              "suggested", "unmatched", "pending_model", "model_calls",
+              "errors")                    # messages stored skipped/internal (D-158 1)
 
 
 @dataclass
@@ -488,6 +493,7 @@ REASON_TEXTS: dict[Reason, str] = {
     Reason.UNCLEAR: "The email is about this application, but JobScraper couldn't tell what changed.",
     Reason.MODEL_UNAVAILABLE: "JobScraper couldn't read this email because the AI model wasn't running.",
     Reason.BACKFILLED: "You added this application after this email arrived.",
+    Reason.INTERNAL: "This email couldn't be read, so it was skipped.",
 }
 ```
 
@@ -572,7 +578,7 @@ The first-sync window (F-50f) is fixed when the account is added: `first_sync_fr
 
 **Per-message isolation (D-157 a, review FL-1).** Steps 2–8 for one message run inside `try/except Exception`. Excluded, so they keep their own handling: the flow's internal `_Stop`, `MailFailure` (connection and transport failures, §12) and the database-busy `sqlite3.OperationalError` (§12 row "Database busy": rollback, stop, the message is tried again next time). Any other exception is isolated to the message:
 1. the traceback is logged with no mail values (the log names the account id and the exception type only, §13);
-2. `store.mail_record` stores a minimal row, `outcome = skipped`, `reason = internal` (the value `"internal"`; a `Reason.INTERNAL` member and the count key `errors` are not yet in the §3 listing: open request in `comms/outbox/architect.md`): `gm_msgid`, `gm_thrid`, role, UIDVALIDITY, UID, `received_at`, `sender_domain = ""`, no category, no match, no evidence. The cursor advances in the **same transaction** (F-50s);
+2. `store.mail_record` stores a minimal row, `outcome = skipped`, `reason = internal` (`Reason.INTERNAL`, in `SKIP_REASONS`; D-158 1): `gm_msgid`, `gm_thrid`, role, UIDVALIDITY, UID, `received_at`, `sender_domain = ""`, no category, no match, no evidence. The cursor advances in the **same transaction** (F-50s);
 3. `counts["errors"] += 1`, and the scan goes on with the next message;
 4. a run of **3 consecutive** isolated failures in one account stops that account with ERROR `internal` (the usual `retry_after` backoff, §12). A message processed normally resets the run to 0.
 
