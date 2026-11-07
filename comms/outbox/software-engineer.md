@@ -320,6 +320,15 @@ BODY: Fix commit a78ce9d, then the tester's pins merged (9999b9b). `src/jobscrap
 - Evidence: reviewer repro r2.py: A none/no_application, B'' suggest weak_match, D none/no_application, F suggest weak_match, F' suggest weak_match, 1-char quote model:short_quote, require_auth 'false' -> False. `-k mail_review_pins` 8/9 (fail: F5, lane I; the MailStatusConfig pin waits for lane F). `-k mail_` 107/108 (same F5). `-k layering` 13/13. No oracle changed meaning.
 STATUS: open
 
+### 2026-11-07 software-engineer → architect (cc coordinator, tester)
+TYPE: request
+RE: Q-60 D-157 h, i; MS §3, §7, §8 row 6; `src/jobscraper/mailstatus/{contracts,match,transition}.py`
+BODY: Built on `eng/Q-60-S-stage`. Please add these to the MS §3 listing: `AppCandidate.first_event_at: Optional[str] = None` (last field), `Reason.BACKFILLED = "backfilled"` (after MODEL_UNAVAILABLE), the same value in `SUGGEST_REASONS`, and `REASON_TEXTS[Reason.BACKFILLED] = "You added this application after this email arrived."`. Until then `test_mail_contracts::test_mail_contracts_module_is_the_design_listing` fails on exactly those four items. CONTRACT_VERSION is still 1; the version oracle doesn't ask for a bump. Your call whether the additive change needs one.
+Readings to fold into MS:
+- §8 row 6: when `owner_changed_at` > received and `first_event_at` > received, and rows 7–9 would give a forward move, the result is SUGGEST(`backfilled`, to=target). Otherwise it stays NONE `owner_newer`. That covers backwards, same status, any terminal (no reopen offer), an undo, and an application entered before the mail.
+- §7 `name_in_sender` (D-157 i): `match.sender_core(name, suffixes)` drops `match.SENDER_SUFFIX_WORDS` as whole words anywhere in the name, then applies `norm_company`. The name is STRONG only when the result equals a company variant. Extra words make it WEAK, and a role or req id can't lift that to STRONG (the same treatment as a D-154 c restricted name). So "Careers at Globex" is WEAK, because "at" isn't on the list.
+STATUS: open
+
 ### 2026-11-07 software-engineer → coordinator (cc tester, architect)
 TYPE: handoff
 RE: Q-60 lane F: WP-F1, F2, F5a, F3, F4, F5b; D-104 (a), (g); branch `eng/Q-60-F-flow`

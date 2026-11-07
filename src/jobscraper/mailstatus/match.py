@@ -30,6 +30,12 @@ _WS = re.compile(r"\s+")
 _BRACKET_TAIL = re.compile(r"\s*[(\[{][^()\[\]{}]*[)\]}]\s*$")
 ROLE_SHARE = 0.8        # MS 7: >= 80% of a role's tokens (at least 2) in one line
 SHORT_NAME = 5          # a one-token variant under 5 characters counts in the body only as written
+# D-157 i: words a recruiting sender adds to the company name ("Globex Careers",
+# "Globex Talent Acquisition"). Dropped before a display name is compared with
+# the tracked company; any other extra word makes the name only WEAK evidence.
+SENDER_SUFFIX_WORDS = ("campus recruiting", "university recruiting", "talent acquisition",
+                       "careers", "recruiting", "recruitment", "talent", "hiring", "jobs",
+                       "team", "hr", "people")
 
 
 # ---------------------------------------------------------------------------
@@ -75,6 +81,19 @@ def norm_role(title: str) -> str:
             break
         t = cut
     return norm(t)
+
+
+def sender_core(display_name: str, suffixes: Iterable[str] = ()) -> str:
+    """D-157 i: a sender display name with the recruiting words of
+    SENDER_SUFFIX_WORDS removed (as whole words, anywhere), then normalised like
+    a company name: "Globex Pte Ltd Careers" -> "globex", "Globex Labs" ->
+    "globex labs"."""
+    padded = f" {norm(display_name)} "
+    for phrase in SENDER_SUFFIX_WORDS:
+        needle = f" {phrase} "
+        while needle in padded:
+            padded = padded.replace(needle, " ")
+    return norm_company(padded, suffixes)
 
 
 def variants(app: AppCandidate, rules: Rules) -> tuple[str, ...]:
@@ -154,6 +173,7 @@ class _Mail:
         self.subject_raw = h.subject or ""
         self.text_raw = body.text if body is not None and body.text else ""
         self.sender = norm(h.from_name)
+        self.sender_core = sender_core(h.from_name, rules.company_suffixes)
         self.subject = norm(self.subject_raw)
         self.text = norm(self.text_raw)
         # For names that count only as written (D-104 c): accents dropped, case kept.
@@ -280,6 +300,14 @@ def _evaluate(app: AppCandidate, mail: _Mail) -> tuple[tuple[Signal, ...], int, 
                 hit = any(_written_in(raw, f) for f in written.get(v, ()))
                 restricted_hit = restricted_hit or hit
                 is_strong = False
+            elif signal is Signal.NAME_IN_SENDER:
+                # D-157 i: the display name is strong only when, recruiting words
+                # dropped, it IS the company ("Globex Careers"); "Globex Labs" is
+                # someone else on a shared platform. Extra words give WEAK, and
+                # (like a restricted name) a role can't lift that to STRONG.
+                hit = _has(normed, v)
+                is_strong = hit and mail.sender_core == v
+                restricted_hit = restricted_hit or (hit and not is_strong)
             else:
                 hit = _has(normed, v)
                 is_strong = signal is not Signal.NAME_IN_BODY
