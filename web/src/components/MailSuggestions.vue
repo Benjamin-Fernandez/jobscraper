@@ -44,7 +44,10 @@ function pick(s, jobId) {
 }
 
 const ambiguous = s => Array.isArray(s.candidates) && s.candidates.length > 0
-const appLine = s => [s.company, s.role].filter(Boolean).join(' · ')
+// With no job_id (an ambiguous or untracked-role suggestion) the company comes from the
+// first candidate, so every such card names the employer (MS section 11.3, D-161).
+const appLine = s => [s.company || s.candidates?.[0]?.company, s.role]
+  .filter(Boolean).join(' · ')
 const candidateLabel = c => `${c.role || c.job_id} · ${statusLabel(c.status)}`
 
 // The link the server builds to the owner's own Gmail (MS section 11.1); never one from mail.

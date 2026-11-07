@@ -272,3 +272,23 @@ RE: Q-71 lanes F+G pins and fixes (test/Q-71-FG-pins on int/Q-70-ux incl. 7772b5
 BODY: Fixed: FieldInput salary Amount text/inputmode, error-summary wording, comments-note copy (ApplicationDetails.test.js), test_apply_flow_accounts consent case (PROFILE_INCOMPLETE + "consents.privacy_consent"; added a direct test of the sign-up "account terms" guard), test_filter CLI tests now use a temp config/profile (hermetic, no data/ read). New: tests/test_applicant_q71_pins.py (15: country validation/options, control/show_when/autocomplete JSON, consents only when True, documents_status names only, POST /check writes nothing), web/tests/ApplicationDetails.q71.test.js (41: Q71-02/03/04/05/06/07/09/11/12/13/14/15/16/17/18/20 plus the narrow minmax(0,1fr) layout check, which reads the SFC style text because jsdom has no layout). Mutations: 24 frontend source breaks all red (list in the report); 4 python breaks red.
 SOURCE DEFECTS: none. Note: a profile with an empty section dict (e.g. `pay: {}`) shows as "Other keys in your file" with a rail entry; the server's real profiles carry null leaves, so it only appears for hand-edited files.
 STATUS: open
+
+### 2026-11-07 tester → coordinator
+TYPE: handoff
+RE: Q-72 (a, D-161) · branch test/Q-72-untracked-oracles (base int/Q-72-mail-untracked 10c6d01)
+BODY: MS 16 "Row 7a oracles" pinned in `tests/test_mail_q72_pins.py` (15 tests) and one vitest case in `web/tests/MailSuggestions.test.js`. Expected values are from MS 3, 8 (row 7a and its note), 11.3 and 16, not from the build. Oracle -> test:
+1. `test_q72_o1_the_d160_acknowledgement_over_three_closed_applications_asks_a_question` (AMBIGUOUS x3 -> SUGGEST maybe_untracked, to=None)
+2. `test_q72_o2_a_single_closed_application_gives_the_same_reason` (STRONG and WEAK); flow: `test_q72_o2_flow_stores_a_suggestion_with_no_target_and_leaves_the_message_unattached` (evidence job_id/from/to NULL, candidates_json = the one app, mail_messages.job_id NULL, `suggested` +1, status unchanged, a later rejection in the same thread is also a suggestion)
+3. `test_q72_o3_a_role_or_req_id_in_the_mail_keeps_a_late_duplicate_silent`
+4. `test_q72_o4_a_thread_signal_keeps_it_silent`
+5. `test_q72_o5_an_open_sibling_means_7a_never_fires` (ack: same_status when the sibling is first, terminal when last; rejection: several_applications offering only the sibling)
+6. `test_q72_o6_mail_not_newer_than_every_candidates_last_event_stays_silent` (later, equal, plus a strictly-older control that must ask)
+7. `test_q72_o7_the_d160_rejection_asks_unless_a_role_is_named`
+8. `test_q72_o8_other_categories_are_unchanged` (withdrawn, posting_closed, kept_on_file, no_change, unknown without/with status words) and `test_q72_o8_interview_on_the_same_fixture_is_the_reopen_path_not_7a` (also assessment, offer)
+9. `test_q72_o9_adding_the_application_afterwards_is_unchanged` (ack owner_newer, rejection backfilled); flow: `test_q72_o9_flow_backfilled_retest_is_unchanged`
+10. `test_q72_o10_an_owner_added_status_is_custom_status_not_7a` (single: custom_status; mixed with closed candidates: several_applications)
+Also `test_q72_contract_has_the_reason_its_text_and_is_a_suggestion` (MS 3: member, SUGGEST_REASONS, REASON_TEXTS, CONTRACT_VERSION 1). Web: `"maybe untracked" shows the company alone, ...` (company from candidates[0], reason text verbatim, Got it + Open in Gmail only, no select or candidate list).
+- Pre-merge, expected FAIL (7 py + 1 vitest): contract (no `Reason.MAYBE_UNTRACKED`), o1, o2 pure, o2 flow (`suggested` is 0; decide gives NONE terminal), o6 (its control), o7, vitest (`.ms-app` is empty: no fallback to candidates[0].company in `appLine`). Pre-merge PASS by design (they guard the rows that must not move): o3, o4, o5, o8 x2, o9 x2, o10.
+- Existing suite: `test_mail_contracts_module_is_the_design_listing` already fails on this base because the design lists `MAYBE_UNTRACKED` and contracts.py doesn't; it clears when the member and text are added.
+- Flow fixture: Northwind stands in for Acme (one closed application, owner-closed 2026-10-13); the crafted ack names an untracked role, so signals are employer-only (probed: name_in_sender/subject/body).
+STATUS: open

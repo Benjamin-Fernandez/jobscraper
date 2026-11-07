@@ -120,6 +120,7 @@ class Reason(str, enum.Enum):          # mail_messages.reason, mail_evidence.rea
     UNCLEAR = "unclear"
     MODEL_UNAVAILABLE = "model_unavailable"    # also: pending
     BACKFILLED = "backfilled"                  # owner_newer, but the application was entered after the email (D-157 h)
+    MAYBE_UNTRACKED = "maybe_untracked"        # only closed applications match, none by role: maybe one not added (MS 8 row 7a; D-161)
     # pending
     MODEL_DEFERRED = "model_deferred"
     # skipped by the flow, not a gate: processing this one message failed (D-157 a, D-158 1)
@@ -135,7 +136,8 @@ SUGGEST_REASONS = frozenset({Reason.MODEL_TIER, Reason.WEAK_MATCH,
                              Reason.CLOSED_ROLE, Reason.KEPT_ON_FILE, Reason.SUGGEST_ONLY,
                              Reason.FROM_SPAM, Reason.UNAUTHENTICATED,
                              Reason.CUSTOM_STATUS, Reason.PORTAL_CHECK, Reason.UNCLEAR,
-                             Reason.MODEL_UNAVAILABLE, Reason.BACKFILLED})
+                             Reason.MODEL_UNAVAILABLE, Reason.BACKFILLED,
+                             Reason.MAYBE_UNTRACKED})
 
 
 class AuthResult(str, enum.Enum):      # Gmail's Authentication-Results (mx.google.com)
@@ -399,5 +401,6 @@ REASON_TEXTS: dict[Reason, str] = {
     Reason.UNCLEAR: "The email is about this application, but JobScraper couldn't tell what changed.",
     Reason.MODEL_UNAVAILABLE: "JobScraper couldn't read this email because the AI model wasn't running.",
     Reason.BACKFILLED: "You added this application after this email arrived.",
+    Reason.MAYBE_UNTRACKED: "This email may be about an application you haven't added.",
     Reason.INTERNAL: "This email couldn't be read, so it was skipped.",
 }

@@ -1,8 +1,9 @@
 # Application status from email (F-50; Q-60; D-150, D-151; KA-3)
 
-Architect, 2026-11-02, branch `int/Q-60-mail-status`. Stage B. Input: `docs/research/mail_status_brief.md` (cited **MB §n**). ADR: `adr/0007-mail-status-imap.md`. Build plan: `mail_status_build_plan.md` (**BP**). Status: READY for stage-E review.
+Architect, 2026-11-02, branch `int/Q-60-mail-status`. Stage B. Input: `docs/research/mail_status_brief.md` (cited **MB §n**). ADR: `adr/0007-mail-status-imap.md`. Build plan: `mail_status_build_plan.md` (**BP**). Status: READY for stage-E review. Amendment Q-72 (a) "maybe untracked": READY (Q-72, D-161).
 
-**Changelog.** 2026-11-07 (3): §3 adds `Reason.INTERNAL` (in `SKIP_REASONS`, with its `REASON_TEXTS` entry) and the count key `errors`, as built by lane F (int 5b91824; D-158 1); the "pending" note in §5.4 is gone. Still READY.
+**Changelog.** 2026-11-07 (4), READY (Q-72, D-161): a new suggestion for mail that matches only closed applications at an employer and names none of them (the D-160 dry-run gap). §3 adds `Reason.MAYBE_UNTRACKED` (in `SUGGEST_REASONS`) and its `REASON_TEXTS` entry; `CONTRACT_VERSION` stays 1. §7 "Mail for untracked roles", §8 row 7a (new) and its note, §11.3, §15, §16 and §17 (F-50l) changed. No schema change, no new config key, no new count key. Every other rule keeps its meaning.
+2026-11-07 (3): §3 adds `Reason.INTERNAL` (in `SKIP_REASONS`, with its `REASON_TEXTS` entry) and the count key `errors`, as built by lane F (int 5b91824; D-158 1); the "pending" note in §5.4 is gone. Still READY.
 2026-11-07 (2): aligned with D-157 (a)–(j) and D-156 (1), (3)–(5) from the lane F review (`docs/reviews/Q-60-flow.md`): §2.3 (PRD §7.2), §3 (additive, as built by lane S: `AppCandidate.first_event_at`, `Reason.BACKFILLED` in `SUGGEST_REASONS`, its `REASON_TEXTS` entry; `CONTRACT_VERSION` stays 1), §5.1, §5.4, §5.5, §6.5, §7, §8, §9, §10.1–§10.4, §11.1, §11.4 (new), §12, §15 R3. D-157 (e) supersedes D-156 (2): owner triggers ignore `retry_after`. Still READY.
 2026-11-07: aligned with D-153 (§8 row 2) and D-154 (a)–(g), as built in the lane S and lane I fix rounds (§5.6, §6.2–§6.5, §7, §8, §10.4, §11.3, §12, §13). Q-60 decision IDs renumbered to D-150..D-154 per D-155's map. Contracts (§3) unchanged.
 
@@ -214,6 +215,7 @@ class Reason(str, enum.Enum):          # mail_messages.reason, mail_evidence.rea
     UNCLEAR = "unclear"
     MODEL_UNAVAILABLE = "model_unavailable"    # also: pending
     BACKFILLED = "backfilled"                  # owner_newer, but the application was entered after the email (D-157 h)
+    MAYBE_UNTRACKED = "maybe_untracked"        # only closed applications match, none by role: maybe one not added (§8 row 7a; D-161)
     # pending
     MODEL_DEFERRED = "model_deferred"
     # skipped by the flow, not a gate: processing this one message failed (D-157 a, D-158 1)
@@ -229,7 +231,8 @@ SUGGEST_REASONS = frozenset({Reason.MODEL_TIER, Reason.WEAK_MATCH,
                              Reason.CLOSED_ROLE, Reason.KEPT_ON_FILE, Reason.SUGGEST_ONLY,
                              Reason.FROM_SPAM, Reason.UNAUTHENTICATED,
                              Reason.CUSTOM_STATUS, Reason.PORTAL_CHECK, Reason.UNCLEAR,
-                             Reason.MODEL_UNAVAILABLE, Reason.BACKFILLED})
+                             Reason.MODEL_UNAVAILABLE, Reason.BACKFILLED,
+                             Reason.MAYBE_UNTRACKED})
 
 
 class AuthResult(str, enum.Enum):      # Gmail's Authentication-Results (mx.google.com)
@@ -493,6 +496,7 @@ REASON_TEXTS: dict[Reason, str] = {
     Reason.UNCLEAR: "The email is about this application, but JobScraper couldn't tell what changed.",
     Reason.MODEL_UNAVAILABLE: "JobScraper couldn't read this email because the AI model wasn't running.",
     Reason.BACKFILLED: "You added this application after this email arrived.",
+    Reason.MAYBE_UNTRACKED: "This email may be about an application you haven't added.",
     Reason.INTERNAL: "This email couldn't be read, so it was skipped.",
 }
 ```
@@ -735,7 +739,7 @@ quote: the shortest sentence from the email that shows the category, copied exac
 5. If `|R| = 0` and `|E| = 1` → that one, `STRONG` with a strong employer signal, else `WEAK`.
 6. If `|R| = 0` and `|E| > 1` → `AMBIGUOUS(E)`.
 
-**Saved roles (`to_apply`)** are ordinary candidates: an acknowledgement moves them to `applied` (rank 0 → 1, automatic when confident), with `applied_at` set from the email date. **Mail for untracked roles:** `UNMATCHED / no_application`. Only its row (id, date, sender domain) and a count ("4 job emails matched no tracked application") are kept: no list and no subject. A list would mean storing subjects of mail about applications JobScraper doesn't track. That is a later feature if wanted (§15).
+**Saved roles (`to_apply`)** are ordinary candidates: an acknowledgement moves them to `applied` (rank 0 → 1, automatic when confident), with `applied_at` set from the email date. **Mail for untracked roles:** `UNMATCHED / no_application`. Only its row (id, date, sender domain) and a count ("4 job emails matched no tracked application") are kept: no list and no subject. A list would mean storing subjects of mail about applications JobScraper doesn't track. That is a later feature if wanted (§15). Mail that matches an employer the owner tracks, but only its closed applications and by employer alone, is a match, not `no_application`: §8 row 7a may turn it into a `maybe_untracked` suggestion (D-161). Its subject and quote are stored like any suggestion's, because the employer is one the owner tracks.
 
 ---
 
@@ -757,12 +761,20 @@ quote: the shortest sentence from the email that shows the category, copied exac
 | 5 | `app.status` neither ranked nor terminal (an owner-added status) | SUGGEST(`custom_status`) |
 | 6 | `app.owner_changed_at > h.received_at` | if `app.first_event_at` is set and `> h.received_at` (the owner entered the application after the mail arrived) **and** the verdict is forward for it (rows 7–9 would reach row 10) → SUGGEST(to=target, `backfilled`) (D-157 h). Otherwise NONE `owner_newer` (an undo, or any owner change after an application that already existed when the mail came, stays silent) |
 | 7 | `app.status` terminal | target terminal → NONE `terminal`; category ∈ {assessment, interview, offer} and `h.received_at > app.last_event_at` → SUGGEST(`reopen`); else NONE `terminal` |
+| 7a | (D-161; refines rows 4 and 7) rows 4–9 settle **every** candidate (the one application of a `STRONG` or `WEAK` match, or each candidate of an `AMBIGUOUS` one) as NONE `terminal`, **and** `match.signals` holds none of `role`, `req_id`, `thread`, **and** `h.received_at > c.last_event_at` for every candidate `c` (a missing `last_event_at` counts as older, as in row 7), **and** category ∈ {`acknowledged`, `rejected`} | SUGGEST(to=None, `maybe_untracked`), offering every matched candidate. If any condition fails, the row 4 / row 7 result stands: NONE `terminal` |
 | 8 | target == `app.status` | NONE `same_status` |
 | 9 | target not terminal and rank(target) < rank(status) | NONE `backwards` |
 | 10 | (forward) | go to the bar |
 | 11 | **bar for AUTO**, in order: (a) `tier == MODEL` → SUGGEST `model_tier`; (b) category ∈ suggest_only → SUGGEST `closed_role` / `kept_on_file` / `suggest_only`; (c) match `WEAK` → SUGGEST `weak_match`; (d) `h.ref.role == JUNK` and category ∉ `junk_auto` → SUGGEST `from_spam`; (e) `require_auth` and `h.auth != PASS` → SUGGEST `unauthenticated` | else **AUTO `forward`** |
 
 **"Confident, unique":** a rule-tier verdict, a `STRONG` match, a category that isn't suggest-only, not from Spam (except acknowledgements), and Gmail-authenticated. **How D-151 c's "anything else → a suggestion" is read:** forward moves that miss the bar become suggestions, and so do the explicit cases in rows 2–5 and 7. Backwards moves (row 9), same-status mail (row 8) and mail older than an owner change (row 6, except a forward verdict on an application entered after the mail: `backfilled`) change nothing *and* raise no suggestion. Without that, every late acknowledgement and every assessment reminder after an interview would ask a question. Out-of-order mail of that kind is common (MB §4).
+
+**Row 7a, maybe untracked (D-161, Q-72 a; the D-160 dry run).** The owner applied to a new Acme role without adding it to JobScraper. Its acknowledgement matched only the three closed Acme rows, by employer alone, and every one was settled NONE `terminal`, so nothing showed. Row 7a turns that case into a question with no target. The rest of this note pins it down:
+- *Categories (ruling).* `assessment`, `interview` and `offer` on a closed application, newer than its last event, already get `reopen` (row 7) or `several_applications` (row 4). So they are never silent, and row 7a never sees them. Those rows are unchanged. Row 7a adds `acknowledged` and `rejected`. A late generic rejection of an application already closed will sometimes hint falsely, but Got it is one click, while a missed application is lost for good. Not included: `withdrawn` (withdrawing is the owner's own act); `posting_closed` and `kept_on_file` (bulk notices sent late, often naming no role, and missing an untracked closed application costs nothing). `no_change`, `unknown` and `portal_update` are decided by rows 1–3 first.
+- *Rows 5, 6, 11.* A candidate with an owner-added status (row 5) or a newer owner change (row 6: `owner_newer` or `backfilled`) is not settled `terminal`, so row 7a does not fire. The date condition already rules out row 6, because `owner_changed_at ≤ last_event_at < received_at`. An open candidate is never settled `terminal`, so the existing rows decide (existing rows win). Row 11 never runs: row 7a is a suggestion with no target, decided before row 10.
+- *Signals.* `match.signals` is the chosen application's signals, or the union over an `AMBIGUOUS` match's candidates (`match.py`). A `role` or `req_id` hit means the mail names a tracked, closed role: a late duplicate stays silent. A `thread` hit means the conversation already belongs to that application.
+- *Code.* `transition.decide`: on the row 4 path, when `left` is empty and every settled reason is `terminal`; on the single path, when `_settle` returns NONE `terminal`. A private helper `_maybe_untracked(pool, verdict, match, h)` holds the test. `remaining_candidates` still returns `()` for it.
+- *Storage (no schema change).* For every match kind the flow stores it like an ambiguous suggestion with no target: `mail_evidence.job_id` NULL, `from_status` NULL, and `candidates_json` = every matched candidate with its status (for `STRONG`/`WEAK`, that one application). The subject and the quote are stored as for any suggestion (§9, §13). `mail_messages.job_id` stays NULL even for a `STRONG` match, so the thread never attaches to the closed application. Otherwise a later rejection in that thread would match it by `thread` and stay silent. The outcome is `suggested`, which adds 1 to the `suggested` count; there is no new count key. Staleness follows the ambiguous rule (§8 "Superseded"). It has no target, so Got it is the only answer (`mail_accept` refuses it as for any suggestion with no target). Adding the application later does not re-run the mail (dedupe by X-GM-MSGID); after a model verdict (§5.5) `decide` runs again and the same rule applies.
 
 **Who wrote it.** An automatic change writes `app_events(by='mail', at=now)`. `applied_at` is the email date when the move leaves `to_apply`, including a move straight to a terminal status: a saved role rejected by mail gets `applied_at` = the rejection's date (kept on purpose, D-157 j; Undo restores the previous value, NULL). The evidence row has `kind='auto'`, `event_id`, the quote, the subject (≤ 120 characters), the sender domain, `received_at`, the category, tier, rule id or model, the reason and `prev_applied_at`. An accepted suggestion writes the same event (`by='mail'`), and its evidence row moves to `state='accepted'` with `event_id`.
 
@@ -970,6 +982,7 @@ mail_status:                   # F-50: application status from email (docs/archi
 | Disconnect dialog | Title "Disconnect {address}?" Body: "JobScraper stops reading this mailbox and deletes its app password from Windows Credential Manager, its place in the mailbox and its list of checked emails. Status changes already made stay in each application's history." Shared mailbox: the password sentence becomes "The app password stays, because email verification for auto-apply uses it." Buttons **Disconnect** / **Keep connected** |
 | Toasts | "Connected. The first check has started." · "Check finished: {n} updated, {m} to review." · "Back to {status}." |
 | Suggestions panel | Title "From your email" with a count; subtitle "Updates JobScraper wasn't sure enough to make." Item: "{Company} · {Role}" / "Email says: {Status}" (or "Check the email") / "“{quote}”" / "{sender domain} · {date}" / `reason_text`. Buttons **Set to {Status}** and **Dismiss**; with no target: **Got it**; ambiguous: the select "Which application?" then **Set to {Status}**; plus **Open in Gmail** |
+| Maybe untracked (D-161) | The usual no-target card: the app line is the company alone, "{Company}", taken from `candidates[0].company` when `job_id` is null (in `MailSuggestions.vue` `appLine`, a fallback that also helps the other ambiguous suggestions). Then "Check the email", the quote, "{sender domain} · {date}", and `reason_text` "This email may be about an application you haven't added." Buttons **Got it** and **Open in Gmail** only: no select and no candidate list. There is **no** "Find the role" link: the Inbox has no company-search URL to point at, so this would be a new route (a later item if the owner asks). The owner adds the application by hand as usual |
 | Conflicts | Accept 409: "This application changed after the email. Set the status by hand if you still want this." · Undo 409: "Can't undo: the status changed after this email. Set it by hand." After either 409 the view reloads (D-154 f, review F8): `MailSuggestions` calls `load()`, and `MailEvidence` emits `stale` so the timeline reloads; the superseded suggestion and its Undo button go away |
 | Password field | The typed app password is not cleared before the consent check passes (D-154 f, F8), so an implicit submit without consent loses nothing |
 | Timeline badge | **From email**; tooltip "{sender domain}, {date}" |
@@ -1047,7 +1060,7 @@ No retry storm: per account, at most one connect attempt per timer tick, with ba
 
 ## 15. Decisions, owner questions, risks
 
-**Decided here:** placement and the timer (ADR-0007); interview mail from an assessment vendor → assessment (D-152); `posting_closed` and lone `kept_on_file` → suggestions; the `assessment` status added; model-tier verdicts never automatic; automatic changes need Gmail authentication and, outside acknowledgements, not Spam; no unmatched list; no X-GM-RAW; no IDLE (polling every 10 minutes is enough, MB §2); disconnect keeps the evidence of changes already made.
+**Decided here:** placement and the timer (ADR-0007); interview mail from an assessment vendor → assessment (D-152); `posting_closed` and lone `kept_on_file` → suggestions; the `assessment` status added; model-tier verdicts never automatic; automatic changes need Gmail authentication and, outside acknowledgements, not Spam; no unmatched list; no X-GM-RAW; no IDLE (polling every 10 minutes is enough, MB §2); disconnect keeps the evidence of changes already made. **D-161 (Q-72 a):** an acknowledgement or rejection that matches only closed applications, by employer alone, and is newer than every one of their events, becomes a `maybe_untracked` suggestion with no target (§8 row 7a). This replaces the earlier backlog idea of an `untracked_hint` count with no subject (Q-72 row): a card the owner can open in Gmail is more useful, and the employer is already tracked.
 
 **For the owner (with recommendations; none blocks the build):**
 1. Which mailboxes: **recommend** the application Gmail only, at first. The personal one can be connected later from the same card (its first sync reads 180 days of headers, mostly gated out unread).
@@ -1071,6 +1084,18 @@ No retry storm: per account, at most one connect attempt per timer tick, with ba
 
 Pure oracles for the rules, gates, classifier, matcher, transitions and model parse. A fake IMAP server (`tests/mail_support.py`) speaking LIST, EXAMINE, UID SEARCH and UID FETCH with X-GM items records every command: the "no STORE ever" and "PEEK only" oracles, cursor resume, UIDVALIDITY change, the `n:*` gotcha, first window, Spam-to-All-Mail dedupe. Store oracles: atomicity (inject a failure in `mail_record` → the cursor is unchanged), lease, undo, accept, dismiss, cascade. A flow canary test plants a marker string in a subject, a body, a display name and an address; the marker must appear in no log record, no CLI output and no job log. Web oracles: the password appears in no response, including the 422 and 400 paths; the timer is off in tests; Check now → 409 while busy; DELETE keeps a shared vault entry. Vitest: the card states and the suggestion actions.
 
+**Row 7a oracles (D-161; pure `decide` plus one flow case).** Fixture: three Acme applications, `rejected` by the owner on 2026-10-13 (`owner_changed_at` = `last_event_at` = that day), and Workday mail from Acme with employer signals only. The expected change for each:
+1. The D-160 ack ("thank you for applying … DevOps Engineer <req id>", 2026-11-02; `AMBIGUOUS` over the three; signals `employer_domain`, `tenant`, `name_in_subject`, `name_in_body`) → SUGGEST(to=None, `maybe_untracked`), with all three candidates offered.
+2. The same with a single closed Acme application (`STRONG` match) → the same reason. Flow: evidence `job_id` NULL, `candidates_json` holds that one, `mail_messages.job_id` NULL, `suggested` +1.
+3. The same mail, but one candidate's role (or req id) is in the subject → NONE `terminal`.
+4. The same mail with a `thread` signal → NONE `terminal`.
+5. An open Acme sibling (`applied`) as well → exactly as before 7a, which never fires. The ack gives NONE with row 4's first-candidate reason, since the sibling is settled `same_status`. The rejection gives `several_applications`, offering the sibling.
+6. Mail older than one candidate's `last_event_at` (or equal to it) → NONE `terminal`.
+7. The D-160 rejection (2026-11-03, no tracked role named) → `maybe_untracked`. With a role signal → NONE `terminal`.
+8. `withdrawn`, `posting_closed`, `kept_on_file`, `no_change`, and `unknown` without status words → unchanged: NONE `terminal` or the row 1–3 result. `interview` on the same fixture → `several_applications` (row 4/7 `reopen`), not 7a.
+9. The re-test after the owner adds the DevOps row (`applied`, first event after the mail): ack → NONE `owner_newer`; rejection → SUGGEST `backfilled`. These are unchanged and stay pinned.
+10. A candidate with an owner-added status → `custom_status`, not 7a.
+
 ---
 
 ## 17. Requirement map
@@ -1088,7 +1113,7 @@ Pure oracles for the rules, gates, classifier, matcher, transitions and model pa
 | F-50i | §6.2 | S1 (+ R1 data) | T2 |
 | F-50j | §7 | S2 | T3 |
 | F-50k | §6.3, §6.5 | S1, S3, F3 | T2, T3 |
-| F-50l | §8 | S3, F1 | T3, T5 |
+| F-50l | §8 (row 7a: D-161) | S3, F1 | T3, T5 (§16 row 7a oracles) |
 | F-50m | §8 Undo, §9 | F1, F5, U2 | T5, T6 |
 | F-50n | §8 Accept / dismiss | F1, F5, U2 | T5, T6 |
 | F-50o | §10.3, §11 | F4, F5, U1 | T6 |
