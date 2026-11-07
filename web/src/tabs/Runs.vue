@@ -12,7 +12,7 @@ import { ApiError, cancelJob, describeError, getSettings, startRun } from '../ap
 import { useJob } from '../composables/useJob.js'
 import { requestCompanyFilter } from '../companyFilter.js'
 import { ago, duration, plural, shortDate, utcMs, when } from '../format.js'
-import { asList, matchLabel, runStatusLabel, takePickerRequest } from '../runs.js'
+import { asList, matchLabel, runStatusLabel, runStatusNote, takePickerRequest } from '../runs.js'
 import { tabEmits, tabProps } from '../shell.js'
 import CountPicker from '../components/CountPicker.vue'
 import TabLoading from '../components/TabLoading.vue'
@@ -166,8 +166,9 @@ const lastRun = computed(() => props.runs.find(r => r.finished_at) ?? null)
 // The failed count is red only when the run itself broke.
 const HARD = ['failed', 'aborted_unhealthy']
 const failedTone = r => (HARD.includes(r.status) ? 'hard' : 'partial')
+// The Companies tab lists who fails now, not who failed in that run: say so.
 const failedText = r =>
-  `${plural(Number(r.stats.companies_failed), 'company', 'companies')} could not be read. See which on the Companies tab.`
+  `${plural(Number(r.stats.companies_failed), 'company', 'companies')} could not be read in this run. The Companies tab lists the ones that fail now.`
 
 // "N failed" in the history: the Companies tab's Failed list says which and why.
 function showFailed() {
@@ -279,6 +280,7 @@ onMounted(async () => {
     <p v-else-if="lastRun" class="last-run muted">
       Last run {{ ago(lastRun.finished_at, now) }} ({{ when(lastRun.finished_at) }})<template v-if="lastRun.status && lastRun.status !== 'ok'">, {{ runStatusLabel(lastRun.status) }}</template>:
       {{ matchLabel(lastRun.accepted) }}<template v-if="lastRun.accepted"> - <a href="#/inbox">see them in the Inbox</a></template>.
+      <template v-if="runStatusNote(lastRun.status)">{{ runStatusNote(lastRun.status) }}</template>
     </p>
     <p v-else-if="jobError && !job" class="notice error" role="alert">Could not read the current job: {{ jobError }}</p>
 
@@ -365,7 +367,10 @@ onMounted(async () => {
                 >{{ r.stats.companies_failed }}</button>
                 <template v-else>{{ r.stats?.companies_failed ?? '—' }}</template>
               </td>
-              <td><span class="pill" :data-status="r.status">{{ runStatusLabel(r.status) }}</span></td>
+              <td>
+                <span class="pill" :data-status="r.status" :title="runStatusNote(r.status) || undefined">{{ runStatusLabel(r.status) }}</span>
+                <span v-if="runStatusNote(r.status)" class="visually-hidden">. {{ runStatusNote(r.status) }}</span>
+              </td>
             </tr>
           </tbody>
         </table>

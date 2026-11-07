@@ -70,6 +70,17 @@ export function runStatusLabel(status) {
   return RUN_STATUS[status] ?? String(status).replace(/_/g, ' ')
 }
 
+// Why a run ended as it did, where the status alone does not say (Q-75 G27).
+// `aborted_unhealthy` is the pipeline's network-fault guard: most due companies
+// failed together, so nothing was counted against any of them.
+const RUN_STATUS_NOTE = {
+  aborted_unhealthy: 'Most of the companies due failed together, which looks like a network problem on this computer. '
+    + 'Nothing was counted against any company, and the batch was not marked as done: run again to retry it.',
+}
+export function runStatusNote(status) {
+  return RUN_STATUS_NOTE[status] ?? ''
+}
+
 // How often the cycle restarts, in words (M15, Settings).
 const CYCLE_WORDS = { 1: 'Daily', 7: 'Weekly', 14: 'Fortnightly', 30: 'Monthly' }
 export function cycleLabel(days) {
