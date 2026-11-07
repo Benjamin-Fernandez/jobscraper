@@ -252,8 +252,24 @@ function onDrop(event) {
   take(event.dataTransfer?.files?.[0])
 }
 
+// Clearing is rare and cannot be undone, so it sits quietly beside the downloads
+// and asks in place (Q-75 G26); Keep is focused first, Esc backs out.
+const confirmingClear = ref(false)
+const keepEl = ref(null)
+const clearEl = ref(null)
+async function askClear() {
+  confirmingClear.value = true
+  await nextTick()
+  keepEl.value?.focus()
+}
+async function keepList() {
+  confirmingClear.value = false
+  await nextTick()
+  clearEl.value?.focus()
+}
+
 async function clear() {
-  if (!window.confirm('Clear your list? The companies it added stop being watched.')) return
+  confirmingClear.value = false
   problem.value = ''
   note.value = ''
   clearing.value = true
@@ -348,7 +364,6 @@ onMounted(() => Promise.all([loadList(), loadHealth(), refresh()]))
         <button v-if="!editing" type="button" class="edit-list" :disabled="busy" @click="editList">
           {{ items.length ? 'Edit list' : 'Type or paste names' }}
         </button>
-        <button v-if="items.length" type="button" class="clear" :disabled="busy" @click="clear">Clear list</button>
       </div>
 
       <form v-if="editing" class="list-editor surface" novalidate @submit.prevent="saveTyped">
@@ -429,8 +444,11 @@ onMounted(() => Promise.all([loadList(), loadHealth(), refresh()]))
       <template v-else>
         <div class="summary surface">
           <dl class="stats">
-            <div><dt>Found</dt><dd class="num found-n">{{ count('found') }}</dd></div>
-            <div><dt>Already watched</dt><dd class="num watched-n">{{ count('watched') }}</dd></div>
+            <div>
+              <dt>Found</dt>
+              <dd class="num found-n">{{ found.length }}</dd>
+              <dd v-if="count('watched')" class="sub muted watched-n">{{ count('watched') }} already watched</dd>
+            </div>
             <div><dt>Failed</dt><dd class="num failed-n">{{ failed.length }}</dd></div>
             <div><dt>Waiting</dt><dd class="num waiting-n">{{ waiting.length }}</dd></div>
           </dl>
@@ -439,6 +457,12 @@ onMounted(() => Promise.all([loadList(), loadHealth(), refresh()]))
             <button type="button" class="dl-found" :disabled="!found.length" @click="downloadFound">Download found (.txt)</button>
             <button type="button" class="dl-failed" :disabled="!failed.length" @click="downloadFailed">Download failed (.txt)</button>
             <button type="button" class="dl-report" @click="downloadReport">Full report (.csv)</button>
+            <span v-if="confirmingClear" class="clear-ask" role="group" aria-label="Clear your list" @keydown.esc="keepList">
+              <span class="clear-q">Clear your list? The companies it added stop being watched.</span>
+              <button type="button" class="confirm-clear" :disabled="busy" @click="clear">Yes, clear it</button>
+              <button ref="keepEl" type="button" class="keep-list" @click="keepList">Keep it</button>
+            </span>
+            <button v-else ref="clearEl" type="button" class="ghost clear" :disabled="busy" @click="askClear">Clear list</button>
           </div>
         </div>
 
@@ -571,13 +595,17 @@ onMounted(() => Promise.all([loadList(), loadHealth(), refresh()]))
 .list-editor-hint { margin: 0; font-size: var(--text-sm); }
 .list-editor-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
 .list-editor-count { font-size: var(--text-sm); margin-left: auto; }
-.clear { color: var(--danger); }
+/* Quiet until asked: the irreversible choice is red only inside its own question. */
+.clear { margin-left: auto; }
+.clear-ask { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); margin-left: auto; font-size: var(--text-sm); }
+.confirm-clear { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 45%, var(--border-strong)); }
 .search-now { display: inline-flex; align-items: center; gap: var(--space-1); }
 
 .summary { margin: var(--space-4) 0 var(--space-3); padding: var(--space-4); display: grid; gap: var(--space-3); }
 .stats { display: flex; flex-wrap: wrap; gap: var(--space-2) var(--space-6); margin: 0; }
 .stats dt { font-size: var(--text-xs); color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; }
 .stats dd { margin: 0; font-size: var(--text-xl); font-weight: 600; }
+.stats .sub { font-size: var(--text-xs); font-weight: 400; }
 .found-n { color: var(--ok); }
 .failed-n { color: var(--danger); }
 .cap { margin: 0; font-size: var(--text-sm); }
