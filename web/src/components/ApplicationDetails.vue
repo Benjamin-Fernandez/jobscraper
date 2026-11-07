@@ -629,7 +629,7 @@ defineExpose({ load })
           Saving rewrites applicant.yaml without its comments. A copy with the comments is kept as applicant.commented-backup.yaml.
         </p>
 
-        <div class="details-body">
+        <div class="details-body" :class="{ 'has-rail': sections.length > 1 }">
         <SectionRail v-if="sections.length > 1" class="details-rail" :sections="sections" :current="currentSection" @go="goSection" />
         <form class="the-form" novalidate @submit.prevent="save" @focusin="onFocusIn">
           <section
@@ -842,11 +842,13 @@ defineExpose({ load })
 .note { margin: calc(-1 * var(--space-2)) 0 0; font-size: var(--text-sm); }
 /* Two columns from 900px (Q71-19): short related fields pair up, the rest take the row. */
 @media (min-width: 900px) {
-  .details-body { grid-template-columns: 13rem minmax(0, 1fr); }
+  .details-body.has-rail { grid-template-columns: 13rem minmax(0, 1fr); }
   .group { grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: var(--space-5); }
   .group > .group-head, .group > .note, .field.wide, .extra-row, .others { grid-column: 1 / -1; }
 }
-.field { display: grid; gap: var(--space-1); align-content: start; scroll-margin-top: calc(var(--header-h) + var(--space-4)); }
+/* The sticky save bar must not cover the field that has focus (WCAG 2.4.11). */
+.field { display: grid; gap: var(--space-1); align-content: start; scroll-margin-top: calc(var(--header-h) + var(--space-4)); scroll-margin-bottom: 6rem; }
+.missing-list .upload { min-height: 1.5rem; }
 .field-head { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-2); }
 .field-label { font-size: var(--text-sm); font-weight: 600; }
 .hint { margin: 0; font-size: var(--text-xs); color: var(--muted); max-width: 60ch; }

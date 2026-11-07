@@ -359,8 +359,9 @@ function removeRow(i) {
         <legend>
           <span class="entry-name">{{ entryName(i) }}</span>
           <span v-if="entryFromResume(i)" class="tag resume">From your resume, please check</span>
-          <button type="button" class="ghost remove-entry" :disabled="disabled" :aria-label="`Remove ${entryName(i)}`" @click="removeEntry(i)">Remove</button>
         </legend>
+        <!-- Outside the legend, so the group's name stays "School 1"; shown at the legend row's end. -->
+        <button type="button" class="ghost remove-entry" :disabled="disabled" :aria-label="`Remove ${entryName(i)}`" @click="removeEntry(i)">Remove</button>
         <div class="entry-grid">
           <div v-for="s in sub" :key="s.path" class="entry-field" :class="{ wide: s.multiline || s.path === 'description' }">
             <label :id="`${subId(i, s)}-label`" :for="subId(i, s)">{{ s.label }}</label>
@@ -535,16 +536,21 @@ function removeRow(i) {
 .add { display: flex; gap: var(--space-2); }
 .add input { flex: 1; min-width: 0; }
 .entries { display: grid; gap: var(--space-3); justify-items: start; }
-.entry { width: 100%; margin: 0; padding: var(--space-3) var(--space-4); border: 1px solid var(--border); border-radius: var(--radius); display: grid; gap: var(--space-3); justify-items: start; }
+/* A block, not a grid: the floated legend is then a normal row at the top (Q71-21). */
+.entry { position: relative; width: 100%; margin: 0; padding: var(--space-3) var(--space-4); border: 1px solid var(--border); border-radius: var(--radius); display: block; }
+.entry > .entry-grid, .entry > .field-error { clear: both; margin-top: var(--space-3); }
 /* The legend row: the entry's name, its tag, and Remove at the far end (Q71-21). */
 .entry legend {
-  float: left; width: 100%; padding: 0;
+  float: left; width: 100%; padding: 0 5rem 0 0; min-height: 1.75rem;
   display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-2);
   font-size: var(--text-sm); font-weight: 600;
 }
-.entry legend + * { clear: both; }
 .entry legend .tag { margin-left: 0; }
-.remove-entry { margin-left: auto; min-height: 1.75rem; padding: 0 var(--space-2); font-weight: 500; }
+.remove-entry {
+  position: absolute; top: var(--space-3); right: var(--space-4);
+  min-height: 1.75rem; padding: 0 var(--space-2); font-weight: 500;
+}
+.clear { min-height: 1.5rem; }
 .entry-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr)); gap: var(--space-3) var(--space-4); width: 100%; }
 .entry-field { display: grid; gap: var(--space-1); align-content: start; min-width: 0; }
 .entry-field.wide { grid-column: 1 / -1; }
