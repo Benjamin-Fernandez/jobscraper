@@ -39,3 +39,6 @@ One entry per session. Older handover notes end up here, so `handover.md` stays 
 - Lane F review fixes (D-157, D-158, D-159), tester T5/T6 and pins merged on int; IDs renamed into D-150..D-169 (D-155). int e0e97e4: 1106/1106.
 - X1 dev check on a DB copy (8769). Owner dry run on a fresh copy: 19 read, 0 changes (D-160; untracked tenant B application → Q-72).
 - Live DB backed up; merged into personal c20332a; suite 1106/1106, vitest 296/1 skipped, bundle rebuilt, smoke OK; pushed.
+
+### 2026-11-07 session (Q-70 UX + Q-71 details form)
+- Resumed Q-70 after an interruption: merged lanes A, B, D; lane C + C4 KeepAlive; Overview page (E); tester pins for each. Owner reported the details form ("can't enter my desired salary"): fixed the salary defect, reviewer audit (24 gaps), lanes F (form) + G (schema), browser pass incl. 390px fixes (rail containing block, country rows, Companies switcher). Merged Q-60 from personal into int (Applications.vue conflict resolved; assessment stage colour moved into StatusSelect.vue). Merged into personal e5d939e, bundle 370feab, pushed. web 481/482, Python 1122/1122.
