@@ -224,3 +224,13 @@ BODY: Commits: 3a9e6d3 T0 alone (layering sets, read-only mailbox guard, SQL tok
 - Design notes for the Coordinator to confirm or amend in MS: (1) MS 8 row 2 "(or no target)" would catch portal_update before row 3; the oracles and lane S both let row 3 decide it. (2) The golden employers Northwind and Contoso use the reserved `.example` TLD, so the "first domain label" variant doesn't make every employer "example".
 - Researcher: to try a draft rules file, set `JOBSCRAPER_TEST_MAIL_RULES=<path>` and run `-k mail_rules`.
 STATUS: open
+
+### 2026-11-07 tester → coordinator (cc lanes F, S, I)
+TYPE: handoff
+RE: Q-60 WP-T5, WP-T6, D-156/D-157/D-158 pins · branch test/Q-60-mail-oracles
+BODY: Commits dbfbd14 T5 (`test_store_mail`, `test_mail_flow`, `test_config_mail`, `mail_flow_support`), d552680 T6 (`test_cli_mail`, `test_web_mail`, `web/tests/MailCard|MailSuggestions.test.js`, `web/tests/mailFake.js`), 33ea215 D-156 pins + neutral names (Grab/Sea → Claim/Ocean; rules_min `common_word_names: [ocean, claim]`; the review pins add those two words to the shipped file's list in memory), 1b351f3 D-157 pins, 31fe682 D-157(i) addendum + D-158 pins.
+- Pins expected to fail until lanes F/S land: D-157 a (both), b, c, d, e, f, h, i; D-158 cursor-after-disconnect, backfilled accept, poison `Reason.INTERNAL`. D-158 locked-DB already passes.
+- Defect (LOW, lane F): `config.py` `MailStatusConfig.from_raw` crashes with OverflowError on `.inf`/"inf"/"1e400" (it catches only TypeError/ValueError around `int(float(v))`). Pin: `test_config_mail_an_infinite_number_keeps_the_default`.
+- Not covered: FL-2 (6) migration 4 to 5 (needs a v4 DB built with the old Store); the web child's job log is checked only for its `$ mail sync` line.
+- Real company names still in tests outside mail (not common-word examples, left alone): `test_apply_contracts.py:407` ("Grab"), `test_applicant_form.py:310-312` ("shopee"). Coordinator's call.
+STATUS: open
