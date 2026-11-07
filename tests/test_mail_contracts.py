@@ -97,9 +97,12 @@ def _check_code_sets(c) -> None:
     assert not c.SKIP_REASONS & c.SUGGEST_REASONS, "the skip and suggest Reason sets overlap"
     assert R.FORWARD not in c.SKIP_REASONS | c.SUGGEST_REASONS
     assert c.SKIP_REASONS <= set(R) and c.SUGGEST_REASONS <= set(R)
-    # The header and content gates (MS 6.2) can only give skip reasons.
+    # The header and content gates (MS 6.2) can only give skip reasons; D-158 (1) adds the
+    # flow's INTERNAL: a message that couldn't be read is skipped, not the account stopped.
     assert {R.TOO_OLD, R.OWN_MAIL, R.AUTO_REPLY, R.JOB_BOARD, R.NOT_JOB_MAIL, R.BULK,
-            R.ACCOUNT_MAIL, R.JOB_ALERT, R.OUTREACH} == c.SKIP_REASONS
+            R.ACCOUNT_MAIL, R.JOB_ALERT, R.OUTREACH, R.INTERNAL} == c.SKIP_REASONS
+    assert R.INTERNAL.value == "internal"
+    assert c.REASON_TEXTS[R.INTERNAL] == "This email couldn't be read, so it was skipped."
 
 
 def _check_texts(c) -> None:
@@ -156,7 +159,8 @@ def _check_shapes(c) -> None:
     r1, r2 = c.SyncReport(None, S.OK), c.SyncReport(None, S.OK)
     r1.accounts.append(a)
     assert r2.accounts == [], "SyncReport.accounts is shared between instances"
-    assert len(c.COUNT_KEYS) == len(set(c.COUNT_KEYS)) == 10
+    assert len(c.COUNT_KEYS) == len(set(c.COUNT_KEYS)) == 11
+    assert "errors" in c.COUNT_KEYS, "D-158 (1): failed messages are counted"
 
     # MailFailure: a RuntimeError that carries a code and a detail.
     e = c.MailFailure(S.NETWORK, "TimeoutError")
