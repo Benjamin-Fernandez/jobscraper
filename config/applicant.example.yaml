@@ -1,6 +1,6 @@
 # JobScraper applicant profile: TEMPLATE. Copy to data/applicant.yaml and fill it in.
 # data/applicant.yaml is gitignored. Never put real values in THIS file (the repo is public).
-# S = sensitive: never sent to the AI model, never written to logs.
+# S = sensitive: never written to logs. The AI reads S values only when apply.model_sees_sensitive is on and the model runs on this computer; except contact details, they never ground an AI-written answer (those questions wait for you).
 # "decline" means "prefer not to say" wherever a form offers it.
 version: 1
 
