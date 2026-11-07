@@ -1,0 +1,699 @@
+# Golden cases for F-50 (mail_status_design.md 6-8 and 14; build plan WP-T1). Synthetic only:
+# Example Corp (example.com), Northwind Traders (northwind.example) and Contoso Bank
+# (contoso.example) on reserved domains, real platform domains (public), no copied mail.
+#
+# A case: the .eml in golden/, how it arrives (folder = the MailboxRole being scanned,
+# X-GM-LABELS, X-GM-MSGID, X-GM-THRID), the AuthResult its Authentication-Results header gives
+# (auth), and what the stage decides against `apps` under `context`:
+#   skip:        {gate: header|content, reason: <Reason>}, or null
+#   category:    the rule classifier's Category; status_words: the Verdict flag
+#   conflict:    the categories behind a "conflict:a+b" rule verdict
+#   rule_category: the category of the deciding phrase when it differs from `category`
+#                (D-92: an `interview` hit from a `kind: assessment` sender is `assessment`)
+#   match:       {kind, job_id} or {kind: ambiguous, candidates: [...]} (MS 7)
+#   change:      {kind, reason, to} from transition.decide (MS 8); to: null = check the portal/email.
+#                A reason list means any of them: an ambiguous match that settles as NONE takes
+#                the first candidate's reason, and MS 7 doesn't fix the candidate order
+#   needs_model: the flow would ask the model first (MS 6.5); `change` is for the rule verdict
+#   tags:        the tricky cases it covers (test_mail_fixtures checks the build plan's list)
+# To add a case (MS 14): write the .eml by hand, add its row here, run
+# `python tests/run_tests.py -k mail_fixtures` and `-k mail_rules`.
+# Northwind and Contoso use the reserved .example TLD so that the "first label of each employer
+# domain" variant (MS 7) names the employer instead of giving every employer "example".
+version: 1
+context:
+  now: "2026-11-02T12:00:00"
+  window_start: "2026-08-01T00:00:00"     # the account's first_sync_from (MS 5.3)
+  own: [alex.applicant@inbox.example]
+  statuses: [to_apply, applied, assessment, interviewing, offer, rejected, withdrawn]
+  mail_status:                            # the MS 10.4 defaults that build_policy reads
+    require_auth: true
+    ranks: {to_apply: 0, applied: 1, assessment: 2, interviewing: 3, offer: 4}
+    terminal: [rejected, withdrawn]
+    category_status: {acknowledged: applied, assessment: assessment, interview: interviewing,
+                      offer: offer, rejected: rejected, withdrawn: withdrawn,
+                      posting_closed: rejected, kept_on_file: rejected}
+    suggest_only: [posting_closed, kept_on_file]
+    junk_auto: [acknowledged]
+apps:                                     # AppCandidate fields; tenant_hosts as mail_match_context gives them (E1)
+  - job_id: ex-swe
+    status: applied
+    company_names: [Example Corp, Example Corporation Pte Ltd]
+    role: Graduate Software Engineer
+    employer_domains: [example.com]
+    tenant_hosts: [examplecorp.wd3.myworkdayjobs.com]
+    board_slugs: []
+    req_ids: [R0012345]
+    threads: ["1800000000000000901"]
+    owner_changed_at: "2026-09-20T09:00:00"
+    last_event_at: "2026-09-20T09:00:00"
+  - job_id: ex-data
+    status: assessment
+    company_names: [Example Corp]
+    role: Data Analyst Graduate
+    employer_domains: [example.com]
+    tenant_hosts: [examplecorp.wd3.myworkdayjobs.com]
+    board_slugs: []
+    req_ids: [R0067890]
+    threads: []
+    owner_changed_at: "2026-09-21T09:00:00"
+    last_event_at: "2026-10-05T09:00:00"
+  - job_id: nw-analyst
+    status: interviewing
+    company_names: [Northwind Traders Pte Ltd]
+    role: Graduate Analyst
+    employer_domains: [northwind.example]
+    tenant_hosts: []
+    board_slugs: [northwind]
+    req_ids: []
+    threads: []
+    owner_changed_at: "2026-10-10T09:00:00"
+    last_event_at: "2026-10-10T09:00:00"
+  - job_id: nw-dataeng                    # a saved role (to_apply)
+    status: to_apply
+    company_names: [Northwind Traders Pte Ltd]
+    role: Graduate Data Engineer
+    employer_domains: [northwind.example]
+    tenant_hosts: []
+    board_slugs: [northwind]
+    req_ids: []
+    threads: []
+    owner_changed_at: "2026-09-15T09:00:00"
+    last_event_at: "2026-09-15T09:00:00"
+  - job_id: ct-tech                       # made by hand: no attempt row, no tenant host (E1: compact name)
+    status: applied
+    company_names: [Contoso Bank]
+    role: Technology Graduate Programme
+    employer_domains: [contoso.example]
+    tenant_hosts: []
+    board_slugs: []
+    req_ids: []
+    threads: []
+    owner_changed_at: "2026-09-25T09:00:00"
+    last_event_at: "2026-09-25T09:00:00"
+  - job_id: ct-ops                        # already closed (terminal)
+    status: rejected
+    company_names: [Contoso Bank]
+    role: Operations Graduate Associate
+    employer_domains: [contoso.example]
+    tenant_hosts: []
+    board_slugs: []
+    req_ids: []
+    threads: []
+    owner_changed_at: "2026-10-01T09:00:00"
+    last_event_at: "2026-10-01T09:00:00"
+cases:
+  - file: ack_gh_saved_role.eml
+    folder: all
+    labels: []
+    gm_msgid: "1800000000000001001"
+    gm_thrid: "1800000000000001001"
+    auth: pass
+    tags: [saved_role]
+    expect:
+      skip: null
+      category: acknowledged
+      status_words: true
+      match: {kind: strong, job_id: nw-dataeng}
+      change: {kind: auto, reason: forward, to: applied}
+  - file: ack_wd_volume_disclaimer.eml
+    folder: all
+    labels: []
+    gm_msgid: "1800000000000001002"
+    gm_thrid: "1800000000000001002"
+    auth: pass
+    tags: [volume_disclaimer, workday_tenant]
+    expect:
+      skip: null
+      category: acknowledged
+      status_words: true
+      match: {kind: strong, job_id: ex-swe}
+      change: {kind: none, reason: same_status, to: null}
+  - file: ack_oleeo_talnet.eml
+    folder: all
+    labels: []
+    gm_msgid: "1800000000000001003"
+    gm_thrid: "1800000000000001003"
+    auth: pass
+    tags: [oleeo_talnet, confirm_in_acknowledgement]
+    expect:
+      skip: null
+      category: acknowledged
+      status_words: true
+      match: {kind: strong, job_id: ct-tech}
+      change: {kind: none, reason: same_status, to: null}
+  - file: ack_autogenerated_late.eml
+    folder: all
+    labels: []
+    gm_msgid: "1800000000000001004"
+    gm_thrid: "1800000000000001004"
+    auth: pass
+    tags: [auto_generated, late_acknowledgement, confirm_in_acknowledgement]
+    expect:
+      skip: null
+      category: acknowledged
+      status_words: true
+      match: {kind: strong, job_id: ex-data}
+      change: {kind: none, reason: backwards, to: null}
+  - file: ack_spam_gh.eml
+    folder: junk
+    labels: []
+    gm_msgid: "1800000000000001005"
+    gm_thrid: "1800000000000001005"
+    auth: pass
+    tags: [acknowledgement_from_spam]
+    expect:
+      skip: null
+      category: acknowledged
+      status_words: true
+      match: {kind: strong, job_id: nw-dataeng}
+      change: {kind: auto, reason: forward, to: applied}
+  - file: ack_ambiguous_example.eml
+    folder: all
+    labels: []
+    gm_msgid: "1800000000000001006"
+    gm_thrid: "1800000000000001006"
+    auth: pass
+    tags: [ambiguous_no_role]
+    expect:
+      skip: null
+      category: acknowledged
+      status_words: true
+      match: {kind: ambiguous, candidates: [ex-data, ex-swe]}
+      change: {kind: none, reason: [backwards, same_status], to: null}
+  - file: assess_hirevue_ondemand.eml
+    folder: all
+    labels: []
+    gm_msgid: "1800000000000001007"
+    gm_thrid: "1800000000000001007"
+    auth: pass
+    tags: [hirevue_on_demand]
+    expect:
+      skip: null
+      category: assessment
+      status_words: true
+      match: {kind: strong, job_id: ct-tech}
+      change: {kind: auto, reason: forward, to: assessment}
+  - file: assess_hackerrank_online.eml
+    folder: all
+    labels: []
+    gm_msgid: "1800000000000001008"
+    gm_thrid: "1800000000000001008"
+    auth: pass
+    tags: []
+    expect:
+      skip: null
+      category: assessment
+      status_words: true
+      match: {kind: strong, job_id: ex-swe}
+      change: {kind: auto, reason: forward, to: assessment}
+  - file: assess_reminder.eml
+    folder: all
+    labels: []
+    gm_msgid: "1800000000000001009"
+    gm_thrid: "1800000000000001009"
+    auth: pass
+    tags: [reminder]
+    expect:
+      skip: null
+      category: assessment
+      status_words: true
+      match: {kind: strong, job_id: ex-data}
+      change: {kind: none, reason: same_status, to: null}
+  - file: assess_ambiguous_example.eml
+    folder: all
+    labels: []
+    gm_msgid: "1800000000000001010"
+    gm_thrid: "1800000000000001010"
+    auth: pass
+    tags: [ambiguous_suggestion]
+    expect:
+      skip: null
+      category: assessment
+      status_words: true
+      match: {kind: ambiguous, candidates: [ex-data, ex-swe]}
+      change: {kind: suggest, reason: several_applications, to: assessment}
+  - file: int_offer_you_an_interview.eml
+    folder: all
+    labels: []
+    gm_msgid: "1800000000000001011"
+    gm_thrid: "1800000000000001011"
+    auth: pass
+    tags: [offer_you_an_interview, url_in_text]
+    expect:
+      skip: null
+      category: interview
+      status_words: true
+      match: {kind: strong, job_id: nw-dataeng}
+      change: {kind: auto, reason: forward, to: interviewing}
+  - file: int_hirevue_live.eml
+    folder: all
+    labels: []
+    gm_msgid: "1800000000000001012"
+    gm_thrid: "1800000000000001012"
+    auth: pass
+    tags: [hirevue_live, d92_assessment_vendor]
+    expect:
+      skip: null
+      category: assessment
+      status_words: true
+      rule_category: interview
+      match: {kind: strong, job_id: ex-swe}
+      change: {kind: auto, reason: forward, to: assessment}
+  - file: int_calendar_invite.eml
+    folder: all
+    labels: []
+    gm_msgid: "1800000000000001013"
+    gm_thrid: "1800000000000001013"
+    auth: pass
+    tags: [calendar_request, employer_domain]
+    expect:
+      skip: null
+      category: interview
+      status_words: true
+      match: {kind: strong, job_id: ct-tech}
+      change: {kind: auto, reason: forward, to: interviewing}
+  - file: int_reschedule.eml
+    folder: all
+    labels: []
+    gm_msgid: "1800000000000001014"
+    gm_thrid: "1800000000000001014"
+    auth: pass
+    tags: [reschedule, encoded_display_name]
+    expect:
+      skip: null
+      category: interview
+      status_words: true
+      match: {kind: strong, job_id: nw-analyst}
+      change: {kind: none, reason: same_status, to: null}
+  - file: int_thread_reply.eml
+    folder: all
+    labels: []
+    gm_msgid: "1800000000000001015"
+    gm_thrid: "1800000000000000901"
+    auth: pass
+    tags: [thread_first]
+    expect:
+      skip: null
+      category: interview
+      status_words: true
+      match: {kind: strong, job_id: ex-swe}
+      change: {kind: auto, reason: forward, to: interviewing}
+  - file: offer_letter_oleeo.eml
+    folder: all
+    labels: []
+    gm_msgid: "1800000000000001016"
+    gm_thrid: "1800000000000001016"
+    auth: pass
+    tags: [dkim_aligned_no_dmarc]
+    expect:
+      skip: null
+      category: offer
+      status_words: true
+      match: {kind: strong, job_id: ct-tech}
+      change: {kind: auto, reason: forward, to: offer}
+  - file: offer_from_spam.eml
+    folder: junk
+    labels: []
+    gm_msgid: "1800000000000001017"
+    gm_thrid: "1800000000000001017"
+    auth: pass
+    tags: [offer_from_spam]
+    expect:
+      skip: null
+      category: offer
+      status_words: true
+      match: {kind: strong, job_id: ex-swe}
+      change: {kind: suggest, reason: from_spam, to: offer}
+  - file: offer_dmarc_fail.eml
+    folder: all
+    labels: []
+    gm_msgid: "1800000000000001018"
+    gm_thrid: "1800000000000001018"
+    auth: fail
+    tags: [offer_dmarc_fail]
+    expect:
+      skip: null
+      category: offer
+      status_words: true
+      match: {kind: strong, job_id: ex-data}
+      change: {kind: suggest, reason: unauthenticated, to: offer}
+  - file: rej_not_move_forward.eml
+    folder: all
+    labels: []
+    gm_msgid: "1800000000000001019"
+    gm_thrid: "1800000000000001019"
+    auth: pass
+    tags: []
+    expect:
+      skip: null
+      category: rejected
+      status_words: true
+      match: {kind: strong, job_id: nw-analyst}
+      change: {kind: auto, reason: forward, to: rejected}
+  - file: rej_kept_on_file.eml
+    folder: all
+    labels: []
+    gm_msgid: "1800000000000001020"
+    gm_thrid: "1800000000000001020"
+    auth: pass
+    tags: [kept_on_file_with_rejection, req_id]
+    expect:
+      skip: null
+      category: rejected
+      status_words: true
+      match: {kind: strong, job_id: ex-data}
+      change: {kind: auto, reason: forward, to: rejected}
+  - file: rej_position_filled_terminal.eml
+    folder: all
+    labels: []
+    gm_msgid: "1800000000000001021"
+    gm_thrid: "1800000000000001021"
+    auth: pass
+    tags: [terminal]
+    expect:
+      skip: null
+      category: rejected
+      status_words: true
+      match: {kind: strong, job_id: ct-ops}
+      change: {kind: none, reason: terminal, to: null}
+  - file: rej_chinese.eml
+    folder: all
+    labels: []
+    gm_msgid: "1800000000000001022"
+    gm_thrid: "1800000000000001022"
+    auth: pass
+    tags: [chinese_rejection, non_latin]
+    expect:
+      skip: null
+      category: unknown
+      status_words: true
+      needs_model: true
+      match: {kind: strong, job_id: ex-swe}
+      change: {kind: suggest, reason: unclear, to: null}
+  - file: wd_withdrawn_workday.eml
+    folder: all
+    labels: []
+    gm_msgid: "1800000000000001023"
+    gm_thrid: "1800000000000001023"
+    auth: pass
+    tags: [reply_to_employer]
+    expect:
+      skip: null
+      category: withdrawn
+      status_words: true
+      match: {kind: strong, job_id: ex-swe}
+      change: {kind: auto, reason: forward, to: withdrawn}
+  - file: wd_you_withdrew_gh.eml
+    folder: all
+    labels: []
+    gm_msgid: "1800000000000001024"
+    gm_thrid: "1800000000000001024"
+    auth: pass
+    tags: [confirm_in_status_mail]
+    expect:
+      skip: null
+      category: withdrawn
+      status_words: true
+      match: {kind: strong, job_id: nw-analyst}
+      change: {kind: auto, reason: forward, to: withdrawn}
+  - file: wd_oleeo_unauthenticated.eml
+    folder: all
+    labels: []
+    gm_msgid: "1800000000000001025"
+    gm_thrid: "1800000000000001025"
+    auth: none
+    tags: [no_authentication_results]
+    expect:
+      skip: null
+      category: withdrawn
+      status_words: true
+      match: {kind: strong, job_id: ct-tech}
+      change: {kind: suggest, reason: unauthenticated, to: withdrawn}
+  - file: pc_on_hold.eml
+    folder: all
+    labels: []
+    gm_msgid: "1800000000000001026"
+    gm_thrid: "1800000000000001026"
+    auth: pass
+    tags: []
+    expect:
+      skip: null
+      category: posting_closed
+      status_words: true
+      match: {kind: strong, job_id: ex-swe}
+      change: {kind: suggest, reason: closed_role, to: rejected}
+  - file: pc_no_longer_accepting.eml
+    folder: all
+    labels: []
+    gm_msgid: "1800000000000001027"
+    gm_thrid: "1800000000000001027"
+    auth: pass
+    tags: []
+    expect:
+      skip: null
+      category: posting_closed
+      status_words: true
+      match: {kind: strong, job_id: nw-dataeng}
+      change: {kind: suggest, reason: closed_role, to: rejected}
+  - file: pc_requisition_closed.eml
+    folder: all
+    labels: []
+    gm_msgid: "1800000000000001028"
+    gm_thrid: "1800000000000001028"
+    auth: pass
+    tags: []
+    expect:
+      skip: null
+      category: posting_closed
+      status_words: true
+      match: {kind: strong, job_id: ct-tech}
+      change: {kind: suggest, reason: closed_role, to: rejected}
+  - file: kof_resume_on_file.eml
+    folder: all
+    labels: []
+    gm_msgid: "1800000000000001029"
+    gm_thrid: "1800000000000001029"
+    auth: pass
+    tags: [kept_on_file_alone]
+    expect:
+      skip: null
+      category: kept_on_file
+      status_words: true
+      match: {kind: strong, job_id: nw-analyst}
+      change: {kind: suggest, reason: kept_on_file, to: rejected}
+  - file: kof_talent_pool.eml
+    folder: all
+    labels: []
+    gm_msgid: "1800000000000001030"
+    gm_thrid: "1800000000000001030"
+    auth: pass
+    tags: []
+    expect:
+      skip: null
+      category: kept_on_file
+      status_words: true
+      match: {kind: strong, job_id: ex-data}
+      change: {kind: suggest, reason: kept_on_file, to: rejected}
+  - file: kof_details_on_file.eml
+    folder: all
+    labels: []
+    gm_msgid: "1800000000000001031"
+    gm_thrid: "1800000000000001031"
+    auth: pass
+    tags: []
+    expect:
+      skip: null
+      category: kept_on_file
+      status_words: true
+      match: {kind: strong, job_id: ct-tech}
+      change: {kind: suggest, reason: kept_on_file, to: rejected}
+  - file: portal_neutral_subject.eml
+    folder: all
+    labels: []
+    gm_msgid: "1800000000000001032"
+    gm_thrid: "1800000000000001032"
+    auth: pass
+    tags: [neutral_subject_log_in_to_view, html_only]
+    expect:
+      skip: null
+      category: portal_update
+      status_words: true
+      match: {kind: strong, job_id: ex-swe}
+      change: {kind: suggest, reason: portal_check, to: null}
+  - file: portal_status_changed.eml
+    folder: all
+    labels: []
+    gm_msgid: "1800000000000001033"
+    gm_thrid: "1800000000000001033"
+    auth: pass
+    tags: []
+    expect:
+      skip: null
+      category: portal_update
+      status_words: true
+      match: {kind: strong, job_id: nw-analyst}
+      change: {kind: suggest, reason: portal_check, to: null}
+  - file: portal_successfactors.eml
+    folder: all
+    labels: []
+    gm_msgid: "1800000000000001034"
+    gm_thrid: "1800000000000001034"
+    auth: none
+    tags: [dkim_misaligned]
+    expect:
+      skip: null
+      category: portal_update
+      status_words: true
+      match: {kind: strong, job_id: ct-tech}
+      change: {kind: suggest, reason: portal_check, to: null}
+  - file: unknown_next_steps.eml
+    folder: all
+    labels: []
+    gm_msgid: "1800000000000001035"
+    gm_thrid: "1800000000000001035"
+    auth: pass
+    tags: [weak_word_only]
+    expect:
+      skip: null
+      category: unknown
+      status_words: true
+      needs_model: true
+      match: {kind: strong, job_id: nw-analyst}
+      change: {kind: suggest, reason: unclear, to: null}
+  - file: unknown_plain.eml
+    folder: all
+    labels: []
+    gm_msgid: "1800000000000001036"
+    gm_thrid: "1800000000000001036"
+    auth: pass
+    tags: []
+    expect:
+      skip: null
+      category: unknown
+      status_words: false
+      match: {kind: strong, job_id: ex-swe}
+      change: {kind: none, reason: no_status_words, to: null}
+  - file: unknown_conflict.eml
+    folder: all
+    labels: []
+    gm_msgid: "1800000000000001037"
+    gm_thrid: "1800000000000001037"
+    auth: pass
+    tags: [conflict]
+    expect:
+      skip: null
+      category: unknown
+      status_words: true
+      conflict: [posting_closed, withdrawn]
+      needs_model: true
+      match: {kind: strong, job_id: ex-swe}
+      change: {kind: suggest, reason: unclear, to: null}
+  - file: skip_own_sent.eml
+    folder: all
+    labels: ["\\Sent"]
+    gm_msgid: "1800000000000001038"
+    gm_thrid: "1800000000000001038"
+    auth: pass
+    tags: [own_sent_mail]
+    expect:
+      skip: {gate: header, reason: own_mail}
+  - file: skip_auto_replied.eml
+    folder: all
+    labels: []
+    gm_msgid: "1800000000000001039"
+    gm_thrid: "1800000000000001039"
+    auth: pass
+    tags: [auto_replied]
+    expect:
+      skip: {gate: header, reason: auto_reply}
+  - file: skip_ooo_subject.eml
+    folder: all
+    labels: []
+    gm_msgid: "1800000000000001040"
+    gm_thrid: "1800000000000001040"
+    auth: pass
+    tags: [auto_reply_subject_phrase]
+    expect:
+      skip: {gate: header, reason: auto_reply}
+  - file: skip_job_alert.eml
+    folder: all
+    labels: []
+    gm_msgid: "1800000000000001041"
+    gm_thrid: "1800000000000001041"
+    auth: pass
+    tags: [job_alert]
+    expect:
+      skip: {gate: content, reason: job_alert}
+  - file: skip_talent_newsletter.eml
+    folder: all
+    labels: []
+    gm_msgid: "1800000000000001042"
+    gm_thrid: "1800000000000001042"
+    auth: pass
+    tags: [talent_community_newsletter]
+    expect:
+      skip: {gate: header, reason: bulk}
+  - file: skip_talent_welcome.eml
+    folder: all
+    labels: []
+    gm_msgid: "1800000000000001043"
+    gm_thrid: "1800000000000001043"
+    auth: pass
+    tags: [talent_community_welcome]
+    expect:
+      skip: {gate: content, reason: job_alert}
+  - file: skip_job_board.eml
+    folder: all
+    labels: []
+    gm_msgid: "1800000000000001044"
+    gm_thrid: "1800000000000001044"
+    auth: pass
+    tags: [job_board]
+    expect:
+      skip: {gate: header, reason: job_board}
+  - file: skip_verify_confirm.eml
+    folder: all
+    labels: []
+    gm_msgid: "1800000000000001045"
+    gm_thrid: "1800000000000001045"
+    auth: pass
+    tags: [verification_with_confirm]
+    expect:
+      skip: {gate: content, reason: account_mail}
+  - file: skip_security_code.eml
+    folder: all
+    labels: []
+    gm_msgid: "1800000000000001046"
+    gm_thrid: "1800000000000001046"
+    auth: pass
+    tags: [security_code]
+    expect:
+      skip: {gate: content, reason: account_mail}
+  - file: skip_outreach.eml
+    folder: all
+    labels: []
+    gm_msgid: "1800000000000001047"
+    gm_thrid: "1800000000000001047"
+    auth: pass
+    tags: [recruiter_outreach]
+    expect:
+      skip: {gate: content, reason: outreach}
+  - file: skip_not_job_mail.eml
+    folder: all
+    labels: []
+    gm_msgid: "1800000000000001048"
+    gm_thrid: "1800000000000001048"
+    auth: pass
+    tags: [not_job_mail_with_offer_words]
+    expect:
+      skip: {gate: header, reason: not_job_mail}
+  - file: skip_too_old.eml
+    folder: all
+    labels: []
+    gm_msgid: "1800000000000001049"
+    gm_thrid: "1800000000000001049"
+    auth: pass
+    tags: [too_old]
+    expect:
+      skip: {gate: header, reason: too_old}

@@ -1,0 +1,20 @@
+Authentication-Results: mx.google.com;
+       dkim=pass header.i=@myworkday.com header.s=s1 header.b=Zm9vYmFy;
+       spf=pass (google.com: domain of examplecorp@myworkday.com designates 192.0.2.10 as permitted sender) smtp.mailfrom=examplecorp@myworkday.com;
+       dmarc=pass (p=REJECT sp=REJECT dis=NONE) header.from=myworkday.com
+From: Example Corp <examplecorp@myworkday.com>
+To: Alex Applicant <alex.applicant@inbox.example>
+Subject: Your application for Graduate Software Engineer (R0012345)
+Date: Wed, 21 Oct 2026 10:02:00 +0000
+Message-ID: <golden-02@synthetic.test>
+MIME-Version: 1.0
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: 7bit
+
+Dear Alex,
+
+We have received your application for the Graduate Software Engineer position (R0012345). Our recruiters will review it carefully.
+
+Unfortunately, due to the high volume of applications, we cannot guarantee individual replies.
+
+Example Corp Talent Acquisition

@@ -1,0 +1,109 @@
+# A small, valid rules file for the F-50 stage oracles (mail_status_design.md 6.1, E1).
+# Lanes S and F build against this file; the real one is config/mail_rules.yaml (researcher).
+# It covers every golden case in golden.yaml: phrases come from the brief's section 4 tables
+# (high-precision column), platforms from its section 3. Public data only.
+version: 1
+platforms:
+  - {id: greenhouse, kind: ats, domains: [greenhouse-mail.io, greenhouse.io]}
+  - {id: workday, kind: ats, domains: [myworkday.com], tenant_from_local_part: true, tenant_sites: [myworkdayjobs.com]}
+  - {id: oleeo, kind: ats, domains: [tal.net], tenant_from_subdomain: true, tenant_sites: [tal.net]}
+  - {id: successfactors, kind: ats, domains: [successfactors.com, successfactors.eu]}
+  - {id: hirevue, kind: assessment, domains: [hirevue.com]}
+  - {id: hackerrank, kind: assessment, domains: [hackerrankforwork.com, hackerrank.com]}
+  - {id: codility, kind: assessment, domains: [codility.com]}
+job_boards: [linkedin.com, indeed.com, indeedemail.com, jobstreet.com, mycareersfuture.gov.sg, glassdoor.com]
+company_suffixes: [pte, ltd, limited, private, inc, llc, plc, corp, corporation, co, company, group, holdings, singapore, sg]
+common_word_names: [sea, grab]
+bulk: {list_id: true, precedence: [bulk, list, junk]}
+gates:
+  auto_reply:
+    - {id: ar.ooo, re: "out of (the )?office", in: subject}
+    - {id: ar.automatic_reply, re: "automatic reply", in: subject}
+  account:
+    - {id: acc.verify_email, re: "verify your email( address)?"}
+    - {id: acc.confirm_email, re: "confirm your email( address)?"}
+    - {id: acc.security_code, re: "security code"}
+    - {id: acc.password_reset, re: "(reset|change) your password|password reset"}
+    - {id: acc.account_created, re: "your account (has been )?created"}
+  job_alert:
+    - {id: alert.jobs_you_may_like, re: "jobs you may (like|be interested in)"}
+    - {id: alert.job_alert, re: "job alerts?"}
+    - {id: alert.new_jobs_matching, re: "new jobs matching"}
+    - {id: alert.recommended_jobs, re: "recommended jobs"}
+    - {id: alert.talent_welcome, re: "(welcome to|thank you for joining) (our|the)( \\S+){0,3} talent community"}
+  outreach:
+    - {id: out.came_across, re: "came across your (profile|resume|cv)"}
+categories:
+  acknowledged:
+    phrases:
+      - {id: ack.thank_applying, re: "thank you for applying"}
+      - {id: ack.thank_application, re: "thank you for your application"}
+      - {id: ack.received, re: "we have received your application"}
+      - {id: ack.has_been_received, re: "your application has been received"}
+      - {id: ack.application_received, re: "application received"}
+      - {id: ack.successfully_submitted, re: "successfully submitted"}
+    weak: ["next steps"]
+  assessment:
+    phrases:
+      - {id: ass.invited_to_take, re: "invited you to (take|complete) (an|the) (online )?assessment"}
+      - {id: ass.online, re: "online assessment"}
+      - {id: ass.coding, re: "coding (challenge|assessment|test)"}
+      - {id: ass.complete_by, re: "complete the assessment by"}
+      - {id: ass.invitation, re: "assessment invitation"}
+      - {id: ass.game_based, re: "game-based assessment"}
+      - {id: ass.one_way_video, re: "(on-demand|digital|pre-recorded) video interview"}
+  interview:
+    phrases:
+      - {id: int.invite, re: "invite you to (an|a) interview"}
+      - {id: int.invitation, re: "interview invitation"}
+      - {id: int.schedule, re: "schedule (an|your) interview"}
+      - {id: int.select_time, re: "select a time"}
+      - {id: int.availability, re: "your availability for an interview"}
+      - {id: int.confirmation, re: "interview confirmation"}
+      - {id: int.phone_screen, re: "phone screen"}
+      - {id: int.first_round, re: "first-round interview"}
+      - {id: int.live_video, re: "live video interview"}
+      - {id: int.assessment_centre, re: "(invite|invited) you to (attend )?(an?|the|our) (assessment (centre|center|day)|superday)"}
+      - {id: int.calendar, re: "interview", calendar: true}
+  offer:
+    phrases:
+      - {id: off.pleased_to_offer, re: "(pleased|delighted) to offer you(?!\\s+(an?\\s+)?(interview|assessment))"}
+      - {id: off.of_employment, re: "offer of employment"}
+      - {id: off.letter_of_offer, re: "letter of offer"}
+      - {id: off.offer_letter, re: "offer letter"}
+      - {id: off.contract, re: "employment contract"}
+  rejected:
+    phrases:
+      - {id: rej.not_move_forward, re: "decided not to move forward"}
+      - {id: rej.not_moving_forward, re: "will not be moving forward"}
+      - {id: rej.other_candidates, re: "(move forward|proceed) with other candidates|pursue other candidates"}
+      - {id: rej.not_successful, re: "not been successful|unsuccessful on this occasion"}
+      - {id: rej.regret_to_inform, re: "we regret to inform you"}
+      - {id: rej.not_progressing, re: "not be progressing your application"}
+      - {id: rej.filled, re: "position has been filled"}
+  withdrawn:
+    phrases:
+      - {id: wd.has_been_withdrawn, re: "your application has been withdrawn"}
+      - {id: wd.you_withdrew, re: "you have withdrawn"}
+  posting_closed:
+    phrases:
+      - {id: pc.position_closed, re: "the position has been (closed|cancelled|put on hold)"}
+      - {id: pc.not_accepting, re: "no longer accepting applications"}
+      - {id: pc.requisition_closed, re: "requisition has been closed"}
+  kept_on_file:
+    phrases:
+      - {id: kof.on_file, re: "keep your (resume|cv|details|profile) on file"}
+      - {id: kof.talent_pool, re: "added( you)? to our talent (pool|community)"}
+      - {id: kof.future, re: "consider you for future (opportunities|roles)"}
+      - {id: kof.suitable_role, re: "should a suitable role arise"}
+  portal_update:
+    phrases:
+      - {id: portal.log_in_to_view, re: "(log|sign) in to (view|see|check)"}
+dominates:
+  offer: [acknowledged, assessment, interview]
+  rejected: [acknowledged, assessment, interview, kept_on_file, posting_closed]
+  interview: [acknowledged, assessment]
+  assessment: [acknowledged]
+  withdrawn: [acknowledged]
+  posting_closed: [acknowledged, kept_on_file]
+  kept_on_file: [acknowledged]

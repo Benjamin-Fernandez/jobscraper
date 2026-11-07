@@ -1,0 +1,18 @@
+Authentication-Results: mx.google.com;
+       dkim=pass header.i=@codility.com header.s=s1 header.b=Zm9vYmFy;
+       spf=pass (google.com: domain of no-reply@codility.com designates 192.0.2.10 as permitted sender) smtp.mailfrom=no-reply@codility.com;
+       dmarc=pass (p=REJECT sp=REJECT dis=NONE) header.from=codility.com
+From: Codility <no-reply@codility.com>
+To: Alex Applicant <alex.applicant@inbox.example>
+Subject: Reminder: your Example Corp coding test expires in 2 days
+Date: Tue, 27 Oct 2026 04:00:00 +0000
+Message-ID: <golden-09@synthetic.test>
+MIME-Version: 1.0
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: 7bit
+
+Hello,
+
+This is a reminder that your coding assessment for Example Corp (Data Analyst Graduate, R0067890) expires in 2 days. Please complete the assessment by 6 November 2026.
+
+Codility

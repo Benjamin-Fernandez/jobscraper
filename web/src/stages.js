@@ -7,9 +7,12 @@ export const CLOSED_STATUSES = ['rejected', 'withdrawn']
 
 // `to_apply` reads as "Saved": the word LinkedIn's and Indeed's trackers use
 // for a role kept for later.
+// `assessment` (Q-60): tests, coding challenges and one-way video, between
+// applied and interviewing; email updates can set it (mail_status_design.md 8).
 const LABELS = {
   to_apply: 'Saved',
   applied: 'Applied',
+  assessment: 'Assessment',
   interviewing: 'Interviewing',
   offer: 'Offer',
   rejected: 'Rejected',

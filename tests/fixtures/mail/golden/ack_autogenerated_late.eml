@@ -1,0 +1,17 @@
+Authentication-Results: mx.google.com;
+       dkim=pass header.i=@example.com header.s=s1 header.b=Zm9vYmFy;
+       spf=pass (google.com: domain of careers@example.com designates 192.0.2.10 as permitted sender) smtp.mailfrom=careers@example.com;
+       dmarc=pass (p=REJECT sp=REJECT dis=NONE) header.from=example.com
+From: Example Corp Careers <careers@example.com>
+To: Alex Applicant <alex.applicant@inbox.example>
+Auto-Submitted: auto-generated
+Subject: Thank you for applying - Data Analyst Graduate
+Date: Fri, 23 Oct 2026 07:45:00 +0000
+Message-ID: <golden-04@synthetic.test>
+MIME-Version: 1.0
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: 7bit
+
+Thank you for applying for the Data Analyst Graduate role (R0067890). This email confirms that we have received your application.
+
+Example Corp Careers
