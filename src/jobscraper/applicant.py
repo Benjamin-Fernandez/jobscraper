@@ -1961,7 +1961,16 @@ _SYNONYM_GROUPS: tuple[tuple[str, ...], ...] = (
     ("catholic", "catholicism", "roman catholic"), ("muslim", "islam", "islamic", "muslims"),
     ("hindu", "hinduism", "hindus"), ("sikh", "sikhism", "sikhs"),
     ("taoist", "taoism", "daoist", "daoism"), ("jewish", "judaism", "jew"),
+    # residency, NS and marital status as employers word them (review N1)
+    ("pr", "permanent resident", "singapore pr", "spr", "singapore permanent resident"),
+    ("citizen", "singaporean", "singapore citizen"),
+    ("completed", "ord", "nsman", "ns completed", "completed ns"),
+    ("serving", "ns serving"),
+    ("single", "never married", "unmarried"),
 )
+# One-way: a stored race also stands for the broader group a US form asks about.
+_IMPLIES: dict[str, tuple[str, ...]] = {"chinese": ("asian",), "malay": ("asian",),
+                                        "indian": ("asian",)}
 # How a protected term is matched (review R1). "any": whole word anywhere. "exact": a
 # generic status or gender word counts only when an option label or the evidence quote
 # IS that word, so "I completed my degree" is not a hit but the option "Completed" is.
@@ -1972,7 +1981,9 @@ _ANSWER_WORDS = frozenset({"yes", "no", "decline", "other", "none", "true", "fal
                            "none required", "always prefer not to say"})
 _EXACT_WORDS = frozenset({"single", "married", "completed", "serving", "exempted", "citizen",
                           "foreigner", "male", "female", "man", "men", "woman", "women",
-                          "veteran", "asian", "white", "black", "malay", "indian", "chinese"})
+                          "veteran", "asian", "white", "black", "malay", "indian", "chinese",
+                          "pr", "spr", "ord", "nsman", "singaporean", "never married",
+                          "unmarried"})
 
 
 class Term(NamedTuple):
@@ -1999,9 +2010,9 @@ def _term_mode(text: str) -> str:
 def _terms(profile: dict, *, contact: bool) -> list[Term]:
     out: dict[str, Term] = {}
 
-    def add(text: str, is_contact: bool) -> None:
+    def add(text: str, is_contact: bool, short_ok: bool = False) -> None:
         f = _fold(text)
-        if len(f) >= 3 and f not in out:
+        if (len(f) >= 3 or short_ok) and f not in out:
             out[f] = Term(text.strip(), _term_mode(text), is_contact)
 
     for path, v in _walk(profile or {}):
@@ -2026,7 +2037,9 @@ def _terms(profile: dict, *, contact: bool) -> list[Term]:
         for grp in _SYNONYM_GROUPS:
             if fv in grp:
                 for w in grp:
-                    add(w, is_contact)
+                    add(w, is_contact, short_ok=True)      # "PR" is a word on a form
+        for w in _IMPLIES.get(fv, ()):
+            add(w, is_contact)
     return list(out.values())
 
 
@@ -2049,12 +2062,17 @@ def _term_regex(text: str) -> re.Pattern:
 
 
 def terms_hit(terms: Sequence[Term], values: Sequence[Any] = (), evidence: str = "", *,
-              corpus: str = "", tag: bool = False) -> bool:
-    """True when a term shows up in `values` (option labels, a number or a written
-    text) or in the `evidence` quote, by the term's mode. A term that is also in
-    `corpus` (the non-protected text: resume, posting, employer) is no hit unless it
-    is a contact detail: the answer can come from there. `tag=True` (the Private tag,
-    Q-77): only "any" terms count, so a generic word never makes an answer Private."""
+              corpus: str = "", tag: bool = False, labels: bool = False) -> bool:
+    """True when a term shows up in `values` (a number or a written text) or in the
+    `evidence` quote, by the term's mode. A term that is also in `corpus` (the
+    non-protected text: resume, posting, employer) is no hit unless it is a contact
+    detail: the answer can come from there. That exemption covers free text and the
+    evidence quote only. `labels=True` says `values` are chosen option labels
+    (review N1, N2): there an "exact" word counts as a whole word inside the label
+    ("Chinese (Han)", "NS Completed"), and the corpus never exempts a label, because
+    choosing it would let the model decide the private answer.
+    `tag=True` (the Private tag, Q-77): only "any" terms count, so a generic word
+    never makes an answer Private."""
     vals = [str(v) for v in values if v not in (None, "")]
     ev = str(evidence or "")
     folded = [_fold(x) for x in vals + ([ev] if ev else [])]
@@ -2062,14 +2080,17 @@ def terms_hit(terms: Sequence[Term], values: Sequence[Any] = (), evidence: str =
     for t in terms:
         if tag and t.mode != "any":
             continue
+        rx = _term_regex(t.text)
+        in_label = False
         if t.mode == "any":
-            rx = _term_regex(t.text)
-            hit = any(rx.search(x) for x in vals + [ev])
+            in_label = labels and any(rx.search(x) for x in vals)
+            hit = in_label or any(rx.search(x) for x in (vals if not labels else []) + [ev])
         elif t.mode == "exact":
-            hit = _fold(t.text) in folded
+            in_label = labels and any(rx.search(x) for x in vals)
+            hit = in_label or _fold(t.text) in folded
         else:
             hit = bool(efold) and _fold(t.text) == efold
-        if hit and not t.contact and corpus and _term_regex(t.text).search(corpus):
+        if hit and not in_label and not t.contact and corpus and rx.search(corpus):
             continue
         if hit:
             return True

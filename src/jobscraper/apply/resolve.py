@@ -1471,7 +1471,7 @@ def _scrub_note(note: str, ctx: Optional[ResolveContext]) -> str:
 
 
 def _protected_hit(ctx: ResolveContext, values: Sequence[Any], evidence: str = "",
-                   corpus: str = "") -> bool:
+                   corpus: str = "", labels: bool = False) -> bool:
     """D-105 / ADR-0008 Option C: True when the switch is on and the reply's values
     (option labels, a number, a text) or its evidence quote hold a protected S value:
     the stored text, the Profile form's wording of it ("Singapore Permanent
@@ -1483,7 +1483,7 @@ def _protected_hit(ctx: ResolveContext, values: Sequence[Any], evidence: str = "
     if not ctx.model_sees_sensitive:
         return False
     return applicant.terms_hit(applicant.protected_terms(ctx.profile), values, evidence,
-                               corpus=corpus)
+                               corpus=corpus, labels=labels)
 
 
 def _reply_texts(f: FormField, kind: str, r: dict) -> tuple[list[str], str]:
@@ -1552,7 +1552,8 @@ def _tier5(f: FormField, ctx: ResolveContext, backend: Any) -> Optional[Answer]:
             if _is_unknown(kind, r):
                 return _llm_failed(f, False, "model: the facts do not settle it", model, phash)
             bad = grounded(kind, r, ctx, n_options=n, corpus=corpus)
-            hit = _protected_hit(ctx, *_reply_texts(f, kind, r), corpus=corpus)
+            hit = _protected_hit(ctx, *_reply_texts(f, kind, r), corpus=corpus,
+                                 labels=kind in ("choice", "multi"))
             if hit:
                 bad = bad + ["private value"]
             if bad:
