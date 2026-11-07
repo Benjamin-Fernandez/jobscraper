@@ -415,8 +415,10 @@ class _Sync:
         for p in rows:
             self.check_time()
             expired = bool(p["expired"])
-            if not expired and (self.defer_model or self.model_down
-                                or self.model_calls >= int(self.ms.model_max_calls)):
+            # model: false settles every row now (an unclear suggestion, below).
+            if not expired and self.ms.model and (
+                    self.defer_model or self.model_down
+                    or self.model_calls >= int(self.ms.model_max_calls)):
                 if not self.defer_model:            # deferral isn't a failed try
                     self.st.mail_resolve_pending(acc.id, p["gm_msgid"],
                                                  {"outcome": "pending_model",
