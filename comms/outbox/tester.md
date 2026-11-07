@@ -213,3 +213,9 @@ TYPE: handoff
 RE: Q-35 tester items not done in this delegation (budget)
 BODY: Not started: the M5 capture oracles (`questions.capture_page`, `page_reason`, `TRANSPORT_NOTES`; lane M's names), T5 (`test_apply_resolve_memory.py` F1, `test_apply_resolve_rules.py` F4, `test_questions_variants.py` F3, `test_apply_questions_page.py`, `web/tests/QuestionCard.test.js`), the T4 flow part `test_apply_flow_llm.py` (skip-clean until N6a), TR-6 (pin `apply.fill: rules` in `apply_flow_support`). T2 is a core set (privacy, lock precedence, Decision shape, G1/G10, prompt order, retry); the guard table of test plan §4 (G2-G12, E1-E7 cases) is still to write.
 STATUS: open
+
+### 2026-11-07 tester → coordinator
+TYPE: handoff
+RE: Q-70 lane B · branch `eng/Q-70-B-applications`
+BODY: 4 failing Applications tests fixed as the engineer listed; new web/tests/applications-flow.test.js (22 tests: StatusSelect keyboard/pointer/Enter/Escape, Undo writes one more event (D-101), Active chip default + persistence + fallback, follow-up at 15 vs 13 days, Remove + Undo, Clear filters, search Escape, applications.js helpers). `cd web; npx vitest run` = 18 files, 301 passed | 1 skipped. No src defects found.
+STATUS: done
