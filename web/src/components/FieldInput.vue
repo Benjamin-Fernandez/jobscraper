@@ -99,8 +99,16 @@ const entryFromResume = i => props.fromResume.some(p => p === `${props.path}[${i
 const entryName = i => `${props.label || 'Entry'} ${i + 1}`
 
 // ---- salary ----
+// A required salary (expected) always shows its inputs, even while the value is
+// null or missing (Q-71: the grid used to vanish, leaving no way to enter one).
+// The defaults are only shown; they are written on the first edit, so an
+// untouched field stays unset ("Needed"). Only a nullable salary (current) can
+// be "I don't have one", which hides the inputs.
+const SALARY_DEFAULTS = { amount: null, currency: 'SGD', period: 'monthly' }
 const salary = computed(() => (props.modelValue && typeof props.modelValue === 'object' ? props.modelValue : null))
-const setSalary = (key, v) => set({ ...(salary.value || {}), [key]: v })
+const noSalary = computed(() => props.nullable && salary.value === null)
+const shownSalary = computed(() => salary.value || SALARY_DEFAULTS)
+const setSalary = (key, v) => set({ ...shownSalary.value, [key]: v })
 function toggleNoSalary(none) {
   set(none ? null : { amount: null, currency: 'SGD', period: 'monthly' })
 }
@@ -312,10 +320,10 @@ function removeRow(i) {
     <!-- amount, currency, period, negotiable -->
     <div v-else-if="kind === 'salary'" class="salary" role="group" v-bind="aria">
       <label v-if="nullable" class="check">
-        <input type="checkbox" :checked="salary === null" :disabled="disabled" @change="toggleNoSalary($event.target.checked)">
+        <input type="checkbox" :checked="noSalary" :disabled="disabled" @change="toggleNoSalary($event.target.checked)">
         I don't have one
       </label>
-      <div v-if="salary" class="salary-grid">
+      <div v-if="!noSalary" class="salary-grid">
         <div>
           <label :for="id">Amount</label>
           <input
@@ -324,7 +332,7 @@ function removeRow(i) {
             class="narrow"
             min="0"
             step="1"
-            :value="salary.amount ?? ''"
+            :value="shownSalary.amount ?? ''"
             :disabled="disabled"
             :aria-invalid="invalid ? 'true' : undefined"
             :aria-describedby="describedby || undefined"
@@ -340,21 +348,21 @@ function removeRow(i) {
             maxlength="3"
             placeholder="SGD"
             autocomplete="off"
-            :value="salary.currency ?? ''"
+            :value="shownSalary.currency ?? ''"
             :disabled="disabled"
             @input="setSalary('currency', $event.target.value.toUpperCase())"
           >
         </div>
         <div>
           <label :for="`${id}-period`">Period</label>
-          <select :id="`${id}-period`" :value="salary.period ?? ''" :disabled="disabled" @change="setSalary('period', $event.target.value || null)">
+          <select :id="`${id}-period`" :value="shownSalary.period ?? ''" :disabled="disabled" @change="setSalary('period', $event.target.value || null)">
             <option value="">Choose…</option>
             <option value="monthly">per month</option>
             <option value="annual">per year</option>
           </select>
         </div>
         <label v-if="!nullable" class="check">
-          <input type="checkbox" :checked="salary.negotiable === true" :disabled="disabled" @change="setSalary('negotiable', $event.target.checked)">
+          <input type="checkbox" :checked="shownSalary.negotiable === true" :disabled="disabled" @change="setSalary('negotiable', $event.target.checked)">
           Negotiable
         </label>
       </div>
