@@ -9,16 +9,18 @@
 // hands it to every tab (see shell.js). Choosing a run fetches that run's
 // shortlist and swaps it in place: one request, no navigation (M7-T2).
 import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { ApiError, describeError, failureText, getRuns, getShortlist, getStats } from './api.js'
+import { ApiError, describeError, failureText, getQuestions, getRuns, getShortlist, getStats } from './api.js'
 import { onJobStarted, useJob } from './composables/useJob.js'
 import { showToast } from './toast.js'
 import { TABS } from './tabs.js'
 import { runQuery, sameRun } from './runs.js'
 import { hashFor, tabFromHash } from './route.js'
+import { createShellKeys, goKeysOf } from './shortcuts.js'
 import TabLoading from './components/TabLoading.vue'
 import TabFailed from './components/TabFailed.vue'
 import ToastHost from './components/ToastHost.vue'
 import JobPill from './components/JobPill.vue'
+import ShortcutsSheet from './components/ShortcutsSheet.vue'
 
 const runs = ref([])
 // What the Inbox shows (M15): 'all' (the default), 'week', 'month', or the
@@ -26,6 +28,8 @@ const runs = ref([])
 const run = ref('all')
 const jobs = ref([])
 const stats = ref(null)
+// Applications waiting on an answer (Q-75 N7); null until the server has said.
+const openQuestions = ref(null)
 const loading = ref(true)
 const error = ref('')
 
@@ -82,7 +86,7 @@ function onTabKey(event, index) {
 
 function badgeOf(tab) {
   if (!tab.badge) return null
-  const n = tab.badge({ jobs: jobs.value, stats: stats.value, runs: runs.value, run: run.value })
+  const n = tab.badge({ jobs: jobs.value, stats: stats.value, runs: runs.value, run: run.value, openQuestions: openQuestions.value })
   return Number.isFinite(n) && n > 0 ? n : null
 }
 
@@ -113,6 +117,22 @@ async function loadStats() {
   }
 }
 
+// The Profile tab's badge. Open question groups, as the Application details
+// view counts them; a server without the questions routes, or a failed call,
+// means no badge. Only the newest call may write (as loadJobs).
+let questionsSeq = 0
+async function loadQuestions() {
+  const seq = ++questionsSeq
+  let n = null
+  try {
+    const data = await getQuestions('open')
+    n = (data?.groups ?? []).filter(g => !g.status || g.status === 'open').length
+  } catch {
+    n = null
+  }
+  if (seq === questionsSeq) openQuestions.value = n
+}
+
 // A finished run needs no following any more (M15): All runs, Past week and
 // Past month all take it in on the reload that comes with the new run list.
 // Same guard as loadJobs (Vue review, M12): only the newest call may write.
@@ -139,7 +159,7 @@ async function onChanged(options = {}) {
       error.value = describeError(e)
     }
   }
-  await Promise.all([loadJobs(), loadStats()])
+  await Promise.all([loadJobs(), loadStats(), loadQuestions()])
 }
 
 // The shell watches the background job for every tab (Q-70 C2, G7): a run that
@@ -182,18 +202,38 @@ function measureTabs() {
   if (el) moreRight.value = el.scrollLeft + el.clientWidth < el.scrollWidth - 1
 }
 
-// "/" jumps to the open tab's search box, as on GitHub or Gmail - unless the
-// user is already typing somewhere.
-function onSlash(event) {
-  if (event.key !== '/' || event.ctrlKey || event.metaKey || event.altKey) return
-  const t = event.target
-  if (t?.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t?.tagName || '')) return
+// Leaving Profile, where questions get answered, refreshes its badge.
+watch(activeId, (_, was) => { if (was === 'profile') loadQuestions() })
+
+// The keyboard layer (Q-75 N16, shortcuts.js): "/" jumps to the open tab's
+// search box, "g" then a letter goes to a tab, "?" opens the key sheet. It
+// listens in the capture phase so a go-to key is spent before the Inbox's own
+// keys (S, A, X ...) can hear it.
+const helpOpen = ref(false)
+const goKeys = goKeysOf(tabs)
+
+function focusSearch() {
   const box = document.querySelector('.panel input[type="search"]')
-  if (!box) return
-  event.preventDefault()
+  if (!box) return false
   box.focus()
   box.select?.()
+  return true
 }
+
+// Going by key moves the focus to the new panel, which names itself to a
+// screen reader (aria-labelledby the tab); a click on a tab needs no such help.
+async function goTo(id) {
+  open(id)
+  await nextTick()
+  document.getElementById(`panel-${id}`)?.focus({ preventScroll: true })
+}
+
+const keys = createShellKeys({
+  tabs, go: goTo, focusSearch,
+  toggleHelp: () => { helpOpen.value = !helpOpen.value },
+  isOpen: () => helpOpen.value,
+})
+function onShellKey(event) { keys.onKeydown(event) }
 
 // The first load. A network failure (not an ApiError: the server answered
 // nothing at all) means every tab would show the same error, so one screen
@@ -216,12 +256,12 @@ async function boot() {
     error.value = describeError(e)
   }
   retrying.value = false
-  await Promise.all([loadJobs(), loadStats()])
+  await Promise.all([loadJobs(), loadStats(), loadQuestions()])
 }
 
 onMounted(() => {
   window.addEventListener('hashchange', onHashChange)
-  window.addEventListener('keydown', onSlash)
+  window.addEventListener('keydown', onShellKey, true)
   window.addEventListener('resize', measureTabs)
   measureTabs()
   document.addEventListener('visibilitychange', onVisible)
@@ -231,7 +271,7 @@ onMounted(() => {
 })
 onBeforeUnmount(() => {
   window.removeEventListener('hashchange', onHashChange)
-  window.removeEventListener('keydown', onSlash)
+  window.removeEventListener('keydown', onShellKey, true)
   window.removeEventListener('resize', measureTabs)
   document.removeEventListener('visibilitychange', onVisible)
   stopStarters()
@@ -240,7 +280,7 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="app">
-    <header class="masthead">
+    <header class="masthead" :inert="helpOpen || undefined">
       <div class="masthead-inner">
         <h1 class="brand">
           <a :href="`#/${tabs[0]?.id}`" @click.prevent="open(tabs[0]?.id)">
@@ -266,11 +306,12 @@ onBeforeUnmount(() => {
               role="tab"
               type="button"
               class="tab"
-              :class="{ current: tab.id === activeId }"
+              :class="{ current: tab.id === activeId, quiet: tab.quiet }"
               :aria-selected="tab.id === activeId ? 'true' : 'false'"
               :aria-controls="tab.id === activeId ? `panel-${tab.id}` : undefined"
               :tabindex="tab.id === activeId ? 0 : -1"
               :data-tab="tab.id"
+              :aria-keyshortcuts="tab.goKey ? `g ${tab.goKey}` : undefined"
               @click="open(tab.id)"
               @keydown="onTabKey($event, i)"
             >
@@ -302,6 +343,7 @@ onBeforeUnmount(() => {
       v-else-if="active"
       :id="`panel-${active.id}`"
       class="panel"
+      :inert="helpOpen || undefined"
       role="tabpanel"
       :aria-labelledby="`tab-${active.id}`"
       tabindex="0"
@@ -325,6 +367,7 @@ onBeforeUnmount(() => {
       </KeepAlive>
     </main>
     <ToastHost />
+    <ShortcutsSheet :open="helpOpen" :go-keys="goKeys" @close="helpOpen = false" />
   </div>
 </template>
 
@@ -398,6 +441,16 @@ onBeforeUnmount(() => {
   background: transparent;
 }
 .tab.current { color: var(--text); font-weight: 650; }
+/* Developer (Q-75 N19): last in the bar, set apart by a hairline and drawn smaller. */
+.tab.quiet { margin-left: var(--space-2); padding-left: var(--space-4); font-size: var(--text-xs); }
+.tab.quiet::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 25%;
+  bottom: 25%;
+  border-left: 1px solid var(--border-strong);
+}
 .tab.current::after { background: var(--accent); }
 .tab:focus-visible { outline-offset: -4px; }
 .badge-slot { display: inline-flex; }

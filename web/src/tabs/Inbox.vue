@@ -19,6 +19,7 @@ import { parseDescription, previewBlocks } from '../jd.js'
 import { tabEmits, tabProps } from '../shell.js'
 import { showToast } from '../toast.js'
 import { requestPicker, runLabel } from '../runs.js'
+import { SHORTCUTS_EVENT } from '../shortcuts.js'
 import CompanyMark from '../components/CompanyMark.vue'
 import Icon from '../components/Icon.vue'
 import RunSelector from '../components/RunSelector.vue'
@@ -220,6 +221,19 @@ function unpend(id) {
   pending.value = next
 }
 
+// The last Save, Applied or Not interested can be taken back with Z for a minute
+// (G3r), the same Undo the toast offers; whichever is used first spends it.
+const UNDO_WINDOW_MS = 60000
+let lastUndo = null
+function rememberUndo(run) { lastUndo = { run, at: Date.now() } }
+function spendUndo(run) { lastUndo = null; return run() }
+function undoLast() {
+  const u = lastUndo
+  lastUndo = null
+  if (!u || Date.now() - u.at > UNDO_WINDOW_MS) return
+  return u.run()
+}
+
 const VERB = { applied: 'Marked applied', to_apply: 'Saved' }
 
 async function track(job, status) {
@@ -234,9 +248,10 @@ async function track(job, status) {
     await setApplicationStatus(job.id, status, { company: job.company, role: job.title, url: job.url })
     quiet.value = true
     emit('changed')
+    rememberUndo(() => undo(job))
     showToast({
       message: `${VERB[status]}: ${job.title} at ${job.company}`,
-      action: { label: 'Undo', run: () => undo(job) },
+      action: { label: 'Undo', run: () => spendUndo(() => undo(job)) },
       link: { label: 'View in Applications', href: '#/applications' },
     })
   } catch (e) {
@@ -284,8 +299,9 @@ async function markNotInterested(job) {
     }
     showToast({
       message: `Moved to Not interested: ${job.title} at ${job.company}`,
-      action: { label: 'Undo', run: () => moveBack(job, { undoing: true }) },
+      action: { label: 'Undo', run: () => spendUndo(() => moveBack(job, { undoing: true })) },
     })
+    rememberUndo(() => moveBack(job, { undoing: true }))
   } finally {
     busy.value = false
     if (hadFocus) refocus()
@@ -362,6 +378,12 @@ async function step(by) {
 
 function onShortcut(event) {
   if (!shortcutsOn.value || event.defaultPrevented || event.ctrlKey || event.metaKey || event.altKey || typing(event.target)) return
+  if (String(event.key).toLowerCase() === 'z') {
+    if (!lastUndo || busy.value) return
+    event.preventDefault()
+    undoLast()
+    return
+  }
   const job = selected.value
   const act = {
     s: () => track(job, 'to_apply'),
@@ -376,8 +398,17 @@ function onShortcut(event) {
   act()
 }
 
-onMounted(() => window.addEventListener('keydown', onShortcut))
-onBeforeUnmount(() => window.removeEventListener('keydown', onShortcut))
+// The "?" sheet's switch reaches an open Inbox through this event.
+function onShortcutsSwitch(event) { shortcutsOn.value = Boolean(event.detail?.on) }
+
+onMounted(() => {
+  window.addEventListener('keydown', onShortcut)
+  window.addEventListener(SHORTCUTS_EVENT, onShortcutsSwitch)
+})
+onBeforeUnmount(() => {
+  window.removeEventListener('keydown', onShortcut)
+  window.removeEventListener(SHORTCUTS_EVENT, onShortcutsSwitch)
+})
 // A kept-alive Inbox must not keep its keys while another tab is showing
 // (duplicate adds of the same listener are dropped by the browser).
 onActivated(() => window.addEventListener('keydown', onShortcut))
@@ -559,7 +590,7 @@ onDeactivated(() => window.removeEventListener('keydown', onShortcut))
         <p class="shortcuts muted">
           <template v-if="shortcutsOn">
             Keys: <kbd>S</kbd> save · <kbd>A</kbd> applied · <kbd>X</kbd> not interested · <kbd>O</kbd> open ·
-            <kbd>J</kbd> <kbd>K</kbd> next, previous ·
+            <kbd>J</kbd> <kbd>K</kbd> next, previous · <kbd>Z</kbd> undo · <kbd>?</kbd> all keys ·
           </template>
           <button
             type="button"
