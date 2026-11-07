@@ -263,8 +263,12 @@ describe('Runs tab inside the app', () => {
     api.finishJob()
     await tick()
 
-    expect(api.count(/^api\/runs$/)).toBe(2)
+    // Q-70 C2: the shell's own watcher also reloads on the finish (requestSeq-guarded),
+    // so the Runs tab's reload may be doubled; what matters is at least one more.
+    expect(api.count(/^api\/runs$/)).toBeGreaterThanOrEqual(2)
+    expect(api.count(/^api\/runs$/)).toBeLessThanOrEqual(3)
     expect(wrapper.findAll('tr[data-run]').map(r => r.attributes('data-run'))).toEqual(['13', '12', '11'])
-    expect(api.count(/^api\/shortlist\?run=all$/)).toBe(2)
+    expect(api.count(/^api\/shortlist\?run=all$/)).toBeGreaterThanOrEqual(2)
+    expect(api.count(/^api\/shortlist\?run=all$/)).toBeLessThanOrEqual(3)
   })
 })
