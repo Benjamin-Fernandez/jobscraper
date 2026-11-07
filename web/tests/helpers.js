@@ -144,6 +144,10 @@ export function fakeApi({
   // Q-70 E: questions = the GET /api/questions payload ({groups, waiting, ...}), null = 404 as
   // before; applicationRows = exact rows for GET /api/applications instead of the status log.
   questions = null, applicationRows = null,
+  // Q-76: attempts = { job_id: [attempt views, newest first] } (the shape of attempt_view);
+  // GET /api/applications rows carry the first as `last_attempt`, and the count as `attempts`.
+  // attemptsFail = job ids whose GET /api/applications/<id>/attempts answers 500.
+  attempts = {}, attemptsFail = [],
 } = {}) {
   const calls = []
   const apps = {}
@@ -296,13 +300,21 @@ export function fakeApi({
     }
     if (url === 'api/applications' && applicationRows) return respond(applicationRows)
     if (/^api\/questions\?status=/.test(url) && questions) return respond(questions)
+    const att = /^api\/applications\/([\w.:-]+)\/attempts$/.exec(url)
+    if (att) {
+      if (attemptsFail.includes(att[1])) return respond({ detail: 'attempts are down' }, 500)
+      return respond(attempts[att[1]] ?? [])
+    }
     if (url === 'api/applications') {
       return respond(Object.entries(apps).map(([id, a]) => {
-        const j = fixture.jobs.find(x => x.id === id) ?? {}
+        const j = fixture.jobs.find(x => x.id === id)
+        const tries = attempts[id] ?? []
         return {
           job_id: id, status: a.status, notes: a.notes,
-          company: j.company ?? null, role: j.title ?? null, url: j.url ?? null,
-          run_no: j.run_no ?? null, events: a.events,
+          company: j?.company ?? null, role: j?.title ?? null, url: j?.url ?? null,
+          run_no: j?.run_no ?? null, events: a.events,
+          last_attempt: tries[0] ?? null, attempts: tries.length,
+          posting: j ? { reason: j.reason, matched_skills: j.matched_skills ?? [], yoe_min: j.yoe_min, decided_at: j.decided_at, closed: false } : null,
         }
       }))
     }
