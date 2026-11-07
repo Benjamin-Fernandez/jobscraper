@@ -168,8 +168,10 @@ def test_sign_up_needs_the_privacy_consent_before_any_vault_write():
         with memory_keyring() as mem:
             ad = _AccountAdapter(w.store)
             r = _run(w, [jid], ad)[0][0]
-            assert r.state is S.FAILED and r.reason is R.UNANSWERABLE_REQUIRED
-            assert "account terms" in r.reason_detail
+            # Q-71 G3: a consent that is not True is refused up front (the profile guard), before any
+            # browser or vault work; the sign-up-time "account terms" check is the second line.
+            assert r.state is S.FAILED and r.reason is R.PROFILE_INCOMPLETE, (r.state, r.reason)
+            assert "consents.privacy_consent" in r.reason_detail
             assert "sign_up" not in ad.calls
             assert not [c for c in mem.calls if c[0] == "set"] and w.store.accounts() == []
     finally:
@@ -403,3 +405,19 @@ def test_on_workday_choose_entry_runs_before_the_account_wall():
 if WAITING[_W0:]:
     print(f"[test_apply_flow_accounts] {len(WAITING[_W0:])} oracle tests wait for modules not built yet: "
           + ", ".join(sorted({m for _n, m in WAITING[_W0:]})))
+
+def test_the_sign_up_step_itself_refuses_without_the_privacy_consent():
+    """Q-71 G3 refuses such a profile earlier (PROFILE_INCOMPLETE), so the flow never reaches this check;
+    it stays as the second line of defence, and this calls it directly: no vault, no account row, no click."""
+    import types
+    from jobscraper.apply.contracts import ApplyFailure
+    for consent in (False, None):
+        p = sample_profile()
+        p["consents"]["privacy_consent"] = consent
+        stub = types.SimpleNamespace(profile=p)           # sign_up reads nothing else before the guard
+        try:
+            apply_flow._Run.sign_up(stub, None, None, None, None, None, "", "", "")
+        except ApplyFailure as e:
+            assert e.reason is R.UNANSWERABLE_REQUIRED and "account terms" in str(e.detail if hasattr(e, "detail") else e)
+        else:
+            raise AssertionError("sign_up went ahead without the privacy consent")

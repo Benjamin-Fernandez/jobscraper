@@ -42,7 +42,8 @@ describe('FieldInput salary (required, Q-71)', () => {
     it(`shows Amount, Currency, Period and Negotiable when the value is ${name}`, () => {
       const w = salary(props)
       expect(w.find('.salary-grid').exists()).toBe(true)
-      expect(w.find('#f-pay').attributes('type')).toBe('number')
+      expect(w.find('#f-pay').attributes('type')).toBe('text')            // Q71-05: a text box that parses "4,500"
+      expect(w.find('#f-pay').attributes('inputmode')).toBe('numeric')
       expect(w.find('label[for="f-pay"]').text()).toBe('Amount')
       expect(w.find('#f-pay-currency').element.value).toBe('SGD')
       expect(w.find('#f-pay-period').element.value).toBe('monthly')
