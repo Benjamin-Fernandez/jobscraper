@@ -1174,6 +1174,12 @@ def validate_extra(extra: Any) -> list[FieldError]:
 # Completeness (F-11)
 # --------------------------------------------------------------------------
 
+# Q-71 G3: the two required consents count as filled only when True. A "No"
+# is an answer, but an application cannot be sent on it: auto-apply would start,
+# then stop at the consent / terms box (fail-closed, but a wasted run).
+CONSENTS_MUST_BE_YES = ("consents.privacy_consent", "consents.certify_true")
+
+
 def _filled(profile: dict, path: str) -> bool:
     if path == "education":
         return any(isinstance(e, dict) and not _empty(e.get("institution"))
@@ -1182,6 +1188,8 @@ def _filled(profile: dict, path: str) -> bool:
     v = _get(profile, path)
     if path == "pay.expected_salary.amount":
         return _is_int(v) and v > 0            # the template's 0 is "not filled"
+    if path in CONSENTS_MUST_BE_YES:
+        return v is True                       # "No" here only stops the run at the box
     return not _empty(v)
 
 
@@ -1202,6 +1210,42 @@ def resume_file(profile: dict, resume_dir: str | os.PathLike | None = None) -> O
         if (rdir / name).is_file():
             return rdir / name
     return None
+
+
+def _named_file(profile: dict, path: str, resume_dir: str | os.PathLike | None) -> Optional[Path]:
+    """The file `profile[path]` names (relative = from the project root, then
+    from `resume_dir`), or None when unset or not a file."""
+    named = _get(profile, path)
+    if _empty(named):
+        return None
+    p = Path(str(named))
+    rdir = Path(resume_dir) if resume_dir else ROOT / "data"
+    for cand in ([p] if p.is_absolute() else [ROOT / p, rdir / p]):
+        if cand.is_file():
+            return cand
+    return None
+
+
+def documents_status(profile: dict, resume_dir: str | os.PathLike | None = None) -> dict:
+    """What the Files group shows (Q-71 G4): for the resume and the transcript,
+    `{name, size, modified}` of the file in use, or None. `modified` is ISO 8601
+    in UTC. Only the file name is returned, never a path: the owner's folder
+    layout is nobody's business, and the page must not echo it."""
+    profile = profile or {}
+
+    def info(p: Optional[Path]) -> Optional[dict]:
+        if p is None:
+            return None
+        try:
+            st = p.stat()
+        except OSError:
+            return None
+        when = _dt.datetime.fromtimestamp(st.st_mtime, tz=_dt.timezone.utc)
+        return {"name": p.name, "size": st.st_size,
+                "modified": when.isoformat(timespec="seconds")}
+
+    return {"resume": info(resume_file(profile, resume_dir)),
+            "transcript": info(_named_file(profile, "documents.transcript", resume_dir))}
 
 
 def missing_for_apply(profile: dict, resume_dir: str | os.PathLike | None = None) -> list[str]:
@@ -1328,20 +1372,30 @@ FORM: tuple[FormGroup, ...] = (
             {"chinese": "Chinese", "malay": "Malay", "indian": "Indian",
              "eurasian": "Eurasian", "other": "Other"})),
         _I("singapore_status.race_other", "Race, if other", "text"),
-        _I("singapore_status.religion", "Religion", "text", help="Or leave it as decline."),
+        _I("singapore_status.religion", "Religion", "text", help="Type your religion, or “decline” to not say."),
         _I("singapore_status.marital_status", "Marital status", "enum", _enum_opts(
             "singapore_status.marital_status", {"single": "Single", "married": "Married"})),
         _I("singapore_status.nric_last4", "NRIC, last 4 characters", "text",
            help="Only the last 4, such as 123A. Never the full NRIC."),
     )),
     FormGroup("us_self_id", "US equal-employment questions", (
-        _I("us_self_id.eeo_gender", "Gender", "enum", _enum_opts("us_self_id.eeo_gender")),
+        _I("us_self_id.eeo_gender", "Gender", "enum", _enum_opts(
+            "us_self_id.eeo_gender", {"male": "Male", "female": "Female",
+                                      "non_binary": "Non-binary"})),
         _I("us_self_id.eeo_race_ethnicity", "Race or ethnicity", "enum",
-           _enum_opts("us_self_id.eeo_race_ethnicity")),
+           _enum_opts("us_self_id.eeo_race_ethnicity", {
+               "asian": "Asian", "black": "Black or African American",
+               "hispanic_latino": "Hispanic or Latino", "white": "White",
+               "two_or_more": "Two or more races",
+               "native_american": "American Indian or Alaska Native",
+               "pacific_islander": "Native Hawaiian or Pacific Islander"})),
         _I("us_self_id.veteran_status", "Veteran status", "enum",
-           _enum_opts("us_self_id.veteran_status")),
+           _enum_opts("us_self_id.veteran_status", {
+               "not_a_veteran": "Not a veteran", "veteran": "Veteran"})),
         _I("us_self_id.disability_status", "Disability status", "enum",
-           _enum_opts("us_self_id.disability_status")),
+           _enum_opts("us_self_id.disability_status", {
+               "no": "No, I don't have a disability",
+               "yes": "Yes, I have a disability"})),
     )),
     FormGroup("availability", "Availability", (
         _I("availability.notice_period_days", "Notice period, in days", "int"),
@@ -1357,7 +1411,7 @@ FORM: tuple[FormGroup, ...] = (
            _enum_opts("pay.current_salary.period",
                       {"monthly": "per month", "annual": "per year"}), nullable=True),
         _I("pay.months_per_year", "Months of pay per year", "int",
-           help="13 if you count the AWS bonus."),
+           help="13 if you get the AWS (Annual Wage Supplement, a 13th-month bonus)."),
     )),
     FormGroup("education", "Education", (
         _I("education", "Education", "entries", sub=(
