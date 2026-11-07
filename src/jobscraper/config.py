@@ -13,7 +13,7 @@ retired at M9-T1 (kept at the v1-final tag).
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Optional
 
@@ -203,6 +203,95 @@ class QuestionCaptureConfig:
     naming_max_per_attempt: int = 10
 
 
+# ---------------- application status from email (F-50, mail_status_design §10.4) ----------------
+
+# The design's defaults. Ranks and category targets are status names from
+# `applications.statuses`; the flow drops a target that list lacks (§8).
+MAIL_RANKS = {"to_apply": 0, "applied": 1, "assessment": 2, "interviewing": 3, "offer": 4}
+MAIL_CATEGORY_STATUS = {"acknowledged": "applied", "assessment": "assessment",
+                        "interview": "interviewing", "offer": "offer", "rejected": "rejected",
+                        "withdrawn": "withdrawn", "posting_closed": "rejected",
+                        "kept_on_file": "rejected"}
+
+# (min, max) for the numbers; out-of-range values are clamped (§10.4). Only
+# interval_min's range is the design's (5-120); the others only refuse what
+# cannot work (a negative delay, a zero cap or timeout).
+_MAIL_CLAMPS: dict[str, tuple[float, Optional[float]]] = {
+    "interval_min": (5, 120), "startup_delay_s": (0, None), "catchup_delay_s": (0, None),
+    "first_sync_max_days": (1, None), "max_headers_per_sync": (1, None),
+    "max_bodies_per_sync": (1, None), "max_body_bytes": (1, None), "sync_timeout_s": (1, None),
+    "model_max_calls": (0, None), "model_max_chars": (1, None), "model_timeout_s": (1, None),
+    "retry_model_days": (0, None)}
+
+
+@dataclass(frozen=True)
+class MailStatusConfig:
+    """The `mail_status:` block (mail_status_design §10.4): reading Gmail for
+    application updates. `enabled` is the master switch; each mailbox also has
+    its own switch in Settings (the `mail_accounts` table)."""
+    enabled: bool = True
+    interval_min: int = 10
+    startup_delay_s: int = 60
+    catchup_delay_s: int = 60
+    first_sync_max_days: int = 180
+    max_headers_per_sync: int = 2000
+    max_bodies_per_sync: int = 200
+    max_body_bytes: int = 5_000_000           # larger: classified from the subject
+    sync_timeout_s: int = 600
+    model: bool = True
+    model_max_calls: int = 20
+    model_max_chars: int = 6000
+    model_timeout_s: int = 60
+    retry_model_days: int = 3
+    require_auth: bool = True                 # automatic changes need Gmail DKIM/DMARC pass
+    ranks: Any = field(default_factory=lambda: dict(MAIL_RANKS))
+    terminal: tuple[str, ...] = ("rejected", "withdrawn")
+    category_status: Any = field(default_factory=lambda: dict(MAIL_CATEGORY_STATUS))
+    suggest_only: tuple[str, ...] = ("posting_closed", "kept_on_file")
+    junk_auto: tuple[str, ...] = ("acknowledged",)
+
+    @classmethod
+    def from_raw(cls, raw: Any) -> "MailStatusConfig":
+        """Build from the yaml block: defaults for what is missing or cannot be
+        read, numbers clamped, unknown keys ignored (as `TailorConfig`)."""
+        raw = raw if isinstance(raw, dict) else {}
+        out: dict[str, Any] = {}
+        for name, f in cls.__dataclass_fields__.items():
+            if name not in raw or raw[name] is None or name in _MAIL_MAPS or name in _MAIL_LISTS:
+                continue
+            v, default = raw[name], f.default
+            if isinstance(default, bool):
+                out[name] = v if isinstance(v, bool) else str(v).strip().lower() in (
+                    "1", "true", "yes", "on")
+                continue
+            try:
+                n = int(float(v))
+            except (TypeError, ValueError):
+                continue                           # unreadable: keep the default
+            lo, hi = _MAIL_CLAMPS.get(name, (None, None))
+            n = max(n, int(lo)) if lo is not None else n
+            out[name] = min(n, int(hi)) if hi is not None else n
+        for name, value_type in _MAIL_MAPS.items():
+            block = raw.get(name)
+            if isinstance(block, dict):
+                kept = {}
+                for k, v in block.items():
+                    try:
+                        kept[str(k)] = value_type(v)
+                    except (TypeError, ValueError):
+                        continue
+                out[name] = kept
+        for name in _MAIL_LISTS:
+            seq = raw.get(name)
+            if isinstance(seq, (list, tuple)):
+                out[name] = tuple(str(s) for s in seq if s is not None)
+        return cls(**out)
+
+
+_MAIL_MAPS = {"ranks": int, "category_status": str}
+_MAIL_LISTS = ("terminal", "suggest_only", "junk_auto")
+
+
 @dataclass
 class Config:
     raw: dict[str, Any]
@@ -343,8 +432,10 @@ class Config:
     def application_statuses(self) -> list[str]:
         """Ordered status vocabulary. Adding one is config, not a migration."""
         statuses = self.raw.get("applications", {}).get("statuses")
+        # `assessment` (F-50, mail_status_design §8): tests, coding challenges and
+        # one-way video between applying and interviewing.
         return list(statuses) if statuses else [
-            "to_apply", "applied", "interviewing", "offer", "rejected",
+            "to_apply", "applied", "assessment", "interviewing", "offer", "rejected",
             "withdrawn"]
 
     # ---------------- apply (M20) ----------------
@@ -401,6 +492,19 @@ class Config:
         block = self.raw.get("question_capture") or {}
         known = {k: block[k] for k in QuestionCaptureConfig.__dataclass_fields__ if k in block}
         return QuestionCaptureConfig(**known)
+
+    # ---------------- application status from email (F-50) ----------------
+
+    @property
+    def mail_status(self) -> MailStatusConfig:
+        """The `mail_status:` block with the design's defaults (mail_status_design §10.4)."""
+        return MailStatusConfig.from_raw(self.raw.get("mail_status"))
+
+    @property
+    def mail_rules_path(self) -> Path:
+        """Sender platforms, gates and phrases for email updates (F-50t).
+        Researcher-owned public data; a new sender or phrase needs no code."""
+        return self._path("mail_rules", "config/mail_rules.yaml")
 
 
 def load_config(path: str | os.PathLike | None = None) -> Config:
