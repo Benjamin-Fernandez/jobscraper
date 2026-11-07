@@ -260,6 +260,43 @@ Order: **M:** M1 → M2 → M3 → M4 → M5 → Q5. **R:** R1 → R2 → R3. **
 - **Done when:** all T4 flow oracles pass (cache replay, pre-Submit scan); `-k tailor` and every `-k apply_flow` file stay green.
 - **Requirements:** F-30, F-32, F-39, NF-06, NF-09.
 
+## 5b. Q-45: composed texts (cover letter, "why join"; LF §19, D-86 F9)
+
+Contracts: apply v5 additive (`QuestionReason.COMPOSE_NEEDED`, `AnswerSource.COMPOSED`, `ResolveContext.job_title`, `AttemptContext.composed`/`composed_files`, `PageOutcome.compose_needed`), tailor v2 additive (`ComposeRequest`, `ComposeResult`, `COMPOSE_VERSION`, four `IssueCode`s). Not a gate item: the gate runs with `apply.compose.enabled: false` (compose targets become questions).
+
+#### WP-K1 · Tailor compose call and checks
+- **STATUS:** READY
+- **Inputs:** LF §19.4, §19.5; `tailor_design.md` §7.4 (UPGRADE_WORDS), §7.5 (summary-check style), §8.1 (`numbers`, `facts`).
+- **Files:** `src/jobscraper/tailor/compose.py` (new), `src/jobscraper/tailor/validate.py` (`UPGRADE_WORDS` constant only, if absent), `src/jobscraper/tailor_flow.py` (T-block: `compose(cfg, req, *, backend, redact) -> ComposeResult` using the cached master only, `error="no master"` on a miss; `write_letter(text, path, fmt) -> str`).
+- **Depends on:** tailor contracts v2.
+- **Do:** `COMPOSE_SYSTEM`, prompt in the fixed order, `redact` applied to the whole user prompt, checks C1–C7, one retry with a `FIX:` line, no logging of text.
+- **Verify:** `python tests/run_tests.py -k tailor_compose`
+- **Done when:** with a fake backend and a synthetic master: each of C1–C7 rejects its probe; a clean reply passes; no S value in the recorded prompt; the retry happens once.
+- **Requirements:** F-22 (truthfulness reused), F-32, NF-02.
+
+#### WP-K2 · Compose targets on the apply side (lane M files)
+- **STATUS:** READY once `int/Q-35-M` is merged into `personal`
+- **Inputs:** LF §19.1, §19.2, L8, §6.1, G3.
+- **Files:** `src/jobscraper/apply/questions.py` (export `compose_needed`; reason `COMPOSE_NEEDED` now real; notes `off` / `failed check` / `no master`), `src/jobscraper/apply/locks.py` (L8), `src/jobscraper/apply/llm_fill.py` + `guards.py` (compose targets never in the page schema; G3's compose rule only for other free TEXTAREAs), `web/src/components/QuestionCard.vue` (chip and hint copy, LF §19.6).
+- **Depends on:** contracts v5 (this delta).
+- **Verify:** `python tests/run_tests.py -k llm_fill_locks` and `-k apply_questions_page`
+- **Done when:** T7's apply-side oracles pass; `-k llm_fill` stays green.
+- **Requirements:** F-13, F-32.
+
+#### WP-K3 · Compose in `fill_page` and the flow
+- **STATUS:** not READY (after WP-R3, WP-N6a, K1, K2)
+- **Inputs:** LF §8 step 7b, §19.2, §19.3, §13.4 (`apply.compose`).
+- **Files:** `src/jobscraper/apply/pagefill.py` (step 7b, FILE upload from `composed_files`), `src/jobscraper/apply_flow.py` (N-block: §19.3 loop, files, capture on failure, `rctx.job_title`), `src/jobscraper/config.py`, `config/config.yaml`.
+- **Verify:** `python tests/run_tests.py -k apply_flow_compose`
+- **Done when:** off → `compose_needed` capture with the page unchanged; on → text filled and audited; a failing draft → capture; `transport` → `model_unavailable`; no "compose loop".
+- **Requirements:** F-13, F-32, F-39, NF-02.
+
+#### WP-T7 · Compose oracles (tester)
+- **STATUS:** READY (skip-clean)
+- **Files:** `tests/test_tailor_compose.py`, `tests/test_apply_flow_compose.py`, plus rows in `tests/test_llm_fill_locks.py` (L8) and `tests/test_apply_questions_page.py` (reason and notes).
+- **Do:** LF §16 "Compose" row; C1–C7 probes on a synthetic master (a JD-only skill → `FACT_ADDED`; "led" absent from the master → `VERB_UPGRADE`; the sample phone → `PRIVATE_VALUE` with no value in the detail; a watchlist employer → `OTHER_EMPLOYER`; "[Name]" → `PLACEHOLDER`).
+- **Verify:** `python tests/run_tests.py -k compose`
+
 ## 6. After the gate
 
 #### WP-C1 · Cleanup (contracts v6, breaking; covered by ADR-0006)

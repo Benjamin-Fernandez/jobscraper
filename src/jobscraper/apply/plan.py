@@ -15,6 +15,8 @@ import unicodedata
 from html.parser import HTMLParser
 from typing import Iterable, Sequence
 
+from .contracts import GENERIC_LABELS
+
 # Curly quotes and look-alikes that mean an apostrophe (§7.1 step 2).
 _APOSTROPHES = str.maketrans({"’": "'", "‘": "'", "ʼ": "'", "`": "'"})
 _NOISE = ("(required)", "(optional)", "*")
@@ -115,3 +117,46 @@ def any_phrase(phrases: Iterable[str], label: str) -> bool:
     """True if any of `phrases` phrase-matches `label`."""
     lt = tokens(label)
     return any(phrase_match_tokens(tokens(p), lt) for p in phrases)
+
+
+# --------------------------------------------------------------------------
+# Generic labels (review Q-30 F1, llm_fill_design §12.1)
+# --------------------------------------------------------------------------
+
+# questions_design §5.2: words that carry no meaning of their own in a label. Kept here
+# (questions.py re-exports it) so `is_generic` needs no import of a module that imports this one.
+STOP_WORDS = frozenset("a an the of in on for to and or your you are is do does have has what "
+                       "which please select enter provide".split())
+
+
+def content_tokens(text: str) -> list[str]:
+    """`tokens(text)` minus the §5.2 stop words, in order."""
+    return [t for t in tokens(text) if t not in STOP_WORDS]
+
+
+def is_generic(label_norm: str) -> bool:
+    """F1: a label that cannot identify a question alone ("Please specify",
+    "Details", a one-word label): in GENERIC_LABELS, or fewer than 2 content
+    tokens after the stop words. Such a label is matched and captured with its
+    context, never by the label alone."""
+    norm = norm_label(label_norm)
+    if norm in GENERIC_LABELS:
+        return True
+    return len([t for t in norm.split() if t not in STOP_WORDS]) < 2
+
+
+def qualified_label(label: str, description: str = "", context: str = "", *,
+                    step: str = "", ordinal: int = 0) -> str:
+    """F1 (§12.1): the label a question is matched, captured and saved under.
+
+    Generic: `norm(label) | norm(description or context)`; with neither (review
+    M1), `norm(label) | @<step>#<ordinal>` (ordinal = the field's position among
+    the step's generic fields), so a context-less "Please specify" still means
+    one place on one form. Non-generic: `norm(label)`."""
+    norm = norm_label(label)
+    if not is_generic(norm):
+        return norm
+    qual = norm_label(description or "") or norm_label(context or "")
+    if qual:
+        return f"{norm} | {qual}"
+    return f"{norm} | @{step}#{int(ordinal)}"

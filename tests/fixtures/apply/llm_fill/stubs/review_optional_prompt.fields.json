@@ -1,0 +1,34 @@
+[
+ {
+  "label": "Primary programming language",
+  "type": "typeahead",
+  "widget": "prompt",
+  "required": false,
+  "options": [],
+  "options_sorted": true,
+  "shown": "Java",
+  "group": "",
+  "group_title": "",
+  "context": "",
+  "options_complete": false,
+  "automation_id": "formField-primaryLanguage",
+  "parts": [],
+  "help": ""
+ },
+ {
+  "label": "Strongest skill",
+  "type": "typeahead",
+  "widget": "prompt",
+  "required": false,
+  "options": [],
+  "options_sorted": true,
+  "shown": "",
+  "group": "",
+  "group_title": "",
+  "context": "",
+  "options_complete": false,
+  "automation_id": "formField-strongestSkill",
+  "parts": [],
+  "help": ""
+ }
+]

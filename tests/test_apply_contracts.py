@@ -15,6 +15,8 @@ No network: the Greenhouse schema comes from tests/fixtures, browser tests open 
 """
 from __future__ import annotations
 
+import copy
+
 import importlib
 import json
 import re
@@ -428,7 +430,11 @@ def test_prior_employment_is_deduced_from_experience_including_internships():
     q = _yn("q", "Have you previously worked for Example Logistics?")
     assert _chosen(_one(q, employer="Example Logistics")) == ("Yes",)
     assert _chosen(_one(q, employer="ELX", aliases=("Example Logistics",))) == ("Yes",)
-    assert _chosen(_one(q, employer="Dataiku")) == ("No",)
+    # D-90 gate 4 (apply_design §7.5): a prior-employment class answers only when the label
+    # names THIS employer, so each question below names the employer being applied to.
+    assert _chosen(_one(_yn("q", "Have you previously worked for Dataiku?"), employer="Dataiku")) == ("No",)
+    assert _one(q, employer="Dataiku").status is not AnswerStatus.FILLED   # names another company: unsure, never "No"
+    q = _yn("q", "Have you previously worked for Sample Analytics?")
     a = _one(q, employer="Sample Analytics Pte Ltd")      # the 2025 internship
     assert _chosen(a) == ("Yes",) and a.source == "declaration:prior_employment_at_company"
 
@@ -446,13 +452,27 @@ def test_holdings_relatives_and_previously_applied_answer_yes_when_true():
 @needs("jobscraper.apply.resolve")
 def test_unlabelled_attestation_fails_closed_and_never_reaches_the_model():
     be = StubBackend([{"choice": 1, "evidence": "x"}] * 4)
-    for label in ("Please declare any matters we should be aware of.",
-                  "Have you been convicted of an offence or declared bankrupt?"):
-        a = _one(_yn("q", label), backend=be)
-        assert a.status is AnswerStatus.UNKNOWN and not a.fills, label
+    a = _one(_yn("q", "Please declare any matters we should be aware of."), backend=be)
+    assert a.status is AnswerStatus.UNKNOWN and not a.fills
+    # D-87 A4: two standing classes that DISAGREE (criminal record true, bankruptcy false) stay unknown
+    disagree = copy.deepcopy(_profile())
+    disagree.setdefault("declarations", {})["criminal_record"] = True
+    a = _one(_yn("q", "Have you been convicted of an offence or declared bankrupt?"), backend=be, profile=disagree)
+    assert a.status is AnswerStatus.UNKNOWN and not a.fills, a.note
     a = _one(_yn("q", "Please declare any matters we should be aware of.", required=False), backend=be)
     assert a.status is AnswerStatus.BLANK_OPTIONAL
     assert be.calls == [], "attestations never go to the LLM"
+
+
+@needs("jobscraper.apply.resolve", "jobscraper.apply.declarations:classify_all")
+def test_two_agreeing_standing_declarations_answer_no_without_the_model():
+    """D-87 A4 (WP-Q48): criminal record and bankruptcy both false -> "No", rule_id the sorted
+    classes joined by "+", never sent to the model (overturns the old fail-closed case)."""
+    be = StubBackend([{"choice": 0, "evidence": "x"}] * 4)
+    a = _one(_yn("q", "Have you been convicted of an offence or declared bankrupt?"), backend=be)
+    assert a.status is AnswerStatus.FILLED and _chosen(a) == ("No",), (a.status, a.note)
+    assert a.rule_id == "bankruptcy+criminal_record" and a.tier is AnswerTier.DECLARATION, (a.rule_id, a.tier)
+    assert be.calls == []
 
 
 @needs("jobscraper.apply.resolve")

@@ -422,6 +422,57 @@ describe('Q71-12 yes/no questions are radios', () => {
   })
 })
 
+// D-91 / review Q-48 F11 follow-up: willing_to_sign_nda is a three-state answer. Unset is a real
+// answer ("ask me"), so an untouched form must never save it as false.
+describe('D-91 willing_to_sign_nda is unset / Yes / No and an untouched save never writes false', () => {
+  const NDA = 'declarations.willing_to_sign_nda'
+  const ndaForm = () => FORM.map(g => (g.id !== 'declarations' ? g : {
+    ...g, items: [...g.items, item(NDA, "Are you willing to sign an employer's NDA?", 'bool', { sensitive: true },
+      { control: 'yes_no', nullable: true, nullable_bool: true })],
+  }))
+  const mountNda = state => mountDetails({
+    applicant: withProfile({ declarations: state === 'absent' ? { shareholding_in_company: null }
+      : { shareholding_in_company: null, willing_to_sign_nda: state } }, { form: ndaForm() }),
+  })
+  const radios = w => input(w, NDA).findAll('input[type="radio"]')
+
+  it('an unset value shows "Not set", no radio checked and no Clear link', async () => {
+    for (const state of ['absent', null]) {
+      const w = await mountNda(state)
+      expect(input(w, NDA).text()).toContain('Not set')
+      expect(radios(w).map(r => r.element.checked)).toEqual([false, false])
+      expect(button(input(w, NDA), 'Clear')).toBeUndefined()
+      w.unmount()
+    }
+  })
+
+  it('saving without touching it sends no false (null or the key absent)', async () => {
+    for (const state of ['absent', null]) {
+      const w = await mountNda(state)
+      await input(w, 'contact.email').setValue('a@b.co')            // a different edit, so Save has work to do
+      await save(w)
+      const decl = puts().at(-1).body.profile.declarations
+      expect(decl[NDA.split('.')[1]] ?? null).toBeNull()
+      expect(decl[NDA.split('.')[1]]).not.toBe(false)
+      w.unmount()
+    }
+  })
+
+  it('Yes and No save as booleans, and Clear returns to unset (null)', async () => {
+    const w = await mountNda(null)
+    await radios(w)[0].setValue(true)
+    await save(w)
+    expect(puts().at(-1).body.profile.declarations.willing_to_sign_nda).toBe(true)
+    await radios(w)[1].setValue(true)
+    await save(w)
+    expect(puts().at(-1).body.profile.declarations.willing_to_sign_nda).toBe(false)
+    await button(input(w, NDA), 'Clear').trigger('click')
+    expect(input(w, NDA).text()).toContain('Not set')
+    await save(w)
+    expect(puts().at(-1).body.profile.declarations.willing_to_sign_nda ?? null).toBeNull()
+  })
+})
+
 describe('Q71-14 follow-up fields show only when they apply', () => {
   it('race "other" shows its box; indian hides it', async () => {
     const w = await mountDetails()

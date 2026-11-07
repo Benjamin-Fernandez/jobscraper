@@ -45,6 +45,11 @@ INPUTS = """() => { window.__ev = 0; for (const t of ['input', 'change'])
   document.addEventListener(t, () => window.__ev++, true); }"""
 
 
+# The synthetic resume `_world` writes. `_fill`'s temp dir is gone when it returns, so an oracle
+# hashes these bytes, never `ctx.resume_path` (lane R's R3 run, 2026-11-03).
+RESUME_BYTES = b"%PDF-1.4\n%synthetic sample resume\n"
+
+
 class FakeServices:
     """FillServices with a pinned clock; records classify calls with the page's event count then."""
 
@@ -99,7 +104,7 @@ def _world(tmp: Path, **profile_changes):
         a, b = path.split("__")
         p[a][b] = v
     resume = tmp / "Alex_Testcase_Resume.pdf"
-    resume.write_bytes(b"%PDF-1.4\n%synthetic sample resume\n")
+    resume.write_bytes(RESUME_BYTES)
     ctx = AttemptContext(attempt_id=1, job={"id": "job-1", "company": "Example Employer"},
                          tenant=Tenant(ats="workday", host="example.test", board="example"), dry_run=True,
                          email=p["contact"]["email"], resume_path=str(resume), log=lambda s: None,
@@ -165,7 +170,7 @@ def test_an_upload_is_recorded_in_ctx_uploaded_with_its_hash():
             return
         out, ctx, _sv, fb = _fill(pg, "autofill_with_resume", None)
         assert fb.calls == [], "FILE fields never reach the model"
-        want = hashlib.sha256(Path(ctx.resume_path).read_bytes()).hexdigest()
+        want = hashlib.sha256(RESUME_BYTES).hexdigest()
         assert ctx.uploaded == {"Alex_Testcase_Resume.pdf": want}
         assert pg.inner_text('[data-automation-id="file-upload-item-name"]') == "Alex_Testcase_Resume.pdf"
         assert out.unknown_required == () and out.fill_failed == ()

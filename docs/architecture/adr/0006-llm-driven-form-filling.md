@@ -83,6 +83,7 @@ The decision stands; the review tightened how it is kept safe. Details: `llm_fil
 - **NF-07 (D-81):** Greenhouse ≤ 4 min (420 s deadline), Workday 900 s; both exclude the IMAP wait and are measured at the gate.
 - **Gate (D-83):** 5 Greenhouse dry runs; each dry-run audit read row by row before a real submission; gate Workday postings need fresh owner approval.
 - Contracts stay v5 (additive): `ResolveContext.resume_entries`/`other_employers`, `AttemptContext.pre_import`/`uploaded`, `PageOutcome.transport_failed`, `FillServices`.
+- **Composed texts (Q-45, D-86 F9; `llm_fill_design.md` §19):** cover letters and "why join" answers are never written by the page model. The tailor composes them in a separate call, only when the owner opts in (`apply.compose.enabled`, default off). Every claim is checked deterministically against the master resume (numbers, facts, upgrade words, S values, other employers; tailor validator rules). Off, or a failed check → a `compose_needed` question for that posting. The audit row holds the whole text. Tailor contracts v2 (additive).
 
 ## Action items
 
