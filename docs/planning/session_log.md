@@ -48,3 +48,8 @@ One entry per session. Older handover notes end up here, so `handover.md` stays 
 - Q-48 fix round suite 1020/1024 → 3 stale pins/fixture fixed (test-only, spec-cited) → 1023/1024 (test_filter env). Re-review MERGE; F11 fixed + pinned on the sync branch.
 - R3 re-review of lane R fixes: MERGE (F12-F14 → Q-80). Lane M fit e2414c5 + lane R + Q-48 merged into int/Q-35-M; personal merged into int (contracts/applicant/store conflicts: keep both).
 - Merged into personal 7ba7597; 1262/1262, vitest 498/1 skipped; bundle 4b18695; smoke 16/16; pushed. Owner declarations written (D-162). Worktrees/branches removed. Coordinated order with the parallel session (wave 3 + Q-74 after).
+
+## 2026-11-07 (jobscraper-89, UX session, continued): wave 3 merged; Q-74 in review
+- Merged int/Q-75-wave3 into personal (da515d2, bundle 129e8ef, pushed): Q-75 lanes I+J, Q-76 application detail, Q-44/Q-73 resume refresh (D-106). Tester pins: vitest 623 + 1 expected fail; Python 1323/1323. Smoke 8774 on a DB copy: 17/17 GET, all tabs, no console errors. Coordinated with jobscraper-2f, which merged M20 (7ba7597) and built its bundle first.
+- Q-74: review APPROVE WITH FIXES (F1 HIGH tier-5 grounding on S values) → fix round → re-review (R1 over-blocking, R2 form wording) → D-108 gate → pre-merge round (R1/R2/Q-77 + §4 llm_fill hooks, e9d54bb, 1313/1314). Decisions D-107..D-109. Pending: hook pins + re-review 2.
+- Cleanup: wave-3 worktrees/branches removed; orphaned Vite processes stopped by PID. Lesson: TaskStop on an `npx vite` background shell can leave node/esbuild children holding the worktree; find them by command line and stop by PID.
