@@ -1,0 +1,17 @@
+Authentication-Results: mx.google.com;
+       dkim=pass header.i=@myworkday.com header.s=s1 header.b=Zm9vYmFy;
+       spf=pass (google.com: domain of examplecorp@myworkday.com designates 192.0.2.10 as permitted sender) smtp.mailfrom=examplecorp@myworkday.com;
+       dmarc=pass (p=REJECT sp=REJECT dis=NONE) header.from=myworkday.com
+From: Example Corp <examplecorp@myworkday.com>
+To: Alex Applicant <alex.applicant@inbox.example>
+Subject: =?utf-8?b?5YWz5LqO5oKo55qE55Sz6K+3IC0gR3JhZHVhdGUgU29mdHdhcmUgRW5naW5lZXI=?=
+Date: Sun, 01 Nov 2026 04:00:00 +0000
+Message-ID: <golden-22@synthetic.test>
+MIME-Version: 1.0
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: base64
+
+5bCK5pWs55qE55Sz6K+35Lq677yaCgrmhJ/osKLmgqjnlLPor7fmiJHku6zlhazlj7jnmoTogYzk
+vY3jgILnu4/ov4fmhY7ph43ogIPomZHvvIzmiJHku6zlvojpgZfmhr7lnLDpgJrnn6XmgqjvvIzm
+gqjnmoTnlLPor7fmnKrog73ov5vlhaXkuIvkuIDpmLbmrrXjgIIKCuelneaCqOaxguiBjOmhuuWI
+qeOAggo=

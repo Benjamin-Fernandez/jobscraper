@@ -14,9 +14,21 @@ export const POLL_MS = 1500
 // was closed and the job is only found finished when the tab opens again.
 const seenRunning = new Set()
 
+// Listeners told when any tab starts a job (track(..., { started: true })), so
+// the shell's watcher follows a job a tab began without being asked (Q-70 C1).
+const starters = new Set()
+export function onJobStarted(fn) {
+  starters.add(fn)
+  return () => starters.delete(fn)
+}
+
 // kind: 'run' | 'profile' - whose endings this tab cares about.
 // onFinish(job): called once when a job of that kind is seen to end.
-export function useJob({ kind, onFinish } = {}) {
+// consume: false makes this watcher keep its own list of seen jobs, so it can
+// report an ending without taking it from the tab that is meant to hear it
+// first (the shell watches all kinds and must not steal the Runs tab's toast).
+export function useJob({ kind, onFinish, consume = true } = {}) {
+  const seen = consume ? seenRunning : new Set()
   const job = ref(null)
   const error = ref('')
   const running = computed(() => job.value?.state === 'running')
@@ -27,9 +39,9 @@ export function useJob({ kind, onFinish } = {}) {
     job.value = next ?? null
     if (!next || next.id === null || next.id === undefined) return
     if (next.state === 'running') {
-      seenRunning.add(next.id)
-    } else if (seenRunning.has(next.id) && (!kind || next.kind === kind)) {
-      seenRunning.delete(next.id)
+      seen.add(next.id)
+    } else if (seen.has(next.id) && (!kind || next.kind === kind)) {
+      seen.delete(next.id)
       onFinish?.(next)
     }
   }
@@ -57,9 +69,12 @@ export function useJob({ kind, onFinish } = {}) {
 
   // Hand over a job the tab just started (202) or cancelled. A job this tab
   // started counts as seen running even if it has already ended by now.
-  function track(next, { started = false } = {}) {
-    if (started && next?.id !== null && next?.id !== undefined) seenRunning.add(next.id)
+  // announce: false is for a starter listener handing the job on, which would
+  // otherwise announce it to itself again.
+  function track(next, { started = false, announce = true } = {}) {
+    if (started && next?.id !== null && next?.id !== undefined) seen.add(next.id)
     accept(next)
+    if (started && announce) for (const fn of starters) fn(next)
     if (next && next.state === undefined) refresh()
     else schedule()
   }

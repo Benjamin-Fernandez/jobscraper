@@ -219,7 +219,264 @@ EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[A-Za-z]{2,}$")
 COUNTRY_CODE_RE = re.compile(r"^\+\d{1,3}$")
 CURRENCY_RE = re.compile(r"^[A-Z]{3}$")
 ISO2_RE = re.compile(r"^[A-Z]{2}$")
+COUNTRY_PICK_MESSAGE = "is not a country code. Pick a country from the list"
 URL_RE = re.compile(r"^https?://\S+$")
+
+# Q-71 G1: every ISO 3166-1 alpha-2 code with its English short name. Static data
+# (no dependency, nothing to install): the form's country pick-list and the
+# check that contact.country, nationality and the work-rights map keys are real
+# countries. A free-text box let "Singapore" be cut to "SI" (Slovenia) and saved.
+COUNTRY_NAMES: dict[str, str] = {
+    "AD": "Andorra",
+    "AE": "United Arab Emirates",
+    "AF": "Afghanistan",
+    "AG": "Antigua and Barbuda",
+    "AI": "Anguilla",
+    "AL": "Albania",
+    "AM": "Armenia",
+    "AO": "Angola",
+    "AQ": "Antarctica",
+    "AR": "Argentina",
+    "AS": "American Samoa",
+    "AT": "Austria",
+    "AU": "Australia",
+    "AW": "Aruba",
+    "AX": "Åland Islands",
+    "AZ": "Azerbaijan",
+    "BA": "Bosnia and Herzegovina",
+    "BB": "Barbados",
+    "BD": "Bangladesh",
+    "BE": "Belgium",
+    "BF": "Burkina Faso",
+    "BG": "Bulgaria",
+    "BH": "Bahrain",
+    "BI": "Burundi",
+    "BJ": "Benin",
+    "BL": "Saint Barthélemy",
+    "BM": "Bermuda",
+    "BN": "Brunei",
+    "BO": "Bolivia",
+    "BQ": "Caribbean Netherlands",
+    "BR": "Brazil",
+    "BS": "Bahamas",
+    "BT": "Bhutan",
+    "BV": "Bouvet Island",
+    "BW": "Botswana",
+    "BY": "Belarus",
+    "BZ": "Belize",
+    "CA": "Canada",
+    "CC": "Cocos (Keeling) Islands",
+    "CD": "Congo (Democratic Republic)",
+    "CF": "Central African Republic",
+    "CG": "Congo (Republic)",
+    "CH": "Switzerland",
+    "CI": "Côte d'Ivoire",
+    "CK": "Cook Islands",
+    "CL": "Chile",
+    "CM": "Cameroon",
+    "CN": "China",
+    "CO": "Colombia",
+    "CR": "Costa Rica",
+    "CU": "Cuba",
+    "CV": "Cape Verde",
+    "CW": "Curaçao",
+    "CX": "Christmas Island",
+    "CY": "Cyprus",
+    "CZ": "Czechia",
+    "DE": "Germany",
+    "DJ": "Djibouti",
+    "DK": "Denmark",
+    "DM": "Dominica",
+    "DO": "Dominican Republic",
+    "DZ": "Algeria",
+    "EC": "Ecuador",
+    "EE": "Estonia",
+    "EG": "Egypt",
+    "EH": "Western Sahara",
+    "ER": "Eritrea",
+    "ES": "Spain",
+    "ET": "Ethiopia",
+    "FI": "Finland",
+    "FJ": "Fiji",
+    "FK": "Falkland Islands",
+    "FM": "Micronesia",
+    "FO": "Faroe Islands",
+    "FR": "France",
+    "GA": "Gabon",
+    "GB": "United Kingdom",
+    "GD": "Grenada",
+    "GE": "Georgia",
+    "GF": "French Guiana",
+    "GG": "Guernsey",
+    "GH": "Ghana",
+    "GI": "Gibraltar",
+    "GL": "Greenland",
+    "GM": "Gambia",
+    "GN": "Guinea",
+    "GP": "Guadeloupe",
+    "GQ": "Equatorial Guinea",
+    "GR": "Greece",
+    "GS": "South Georgia and the South Sandwich Islands",
+    "GT": "Guatemala",
+    "GU": "Guam",
+    "GW": "Guinea-Bissau",
+    "GY": "Guyana",
+    "HK": "Hong Kong",
+    "HM": "Heard Island and McDonald Islands",
+    "HN": "Honduras",
+    "HR": "Croatia",
+    "HT": "Haiti",
+    "HU": "Hungary",
+    "ID": "Indonesia",
+    "IE": "Ireland",
+    "IL": "Israel",
+    "IM": "Isle of Man",
+    "IN": "India",
+    "IO": "British Indian Ocean Territory",
+    "IQ": "Iraq",
+    "IR": "Iran",
+    "IS": "Iceland",
+    "IT": "Italy",
+    "JE": "Jersey",
+    "JM": "Jamaica",
+    "JO": "Jordan",
+    "JP": "Japan",
+    "KE": "Kenya",
+    "KG": "Kyrgyzstan",
+    "KH": "Cambodia",
+    "KI": "Kiribati",
+    "KM": "Comoros",
+    "KN": "Saint Kitts and Nevis",
+    "KP": "North Korea",
+    "KR": "South Korea",
+    "KW": "Kuwait",
+    "KY": "Cayman Islands",
+    "KZ": "Kazakhstan",
+    "LA": "Laos",
+    "LB": "Lebanon",
+    "LC": "Saint Lucia",
+    "LI": "Liechtenstein",
+    "LK": "Sri Lanka",
+    "LR": "Liberia",
+    "LS": "Lesotho",
+    "LT": "Lithuania",
+    "LU": "Luxembourg",
+    "LV": "Latvia",
+    "LY": "Libya",
+    "MA": "Morocco",
+    "MC": "Monaco",
+    "MD": "Moldova",
+    "ME": "Montenegro",
+    "MF": "Saint Martin (French part)",
+    "MG": "Madagascar",
+    "MH": "Marshall Islands",
+    "MK": "North Macedonia",
+    "ML": "Mali",
+    "MM": "Myanmar",
+    "MN": "Mongolia",
+    "MO": "Macao",
+    "MP": "Northern Mariana Islands",
+    "MQ": "Martinique",
+    "MR": "Mauritania",
+    "MS": "Montserrat",
+    "MT": "Malta",
+    "MU": "Mauritius",
+    "MV": "Maldives",
+    "MW": "Malawi",
+    "MX": "Mexico",
+    "MY": "Malaysia",
+    "MZ": "Mozambique",
+    "NA": "Namibia",
+    "NC": "New Caledonia",
+    "NE": "Niger",
+    "NF": "Norfolk Island",
+    "NG": "Nigeria",
+    "NI": "Nicaragua",
+    "NL": "Netherlands",
+    "NO": "Norway",
+    "NP": "Nepal",
+    "NR": "Nauru",
+    "NU": "Niue",
+    "NZ": "New Zealand",
+    "OM": "Oman",
+    "PA": "Panama",
+    "PE": "Peru",
+    "PF": "French Polynesia",
+    "PG": "Papua New Guinea",
+    "PH": "Philippines",
+    "PK": "Pakistan",
+    "PL": "Poland",
+    "PM": "Saint Pierre and Miquelon",
+    "PN": "Pitcairn Islands",
+    "PR": "Puerto Rico",
+    "PS": "Palestine",
+    "PT": "Portugal",
+    "PW": "Palau",
+    "PY": "Paraguay",
+    "QA": "Qatar",
+    "RE": "Réunion",
+    "RO": "Romania",
+    "RS": "Serbia",
+    "RU": "Russia",
+    "RW": "Rwanda",
+    "SA": "Saudi Arabia",
+    "SB": "Solomon Islands",
+    "SC": "Seychelles",
+    "SD": "Sudan",
+    "SE": "Sweden",
+    "SG": "Singapore",
+    "SH": "Saint Helena",
+    "SI": "Slovenia",
+    "SJ": "Svalbard and Jan Mayen",
+    "SK": "Slovakia",
+    "SL": "Sierra Leone",
+    "SM": "San Marino",
+    "SN": "Senegal",
+    "SO": "Somalia",
+    "SR": "Suriname",
+    "SS": "South Sudan",
+    "ST": "São Tomé and Príncipe",
+    "SV": "El Salvador",
+    "SX": "Sint Maarten",
+    "SY": "Syria",
+    "SZ": "Eswatini",
+    "TC": "Turks and Caicos Islands",
+    "TD": "Chad",
+    "TF": "French Southern Territories",
+    "TG": "Togo",
+    "TH": "Thailand",
+    "TJ": "Tajikistan",
+    "TK": "Tokelau",
+    "TL": "Timor-Leste",
+    "TM": "Turkmenistan",
+    "TN": "Tunisia",
+    "TO": "Tonga",
+    "TR": "Türkiye",
+    "TT": "Trinidad and Tobago",
+    "TV": "Tuvalu",
+    "TW": "Taiwan",
+    "TZ": "Tanzania",
+    "UA": "Ukraine",
+    "UG": "Uganda",
+    "UM": "US Minor Outlying Islands",
+    "US": "United States",
+    "UY": "Uruguay",
+    "UZ": "Uzbekistan",
+    "VA": "Vatican City",
+    "VC": "Saint Vincent and the Grenadines",
+    "VE": "Venezuela",
+    "VG": "British Virgin Islands",
+    "VI": "US Virgin Islands",
+    "VN": "Vietnam",
+    "VU": "Vanuatu",
+    "WF": "Wallis and Futuna",
+    "WS": "Samoa",
+    "YE": "Yemen",
+    "YT": "Mayotte",
+    "ZA": "South Africa",
+    "ZM": "Zambia",
+    "ZW": "Zimbabwe",
+}
 NRIC_LAST4_RE = re.compile(r"^\d{3}[A-Z]$")
 # A full NRIC/FIN anywhere in the file is refused (§5.2): letter, 7 digits, letter.
 NRIC_ANYWHERE_RE = re.compile(r"(?<![A-Za-z0-9])[STFGMstfgm]\d{7}[A-Za-z](?![A-Za-z0-9])")
@@ -685,8 +942,8 @@ def validate(profile: dict) -> list[FieldError]:
         elif isinstance(email, str) and backup.strip().lower() == email.strip().lower():
             err("contact.backup_email", "must differ from contact.email")
     country = _get(profile, "contact.country")
-    if not _empty(country) and not (isinstance(country, str) and ISO2_RE.match(country)):
-        err("contact.country", "must be a 2-letter ISO country code, e.g. SG")
+    if not _empty(country) and country not in COUNTRY_NAMES:
+        err("contact.country", COUNTRY_PICK_MESSAGE)
     postal = _get(profile, "contact.postal_code")
     if not _empty(postal) and country == "SG":
         if not re.fullmatch(r"\d{6}", str(postal).strip()):
@@ -703,8 +960,8 @@ def validate(profile: dict) -> list[FieldError]:
             err("contact.phone_number",
                 "a Singapore (+65) number has 8 digits starting with 3, 6, 8 or 9")
     nat = _get(profile, "singapore_status.nationality")
-    if not _empty(nat) and not (isinstance(nat, str) and ISO2_RE.match(nat)):
-        err("singapore_status.nationality", "must be a 2-letter ISO country code, e.g. SG")
+    if not _empty(nat) and nat not in COUNTRY_NAMES:
+        err("singapore_status.nationality", COUNTRY_PICK_MESSAGE)
 
     # enums
     for path, allowed in ENUMS.items():
@@ -734,6 +991,8 @@ def validate(profile: dict) -> list[FieldError]:
             if not (isinstance(k, str) and (ISO2_RE.match(k) or k == WORK_RIGHTS_DEFAULT)):
                 err(f"singapore_status.{block}",
                     "keys must be 2-letter ISO country codes or default")
+            elif k != WORK_RIGHTS_DEFAULT and k not in COUNTRY_NAMES:
+                err(f"singapore_status.{block}", COUNTRY_PICK_MESSAGE)
             elif v is not None and not isinstance(v, bool):
                 err(f"singapore_status.{block}.{k}", "must be true or false")
 
@@ -956,6 +1215,12 @@ def validate_extra(extra: Any) -> list[FieldError]:
 # Completeness (F-11)
 # --------------------------------------------------------------------------
 
+# Q-71 G3: the two required consents count as filled only when True. A "No"
+# is an answer, but an application cannot be sent on it: auto-apply would start,
+# then stop at the consent / terms box (fail-closed, but a wasted run).
+CONSENTS_MUST_BE_YES = ("consents.privacy_consent", "consents.certify_true")
+
+
 def _filled(profile: dict, path: str) -> bool:
     if path == "education":
         return any(isinstance(e, dict) and not _empty(e.get("institution"))
@@ -964,6 +1229,8 @@ def _filled(profile: dict, path: str) -> bool:
     v = _get(profile, path)
     if path == "pay.expected_salary.amount":
         return _is_int(v) and v > 0            # the template's 0 is "not filled"
+    if path in CONSENTS_MUST_BE_YES:
+        return v is True                       # "No" here only stops the run at the box
     return not _empty(v)
 
 
@@ -984,6 +1251,42 @@ def resume_file(profile: dict, resume_dir: str | os.PathLike | None = None) -> O
         if (rdir / name).is_file():
             return rdir / name
     return None
+
+
+def _named_file(profile: dict, path: str, resume_dir: str | os.PathLike | None) -> Optional[Path]:
+    """The file `profile[path]` names (relative = from the project root, then
+    from `resume_dir`), or None when unset or not a file."""
+    named = _get(profile, path)
+    if _empty(named):
+        return None
+    p = Path(str(named))
+    rdir = Path(resume_dir) if resume_dir else ROOT / "data"
+    for cand in ([p] if p.is_absolute() else [ROOT / p, rdir / p]):
+        if cand.is_file():
+            return cand
+    return None
+
+
+def documents_status(profile: dict, resume_dir: str | os.PathLike | None = None) -> dict:
+    """What the Files group shows (Q-71 G4): for the resume and the transcript,
+    `{name, size, modified}` of the file in use, or None. `modified` is ISO 8601
+    in UTC. Only the file name is returned, never a path: the owner's folder
+    layout is nobody's business, and the page must not echo it."""
+    profile = profile or {}
+
+    def info(p: Optional[Path]) -> Optional[dict]:
+        if p is None:
+            return None
+        try:
+            st = p.stat()
+        except OSError:
+            return None
+        when = _dt.datetime.fromtimestamp(st.st_mtime, tz=_dt.timezone.utc)
+        return {"name": p.name, "size": st.st_size,
+                "modified": when.isoformat(timespec="seconds")}
+
+    return {"resume": info(resume_file(profile, resume_dir)),
+            "transcript": info(_named_file(profile, "documents.transcript", resume_dir))}
 
 
 def missing_for_apply(profile: dict, resume_dir: str | os.PathLike | None = None) -> list[str]:
@@ -1110,20 +1413,30 @@ FORM: tuple[FormGroup, ...] = (
             {"chinese": "Chinese", "malay": "Malay", "indian": "Indian",
              "eurasian": "Eurasian", "other": "Other"})),
         _I("singapore_status.race_other", "Race, if other", "text"),
-        _I("singapore_status.religion", "Religion", "text", help="Or leave it as decline."),
+        _I("singapore_status.religion", "Religion", "text", help="Type your religion, or “decline” to not say."),
         _I("singapore_status.marital_status", "Marital status", "enum", _enum_opts(
             "singapore_status.marital_status", {"single": "Single", "married": "Married"})),
         _I("singapore_status.nric_last4", "NRIC, last 4 characters", "text",
            help="Only the last 4, such as 123A. Never the full NRIC."),
     )),
     FormGroup("us_self_id", "US equal-employment questions", (
-        _I("us_self_id.eeo_gender", "Gender", "enum", _enum_opts("us_self_id.eeo_gender")),
+        _I("us_self_id.eeo_gender", "Gender", "enum", _enum_opts(
+            "us_self_id.eeo_gender", {"male": "Male", "female": "Female",
+                                      "non_binary": "Non-binary"})),
         _I("us_self_id.eeo_race_ethnicity", "Race or ethnicity", "enum",
-           _enum_opts("us_self_id.eeo_race_ethnicity")),
+           _enum_opts("us_self_id.eeo_race_ethnicity", {
+               "asian": "Asian", "black": "Black or African American",
+               "hispanic_latino": "Hispanic or Latino", "white": "White",
+               "two_or_more": "Two or more races",
+               "native_american": "American Indian or Alaska Native",
+               "pacific_islander": "Native Hawaiian or Pacific Islander"})),
         _I("us_self_id.veteran_status", "Veteran status", "enum",
-           _enum_opts("us_self_id.veteran_status")),
+           _enum_opts("us_self_id.veteran_status", {
+               "not_a_veteran": "Not a veteran", "veteran": "Veteran"})),
         _I("us_self_id.disability_status", "Disability status", "enum",
-           _enum_opts("us_self_id.disability_status"),
+           _enum_opts("us_self_id.disability_status", {
+               "no": "No, I don't have a disability",
+               "yes": "Yes, I have a disability"}),
            help="Used for every disability question, in any country, not only US forms."),
     )),
     FormGroup("availability", "Availability", (
@@ -1140,7 +1453,7 @@ FORM: tuple[FormGroup, ...] = (
            _enum_opts("pay.current_salary.period",
                       {"monthly": "per month", "annual": "per year"}), nullable=True),
         _I("pay.months_per_year", "Months of pay per year", "int",
-           help="13 if you count the AWS bonus."),
+           help="13 if you get the AWS (Annual Wage Supplement, a 13th-month bonus)."),
     )),
     FormGroup("education", "Education", (
         _I("education", "Education", "entries", sub=(
@@ -1248,11 +1561,63 @@ def _under(path: str, paths: Iterable[str]) -> bool:
     return any(p == path or p.startswith(path + ".") for p in paths)
 
 
+# Q-71 G2: rendering hints that live beside FORM, not in its tuples, so the
+# declarations group (edited on other branches) stays free of merge conflicts.
+# Each is optional in the item JSON: a client that ignores them still works.
+#
+# YES_NO_CONTROL: a bool item whose path starts with one of these (a trailing
+# "." = a prefix) or equals one is drawn as Yes / No radios (`control:
+# "yes_no"`), not as a switch: the label is a question, and a switch reads as a
+# setting. Consents keep the switch (their labels are statements).
+YES_NO_CONTROL: tuple[str, ...] = ("declarations.", "availability.willing_to_relocate")
+# NULLABLE_BOOL: Yes/No items where "not set" is a real answer (D-91: null =
+# "ask me"), so the form offers a Clear link (`nullable_bool: true`).
+NULLABLE_BOOL: frozenset[str] = frozenset({"declarations.willing_to_sign_nda"})
+# SHOW_WHEN: a follow-up field matters only when another has one of `values`.
+# Emitted as `show_when: {path, values}`; the form hides the item only when the
+# condition is false and the item is empty and has no error (never wipes data).
+SHOW_WHEN: dict[str, dict[str, Any]] = {
+    "singapore_status.race_other": {"path": "singapore_status.race", "values": ["other"]},
+    "declarations.holdings": {"path": "declarations.shareholding_in_company",
+                              "values": [True]},
+    "declarations.relatives_employers": {"path": "declarations.relatives_at_company",
+                                         "values": [True]},
+    "singapore_status.ord_date": {"path": "singapore_status.ns_status",
+                                  "values": ["completed", "serving"]},
+}
+# AUTOCOMPLETE: HTML autocomplete tokens (WCAG 1.3.5). Absent = the client's
+# default ("off"). The backup email is "off" on purpose: browsers would fill the
+# main address into it.
+AUTOCOMPLETE: dict[str, str] = {
+    "identity.legal_first_name": "given-name", "identity.legal_last_name": "family-name",
+    "identity.preferred_name": "nickname", "identity.date_of_birth": "bday",
+    "contact.email": "email", "contact.backup_email": "off",
+    "contact.phone_country_code": "tel-country-code", "contact.phone_number": "tel-national",
+    "contact.address_line1": "address-line1", "contact.address_line2": "address-line2",
+    "contact.postal_code": "postal-code", "contact.city": "address-level2",
+    "contact.country": "country",
+    "links.linkedin": "url", "links.github": "url", "links.portfolio": "url",
+}
+
+
+def _yes_no(path: str) -> bool:
+    return any(path == p or (p.endswith(".") and path.startswith(p)) for p in YES_NO_CONTROL)
+
+
+def country_options() -> list[dict]:
+    """The country pick-list: Singapore first (the owner's home market), then
+    every ISO country by name. Label "Singapore (SG)": the code stays visible
+    where a form asks for it, and typing a name in a native <select> jumps to it."""
+    rest = sorted((n, c) for c, n in COUNTRY_NAMES.items() if c != "SG")
+    return [{"value": "SG", "label": f"{COUNTRY_NAMES['SG']} (SG)"}] +         [{"value": c, "label": f"{n} ({c})"} for n, c in rest]
+
+
 def _item_json(item: FormItem, parent: str = "") -> dict:
     full = f"{parent}[0].{item.path}" if parent else item.path
-    return {
+    out = {
         "path": item.path, "label": item.label, "kind": item.kind,
-        "options": [{"value": v, "label": lab} for v, lab in item.options],
+        "options": (country_options() if item.kind == "country"
+                    else [{"value": v, "label": lab} for v, lab in item.options]),
         "help": item.help,
         "required": not parent and _under(item.path, REQUIRED_PATHS),
         "recommended": not parent and _under(item.path, RECOMMENDED_PATHS),
@@ -1261,6 +1626,18 @@ def _item_json(item: FormItem, parent: str = "") -> dict:
         "nullable": item.nullable, "multiline": item.multiline,
         "entry_label": item.entry_label, "fixed_text": item.fixed_text,
     }
+    if item.kind == "country_bool_map":
+        out["country_options"] = country_options()
+    if not parent:                       # entry sub-fields have no such hints
+        if item.kind == "bool" and _yes_no(item.path):
+            out["control"] = "yes_no"
+            if item.path in NULLABLE_BOOL:
+                out["nullable_bool"] = True
+        if item.path in SHOW_WHEN:
+            out["show_when"] = copy.deepcopy(SHOW_WHEN[item.path])
+        if item.path in AUTOCOMPLETE:
+            out["autocomplete"] = AUTOCOMPLETE[item.path]
+    return out
 
 
 def form_json() -> list[dict]:

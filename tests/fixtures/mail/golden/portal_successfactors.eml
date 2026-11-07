@@ -1,0 +1,18 @@
+Authentication-Results: mx.google.com;
+       dkim=pass header.i=@bounce.mailer.example header.s=m1 header.b=TWlzYWw=;
+       spf=pass (google.com: domain of bounces@bounce.mailer.example designates 192.0.2.12 as permitted sender) smtp.mailfrom=bounces@bounce.mailer.example;
+       dmarc=none header.from=successfactors.eu
+From: Contoso Bank Careers <system@successfactors.eu>
+To: Alex Applicant <alex.applicant@inbox.example>
+Subject: Your application status
+Date: Sun, 01 Nov 2026 16:00:00 +0000
+Message-ID: <golden-34@synthetic.test>
+MIME-Version: 1.0
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: 7bit
+
+Dear Alex,
+
+Your application for Technology Graduate Programme has been updated. Please sign in to view the details.
+
+Contoso Bank

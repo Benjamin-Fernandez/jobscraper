@@ -16,7 +16,7 @@ Tier → model alias today: **top = `opus`, mid = `sonnet`, light = `haiku`** (r
 
 | Role | Default tier | Spawn when | Write scope (only these paths) |
 |---|---|---|---|
-| researcher | top (mid for lookups) | Stage A briefs, ToS questions, new ATS adapters' prior art, question-synonym data | `docs/research/**`, `config/questions.yaml`, `config/aliases.yaml` |
+| researcher | top (mid for lookups) | Stage A briefs, ToS questions, new ATS adapters' prior art, question-synonym data | `docs/research/**`, `config/questions.yaml`, `config/aliases.yaml`, `config/mail_rules.yaml` (Q-60) |
 | architect | top | Stage B designs, contracts, ADRs, spike reports | `docs/architecture/**`, `src/jobscraper/apply/contracts.py`, `src/jobscraper/tailor/contracts.py` |
 | planner | top for build plans, mid for docs | Stage D build plans; README, OVERVIEW, DESIGN, user guide | `docs/prd.md`, `docs/planning/**` (not `session_log.md`), `docs/user/**`, `docs/OVERVIEW.md`, `docs/DESIGN.md`, `README.md` |
 | software-engineer | mid; top for KA builds and the engine port | READY WPs and spikes; parallel lanes in worktrees | `src/**` (not contracts, not `web/static/`), `web/src/**`, `web/index.html`, `web/package*.json`, `web/vite.config.js`, `requirements.txt`, `run.ps1`, `config/config.yaml`, `config/rules.yaml`, `config/applicant.example.yaml`, `.env.example` |

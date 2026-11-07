@@ -1,0 +1,18 @@
+Authentication-Results: mx.google.com;
+       dkim=pass header.i=@inbox.example header.s=s1 header.b=Zm9vYmFy;
+       spf=pass (google.com: domain of alex.applicant@inbox.example designates 192.0.2.10 as permitted sender) smtp.mailfrom=alex.applicant@inbox.example;
+       dmarc=pass (p=REJECT sp=REJECT dis=NONE) header.from=inbox.example
+From: Alex Applicant <alex.applicant@inbox.example>
+To: Jordan Lee <jordan.lee@example.com>
+Subject: Re: Interview availability
+Date: Mon, 02 Nov 2026 01:00:00 +0000
+Message-ID: <golden-38@synthetic.test>
+MIME-Version: 1.0
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: 7bit
+
+Hi Jordan,
+
+I am available on Tuesday for the interview.
+
+Alex

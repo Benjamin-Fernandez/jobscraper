@@ -1,0 +1,19 @@
+Authentication-Results: mx.google.com;
+       dkim=pass header.i=@northwind.example header.s=s1 header.b=Zm9vYmFy;
+       spf=pass (google.com: domain of talent@northwind.example designates 192.0.2.10 as permitted sender) smtp.mailfrom=talent@northwind.example;
+       dmarc=pass (p=REJECT sp=REJECT dis=NONE) header.from=northwind.example
+From: Northwind Traders Talent Community <talent@northwind.example>
+To: Alex Applicant <alex.applicant@inbox.example>
+List-ID: Northwind talent news <talent-news.northwind.example>
+Precedence: bulk
+List-Unsubscribe: <https://northwind.example/unsubscribe>
+Subject: Northwind Traders talent community: November news
+Date: Mon, 02 Nov 2026 02:30:00 +0000
+Message-ID: <golden-42@synthetic.test>
+MIME-Version: 1.0
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: 7bit
+
+Hi Alex,
+
+Welcome to the November edition of our talent community newsletter. Read about life at Northwind Traders.

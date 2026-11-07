@@ -268,4 +268,81 @@ BODY: Each pin reproduces the review's scenario with employer "Acme" and the sam
   - F6 `ground_items`: keeps R, Go, C, Word, Excel and Swift from the prose quote.
   - F9 `deterministic_pick("65", ["Level +65 items"])`: returns the option.
 - The 4 earlier guard pins now pass on 4911696: G2d leaf, G2(d) restated, G3 C++, D-88.
+### 2026-11-07 tester → software-engineer
+TYPE: handoff
+RE: Q-70 lane A tests (reply to your request)
+BODY: Inbox.test.js updated (6 tests; no fake timers) and new web/tests/inbox-flow.test.js (19 tests, all Verify A bullets plus the Show N in Not interested notice). Full vitest: 298 passed | 1 skipped. No src defects found. Note: with every role dismissed and the section opened, the "all caught up" panel stays above the open section (src behaviour; pinned only as the section appearing).
+STATUS: closed
+### 2026-11-07 tester → coordinator
+TYPE: handoff
+RE: Q-70 lane B · branch `eng/Q-70-B-applications`
+BODY: 4 failing Applications tests fixed as the engineer listed; new web/tests/applications-flow.test.js (22 tests: StatusSelect keyboard/pointer/Enter/Escape, Undo writes one more event (D-101), Active chip default + persistence + fallback, follow-up at 15 vs 13 days, Remove + Undo, Clear filters, search Escape, applications.js helpers). `cd web; npx vitest run` = 18 files, 301 passed | 1 skipped. No src defects found.
+STATUS: done
+
+### 2026-11-07 tester → coordinator
+TYPE: handoff
+RE: Q-70 lane C pins (test/Q-70-C-pins, base eng/Q-70-C-shell b511561 + C4 ea5f7d9 merged)
+BODY: Before: 2 files failed, 5 tests failed / 332 passed (exactly the 5 listed). The 5 are fixed (App.test.js x4 for the Choose runs… button; Runs.test.js counts relaxed to 2..3 for the shell's doubled reload). New: web/tests/shell-job.test.js (19 tests: Verify C a-f plus announce and consume checks) and web/tests/keepalive.test.js (4: Inbox state kept and no refetch, Applications kept and refreshes on return, Profile not kept, Inbox keys off while away). After: `npx vitest run` 21 files, all passed. Mutation checks, each red as expected then src restored: shell onFinish reload removed (2 fail), toast removed (4), JobPill v-if false (4), starter listener removed (2), visibility ignored (2), useJob consume ignored (1), label for broken (1), choosable ignored (1), more-right never (2), KeepAlive off (2), Profile in KeepAlive (1), Inbox onDeactivated removed (1), Applications reload on activation removed (1). No src changes committed.
+Note for the engineer: Inbox has no quiet refresh on activation (it uses the shell's data); only Applications reloads when it comes back. The App.vue comment says "Their onActivated hooks do the quiet refresh", slightly inexact for Inbox.
+STATUS: open
+
+### 2026-11-07 tester → coordinator
+TYPE: handoff
+RE: Q-70 lane E Overview pins (test/Q-70-E-pins; int/Q-70-ux ad2df54 + eng/Q-70-E-overview 8eecba3 merged)
+BODY: Baseline on the merge: 21 failed / 339 passed (the 20 empty-hash cases plus "Choose runs… opens the picker", which also assumed an Inbox default). Step 5 applied (App.test.js beforeEach #/inbox, tab order, Overview default and unknown hash, brand link, ArrowLeft/Home; Applications.test.js). After: `npx vitest run` 24 files, 409 passed, 1 skipped. New: web/tests/overview.helpers.test.js (20, pure, now injected), web/tests/Overview.test.js (25, fakeApi + vi.setSystemTime), Runs.test.js describe "failed N tone" (3). helpers.js fakeApi gained `questions` and `applicationRows` options.
+NAMING: the design's `overview.test.js` and `Overview.test.js` are the same file on Windows (case-insensitive), so the pure-helper file is `overview.helpers.test.js`. Please fix the name in overview_design.md §8.
+MUTATIONS (22 source breaks, all red except one noted): nextUp ordering (2), run card while a job runs, responseRate (rejection-after-apply, withdrawn, rejected-from-Saved, null rate), pastWeek (dry runs, window), followUps order, lastRunState (threshold, dry runs), openStages unknown append, single primary CTA (all primary, none primary), Answer questions (wrong view value, no navigation), caught-up despite failed questions check, 409 text, Runs tone (always red, never red), `:disabled="starting"` removed. Survivor: removing the `if (starting.value) return` guard in Overview.vue start() stays green because the disabled button already blocks a second click; the guard is unreachable from the UI (harmless defence, not a defect).
+SOURCE DEFECTS: none found. Notes: design §3 lists `waiting` in nextUp's arguments but the implementation reads it only in Overview.vue (fine); day counts use whole-day floor, so a run finished 15.9 days ago reads "15 days ago".
+STATUS: open
+
+### 2026-11-07 tester → coordinator
+TYPE: handoff
+RE: Q-71 expected salary pins (test/Q-71-pins on int/Q-70-ux 81c0950)
+BODY: FieldInput.test.js gains "FieldInput salary (required, Q-71)" and "(nullable)" (14 tests: null/undefined show Amount, Currency, Period, Negotiable; typing emits {amount, SGD, monthly}; untouched emits nothing; nullable null/undefined show "I don't have one" checked with no grid, unticking emits the defaults, ticking emits null; no Negotiable when nullable). ApplicationDetails.test.js gains "Expected salary (Q-71)" (4: pay missing / no pay section / null show #f-pay-expected-salary-in, Save disabled until typed, PUT carries pay.expected_salary = {amount, SGD, monthly}; untouched is not written). Mutations red: `v-if="salary"` (8 fail), shownSalary without defaults (7), nullable ignored (2). Full run 24 files, 423 passed, 1 skipped.
+### 2026-11-07 tester → coordinator (cc lanes S, I, F, researcher)
+TYPE: handoff
+RE: Q-60 / F-50 oracles WP-T0..T3 · branch test/Q-60-mail-oracles
+BODY: Commits: 3a9e6d3 T0 alone (layering sets, read-only mailbox guard, SQL token fix, contracts oracles), 629573c T1 (FakeImap in `tests/mail_support.py`, `tests/fixtures/mail/rules_min.yaml`, 49-case golden set), 6379749 T2 (rules/gates/classifier, D-92 pins; the golden HireVue-live row is `assessment` per D-92), then T3 (matcher incl. E1, transitions rows 1-11, model prompt/parse) on top of a fast-forward to lane S 1ee2241. All T0-T3 oracles pass against lane S S1-S3, including the real-file half (config/mail_rules.yaml classifies the golden set the same as rules_min). Mutation checks (tenant strict subdomain, D-92, row 6 `>`, row 11c, MAX_TOKENS) each turn an oracle red. No lane S code defects found.
+- Call shapes the oracles use (wrapped in `tests/mail_support.py`, so a rename is a one-line change there): `rules.load_rules(path)` / `RulesError` (its message or `entry_id` names the entry), `header_gate(h, rules, *, own, window_start, threads, employer_regs)`, `content_gate(h, body, rules, *, in_matched_thread)`, `classify`, `quote_around(text, start, end)`, `needs_model`, `platform_of`; `match.match(h, body, apps, rules)`, `tenants_from_hosts(tuple, rules)`, `compact`, `norm_company(name, suffixes)`, `norm_role`, `variants`; `transition.build_policy(statuses, raw)`, `decide(app, verdict, match, h, policy, *, candidates=())` (for AMBIGUOUS: candidates[0] as `app`, every candidate in matcher order); `model.user_prompt(h, body, max_chars)`, `parse(reply, h, body, model_id)`. All of these match lane S.
+- Lane F (flow): `Change` has no candidates field; lane S added `transition.remaining_candidates(...)` for MS 8 row 4. The flow must call it to fill the suggestion's candidates (no oracle yet: flow tests). Row 4's "first candidate's reason" follows `match.candidates` order.
+- Lane I (imapread): use `FakeMailServer.patched(module)`; every write command is refused (logged, then AssertionError). The layering write scanner is AST-based: no literal "STORE"/"COPY"/"MOVE"/"EXPUNGE"/"APPEND" strings in mailbox modules, and `.select(` needs `readonly=True`. LIST gives mailbox names as raw mUTF-7.
+- Design notes for the Coordinator to confirm or amend in MS: (1) MS 8 row 2 "(or no target)" would catch portal_update before row 3; the oracles and lane S both let row 3 decide it. (2) The golden employers Northwind and Contoso use the reserved `.example` TLD, so the "first domain label" variant doesn't make every employer "example".
+- Researcher: to try a draft rules file, set `JOBSCRAPER_TEST_MAIL_RULES=<path>` and run `-k mail_rules`.
+STATUS: open
+
+### 2026-11-07 tester → coordinator (cc lanes F, S, I)
+TYPE: handoff
+RE: Q-60 WP-T5, WP-T6, D-156/D-157/D-158 pins · branch test/Q-60-mail-oracles
+BODY: Commits dbfbd14 T5 (`test_store_mail`, `test_mail_flow`, `test_config_mail`, `mail_flow_support`), d552680 T6 (`test_cli_mail`, `test_web_mail`, `web/tests/MailCard|MailSuggestions.test.js`, `web/tests/mailFake.js`), 33ea215 D-156 pins + neutral names (Grab/Sea → Claim/Ocean; rules_min `common_word_names: [ocean, claim]`; the review pins add those two words to the shipped file's list in memory), 1b351f3 D-157 pins, 31fe682 D-157(i) addendum + D-158 pins.
+- Pins expected to fail until lanes F/S land: D-157 a (both), b, c, d, e, f, h, i; D-158 cursor-after-disconnect, backfilled accept, poison `Reason.INTERNAL`. D-158 locked-DB already passes.
+- Defect (LOW, lane F): `config.py` `MailStatusConfig.from_raw` crashes with OverflowError on `.inf`/"inf"/"1e400" (it catches only TypeError/ValueError around `int(float(v))`). Pin: `test_config_mail_an_infinite_number_keeps_the_default`.
+- Not covered: FL-2 (6) migration 4 to 5 (needs a v4 DB built with the old Store); the web child's job log is checked only for its `$ mail sync` line.
+- Real company names still in tests outside mail (not common-word examples, left alone): `test_apply_contracts.py:407` ("Grab"), `test_applicant_form.py:310-312` ("shopee"). Coordinator's call.
+STATUS: open
+
+### 2026-11-07 tester -> coordinator
+TYPE: handoff
+RE: Q-71 lanes F+G pins and fixes (test/Q-71-FG-pins on int/Q-70-ux incl. 7772b5b)
+BODY: Fixed: FieldInput salary Amount text/inputmode, error-summary wording, comments-note copy (ApplicationDetails.test.js), test_apply_flow_accounts consent case (PROFILE_INCOMPLETE + "consents.privacy_consent"; added a direct test of the sign-up "account terms" guard), test_filter CLI tests now use a temp config/profile (hermetic, no data/ read). New: tests/test_applicant_q71_pins.py (15: country validation/options, control/show_when/autocomplete JSON, consents only when True, documents_status names only, POST /check writes nothing), web/tests/ApplicationDetails.q71.test.js (41: Q71-02/03/04/05/06/07/09/11/12/13/14/15/16/17/18/20 plus the narrow minmax(0,1fr) layout check, which reads the SFC style text because jsdom has no layout). Mutations: 24 frontend source breaks all red (list in the report); 4 python breaks red.
+SOURCE DEFECTS: none. Note: a profile with an empty section dict (e.g. `pay: {}`) shows as "Other keys in your file" with a rail entry; the server's real profiles carry null leaves, so it only appears for hand-edited files.
+STATUS: open
+
+### 2026-11-07 tester → coordinator
+TYPE: handoff
+RE: Q-72 (a, D-161) · branch test/Q-72-untracked-oracles (base int/Q-72-mail-untracked 10c6d01)
+BODY: MS 16 "Row 7a oracles" pinned in `tests/test_mail_q72_pins.py` (15 tests) and one vitest case in `web/tests/MailSuggestions.test.js`. Expected values are from MS 3, 8 (row 7a and its note), 11.3 and 16, not from the build. Oracle -> test:
+1. `test_q72_o1_the_d160_acknowledgement_over_three_closed_applications_asks_a_question` (AMBIGUOUS x3 -> SUGGEST maybe_untracked, to=None)
+2. `test_q72_o2_a_single_closed_application_gives_the_same_reason` (STRONG and WEAK); flow: `test_q72_o2_flow_stores_a_suggestion_with_no_target_and_leaves_the_message_unattached` (evidence job_id/from/to NULL, candidates_json = the one app, mail_messages.job_id NULL, `suggested` +1, status unchanged, a later rejection in the same thread is also a suggestion)
+3. `test_q72_o3_a_role_or_req_id_in_the_mail_keeps_a_late_duplicate_silent`
+4. `test_q72_o4_a_thread_signal_keeps_it_silent`
+5. `test_q72_o5_an_open_sibling_means_7a_never_fires` (ack: same_status when the sibling is first, terminal when last; rejection: several_applications offering only the sibling)
+6. `test_q72_o6_mail_not_newer_than_every_candidates_last_event_stays_silent` (later, equal, plus a strictly-older control that must ask)
+7. `test_q72_o7_the_d160_rejection_asks_unless_a_role_is_named`
+8. `test_q72_o8_other_categories_are_unchanged` (withdrawn, posting_closed, kept_on_file, no_change, unknown without/with status words) and `test_q72_o8_interview_on_the_same_fixture_is_the_reopen_path_not_7a` (also assessment, offer)
+9. `test_q72_o9_adding_the_application_afterwards_is_unchanged` (ack owner_newer, rejection backfilled); flow: `test_q72_o9_flow_backfilled_retest_is_unchanged`
+10. `test_q72_o10_an_owner_added_status_is_custom_status_not_7a` (single: custom_status; mixed with closed candidates: several_applications)
+Also `test_q72_contract_has_the_reason_its_text_and_is_a_suggestion` (MS 3: member, SUGGEST_REASONS, REASON_TEXTS, CONTRACT_VERSION 1). Web: `"maybe untracked" shows the company alone, ...` (company from candidates[0], reason text verbatim, Got it + Open in Gmail only, no select or candidate list).
+- Pre-merge, expected FAIL (7 py + 1 vitest): contract (no `Reason.MAYBE_UNTRACKED`), o1, o2 pure, o2 flow (`suggested` is 0; decide gives NONE terminal), o6 (its control), o7, vitest (`.ms-app` is empty: no fallback to candidates[0].company in `appLine`). Pre-merge PASS by design (they guard the rows that must not move): o3, o4, o5, o8 x2, o9 x2, o10.
+- Existing suite: `test_mail_contracts_module_is_the_design_listing` already fails on this base because the design lists `MAYBE_UNTRACKED` and contracts.py doesn't; it clears when the member and text are added.
+- Flow fixture: Northwind stands in for Acme (one closed application, owner-closed 2026-10-13); the crafted ack names an untracked role, so signals are employer-only (probed: name_in_sender/subject/body).
 STATUS: open

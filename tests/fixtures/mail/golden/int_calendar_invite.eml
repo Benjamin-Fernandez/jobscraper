@@ -1,0 +1,40 @@
+Authentication-Results: mx.google.com;
+       dkim=pass header.i=@contoso.example header.s=s1 header.b=Zm9vYmFy;
+       spf=pass (google.com: domain of recruitment@contoso.example designates 192.0.2.10 as permitted sender) smtp.mailfrom=recruitment@contoso.example;
+       dmarc=pass (p=REJECT sp=REJECT dis=NONE) header.from=contoso.example
+From: Contoso Bank Recruitment <recruitment@contoso.example>
+To: Alex Applicant <alex.applicant@inbox.example>
+Subject: Invitation: Technology Graduate Programme - interview with Contoso Bank
+Date: Thu, 29 Oct 2026 03:00:00 +0000
+Message-ID: <golden-13@synthetic.test>
+MIME-Version: 1.0
+Content-Type: multipart/alternative; boundary="golden-boundary"
+
+
+--golden-boundary
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: 7bit
+
+Contoso Bank Recruitment has invited you to a meeting.
+
+When: Tuesday 10 November 2026, 14:00 SGT
+Where: video call
+
+--golden-boundary
+Content-Type: text/calendar; charset="utf-8"; method=REQUEST
+Content-Transfer-Encoding: 7bit
+
+BEGIN:VCALENDAR
+PRODID:-//Synthetic//Golden//EN
+VERSION:2.0
+METHOD:REQUEST
+BEGIN:VEVENT
+UID:golden-interview-1@synthetic.test
+DTSTART:20261110T060000Z
+DTEND:20261110T064500Z
+SUMMARY:Interview - Technology Graduate Programme
+ORGANIZER;CN=Contoso Bank Recruitment:mailto:recruitment@contoso.example
+END:VEVENT
+END:VCALENDAR
+
+--golden-boundary--

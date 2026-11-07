@@ -1,0 +1,14 @@
+Authentication-Results: mx.google.com;
+       dkim=pass header.i=@shop.example header.s=s1 header.b=Zm9vYmFy;
+       spf=pass (google.com: domain of deals@shop.example designates 192.0.2.10 as permitted sender) smtp.mailfrom=deals@shop.example;
+       dmarc=pass (p=REJECT sp=REJECT dis=NONE) header.from=shop.example
+From: Shop Deals <deals@shop.example>
+To: Alex Applicant <alex.applicant@inbox.example>
+Subject: Your weekend offer: 20% off
+Date: Mon, 02 Nov 2026 05:30:00 +0000
+Message-ID: <golden-48@synthetic.test>
+MIME-Version: 1.0
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: 7bit
+
+We are delighted to offer you 20% off everything this weekend.

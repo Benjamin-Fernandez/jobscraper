@@ -1,0 +1,18 @@
+Authentication-Results: mx.google.com;
+       dkim=fail header.i=@example.com header.s=s1 header.b=QkFEU0lH;
+       spf=softfail (google.com: domain of transitioning talent@example.com does not designate 192.0.2.66 as permitted sender) smtp.mailfrom=talent@example.com;
+       dmarc=fail (p=NONE sp=NONE dis=NONE) header.from=example.com
+From: Example Corp Talent Acquisition <talent@example.com>
+To: Alex Applicant <alex.applicant@inbox.example>
+Subject: Offer of employment - Data Analyst Graduate
+Date: Sat, 31 Oct 2026 08:00:00 +0000
+Message-ID: <golden-18@synthetic.test>
+MIME-Version: 1.0
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: 7bit
+
+Dear Alex,
+
+We are delighted to offer you the Data Analyst Graduate position (R0067890) at Example Corp. Your offer letter is attached.
+
+Example Corp Talent Acquisition

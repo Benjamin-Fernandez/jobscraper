@@ -1,0 +1,14 @@
+Authentication-Results: mx.google.com;
+       dkim=pass header.i=@example.com header.s=s1 header.b=Zm9vYmFy;
+       spf=pass (google.com: domain of jordan.lee@example.com designates 192.0.2.10 as permitted sender) smtp.mailfrom=jordan.lee@example.com;
+       dmarc=pass (p=REJECT sp=REJECT dis=NONE) header.from=example.com
+From: Jordan Lee <jordan.lee@example.com>
+To: Alex Applicant <alex.applicant@inbox.example>
+Subject: Out of office: back on 9 November
+Date: Mon, 02 Nov 2026 01:10:00 +0000
+Message-ID: <golden-40@synthetic.test>
+MIME-Version: 1.0
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: 7bit
+
+Thanks for your email. I will reply when I am back.

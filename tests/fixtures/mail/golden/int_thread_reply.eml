@@ -1,0 +1,19 @@
+Authentication-Results: mx.google.com;
+       dkim=pass header.i=@example.com header.s=s1 header.b=Zm9vYmFy;
+       spf=pass (google.com: domain of jordan.lee@example.com designates 192.0.2.10 as permitted sender) smtp.mailfrom=jordan.lee@example.com;
+       dmarc=pass (p=REJECT sp=REJECT dis=NONE) header.from=example.com
+From: Jordan Lee <jordan.lee@example.com>
+To: Alex Applicant <alex.applicant@inbox.example>
+Subject: Re: Your application
+Date: Fri, 30 Oct 2026 05:00:00 +0000
+Message-ID: <golden-15@synthetic.test>
+MIME-Version: 1.0
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: 7bit
+
+Hi Alex,
+
+Thanks for your reply. We would like to invite you to an interview next week. Could you share your availability for an interview on Tuesday or Wednesday?
+
+Best regards,
+Jordan

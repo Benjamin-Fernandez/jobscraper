@@ -1,0 +1,18 @@
+Authentication-Results: mx.google.com;
+       dkim=pass header.i=@tal.net header.s=s1 header.b=Zm9vYmFy;
+       spf=pass (google.com: domain of noreply@contosobank.tal.net designates 192.0.2.10 as permitted sender) smtp.mailfrom=noreply@contosobank.tal.net;
+       dmarc=pass (p=REJECT sp=REJECT dis=NONE) header.from=tal.net
+From: Contoso Bank Careers <noreply@contosobank.tal.net>
+To: Alex Applicant <alex.applicant@inbox.example>
+Subject: Welcome to the Contoso Bank talent community
+Date: Mon, 02 Nov 2026 03:00:00 +0000
+Message-ID: <golden-43@synthetic.test>
+MIME-Version: 1.0
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: 7bit
+
+Hi Alex,
+
+Welcome to the Contoso Bank talent community! You will receive news and job alerts that match your interests.
+
+Contoso Bank Careers

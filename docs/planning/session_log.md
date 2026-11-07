@@ -20,3 +20,26 @@ One entry per session. Older handover notes end up here, so `handover.md` stays 
 - Decisions D-79 (lenient profile), D-80 (finish tenant B with spike tooling), D-81 (NF-07 Workday deviation + conditions), D-82 (locks stay deterministic), D-83 (gate count 5 GH dry runs; audit read row by row; fresh owner approval for gate postings), D-84 (re-check R1–R4), D-85 (Greenhouse code pattern), D-86 (lane M F7/F8 tightenings, F9 interim compose_needed).
 - Owner: new resume; profile re-derived and applicant.yaml experience/skills rebuilt on request; address_line2 filled.
 - Open at pause: lane M (b79df03) and R3 (adc8f08) unmerged; Q-41, Q-44, Q-45 queued.
+
+## 2026-11-02 · session 3 (resumed, paused by the owner)
+- Q-41 done: tenant B Workday application filled to Review by the S-5b tooling, read row by row by the Coordinator, submitted once, "Applied" (merged 59967d7). Owner gave job locations (Singapore ×3) and kept the tailored PDF and AWS.
+- Owner rules: D-87 declaration-type questions → No; D-91 free from restrictive covenants, willing to sign NDAs. Coordinator decisions D-88 (military/NS labels sensitive), D-89 (government wording beats prior/current employment), D-90/D-90a (declaration frame gates after the WP-Q48 review), K-3 (possible flaky filter test).
+- Q-46 defects (location from home city, ungrounded skills, cited-fact relevance, disability source, Workday Next wait) pinned and fixed by lane M; lane M hierarchical how-heard fit (e2414c5).
+- Q-48 designed (architect), built (WP-Q48), reviewed: needs fixes (frame-blind classification). Fix round was running at the pause (8393f98, not verified).
+- R3 reviewed (merge after fixes); lane R fixed F1–F6, F8, F9 (2add8ee); re-review was stopped at the pause.
+- int/Q-35-M 3aadc13: lane M + WP-Q48 (first build) + tester pins; 1007/1024, the 17 = WP-Q48 fix-round pins. Nothing new merged into personal from the build this session (only Q-41 and records).
+
+## 2026-11-02 · Q-60 session (separate Coordinator session, branch `int/Q-60-mail-status`; paused by the owner)
+- Owner request D-90: application status from email (opt-in Gmail, incremental from the last processed message, automatic status updates), on a separate branch. Ran in parallel with the session-3 Coordinator on `personal`; IDs Q-60/D-90+/F-50 chosen to avoid collisions; all work in worktree `feat-Q-60`.
+- Stage A brief (researcher; IMAP app password recommended over Gmail API OAuth: 7-day Testing-mode token expiry), stage B design + BP + ADR-0007 (architect), stage E by the Coordinator (READY; amendment E1 Oleeo `tal.net` tenants), R2 header-only scan of the application mailbox with owner consent (special-use folders present; ATS mail dkim/spf/dmarc pass; Oleeo found), rules v1 (researcher), S0 + T0 merged into int.
+- Decisions D-90, D-91, D-92. Owner answers: application Gmail first; header scan yes.
+- Paused mid-build: lanes S, I, F and the tester stopped on the owner's word; state in the handover Q-60 block.
+
+## 2026-11-07 · Q-60 session (resumed; merged)
+- Lane F review fixes (D-157, D-158, D-159), tester T5/T6 and pins merged on int; IDs renamed into D-150..D-169 (D-155). int e0e97e4: 1106/1106.
+- X1 dev check on a DB copy (8769). Owner dry run on a fresh copy: 19 read, 0 changes (D-160; untracked tenant B application → Q-72).
+- Live DB backed up; merged into personal c20332a; suite 1106/1106, vitest 296/1 skipped, bundle rebuilt, smoke OK; pushed.
+
+### 2026-11-07 session (Q-70 UX + Q-71 details form)
+- Resumed Q-70 after an interruption: merged lanes A, B, D; lane C + C4 KeepAlive; Overview page (E); tester pins for each. Owner reported the details form ("can't enter my desired salary"): fixed the salary defect, reviewer audit (24 gaps), lanes F (form) + G (schema), browser pass incl. 390px fixes (rail containing block, country rows, Companies switcher). Merged Q-60 from personal into int (Applications.vue conflict resolved; assessment stage colour moved into StatusSelect.vue). Merged into personal e5d939e, bundle 370feab, pushed. web 481/482, Python 1122/1122.
+- Q-72: dismissed-job path found for the owner (Inbox → All runs → Not interested); re-test on a scratch copy confirmed the backfilled Rejected suggestion. D-161 row 7a `maybe_untracked` designed (architect), built (engineer), pinned (tester, 10 oracles + review F1/F2), reviewed APPROVE; merged into personal 4c6133f; 1139/1139, vitest 482/1 skipped.

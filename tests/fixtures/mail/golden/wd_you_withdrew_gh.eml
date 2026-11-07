@@ -1,0 +1,18 @@
+Authentication-Results: mx.google.com;
+       dkim=pass header.i=@greenhouse-mail.io header.s=s1 header.b=Zm9vYmFy;
+       spf=pass (google.com: domain of no-reply@us.greenhouse-mail.io designates 192.0.2.10 as permitted sender) smtp.mailfrom=no-reply@us.greenhouse-mail.io;
+       dmarc=pass (p=REJECT sp=REJECT dis=NONE) header.from=greenhouse-mail.io
+From: Northwind Traders Hiring <no-reply@us.greenhouse-mail.io>
+To: Alex Applicant <alex.applicant@inbox.example>
+Subject: Withdrawal confirmed - Graduate Analyst
+Date: Sun, 01 Nov 2026 06:00:00 +0000
+Message-ID: <golden-24@synthetic.test>
+MIME-Version: 1.0
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: 7bit
+
+Hi Alex,
+
+This confirms that you have withdrawn your application for the Graduate Analyst role at Northwind Traders. We wish you all the best.
+
+Northwind Traders Recruiting

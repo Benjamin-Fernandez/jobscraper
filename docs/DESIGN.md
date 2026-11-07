@@ -127,6 +127,42 @@ Arrows are "depends on". Nothing below a layer may import from above it.
                     └──────────────────────┘
 ```
 
+**Mail status (F-50, Q-60; design `docs/architecture/mail_status_design.md` §2):**
+
+```
+  web/mailsync.py ── starts a child process ──▶ cli.py  mail sync · mail accounts …
+                                                  │
+                                       ┌──────────▼──────────┐
+  ORCH                                 │ mailstatus_flow.py  │  sync · connect · set_password
+                                       └───┬─────────────┬───┘
+                                           │             │
+  STAGE   mailstatus/  ◀───────────────────┘             │
+          contracts · rules · match · transition ·       │
+          model (pure; imports only mailstatus.*)        │
+                                                         ▼
+  FOUNDATION   imapread.py (the only IMAP code, read-only) · store.py · vault.py ·
+               backends.py · config.py
+               imapread.py may import mailstatus.contracts; apply/mail.py uses imapread.py
+```
+
+**Layer sets** (exactly as in `tests/test_layering.py`; the test fails if a module
+has no layer):
+
+| Set | Members |
+|---|---|
+| `FOUNDATION` | `store`, `config`, `models`, `net`, `backends`, `watchlist`, `applicant`, `vault`, `imapread` |
+| `STAGES` | `scheduler`, `filter`, `decide`, `scrape`, `profile`, `apply`, `tailor`, `mailstatus` |
+| `DOTTED_PACKAGES` | `apply`, `tailor`, `mailstatus` (layered one level deeper, e.g. `mailstatus.contracts`) |
+| `CONTRACTS` | `apply.contracts`, `tailor.contracts`, `mailstatus.contracts` (stdlib-only data shapes, D-73) |
+| `ORCHESTRATOR` | `pipeline`, `company_search`, `apply_flow`, `tailor_flow`, `mailstatus_flow` |
+| `ORCHESTRATOR_EDGES` | `apply_flow` → `tailor_flow` only (`mailstatus_flow` adds none) |
+| `PUBLISHER` | `shortlist` |
+| `WEB_MAY_IMPORT` | (`FOUNDATION` minus `imapread`) plus `PUBLISHER` plus `CONTRACTS` |
+| `MAILBOX_MODULES` | `imapread.py`, `mailstatus/`, `mailstatus_flow.py`, `apply/mail.py`: scanned for any mailbox write (STORE, COPY, MOVE, EXPUNGE, APPEND, a non-read-only SELECT, `smtplib`) |
+| `LEGACY` (not layered) | `cli`, `__main__`, `__init__` |
+
+`web/` (including `web/mailsync.py`) is its own layer and may import only `WEB_MAY_IMPORT`.
+
 **Boundary rules (enforced by review, and by M0-T4's import test):**
 - `store.py` must not import any stage module.
 - Stage modules (`scheduler`, `scrape/`, `filter`, `decide`, `profile/`) must not
@@ -142,6 +178,12 @@ Arrows are "depends on". Nothing below a layer may import from above it.
   orchestrator. It never calls a model or the network itself: work that needs
   them (a run, a profile refresh, title recommendations, a company search) runs
   as a background CLI job. `tests/test_layering.py` encodes exactly this.
+  Since F-50: `web/` may import the foundation **except `imapread.py`**, plus the
+  stage packages' `contracts` modules. The mail timer (`web/mailsync.py`) starts
+  a `mail sync` child process; it never reads mail itself.
+- `mailstatus/` is a stage package that imports only `mailstatus.*` (no `imapread`,
+  no `backends`, no `store`); `mailstatus_flow.py` is its orchestrator; `imapread.py` is
+  the foundation module that speaks IMAP, read-only.
 - `backends.py` stays the single place that talks to a model.
 - **`store.py` is the only module containing SQL.** Every other module asks it for
   data. This is what makes the Postgres path in §8.4 one module's work.

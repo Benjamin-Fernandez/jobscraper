@@ -11,7 +11,7 @@
 // the same posting under another id - is left out (M17). Opening the
 // posting on the company's site asks afterwards whether you applied, the way
 // LinkedIn does, so the record is one click away.
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onActivated, onBeforeUnmount, onDeactivated, onMounted, ref, watch } from 'vue'
 import { describeError, getPosting, setApplicationStatus, untrackApplication } from '../api.js'
 import { dismiss, dismissedAt, isDismissed, migrateSessionDismissals, restore } from '../dismissed.js'
 import { cleanLocation, plural, safeUrl, shortDate } from '../format.js'
@@ -35,7 +35,11 @@ const detailOpen = ref(false)          // phone layout: the detail replaces the 
 const pending = ref(new Set())         // just saved/applied: gone before the reload lands
 const opened = ref(new Set())          // postings opened on the company site this session
 const busy = ref(false)
+const rootEl = ref(null)
+const quiet = ref(false)             // our own reload after an action: keep the list at full strength
 const writeError = ref('')
+
+watch(() => props.loading, (now, was) => { if (was && !now) quiet.value = false })
 
 const firstLoad = computed(() => props.loading && !props.jobs.length)
 // For the empty state: 'any run yet', 'the past week', 'run 12'.
@@ -83,7 +87,7 @@ const notInterested = computed(() => {
 // The section's open/closed state is remembered on this device.
 const NI_KEY = 'jobscraper.inbox.notInterestedOpen'
 function readNiOpen() {
-  try { return window.localStorage.getItem(NI_KEY) !== '0' } catch { return true }
+  try { return window.localStorage.getItem(NI_KEY) === '1' } catch { return false }
 }
 const niOpen = ref(readNiOpen())
 watch(niOpen, open => {
@@ -148,25 +152,61 @@ watch(() => selected.value?.id, id => {
 
 const itemEls = {}
 
-function select(job, { open = true } = {}) {
+// One column on a phone or a narrow window (matchMedia is absent in the test DOM).
+const narrow = () => Boolean(window.matchMedia?.('(max-width: 900px)')?.matches)
+
+async function select(job, { open = true } = {}) {
   selectedId.value = job.id
-  if (open) detailOpen.value = true
+  if (!open) return
+  detailOpen.value = true
+  if (narrow()) {
+    await nextTick()
+    window.scrollTo?.(0, 0)
+    document.getElementById('detail-title')?.focus()
+  }
+}
+
+// After an action the selected role changes under the user's finger; put focus
+// on the new one (its card, or the detail title when the detail replaces the
+// list) so a keyboard user never falls to <body> (UX audit G1).
+function hasFocus() {
+  const el = document.activeElement
+  return el === document.body || Boolean(rootEl.value?.contains(el)) || Boolean(el?.closest?.('.toast'))
+}
+
+async function refocus() {
+  await nextTick()
+  const id = selected.value?.id
+  if (!id) return
+  if (detailOpen.value && narrow()) document.getElementById('detail-title')?.focus()
+  else itemEls[id]?.focus()
+}
+
+// A second press inside 400 ms, or while a write is in flight, is dropped (G21).
+let lastActionAt = 0
+function guard() {
+  const t = Date.now()
+  if (busy.value || t - lastActionAt < 400) return false
+  lastActionAt = t
+  return true
 }
 
 // The role to show once `job` leaves the list: the next one, else the previous.
 function neighbour(job) {
-  const list = listed.value
+  const list = isDismissed(job) ? notInterested.value : visible.value
   const i = list.findIndex(j => j.id === job.id)
   return (list[i + 1] ?? list[i - 1] ?? null)?.id ?? null
 }
 
 async function onListKey(event) {
   const step = { ArrowDown: 1, j: 1, ArrowUp: -1, k: -1 }[event.key]
-  if (!step || !listed.value.length) return
+  const edge = event.key === 'Home' || event.key === 'End'
+  if ((!step && !edge) || !listed.value.length) return
   event.preventDefault()
   const list = listed.value
   const i = Math.max(0, list.findIndex(j => j.id === selected.value?.id))
-  const next = list[Math.min(list.length - 1, Math.max(0, i + step))]
+  const next = edge ? list[event.key === 'Home' ? 0 : list.length - 1]
+    : list[Math.min(list.length - 1, Math.max(0, i + step))]
   select(next, { open: false })
   await nextTick()
   itemEls[next.id]?.focus()
@@ -183,6 +223,8 @@ function unpend(id) {
 const VERB = { applied: 'Marked applied', to_apply: 'Saved' }
 
 async function track(job, status) {
+  if (!guard()) return
+  const hadFocus = hasFocus()
   writeError.value = ''
   busy.value = true
   const next = neighbour(job)
@@ -190,6 +232,7 @@ async function track(job, status) {
   selectedId.value = next
   try {
     await setApplicationStatus(job.id, status, { company: job.company, role: job.title, url: job.url })
+    quiet.value = true
     emit('changed')
     showToast({
       message: `${VERB[status]}: ${job.title} at ${job.company}`,
@@ -203,45 +246,66 @@ async function track(job, status) {
   } finally {
     busy.value = false
   }
+  if (hadFocus) refocus()
 }
 
 async function undo(job) {
+  if (busy.value) return               // Undo is not held back by the 400 ms cooldown
+  const hadFocus = hasFocus()
   try {
     await untrackApplication(job.id)
   } catch (e) {
     if (e?.status !== 404) {
       writeError.value = `Could not undo ${job.company} · ${job.title}: ${describeError(e)}`
+      if (hadFocus) refocus()
       return
     }
   }
   unpend(job.id)
   selectedId.value = job.id
+  quiet.value = true
   emit('changed')
+  if (hadFocus) refocus()
 }
 
 async function markNotInterested(job) {
+  if (!guard()) return
+  const hadFocus = hasFocus()
   writeError.value = ''
-  selectedId.value = neighbour(job)
+  busy.value = true
   try {
-    await dismiss(job)
-  } catch (e) {
-    selectedId.value = job.id
-    writeError.value = `Could not mark ${job.company} · ${job.title} as not interested: ${describeError(e)}`
-    return
+    selectedId.value = neighbour(job)
+    try {
+      await dismiss(job)
+    } catch (e) {
+      selectedId.value = job.id
+      writeError.value = `Could not mark ${job.company} · ${job.title} as not interested: ${describeError(e)}`
+      return
+    }
+    showToast({
+      message: `Moved to Not interested: ${job.title} at ${job.company}`,
+      action: { label: 'Undo', run: () => moveBack(job, { undoing: true }) },
+    })
+  } finally {
+    busy.value = false
+    if (hadFocus) refocus()
   }
-  showToast({
-    message: `Moved to Not interested: ${job.title} at ${job.company}`,
-    action: { label: 'Undo', run: () => moveBack(job) },
-  })
 }
 
-async function moveBack(job) {
+// `undoing`: the toast's Undo for a dismissal - only a write in flight stops it.
+async function moveBack(job, { undoing = false } = {}) {
+  if (undoing ? busy.value : !guard()) return
+  const hadFocus = hasFocus()
   writeError.value = ''
+  busy.value = true
   try {
     await restore(job)
     selectedId.value = job.id
   } catch (e) {
     writeError.value = `Could not move ${job.company} · ${job.title} back: ${describeError(e)}`
+  } finally {
+    busy.value = false
+    if (hadFocus) refocus()
   }
 }
 
@@ -314,10 +378,14 @@ function onShortcut(event) {
 
 onMounted(() => window.addEventListener('keydown', onShortcut))
 onBeforeUnmount(() => window.removeEventListener('keydown', onShortcut))
+// A kept-alive Inbox must not keep its keys while another tab is showing
+// (duplicate adds of the same listener are dropped by the browser).
+onActivated(() => window.addEventListener('keydown', onShortcut))
+onDeactivated(() => window.removeEventListener('keydown', onShortcut))
 </script>
 
 <template>
-  <section class="inbox" :aria-busy="loading ? 'true' : 'false'">
+  <section ref="rootEl" class="inbox" :aria-busy="loading ? 'true' : 'false'">
     <header class="page-head">
       <div>
         <h2 class="page-title">Inbox</h2>
@@ -327,7 +395,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onShortcut))
             · <span class="ni-count">{{ notInterestedCount }} not interested</span>
           </template>
           <template v-if="tracked">
-            · <a class="tracked" href="#/applications">{{ tracked }} in Applications</a>
+            · <a class="tracked" href="#/applications">{{ tracked }} already tracked</a>
           </template>
           <template v-if="twins">
             · <span class="twins" title="The same posting is listed under another company or id, and you already track it in Applications">{{ plural(twins, 'duplicate') }} of tracked roles hidden</span>
@@ -338,7 +406,13 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onShortcut))
         <label class="search">
           <Icon name="search" />
           <span class="visually-hidden">Search roles</span>
-          <input v-model="query" type="search" placeholder="Search title, company, location" aria-keyshortcuts="/">
+          <input
+            v-model="query"
+            type="search"
+            placeholder="Search title, company, location"
+            aria-keyshortcuts="/"
+            @keydown.esc="query ? (query = '') : $event.target.blur()"
+          >
           <kbd class="key-hint" aria-hidden="true">/</kbd>
         </label>
         <label class="sort">
@@ -361,29 +435,34 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onShortcut))
     <p v-if="writeError" class="notice error" role="alert">{{ writeError }}</p>
 
     <div v-if="error" class="notice error" role="alert">
-      <p>Could not load the shortlist: {{ error }}</p>
+      <p>{{ jobs.length ? 'Could not refresh the shortlist: ' + error + '. Showing the last list loaded.' : 'Could not load the shortlist: ' + error }}</p>
       <button type="button" @click="emit('changed')">Try again</button>
     </div>
-    <TabLoading v-else-if="firstLoad" :rows="3" />
-    <SetupChecklist v-else-if="!jobs.length" :runs="runs">
+    <TabLoading v-if="firstLoad" :rows="3" />
+    <SetupChecklist v-else-if="!jobs.length && !error" :runs="runs">
       <div class="empty">
         <Icon name="inbox" :size="28" />
         <p class="empty-title">No roles in {{ scope }}.</p>
         <p class="muted">Show other runs above, or start a new one from the <a href="#/runs">Runs tab</a>.</p>
       </div>
     </SetupChecklist>
-    <div v-else-if="!untracked.length" class="empty caught-up">
+    <div v-else-if="!visible.length && !query.trim()" class="empty caught-up">
       <Icon name="check" :size="28" />
       <p class="empty-title">You're all caught up.</p>
-      <p class="muted">Every role here is in <a href="#/applications">Applications</a>.</p>
+      <p class="muted">Every new role is triaged.<template v-if="notInterested.length"> <button type="button" class="link show-ni" @click="niOpen = true">Show Not interested ({{ notInterested.length }})</button></template><template v-else> See <a href="#/applications">Applications</a>.</template></p>
     </div>
-    <div v-else-if="!visible.length && !notInterested.length && query.trim()" class="empty">
+    <div v-else-if="!visible.length && query.trim() && !(notInterested.length && niOpen)" class="empty">
       <Icon name="search" :size="28" />
       <p class="empty-title">No roles match “{{ query.trim() }}”.</p>
-      <p><button type="button" class="link" @click="query = ''">Clear the search</button></p>
+      <p>
+        <button type="button" class="link" @click="query = ''">Clear the search</button>
+        <template v-if="notInterested.length">
+          · <button type="button" class="link show-ni" @click="niOpen = true">Show {{ notInterested.length }} in Not interested</button>
+        </template>
+      </p>
     </div>
 
-    <div v-if="!error && untracked.length && (visible.length || notInterested.length)" class="split" :class="{ 'show-detail': detailOpen, refreshing: loading }">
+    <div v-if="untracked.length && (visible.length || (notInterested.length && niOpen))" class="split" :class="{ 'show-detail': detailOpen, refreshing: loading && !quiet }">
       <div class="job-list surface" @keydown="onListKey">
        <template v-for="group in groups" :key="group.id">
         <button
@@ -411,6 +490,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onShortcut))
             type="button"
             class="card-hit"
             :aria-current="selected && job.id === selected.id ? 'true' : undefined"
+            :tabindex="selected && job.id === selected.id ? 0 : -1"
             @click="select(job)"
           >
             <CompanyMark :name="job.company" />
@@ -430,14 +510,14 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onShortcut))
       </div>
 
       <article v-if="selected" :key="selected.id" class="detail surface" aria-labelledby="detail-title" :data-job="selected.id">
-        <button type="button" class="ghost back" @click="detailOpen = false">
+        <button type="button" class="ghost back" @click="detailOpen = false; nextTick(() => itemEls[selected?.id]?.focus())">
           <Icon name="back" /> All roles
         </button>
 
         <header class="detail-head">
           <CompanyMark :name="selected.company" size="lg" />
           <div class="detail-names">
-            <h3 id="detail-title" class="detail-title">{{ selected.title }}</h3>
+            <h3 id="detail-title" class="detail-title" tabindex="-1">{{ selected.title }}</h3>
             <p class="detail-company">{{ selected.company }}</p>
           </div>
         </header>
@@ -469,10 +549,10 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onShortcut))
           <button type="button" class="save" :disabled="busy" :aria-keyshortcuts="keyOf('S')" @click="track(selected, 'to_apply')">
             <Icon name="bookmark" /> Save
           </button>
-          <button v-if="isDismissed(selected)" type="button" class="ghost undismiss" :aria-keyshortcuts="keyOf('X')" @click="moveBack(selected)">
+          <button v-if="isDismissed(selected)" type="button" class="ghost undismiss" :disabled="busy" :aria-keyshortcuts="keyOf('X')" @click="moveBack(selected)">
             <Icon name="undo" /> Move back to new roles
           </button>
-          <button v-else type="button" class="ghost dismiss" :aria-keyshortcuts="keyOf('X')" @click="markNotInterested(selected)">
+          <button v-else type="button" class="ghost dismiss" :disabled="busy" :aria-keyshortcuts="keyOf('X')" @click="markNotInterested(selected)">
             <Icon name="x" /> Not interested
           </button>
         </div>
@@ -512,8 +592,9 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onShortcut))
           </ul>
         </section>
 
-        <section class="why jd" aria-live="polite">
+        <section class="why jd">
           <h4><Icon name="briefcase" /> About the job</h4>
+          <p class="visually-hidden" role="status">{{ description?.state === 'error' ? 'Could not load the description.' : '' }}</p>
           <p v-if="!description || description.state === 'loading'" class="muted jd-status">Loading the description…</p>
           <p v-else-if="description.state === 'error'" class="muted jd-status">
             Could not load the description ({{ description.error }}). It is on the company site.
@@ -583,7 +664,8 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onShortcut))
 .ni-head .icon { transition: transform 0.15s; }
 .ni-head[aria-expanded='false'] .icon { transform: rotate(-90deg); }
 .ni-num { font-family: var(--mono); font-weight: 500; }
-.cards.ni .card-body, .cards.ni .mark { opacity: 0.65; }
+.cards.ni .mark { opacity: 0.65; }
+.cards.ni .card .title { color: var(--text-2); font-weight: 500; }
 .ni-note { margin: var(--space-2) 0 0; }
 .twins { color: var(--muted); }
 .card-hit {
@@ -604,7 +686,8 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onShortcut))
 .card-hit:hover:not(:disabled) { background: var(--surface-2); }
 .card.selected .card-hit {
   background: var(--accent-soft);
-  border-color: color-mix(in srgb, var(--accent) 35%, transparent);
+  border-color: transparent;
+  box-shadow: inset 3px 0 0 var(--accent);
 }
 .card-body { display: flex; flex-direction: column; min-width: 0; flex: 1; }
 .card .title { font-weight: 650; font-size: var(--text-sm); color: var(--text); line-height: 1.35; }
@@ -612,7 +695,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onShortcut))
 .card .meta { font-size: var(--text-xs); color: var(--muted); margin-top: 2px; }
 .card-side { display: flex; flex-direction: column; align-items: flex-end; gap: var(--space-1); flex: none; }
 .seen { font-family: var(--mono); font-size: var(--text-xs); color: var(--muted); white-space: nowrap; }
-.card.closed .card-body { opacity: 0.6; }
+.card.closed .title { color: var(--text-2); }
 
 .detail {
   position: sticky;

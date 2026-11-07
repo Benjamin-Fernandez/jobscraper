@@ -423,7 +423,8 @@ class Answer:
     rule_id: str = ""                 # questions.yaml key, declaration label, memory key
     model: str = ""                   # tier 5 only
     prompt_hash: str = ""             # tier 5 only: sha256 of system+user, first 16 hex
-    sensitive: bool = False           # an S field (design §5.3): never sent to the model, never logged
+    sensitive: bool = False           # an S field (design §5.3): never logged; sent to the model only
+                                      # when ResolveContext.model_sees_sensitive (D-105)
     note: str = ""                    # why it is UNKNOWN / UNGROUNDED (no personal values)
     # D-78 (llm_fill_design §7, §11): audit extras. Local DB only, never logged.
     evidence: str = ""                # the model's quote (resume/job/keep), or "" for program values
@@ -509,6 +510,12 @@ class ResolveContext:
     other_employers: tuple[str, ...] = ()
     # Q-27 / Q-45: the posting's title (JOB block, composed texts). "" when unknown.
     job_title: str = ""
+    # D-105 (q74_model_sees_sensitive.md §2): True only when config `apply.model_sees_sensitive`
+    # is on AND the backend is local (backends.is_local). Then prompts (and the grounding
+    # corpus the prompt's answer is checked against) may carry S values; logs never do, and
+    # the tier routing (sensitive no-fit stops, tier-4 locks, tier-1 SENSITIVE_CANONICALS,
+    # G7) is unchanged. Set by apply_flow.resolve_ctx; False everywhere else.
+    model_sees_sensitive: bool = False
 
 
 # --------------------------------------------------------------------------
@@ -559,7 +566,7 @@ class CapturedQuestion:
     field_key: str
     field_type: FieldType
     required: bool = True
-    sensitive: bool = False                 # never sent to the model for naming; "Private" in the UI
+    sensitive: bool = False                 # never sent to the model for naming (also under D-105); "Private" in the UI
     description: str = ""                   # help text (<= 300 chars)
     options: tuple[str, ...] = ()           # verbatim option labels (<= 50)
     option_norms: tuple[str, ...] = ()      # norm_label of each option, same order
@@ -869,8 +876,10 @@ class Fact:
     ref: str                # "profile:contact.city", "profile:experience[1].title", "extra:visa_status",
                             # "standing:today"; the model's `ref` must be one of these exactly
     title: str              # what it is, in plain words
-    value: str = ""         # the text the model sees; "" when private
-    private: bool = False   # sensitive (design §5.3 S paths, sensitive extra): the model sees only `is_set`
+    value: str = ""         # the text the model sees; "" when private (unless D-105: see `private`)
+    private: bool = False   # sensitive (design §5.3 S paths, sensitive extra): the model sees only `is_set`;
+                            # under D-105 (ResolveContext.model_sees_sensitive) it also sees `value`, but
+                            # `private` still drives G2d/G7 and audit `sensitive` (q74 design §4)
     is_set: bool = True
     kind: str = "text"      # mapping kind for the program (questions.yaml kinds + "file")
     entry: str = ""         # "experience[1]" etc. for facts that belong to one entry

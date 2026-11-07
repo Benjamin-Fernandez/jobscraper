@@ -86,6 +86,65 @@ BODY: Fast-track amendment to tier 4 (declarations). Budget ran out (36/35 calls
 - D-89 (2026-11-02): R1 extended in AD §7.5: a prior/current-employee span that overlaps a government span also loses. The drop is skipped when the label names this employer (`us`/`our`, or `employer_names` via `company_match`). F18 stays AMBIGUOUS; NS-inclusive military questions are unchanged. New oracles: "Have you previously worked for the government?" and "Are you currently employed by a government body?" → `government_employment` → No.
 - D-90 (2026-11-02): written into AD §7.5: phrase-table rows for disability and prior/current employment conditioned; the "Negated question" rule is replaced by five gates (field type, status frame, polarity with a grown NEGATIONS list and the negative-attestation checkbox rule, the employer condition shared with Q-46c, disability status frames), plus no S state in notes. Also the "Value onto the field" checkbox clause, and LF §4 L3/L7 (one shared helper, F10). Open: an extension to the WILLINGNESS list, proposed and marked pending in AD (see the report).
 - D-91 (2026-11-02): written into AD §7.5. Gate 3: freedom forms (free from/of, clear of/from, unrestricted by, unencumbered by, not bound/subject/party to) take the inverted value when they are the only negation and govern every class phrase. Gate 2: new class `nda_willingness` (an NDA object plus a consent verb) reads the new `declarations.willing_to_sign_nda` (default false; not standing). Also AD §5.4 yaml, the QD §3 row-14 Profile row, and `DeclarationLabel.NDA_WILLINGNESS` (v5 additive). Engineer: classifier + truth + form row + example yaml line. Tester: "Are you free from any restrictive covenants?" → Yes; "Are you willing to sign an NDA?" → the switch; "I agree to sign the NDA" box ticked only when true; "Are you willing to sign a non-compete?" → unknown; "Are you not free from …" / two negations → unknown.
+### 2026-11-07 architect → coordinator
+TYPE: handoff + request
+RE: Q-74 (D-105), Q-44 + Q-73, Q-76; `docs/architecture/q74_model_sees_sensitive.md`, `adr/0008-model-sees-sensitive.md`, `apply_design.md` §5.3 (D-105 amendment paragraph), `q44_refresh_from_resume.md`, `q76_application_detail.md`, `src/jobscraper/apply/contracts.py`
+BODY: All three are fast-track designs, each ending with "READY TO BUILD: yes". Please review, mark them READY, and commit (I have no shell). Suggested message: `docs(arch): Q-74 Q-44 Q-73 Q-76 lean designs + ADR-0008 + contracts D-105`.
+- **Q-74.** `apply.model_sees_sensitive` (owner value true in config/config.yaml) takes effect only when `backends.is_local` holds (Ollama on localhost, 127.0.0.1 or ::1). A Docker or LAN URL counts as remote.
+  - It widens prompts only: `llm_extract` / `grounding_text` gain `sensitive=`, used in the tier-5 prompt and corpus.
+  - It leaves alone: logging, naming, tier-1/2/4 routing, EEO, G7.
+  - Contract (done, additive): `ResolveContext.model_sees_sensitive: bool = False`, plus D-105 notes on `Answer.sensitive`, `CapturedQuestion.sensitive` and `Fact.private`.
+  - Q-35 merge rule: design §4.
+  - Badge: "Private: local AI only". It follows the effective value.
+  - 9 steps, 1 lane.
+- **Q-44 + Q-73.** The profile job also writes `data/applicant.refresh.json` (resume facts only). The pure plan in applicant.py runs against the current applicant.yaml on every GET.
+  - It updates or removes only `from_resume: true` entries and template placeholders. It adds new entries and skills (only skills that appear in the resume text). Owner entries and languages/links are never touched.
+  - Dates are parsed deterministically. Unread dates are left null, never "present".
+  - Summary card plus a collapsed log; no absolute paths.
+  - 8 steps, 2 lanes (P: Python, V: Vue).
+- **Q-76.** `store.last_attempts()` (one GROUP BY query) feeds a `last_attempt` pill on `/api/applications`, plus `GET /api/applications/{id}/attempts` with texts from REASON_TEXTS/STATE_TEXTS.
+  - `JobDetail.vue` extraction is step 5, only after Q-75 lane I merges. Touch points: design §4.
+  - 6 steps, 1 lane.
+REQUEST: record D-105 in 02_status §4, and update the Q-74/Q-44/Q-73/Q-76 queue rows (status READY, design links).
+Open questions: none for the owner.
+STATUS: open
+
+### 2026-11-07 architect → coordinator
+TYPE: handoff
+RE: Q-72 (a), D-161, D-160; `docs/architecture/mail_status_design.md` header + changelog (4), §3, §7, §8 row 7a + its note, §11.3, §15, §16, §17 (F-50l)
+BODY: MS amended, READY (Q-72, D-161); please record D-161 and commit (no shell). The rule: rows 4–9 settle every matched candidate (single or ambiguous) as NONE `terminal`, and `match.signals` has no `role`/`req_id`/`thread`, and the mail is newer than every candidate's `last_event_at`, and the category is `acknowledged` or `rejected`. Then the result is SUGGEST(to=None, `maybe_untracked`), offering all matched candidates.
+Exact changes: §3 `Reason.MAYBE_UNTRACKED = "maybe_untracked"` (suggested section, in `SUGGEST_REASONS`); `REASON_TEXTS` "This email may be about an application you haven't added."; `CONTRACT_VERSION` stays 1; no SKIP or COUNT key (it counts as `suggested`). §8 new row 7a plus the note "Row 7a, maybe untracked" (categories, rows 5/6/11, signals, code location, storage). §7 "Mail for untracked roles" gets one sentence. §11.3 gets a "Maybe untracked" copy row: Got it plus Open in Gmail; the app line falls back to `candidates[0].company`. §15 records the D-161 decision. §16 has 10 named oracles. §17 F-50l cites it.
+Category ruling: assessment, interview and offer are already never silent (row 7 `reopen` / row 4 `several_applications`), so 7a adds only `acknowledged` and `rejected`. `withdrawn`, `posting_closed` and `kept_on_file` are excluded as noise.
+Schema: no change confirmed (`mail_evidence.job_id` NULL + `candidates_json`, `to_status` NULL; `reason` has no CHECK). One flow change the engineer must make: for `maybe_untracked`, `mail_messages.job_id` stays NULL and evidence `job_id` is NULL even on a STRONG match. Today `mailstatus_flow.decide` sets both from `m.job_id` for STRONG (lines 453, 477).
+This supersedes the Q-72 row's `untracked_hint` count idea; please update the queue row text.
+Open questions: (1) "Find the role" link: ruled no (the Inbox has no company-search URL). Raise it if the owner wants one. (2) Expected noise: a role-less late rejection for an app already rejected will hint. Accepted as cheap; revisit after real use.
+STATUS: open
+
+### 2026-11-07 architect → coordinator
+TYPE: handoff + request
+RE: Q-60 MS amendment for D-157 (a)–(j), D-156 (1)(3)(4)(5); `docs/architecture/mail_status_design.md` §2.3, §3, §5.1, §5.4, §5.5, §6.5, §7, §8, §9, §10.1–§10.4, §11.1, §11.4 (new), §12, §15 R3
+BODY: MS amended, still READY; no ADR change (all additive; ADR-0007 never mentioned retry_after). §3 matches lane S's contracts.py (c076f68) exactly: `AppCandidate.first_event_at`, `Reason.BACKFILLED` + `SUGGEST_REASONS`, `REASON_TEXTS` "You added this application after this email arrived." Please run `-k mail_contracts`.
+Points to decide (no silent pick):
+1. REQUEST (lane F, FL-1): D-157 (a) stores a `skipped/internal` row and counts `errors`, but contracts.py has no `Reason.INTERNAL` and `COUNT_KEYS` has no `errors`. MS §5.4 uses the value `"internal"` and `counts["errors"]` and marks them "not yet in §3". Recommend adding `INTERNAL = "internal"` (skipped section, in `SKIP_REASONS`) and `"errors"` to `COUNT_KEYS`; tell me and I'll add both to §3 in the same commit as the code, or lane F transcribes them into §3 too.
+2. D-157 (i) says "suffix words"; lane S drops the words *anywhere* in the name and compares with any company variant; it also blocks a role/req id from lifting an extra-words sender name to STRONG (MS §7, decision step 4), where D-157 says only "→ WEAK". I wrote MS to the built code plus your "<words> at <name>" addendum. Confirm the role rule; note that a body name plus a role still gives STRONG, so "Globex Labs" mail that names "Globex" in the body with a matching role still matches the Globex application.
+3. D-157 (a) isolation: I excluded the busy-DB `sqlite3.OperationalError` from per-message isolation (otherwise a locked DB would mark messages skipped forever); it keeps the §12 "stop, retry next time" row. Confirm.
+4. D-157 (b) covers `mail_record` / `mail_resolve_pending` only. The duplicate path and the end-of-scan path call `mail_cursor_set` (an upsert), which can still create an orphan cursor after a disconnect. Recommend the same account check there.
+5. D-157 (d): "a call was made and gave no usable answer" read as `BackendError` from `backend.complete`; a parsed but unusable reply is already an `unclear` suggestion (§6.5), so it resolves the row rather than counting a retry.
+6. D-157 (f): I named the write path `store.mail_supersede(now)` (end of sync) plus accept/dismiss for their own application. Rename freely if lane F built another name.
+7. D-157 (h) accept: a `backfilled` suggestion would always fail §8 row 6 on accept (the owner change is newer by definition), so MS says accept skips row 6 for it. Lane F/S must build that, or Accept gives 409 `changed`.
+8. `POST /api/mail/sync` `400 {code: "no_mailbox"}` is also a command result, not a SyncCode; D-156 (5) didn't list it, so I left it out of the "Command results" paragraph.
+STATUS: open
+
+### 2026-11-07 architect → coordinator
+TYPE: handoff
+RE: Q-60 MS alignment (D-153, D-154 a–g, D-155 renumber); `docs/architecture/mail_status_design.md`, `mail_status_build_plan.md`, `adr/0007-mail-status-imap.md`
+BODY: MS now describes the code as built on int/Q-60-mail-status e2b3998: §5.6 (F4 argument refusal, F5 URL forms, T4 punctuation), §6.2 (shared domains dropped from the gate; Reply-To still opens the gate and triggers `job_board`), §6.3/§6.4 (D-152 assessment vendors, live included), §6.5 (quote ≥ 15 chars and ≥ 3 words on the normalised quote, `model:short_quote`), §7 (employer_domains/is_shared_domain; restricted names as-written everywhere, never STRONG, not via role/req id), §8 (D-153 row 2; `as_bool`), §10.4, §11.3 (F8), §12, §13. Q-60 IDs renumbered to D-150..D-154 in docs/architecture. MS stays READY; §3 contracts unchanged (the code didn't change them).
+Points to check (no silent pick):
+1. D-155 says "the architect already uses the new IDs in docs/architecture/"; before this pass it didn't (D-90/D-91 were still there). Now true.
+2. D-154 g names `enabled` and `model` too; only `require_auth` (transition.build_policy) is built. `MailStatusConfig` is lane F's: MS §10.4 asks it to use the `as_bool` truth table. Whether config.py may import `mailstatus.transition` is a layering question (`tests/test_layering.py`); a local copy of the same table is fine. The per-account `enabled` in `PATCH /api/mail/accounts/{id}` is JSON; I did not check the router.
+3. Code comments in `mailstatus/match.py` (`_evaluate` docstring, step-4 comment) use a real employer name as the common-word example; the doc uses "Summit"/"Acme". Public repo: suggest an engineer swaps it to a neutral word at the next touch.
+4. The `stale` emit and the F8 password behaviour are written from the review fix text and `MailEvidence.vue` lines 9/48; `MailCard.vue`'s consent order was not re-read.
+5. `contracts.py` comment on `AppCandidate.employer_domains` ("careers_url and a non-ATS posting host") is still true as input; the filter is in the stage. No contract change needed.
 STATUS: open
 
 ### 2026-11-02 architect → coordinator
@@ -226,4 +285,32 @@ STATUS: open
 TYPE: request
 RE: LF §7 G2(f); D-74 rule rows
 BODY: Tier-2 rows (A03 style) for tier-1-only profile paths that forms ask as single questions, so an empty one is captured `profile_gap` instead of `no_rule`: `contact.city`, `links.linkedin`, `links.github`, `links.portfolio` (labels and synonyms only, generic; no values). Private paths such as the postal code don't need one: they are listed as set/empty, so G2(c) already captures them as `profile_gap`.
+### 2026-11-02 architect → coordinator
+TYPE: handoff
+RE: Q-60 / F-50 (D-90, D-91); docs/architecture/mail_status_design.md, mail_status_build_plan.md, adr/0007-mail-status-imap.md
+BODY: Stage-B design for application status from email is READY for stage E. Written only in `.claude/worktrees/feat-Q-60/` on `int/Q-60-mail-status`; not committed (no shell): please commit as `docs(architecture): Q-60 stage-B design, build plan, ADR-0007`.
+- Placement (ADR-0007): foundation `imapread.py` (the only F-50 IMAP code; web/ may not import it) + stage package `mailstatus/` (contracts, rules, match, transition, model; pure) + orchestrator `mailstatus_flow.py`. The web timer (`web/mailsync.py`) spawns `python -m jobscraper mail sync` as its own child (not JobManager), with a DB lease (`mail_sync_runs`, BEGIN IMMEDIATE + heartbeat).
+- Contracts: new `mailstatus/contracts.py` v1 (full listing in MS §3; WP-S0 transcribes it, and I sign off at review). `apply/contracts.py` is untouched.
+- New tables (SCHEMA_VERSION 4 → 5): `mail_accounts`, `mail_cursors`, `mail_messages`, `mail_evidence`, `mail_sync_runs`. If the concurrent session also bumps to 5, make it 6 at merge, with the comment listing both (MS §9).
+- Lanes: S (S0–S3 stage), I (I1 imapread, I2 apply/mail Spam fix, U1 Settings card, U2 Applications), F (F1 store, F2 config, F5a web backend, F3 flow, F4 CLI, F5b real children). Tester T0–T6, researcher R1 (rules file) + R2 (spike, owner consent), planner P1. T0 must merge together with S0 (the layering sets).
+- Decided (MS §6.4, §8, §15): HireVue on-demand → assessment; posting closed and lone kept-on-file → suggestions; `assessment` added to `applications.statuses`; model-tier verdicts never automatic; automatic changes need Gmail DKIM/DMARC pass and (except acknowledgements) not Spam; no unmatched-mail list; no X-GM-RAW; no IDLE.
+- D-91 readings (no contradiction): "anything else → suggestion" = forward moves below the confidence bar plus the explicit cases. Backwards, same-status and stale (older than an owner change) mail change nothing and raise no suggestion. "Confident" excludes model-tier verdicts.
+Requests:
+(1) Add `config/mail_rules.yaml` to the researcher's write scope (`.claude/scopes.json`) for WP-R1.
+(2) Add `JOBSCRAPER_MAIL_SYNC=0` to the dev-instance command in CLAUDE.md: a copied DB would otherwise read the real mailbox (MS §15 R3).
+(3) If ADR-0007 is taken on `personal` at merge time, renumber this ADR and its two references.
+Owner questions (recommendations in MS §15; none blocks the build): which mailboxes (application Gmail first); keep automatic offer and rejected under the bar; the `assessment` status; the owner triggers the first real sync after the merge go-ahead.
+Evidence: none runnable (docs only). After the commit, `python tests/run_tests.py -k layering` should stay green (no code changed).
+STATUS: open
+
+### 2026-11-02 architect → coordinator
+TYPE: handoff
+RE: Q-60 stage-E amendment E1 (Oleeo tenants); mail_status_design.md §3, §6.1, §7, §9, §14; mail_status_build_plan.md WP-S1, S2, F1, T3, R1, R2
+BODY: E1 is in.
+- §6.1: platform keys `tenant_from_subdomain` (strict subdomain of a platform domain; at most one tenant flag per platform) and `tenant_sites`; Oleeo `{id: oleeo, kind: ats, domains: [tal.net], tenant_from_subdomain: true, tenant_sites: [tal.net]}` in the seed; Workday gains `tenant_sites: [myworkdayjobs.com]`.
+- §7: `compact()` (normalised, spaces removed); the `tenant` signal covers both flags and compares in compact form against `app.tenants` and every company variant (both flags: yes, as asked).
+- §3, §9: `mail_match_context` returns raw `tenant_hosts` (attempt `tenant_host` plus the hosts of `jobs.url`, `applications.url` and `companies.careers_url`); `match.tenants_from_hosts` builds `AppCandidate.tenants`.
+- BP: S1, S2, F1, R1 and T3 point at E1; R2 is DONE.
+CONTRACT_VERSION stays 1: only the `AppCandidate.tenants` comment changed.
+One deviation from the literal ask: the host suffixes come from the rules key `tenant_sites` rather than a hard-coded `myworkdayjobs.com` / `tal.net` list in store or code. That keeps "a new ATS without code edits" (§14) true and keeps domain data out of `store.py`. Please commit as `docs(architecture): Q-60 E1 Oleeo tenants (tenant_from_subdomain, compact match)`.
 STATUS: open

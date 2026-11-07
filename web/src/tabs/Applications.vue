@@ -9,15 +9,25 @@
 // a status is a config change (M8-T2); stages.js only says how one is written.
 // The run selector here is this tab's own filter and starts on "all runs": an
 // application outlives the run that found it (M12-T1).
-import { computed, onMounted, ref } from 'vue'
-import { describeError, getApplications, getStats, setApplicationStatus } from '../api.js'
+//
+// Email updates (Q-60, F-50l-n): suggestions an email raised sit above the stage
+// strip (MailSuggestions, hidden when there are none), and an event an email
+// made wears a "From email" badge in History (MailEvidence) with its quote and
+// Undo. Either action reloads the rows and the suggestions.
+import { computed, onActivated, onMounted, ref, watch } from 'vue'
+import { describeError, getApplications, getStats, setApplicationStatus, untrackApplication } from '../api.js'
+import { ageLabel, isActive, lastAt, needsFollowUp, secondLine, STAGE_KEY } from '../applications.js'
 import { plural, safeUrl, shortDate, when } from '../format.js'
 import { tabEmits, tabProps } from '../shell.js'
 import { statusLabel } from '../stages.js'
+import { showToast } from '../toast.js'
 import { runsInRange } from '../runs.js'
 import CompanyMark from '../components/CompanyMark.vue'
 import Icon from '../components/Icon.vue'
+import MailEvidence from '../components/MailEvidence.vue'
+import MailSuggestions from '../components/MailSuggestions.vue'
 import RunSelector from '../components/RunSelector.vue'
+import StatusSelect from '../components/StatusSelect.vue'
 import TabLoading from '../components/TabLoading.vue'
 
 const props = defineProps(tabProps)
@@ -29,7 +39,13 @@ const loading = ref(true)
 const error = ref('')
 const saving = ref('')
 const runFilter = ref('all')
-const stage = ref('all')
+// The stage chip is remembered; a first visit lands on Active, so rejected and
+// withdrawn roles do not crowd the list you act on (Q-70 B2, G8).
+function readStage() {
+  try { return window.localStorage.getItem(STAGE_KEY) || 'active' } catch { return 'active' }
+}
+const stage = ref(readStage())
+watch(stage, v => { try { window.localStorage.setItem(STAGE_KEY, v) } catch { /* private mode */ } })
 const query = ref('')
 
 const UNKNOWN = 'Unknown company'
@@ -53,22 +69,20 @@ const order = computed(() => {
 })
 
 const stages = computed(() => [
+  { id: 'active', label: 'Active', n: inScope.value.filter(isActive).length },
   { id: 'all', label: 'All', n: inScope.value.length },
   ...order.value.map(s => ({ id: s, label: statusLabel(s), n: inScope.value.filter(r => r.status === s).length })),
 ])
 
-const shown = computed(() => (stage.value === 'all'
-  ? inScope.value
-  : inScope.value.filter(r => r.status === stage.value)))
+const shown = computed(() => {
+  if (stage.value === 'all') return inScope.value
+  if (stage.value === 'active') return inScope.value.filter(isActive)
+  return inScope.value.filter(r => r.status === stage.value)
+})
 
 // Company A-Z groups a company's roles together; Recent activity lists every
 // application on its own, the latest change first.
 const sort = ref('company')
-
-// The time of a row's last change: its newest event, else what the row says.
-function lastAt(row) {
-  return row.events?.at(-1)?.at ?? row.updated_at ?? row.applied_at ?? ''
-}
 
 // Companies A-Z; inside one, roles by stage (config order), then title.
 const groups = computed(() => {
@@ -101,17 +115,14 @@ function optionsFor(row) {
   return statuses.value.includes(row.status) ? statuses.value : [...statuses.value, row.status]
 }
 
-function lastChange(row) {
-  const e = row.events?.at(-1)
-  return e ? `${statusLabel(e.to_status)} ${shortDate(e.at)}` : ''
-}
-
 async function load() {
   error.value = ''
   try {
     const [apps, stats] = await Promise.all([getApplications(), getStats()])
     rows.value = apps
     statuses.value = stats.statuses
+    // A remembered stage that config no longer lists falls back to Active.
+    if (!stages.value.some(s => s.id === stage.value)) stage.value = 'active'
   } catch (e) {
     error.value = `Could not load applications: ${describeError(e)}`
   } finally {
@@ -124,18 +135,66 @@ function retry() {
   load()
 }
 
+// ---- email updates ----
+
+const suggestions = ref(null)
+
+// A suggestion was accepted or an email-made change undone: the status moved.
+async function afterMail() {
+  await load()
+  emit('changed')
+  await suggestions.value?.load()
+}
+
 async function change(row, status) {
   if (status === row.status) return
+  const before = row.status
   saving.value = row.job_id
   error.value = ''
   try {
     await setApplicationStatus(row.job_id, status)
     await load()
     emit('changed')
+    // Undo is one more change, so it writes one more history event (D-101).
+    showToast({
+      message: `Moved to ${statusLabel(status)}: ${row.role ?? row.job_id}`,
+      action: { label: 'Undo', run: () => change({ ...row, status }, before) },
+    })
+    // A suggestion about this application may no longer apply (superseded).
+    suggestions.value?.load()
   } catch (e) {
     error.value = `Could not change ${row.company ?? row.job_id}: ${describeError(e)}`
   } finally {
     saving.value = ''
+  }
+}
+
+// Only a row with a single event can be removed, so no history is lost; Undo
+// puts it back as it was (Q-70 B6, G6).
+async function removeRow(row) {
+  error.value = ''
+  try {
+    await untrackApplication(row.job_id)
+    await load()
+    emit('changed')
+    showToast({
+      message: `Removed ${row.role ?? row.job_id}`,
+      action: {
+        label: 'Undo',
+        run: async () => {
+          try {
+            await setApplicationStatus(row.job_id, row.status,
+              { company: row.company, role: row.role, url: row.url, notes: row.notes })
+            await load()
+            emit('changed')
+          } catch (e) {
+            error.value = `Could not restore ${row.company ?? row.job_id}: ${describeError(e)}`
+          }
+        },
+      },
+    })
+  } catch (e) {
+    error.value = `Could not remove ${row.company ?? row.job_id}: ${describeError(e)}`
   }
 }
 
@@ -167,6 +226,9 @@ async function saveNote(row) {
 }
 
 onMounted(load)
+// A cached tab coming back shows what changed meanwhile (Q-70 B9).
+let shownOnce = false
+onActivated(() => { if (shownOnce) load(); shownOnce = true })
 </script>
 
 <template>
@@ -182,7 +244,7 @@ onMounted(load)
         <label class="search">
           <Icon name="search" />
           <span class="visually-hidden">Search applications</span>
-          <input v-model="query" type="search" placeholder="Search company or role" aria-keyshortcuts="/">
+          <input v-model="query" type="search" placeholder="Search company or role" aria-keyshortcuts="/" @keydown.esc="query ? (query = '') : $event.target.blur()">
           <kbd class="key-hint" aria-hidden="true">/</kbd>
         </label>
         <label>
@@ -213,6 +275,8 @@ onMounted(load)
     </div>
 
     <template v-else-if="rows.length">
+      <MailSuggestions ref="suggestions" @changed="afterMail" />
+
       <div class="stages" role="group" aria-label="Filter by stage">
         <button
           v-for="s in stages"
@@ -232,6 +296,7 @@ onMounted(load)
       <div v-if="!shown.length" class="empty">
         <p class="empty-title">Nothing here.</p>
         <p class="muted">No application matches this stage, run and search.</p>
+        <p><button type="button" class="link clear-filters" @click="stage = 'all'; runFilter = 'all'; query = ''">Clear filters</button></p>
       </div>
 
       <div class="groups">
@@ -248,6 +313,8 @@ onMounted(load)
                   {{ row.role ?? row.job_id }}<Icon name="external" :size="13" />
                 </a>
                 <span v-else class="role-title">{{ row.role ?? row.job_id }}</span>
+                <span v-if="needsFollowUp(row)" class="pill follow-up">Follow up?</span>
+                <p v-if="secondLine(row)" class="row-meta">{{ secondLine(row) }}</p>
                 <form
                   v-if="noteFor === row.job_id"
                   class="note-form"
@@ -281,27 +348,31 @@ onMounted(load)
                   >
                     {{ row.notes ? 'Edit note' : 'Add note' }}
                   </button>
+                  <button
+                    v-if="(row.events?.length ?? 0) <= 1"
+                    type="button"
+                    class="link row-remove"
+                    @click="removeRow(row)"
+                  >
+                    Remove from Applications
+                  </button>
                 </template>
               </div>
-              <span class="updated">{{ lastChange(row) }}</span>
-              <label class="status-field">
-                <span class="visually-hidden">Status of {{ row.company ?? row.job_id }} · {{ row.role ?? '' }}</span>
-                <select
-                  class="status-select"
-                  :data-status="row.status"
-                  :value="row.status"
-                  :disabled="saving === row.job_id"
-                  @change="change(row, $event.target.value)"
-                >
-                  <option v-for="s in optionsFor(row)" :key="s" :value="s">{{ statusLabel(s) }}</option>
-                </select>
-              </label>
+              <span class="updated" :title="when(lastAt(row))">{{ ageLabel(row) }}</span>
+              <StatusSelect
+                :model-value="row.status"
+                :options="optionsFor(row)"
+                :disabled="saving === row.job_id"
+                :label="`Status of ${row.company ?? row.job_id} · ${row.role ?? ''}`"
+                @commit="s => change(row, s)"
+              />
               <details v-if="row.events && row.events.length > 1" class="history">
                 <summary>History <span class="num">{{ row.events.length }}</span></summary>
                 <ol class="timeline">
-                  <li v-for="e in row.events" :key="e.id">
+                  <li v-for="e in row.events" :key="e.id" :data-by="e.by ?? null">
                     <span class="to pill" :data-status="e.to_status">{{ statusLabel(e.to_status) }}</span>
                     <span class="at">{{ when(e.at) }}</span>
+                    <MailEvidence v-if="e.by === 'mail' && e.mail" :event="e" @undone="afterMail" @stale="afterMail" />
                   </li>
                 </ol>
               </details>
@@ -347,15 +418,17 @@ onMounted(load)
   font-size: var(--text-xs); line-height: 1.6; color: var(--muted); background: var(--surface-3);
 }
 .stage.active .stage-n { color: var(--text-2); }
-.stage-n.zero { opacity: 0.5; }
+.stage-n.zero { background: transparent; }
 /* Each stage's own colour, as a bar under the active segment. */
 .stage { position: relative; }
 .stage::after {
   content: ''; position: absolute; left: var(--space-3); right: var(--space-3); bottom: 4px;
   height: 2px; border-radius: 2px; background: transparent;
 }
+.stage.active[data-status='active']::after { background: var(--accent); }
 .stage.active[data-status='to_apply']::after { background: var(--stage-saved); }
 .stage.active[data-status='applied']::after { background: var(--stage-applied); }
+.stage.active[data-status='assessment']::after { background: var(--stage-assessment); }
 .stage.active[data-status='interviewing']::after { background: var(--stage-interview); }
 .stage.active[data-status='offer']::after { background: var(--stage-offer); }
 .stage.active[data-status='rejected']::after { background: var(--stage-rejected); }
@@ -392,7 +465,7 @@ a.role-title .icon { color: var(--muted); }
 .note-input {
   width: 100%; resize: vertical; padding: var(--space-2) var(--space-3);
   font: inherit; font-size: var(--text-sm); color: var(--text);
-  background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--radius);
+  background: var(--surface); border: 1px solid var(--control-border, var(--border-strong)); border-radius: var(--radius);
 }
 .note-input:focus-visible {
   outline: none; border-color: var(--accent);
@@ -400,28 +473,18 @@ a.role-title .icon { color: var(--muted); }
 }
 .note-actions { display: flex; gap: var(--space-2); }
 .updated { grid-area: updated; color: var(--muted); font-size: var(--text-xs); white-space: nowrap; }
-.status-field { grid-area: status; }
-
-/* The status control wears its stage colour. */
-.status-select {
-  width: 100%;
-  font-weight: 600;
-  border-color: transparent;
-  color: var(--stage-closed);
-  background-color: var(--stage-closed-soft);
-}
-.status-select[data-status='to_apply'] { color: var(--stage-saved); background-color: var(--stage-saved-soft); }
-.status-select[data-status='applied'] { color: var(--stage-applied); background-color: var(--stage-applied-soft); }
-.status-select[data-status='interviewing'] { color: var(--stage-interview); background-color: var(--stage-interview-soft); }
-.status-select[data-status='offer'] { color: var(--stage-offer); background-color: var(--stage-offer-soft); }
-.status-select[data-status='rejected'] { color: var(--stage-rejected); background-color: var(--stage-rejected-soft); }
-.status-select option { color: var(--text); background: var(--surface); }
+/* StatusSelect renders its own label root; place it in the row's status area. */
+.app-row > :deep(.status-field) { grid-area: status; }
+.follow-up { color: var(--warn); background: var(--warn-soft); margin-left: var(--space-2); }
+.row-meta { margin: 2px 0 0; font-size: var(--text-xs); color: var(--muted); }
+.row-remove { display: flex; width: max-content; margin-top: 2px; font-size: var(--text-xs); color: var(--muted); text-decoration: none; }
+.row-remove:hover:not(:disabled) { color: var(--accent); text-decoration: underline; }
 
 .history { grid-area: history; margin-top: var(--space-2); font-size: var(--text-sm); }
 .history summary { cursor: pointer; color: var(--muted); width: max-content; }
 .history summary .num { font-size: var(--text-xs); }
 .timeline { list-style: none; margin: var(--space-2) 0 0; padding: 0 0 0 var(--space-3); border-left: 2px solid var(--border); }
-.timeline li { display: flex; align-items: center; gap: var(--space-3); padding: 2px 0; }
+.timeline li { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-1) var(--space-3); padding: 2px 0; }
 .at { color: var(--muted); font-family: var(--mono); font-size: var(--text-xs); white-space: nowrap; }
 
 @media (max-width: 640px) {
