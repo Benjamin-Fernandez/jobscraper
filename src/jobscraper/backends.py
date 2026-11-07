@@ -228,6 +228,29 @@ def build(budget: dict[str, Any]) -> Backend:
     return OffBackend(f"unknown budget.backend {kind!r} (expected ollama or off)")
 
 
+# D-105 (q74_model_sees_sensitive.md §1, ADR-0008): hosts that mean "this computer".
+# A Docker service name (`http://ollama:11434`), a LAN IP or any other host is remote.
+LOCAL_HOSTS = frozenset({"localhost", "127.0.0.1", "::1"})
+
+
+def is_local(backend: Backend) -> bool:
+    """True when `backend` is Ollama running on this computer.
+
+    The owner's switch `apply.model_sees_sensitive` lets private profile values into
+    prompts only when this holds, so a later remote backend can never receive them
+    silently. Reads the URL `build` already resolved (the `JOBSCRAPER_OLLAMA_URL`
+    override wins there); makes no network call. `OffBackend` and anything else: False.
+    """
+    if not isinstance(backend, OllamaBackend):
+        return False
+    from urllib.parse import urlparse
+    try:
+        host = urlparse(str(backend.url or "")).hostname or ""
+    except ValueError:
+        return False
+    return host.lower() in LOCAL_HOSTS
+
+
 def _format(format: Optional[dict], schema: Optional[dict]) -> Any:
     """The request's `format`: a JSON schema dict when the caller gave one
     (`format` first, then the older `schema` argument), else plain "json"."""
