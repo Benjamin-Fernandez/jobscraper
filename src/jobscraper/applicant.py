@@ -1983,3 +1983,300 @@ def skill_label(s: Any) -> str:
     if t != t.lower():
         return t
     return re.sub(r"(^|[\s/-])([a-z])", lambda m: m.group(1) + m.group(2).upper(), t)
+
+
+# ---- the proposals file and the template (§2) ----
+
+PROPOSALS_NAME = "applicant.refresh.json"     # beside the profile, so inside gitignored data/
+TEMPLATE_PATH = ROOT / "config" / "applicant.example.yaml"
+
+# The fields a proposal fills, in the template's order. `from_resume` is last.
+REFRESH_FIELDS = {
+    "experience": ("employer", "title", "start", "end", "location", "description"),
+    "education": ("institution", "degree", "major", "minor", "start", "end",
+                  "grade_type", "grade", "grade_scale"),
+}
+REFRESH_ID = {"experience": ("employer", "title"), "education": ("institution", "degree")}
+
+
+def proposals_path(applicant_path: str | os.PathLike) -> Path:
+    """Where `profile --plan-applicant` keeps the resume-side facts: beside the
+    applicant profile (no config key, design §2)."""
+    return Path(applicant_path).with_name(PROPOSALS_NAME)
+
+
+def load_proposals(path: str | os.PathLike) -> Optional[dict]:
+    """The proposals file as a dict, or None when it is missing or unreadable."""
+    import json
+    try:
+        data = json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def save_proposals(path: str | os.PathLike, proposals: dict) -> None:
+    """Write the proposals file atomically (tempfile in the same folder +
+    os.replace), so a reader never sees half a file."""
+    import json
+    p = Path(path)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(prefix=p.stem + ".", suffix=".tmp", dir=str(p.parent))
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as fh:
+            json.dump(proposals, fh, ensure_ascii=False, indent=1)
+        os.replace(tmp, p)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
+
+def load_template(path: str | os.PathLike | None = None) -> dict:
+    """`config/applicant.example.yaml` as a dict ({} when unreadable): its
+    placeholder entries and skills are the ones a refresh may replace."""
+    try:
+        data = yaml.safe_load(Path(path or TEMPLATE_PATH).read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, yaml.YAMLError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def original_resume_hash(resume_dir: str | os.PathLike | None = None) -> Optional[str]:
+    """`sha256:<hex>` of `<resume_dir>/resume.pdf` or `resume.docx` (the same
+    value as profile/resume_ingest.file_hash, copied because this foundation
+    module may not import a stage); None when there is no resume file."""
+    rdir = Path(resume_dir) if resume_dir else ROOT / "data"
+    for name in RESUME_NAMES:
+        p = rdir / name
+        if p.is_file():
+            h = hashlib.sha256()
+            with open(p, "rb") as fh:
+                for block in iter(lambda: fh.read(1 << 16), b""):
+                    h.update(block)
+            return "sha256:" + h.hexdigest()
+    return None
+
+
+# ---- the plan (§3.4) ----
+
+def _key(v: Any) -> str:
+    """Match text: lowercase, punctuation to spaces, whitespace collapsed."""
+    return " ".join(re.sub(r"[^\w\s]|_", " ", str(v or "").lower()).split())
+
+
+def _pair_key(entry: dict, lst: str) -> str:
+    org, title = REFRESH_ID[lst]
+    return f"{_key(entry.get(org))}|{_key(entry.get(title))}"
+
+
+def _org_key(entry: dict, lst: str) -> str:
+    return _key(entry.get(REFRESH_ID[lst][0]))
+
+
+def _clean_proposal(p: dict, lst: str) -> dict:
+    """The entry a proposal saves as: its fields in template order (absent ones
+    empty), `from_resume: true`, and none of the plan-only keys (`dates_text`,
+    `subtitle`)."""
+    out = {k: p.get(k, None if k in ("start", "end") else "") for k in REFRESH_FIELDS[lst]}
+    out["from_resume"] = True
+    return out
+
+
+def _dates_note(p: dict) -> str:
+    text = str(p.get("dates_text") or "")
+    if parse_resume_dates(text)[2]:
+        return ""
+    return f'Dates not understood ("{text}"). Add them after saving.'
+
+
+def _change_note(p: dict) -> str:
+    parts = [_dates_note(p)]
+    subtitle = str(p.get("subtitle") or "").strip()
+    if subtitle:
+        parts.append(f"Resume says: {subtitle}")
+    return " ".join(x for x in parts if x)
+
+
+def _merge_update(old: dict, p: dict, lst: str) -> dict:
+    """The proposal, where a field it cannot fill (unread dates, "") takes the
+    old value only when the old entry came from a resume, never from a template
+    placeholder. A read open end ("Present") stays open. Keys outside the
+    proposal's fields are kept the same way."""
+    new = _clean_proposal(p, lst)
+    if old.get("from_resume") is not True:
+        return new
+    dates_read = not _dates_note(p)
+    for k in REFRESH_FIELDS[lst]:
+        if _empty(new.get(k)) and not _empty(old.get(k)):
+            if k in ("start", "end") and dates_read:
+                continue
+            new[k] = old[k]
+    extra = {k: v for k, v in old.items() if k not in new}
+    if extra:
+        flag = new.pop("from_resume")
+        new.update(extra)
+        new["from_resume"] = flag
+    return new
+
+
+def _plan(profile: dict, proposals: dict, template: dict) -> list[dict]:
+    """Every change with its private apply data (`_new`, `_anchor`, `_order`)."""
+    changes: list[dict] = []
+    seen_ids: dict[str, int] = {}
+
+    def cid(lst: str, op: str, key: str) -> str:
+        base = f"{lst}:{op}:{key}"
+        n = seen_ids.get(base, 0) + 1
+        seen_ids[base] = n
+        return base if n == 1 else f"{base}#{n}"
+
+    for lst in ("experience", "education"):
+        existing = profile.get(lst) if isinstance(profile.get(lst), list) else []
+        props = [p for p in (proposals.get(lst) or []) if isinstance(p, dict)]
+        placeholders = {_pair_key(e, lst) for e in (template.get(lst) or []) if isinstance(e, dict)}
+        is_placeholder = [isinstance(e, dict) and _pair_key(e, lst) in placeholders
+                          for e in existing]
+        replaceable = [isinstance(e, dict) and (e.get("from_resume") is True or is_placeholder[i])
+                       for i, e in enumerate(existing)]
+        match_e: dict[int, int] = {}            # existing index -> proposal index
+        match_p: dict[int, int] = {}            # proposal index -> existing index
+        for j, p in enumerate(props):           # exact org|title first
+            k = _pair_key(p, lst)
+            for i, e in enumerate(existing):
+                if i not in match_e and isinstance(e, dict) and _pair_key(e, lst) == k:
+                    match_e[i], match_p[j] = j, i
+                    break
+        free_e = [i for i, e in enumerate(existing) if i not in match_e and isinstance(e, dict)]
+        free_p = [j for j in range(len(props)) if j not in match_p]
+        for j in free_p:                        # then org alone, when unique on both sides
+            org = _org_key(props[j], lst)
+            if not org:
+                continue
+            es = [i for i in free_e if _org_key(existing[i], lst) == org]
+            ps = [q for q in free_p if _org_key(props[q], lst) == org]
+            if len(es) == 1 and len(ps) == 1 and es[0] not in match_e:
+                match_e[es[0]], match_p[j] = j, es[0]
+
+        for i, e in enumerate(existing):
+            if not isinstance(e, dict):
+                continue
+            if i in match_e:
+                p = props[match_e[i]]
+                if not replaceable[i]:
+                    changes.append({"id": cid(lst, "kept", _pair_key(p, lst)), "list": lst,
+                                    "op": "kept", "index": i, "before": e, "after": None,
+                                    "note": "", "default": False})
+                    continue
+                new = _merge_update(e, p, lst)
+                if new == e:
+                    continue
+                changes.append({"id": cid(lst, "update", _pair_key(p, lst)), "list": lst,
+                                "op": "update", "index": i, "before": e, "after": new,
+                                "note": _change_note(p), "default": True, "_new": new})
+            elif replaceable[i]:
+                example = is_placeholder[i]
+                changes.append({"id": cid(lst, "remove", _pair_key(e, lst)), "list": lst,
+                                "op": "remove", "index": i, "before": e, "after": None,
+                                "reason": "template" if example else "not_on_resume",
+                                "note": ("Example entry from the template" if example
+                                         else "No longer on your resume"),
+                                "default": True})
+        for j, p in enumerate(props):
+            if j in match_p:
+                continue
+            # Just before the first matched entry that follows it in resume order.
+            anchor = next((match_p[q] for q in range(j + 1, len(props)) if q in match_p),
+                          len(existing))
+            new = _clean_proposal(p, lst)
+            changes.append({"id": cid(lst, "add", _pair_key(p, lst)), "list": lst, "op": "add",
+                            "index": anchor, "before": None, "after": new,
+                            "note": _change_note(p), "default": not _dates_note(p),
+                            "_new": new, "_anchor": anchor, "_order": j})
+
+    current = profile.get("skills") if isinstance(profile.get("skills"), list) else []
+    resume_skills: list[str] = []
+    for s in proposals.get("skills") or []:
+        label = skill_label(s)
+        if label and label.lower() not in {x.lower() for x in resume_skills}:
+            resume_skills.append(label)
+    template_skills = template.get("skills")
+    if isinstance(template_skills, list) and template_skills and current == template_skills:
+        if resume_skills != current:
+            changes.append({"id": "skills:replace", "list": "skills", "op": "replace",
+                            "index": None, "before": list(current), "after": resume_skills,
+                            "note": "Example skills from the template", "default": True,
+                            "_new": resume_skills})
+    else:
+        have = {str(x).strip().lower() for x in current}
+        add = [s for s in resume_skills if s.lower() not in have]
+        if add:
+            changes.append({"id": "skills:add", "list": "skills", "op": "add", "index": None,
+                            "before": list(current), "after": list(current) + add,
+                            "note": "", "default": True, "_new": add})
+    return changes
+
+
+def _public(change: dict) -> dict:
+    return {k: copy.deepcopy(v) for k, v in change.items() if not k.startswith("_")}
+
+
+def refresh_plan(profile: dict, proposals: dict, template: dict) -> dict:
+    """What a refresh from the resume would change (§3.4):
+    `{changes: [{id, list, op, index, before, after, note, default}],
+    skills: {add, not_on_resume}}`. Pure; nothing is saved.
+
+    Only a replaceable entry changes: `from_resume: true`, or the template's
+    placeholder (the same org and title as `config/applicant.example.yaml`). An
+    entry the owner added or edited is `kept` when the resume has it too, and is
+    never changed. Skills are only added (case-insensitive), except that the
+    template's placeholder list is offered for replacing. `languages`, `links`,
+    `attested_skills` and everything else are never part of a plan.
+
+    `op` is update | add | remove | kept (entries) or add | replace (skills); a
+    remove also carries `reason` (not_on_resume | template). `index` is the
+    entry's position in the current list (for an add: the entry it goes before)."""
+    changes = _plan(profile or {}, proposals or {}, template or {})
+    skills = next((c for c in changes if c["list"] == "skills"), None)
+    add = [] if skills is None else list(skills["_new"])
+    return {"changes": [_public(c) for c in changes],
+            "skills": {"add": add,
+                       "not_on_resume": [str(s) for s in (proposals or {}).get("not_on_resume") or []]}}
+
+
+def apply_refresh(profile: dict, proposals: dict, accept_ids: Iterable[str],
+                  template: dict) -> tuple[dict, list[str]]:
+    """(the new profile, the accepted ids that were not applied). The plan is
+    computed again here, so only what it offers now can be applied; an id it
+    does not know (or a `kept` row, which is info only) is reported, never
+    applied. The caller validates and saves (`save`: atomic, comment backup)."""
+    profile = copy.deepcopy(profile or {})
+    accept = [str(a) for a in (accept_ids or [])]
+    changes = _plan(profile, proposals or {}, template or {})
+    by_id = {c["id"]: c for c in changes}
+    chosen = {a for a in accept if a in by_id and by_id[a]["op"] != "kept"}
+    ignored = [a for a in accept if a not in chosen]
+    for lst in ("experience", "education"):
+        mine = [c for c in changes if c["list"] == lst and c["id"] in chosen]
+        if not mine:
+            continue
+        existing = list(profile.get(lst) or []) if isinstance(profile.get(lst), list) else []
+        updates = {c["index"]: c["_new"] for c in mine if c["op"] == "update"}
+        removes = {c["index"] for c in mine if c["op"] == "remove"}
+        adds = sorted((c for c in mine if c["op"] == "add"), key=lambda c: c["_order"])
+        out: list[Any] = []
+        for i, e in enumerate(existing):
+            out.extend(copy.deepcopy(c["_new"]) for c in adds if c["_anchor"] == i)
+            if i in removes:
+                continue
+            out.append(copy.deepcopy(updates[i]) if i in updates else e)
+        out.extend(copy.deepcopy(c["_new"]) for c in adds if c["_anchor"] >= len(existing))
+        profile[lst] = out
+    for c in changes:
+        if c["list"] == "skills" and c["id"] in chosen:
+            current = profile.get("skills") if isinstance(profile.get("skills"), list) else []
+            profile["skills"] = (list(c["_new"]) if c["op"] == "replace"
+                                 else list(current) + list(c["_new"]))
+    return profile, ignored
