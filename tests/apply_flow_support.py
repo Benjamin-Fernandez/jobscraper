@@ -604,8 +604,12 @@ def edge_session_class():
 
 
 def edge_acfg(base, profile_dir: str, **over):
-    """An ApplyConfig for a headless test session: fast pacing, short waits, no dry-run hold."""
+    """An ApplyConfig for a headless test session: fast pacing, short waits, no dry-run hold.
+    `fill` is pinned to "rules" (the old per-adapter path, kept until WP-C1; TR-6): the e2e
+    tests run the real adapter with NoModel, which the default `llm` path would stop at its
+    warm-up. Pass `fill="llm"` (and a backend) to exercise the LLM loop."""
     import dataclasses
+    over = {"fill": "rules", **over}
     return dataclasses.replace(
         base, headed=False, profile_dir=profile_dir, type_delay_ms=0, action_pause_ms=30,
         step_timeout_s=8, confirm_timeout_s=4, dry_run_hold_s=0, mygreenhouse_wait_s=8, **over)
