@@ -89,3 +89,10 @@ Requests:
 - tester: oracles for F1, F3, F4 and F7.
 - lane M: the MM/DD/YYYY date of birth in s_values.
 STATUS: open
+
+### 2026-11-07 reviewer → coordinator
+TYPE: review
+RE: Q-60 / F-50 stage + IMAP + UI, `int/Q-60-mail-status` 1a02e11..f7acfa1 · F-50g/j/l/r, MS §5–§8, §11.3, §13, D-92 · docs/reviews/Q-60-stage-imap-ui.md
+BODY: APPROVE WITH FIXES. The read-only transport, the gates, the classifier, D-92 and transition rows 1–11 match the spec. No path writes to the mailbox or leaks server text. F1 BLOCKER (fix before lane F merges): `imapread.employer_domain` returns platform domains (tal.net, taleo.net, icims.com, oraclecloud.com, successfactors…, because ATS_DOMAINS has only 4 entries). Mail from another tenant on the same platform then becomes a strong employer_domain match and auto-moves the application (reproduced: otherbank.tal.net rejection → AUTO rejected). Fix in match/header_gate: ignore employer domains that are rules platform domains. F2 MAJOR (spec gap, architect): Reply-To counts as a strong employer signal, but auth checks only From, so a gmail.com sender with Reply-To set to the employer gets AUTO. F3 MAJOR (spec gap, architect): a name in the subject or sender of shared-platform mail is strong, and common_word_names applies only to the body ("Grab your spot…" from HackerRank → AUTO assessment). MINOR: F4 _ReadOnly doesn't validate uids/criteria/folder names (CR/LF), F5 scheme-less URLs survive links=False, F6 a 1-char model quote passes, F7 §6.4 vs D-92 doc, F8 UI stale state after a 409. Tests: mail_ 52/52, layering 13/13, apply_mail 17/17.
+Requests: lane S F1, F2/F3 after the amendment, F6. Lane I F4, F5, F8. Tester oracles for F1, F2, F3, F5. Architect: amend MS §6.2/§7 (F2, F3) and §6.4 (F7).
+STATUS: open
