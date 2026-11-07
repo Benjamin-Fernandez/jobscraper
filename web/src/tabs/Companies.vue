@@ -593,6 +593,8 @@ onMounted(() => Promise.all([loadList(), loadHealth(), refresh()]))
 .row {
   display: grid; grid-template-columns: 2.25rem auto minmax(0, 1fr) auto auto; align-items: center;
   gap: var(--space-3); padding: var(--space-2) var(--space-4); border-top: 1px solid var(--border);
+  /* Off-screen rows are skipped by layout and paint (Q-75 G41). */
+  content-visibility: auto; contain-intrinsic-size: auto 3.25rem;
 }
 .row:first-child { border-top: 0; }
 .row.none { display: block; text-align: center; padding: var(--space-4); }
