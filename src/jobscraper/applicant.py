@@ -121,6 +121,14 @@ LLM_ALLOW: tuple[str, ...] = (
     "singapore_status.authorised_to_work", "singapore_status.requires_sponsorship",
 )
 
+# D-105 (q74_model_sees_sensitive.md §3, ADR-0008): what the model may also read when
+# ResolveContext.model_sees_sensitive is on (config switch + local backend). Every S
+# path; `extra` never (tier 3 reads it by code).
+LLM_ALLOW_SENSITIVE: tuple[str, ...] = (
+    "identity.date_of_birth", "identity.gender", "singapore_status", "us_self_id",
+    "declarations", "contact",
+)
+
 
 def is_sensitive(path: str) -> bool:
     """True for an S path (§5.3). `path` is dotted, list indices allowed
@@ -1675,11 +1683,14 @@ def json_safe(value: Any) -> Any:
 # What a model may see, the grounding corpus, log redaction (§5.3, §7.7)
 # --------------------------------------------------------------------------
 
-def llm_extract(profile: dict) -> dict:
+def llm_extract(profile: dict, *, sensitive: bool = False) -> dict:
     """The non-sensitive allow-list (§5.3) as a nested dict, in the profile's
-    shape. Nothing else from the profile ever reaches a prompt."""
+    shape. Nothing else from the profile ever reaches a prompt.
+
+    `sensitive=True` (D-105: only when ResolveContext.model_sees_sensitive) adds
+    LLM_ALLOW_SENSITIVE, so S values may be in the prompt. Never `extra`."""
     out: dict = {}
-    for path in LLM_ALLOW:
+    for path in LLM_ALLOW + (LLM_ALLOW_SENSITIVE if sensitive else ()):
         v = _get(profile or {}, path)
         if v is None:
             continue
@@ -1687,7 +1698,13 @@ def llm_extract(profile: dict) -> dict:
         parts = path.split(".")
         for part in parts[:-1]:
             cur = cur.setdefault(part, {})
-        cur[parts[-1]] = _plain(v)
+        v = _plain(v)
+        if isinstance(v, dict) and isinstance(cur.get(parts[-1]), dict):
+            # A whole block after one of its allow-listed leaves ("contact" after
+            # "contact.city"): the block holds the leaf already; keep both.
+            cur[parts[-1]] = {**cur[parts[-1]], **v}
+        else:
+            cur[parts[-1]] = v
     return out
 
 
@@ -1755,18 +1772,22 @@ def work_rights_text(profile: dict) -> str:
     return " ".join(out)
 
 
-def grounding_text(profile: dict, today: Optional[_dt.date] = None) -> str:
+def grounding_text(profile: dict, today: Optional[_dt.date] = None, *,
+                   sensitive: bool = False) -> str:
     """The profile part of the tier-5 grounding corpus (§7.7): every
     non-sensitive value one per line (the legal and preferred names, then the
     llm_extract allow-list), then the computed facts as sentences, then the
-    work-rights sentence (D-75)."""
+    work-rights sentence (D-75).
+
+    `sensitive=True` (D-105) passes through to `llm_extract`: the corpus is what
+    the model saw, so S values it was shown may ground its answer."""
     lines: list[str] = []
     for path in ("identity.legal_first_name", "identity.legal_last_name",
                  "identity.preferred_name"):
         v = _get(profile or {}, path)
         if not _empty(v):
             lines.append(str(v))
-    for _path, v in _walk(llm_extract(profile)):
+    for _path, v in _walk(llm_extract(profile, sensitive=sensitive)):
         if v is None or isinstance(v, bool) or (isinstance(v, str) and not v.strip()):
             continue
         lines.append(str(v))
@@ -1779,6 +1800,21 @@ def grounding_text(profile: dict, today: Optional[_dt.date] = None) -> str:
     # answer may quote them as evidence (§7.7). Always the last line.
     lines.append(work_rights_text(profile or {}))
     return "\n".join(lines)
+
+
+def sensitive_strings(profile: dict) -> list[str]:
+    """The string leaves (3+ characters, dates as ISO text) of S paths (§5.3).
+    D-105: a tier-5 answer that contains one of these is tagged sensitive, so the
+    audit shows it first and it is treated as private. Longest first, deduplicated.
+    For matching only; never log the result."""
+    vals: set[str] = set()
+    for path, v in _walk(profile or {}):
+        if not is_sensitive(path):
+            continue
+        v = _date_text(v)
+        if isinstance(v, str) and len(v.strip()) >= 3:
+            vals.add(v.strip())
+    return sorted(vals, key=lambda s: (-len(s), s))
 
 
 _EXTRA_PATH = re.compile(r"^extra\.[^.\[]+\.(?:by_employer\.[^.\[]+\.)?([^.\[]+)")
