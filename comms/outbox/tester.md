@@ -292,3 +292,16 @@ Also `test_q72_contract_has_the_reason_its_text_and_is_a_suggestion` (MS 3: memb
 - Existing suite: `test_mail_contracts_module_is_the_design_listing` already fails on this base because the design lists `MAYBE_UNTRACKED` and contracts.py doesn't; it clears when the member and text are added.
 - Flow fixture: Northwind stands in for Acme (one closed application, owner-closed 2026-10-13); the crafted ack names an untracked role, so signals are employer-only (probed: name_in_sender/subject/body).
 STATUS: open
+
+## 2026-11-07 handoff: Q-74 pins (branch test/Q-74-pins, on top of eng/Q-74 ace64ba)
+TYPE: handoff
+Files: `tests/test_q74_model_sees_sensitive.py` (43 tests: T1-T4, T6-T8, F1a-F1d, F2a, F2b, F3, doctor, web payloads), `tests/test_q74_open_defects.py` (9: R1, R2, R3).
+Supersession pinned: T5 replaced by the F1 rule (protected values never ground a tier-5 answer; contact values fill, tagged Private).
+Expected FAIL until the next fix round:
+- `test_q74_r1_generic_word_completed_does_not_block_a_text_answer`, `test_q74_r1_a_yes_option_is_not_blocked_by_a_protected_yes`, `test_q74_r1_employer_in_holdings_is_not_blocked_when_it_is_in_the_plain_corpus` (R1, MEDIUM: `_protected_hit` over-blocks; answer is UNGROUNDED "private value").
+- `test_q74_r2_residency_pr_is_caught_under_the_form_wording`, `..._religion_...` ("Buddhism"), `..._gender_...` ("Woman") (R2, MEDIUM: slug-only matching; the pick FILLS and is untagged).
+- `test_f1b_retry_instruction_holds_no_s_value` (LOW): the retry prompt lists raw token violations ("number 2001; month March; word Zzzfaith"). The handoff says the retry holds no S value; only the stored note is reduced to kinds. The prompt goes to the local model only.
+Passing controls keep the pins honest (`*_control_*`). R3 matrix passes (`is_local_config == is_local(build)`, 7 budgets x 4 env states).
+Gap: no vitest pin written. `web/node_modules` is absent in this worktree, so a pin could not be verified. Wanted: `privateBadge(true)` == "Private: local AI only", `privateSentence`, ApplicationDetails header with `model_sees_private: true`, QuestionsInbox + QuestionCard badge (call `setModelSeesPrivate(false)` in afterEach).
+Note: "Which ethnic group best describes you? (diversity report)" matches a profile rule (race) and is FILLED at tier 2, so the F1a pin uses "Which cultural heritage do you identify with, for our diversity report?" (no rule; reaches tier 5).
+STATUS: open
