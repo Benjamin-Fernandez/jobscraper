@@ -283,7 +283,7 @@ describe('Inbox: triage shortcuts', () => {
 
   it('says which keys there are, to screen readers too', async () => {
     const wrapper = await mountInbox()
-    expect(wrapper.findAll('.shortcuts kbd').map(k => k.text())).toEqual(['S', 'A', 'X', 'O', 'J', 'K'])
+    expect(wrapper.findAll('.shortcuts kbd').map(k => k.text())).toEqual(['S', 'A', 'X', 'O', 'J', 'K', 'Z', '?'])
     expect(wrapper.find('.shortcuts').attributes('aria-hidden')).toBeUndefined()
     expect(wrapper.find('button.save').attributes('aria-keyshortcuts')).toBe('S')
   })

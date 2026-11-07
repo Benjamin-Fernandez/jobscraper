@@ -197,12 +197,18 @@ describe('Companies tab', () => {
 
   it('Clear list asks first, then empties it', async () => {
     const wrapper = await mountCompanies({ companies: ['Grab'] })
-    vi.stubGlobal('confirm', vi.fn(() => false))
+    // Q-75 G26: an inline confirm, not window.confirm.
+    const confirmSpy = vi.fn(() => true)
+    vi.stubGlobal('confirm', confirmSpy)
     await wrapper.find('.clear').trigger('click')
+    expect(wrapper.find('.clear-ask').exists()).toBe(true)
+    await wrapper.find('.keep-list').trigger('click')
+    expect(wrapper.find('.clear-ask').exists()).toBe(false)
     expect(api.calls.filter(c => c.method === 'DELETE')).toHaveLength(0)
-    vi.stubGlobal('confirm', vi.fn(() => true))
     await wrapper.find('.clear').trigger('click')
+    await wrapper.find('.confirm-clear').trigger('click')
     await flushPromises()
+    expect(confirmSpy).not.toHaveBeenCalled()
     expect(api.calls.filter(c => c.method === 'DELETE')).toHaveLength(1)
     expect(wrapper.find('.empty-title').text()).toBe('No list yet.')
   })

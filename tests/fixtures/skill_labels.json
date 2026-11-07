@@ -1,0 +1,16 @@
+{
+  "_comment": "Q-44 R5: shared by tests/test_q44_refresh.py (applicant.skill_label) and web/tests/q44-refresh.test.js (applicantForm.js skillLabel). [input, expected]",
+  "cases": [
+    ["machine learning", "Machine Learning"],
+    ["sql", "SQL"],
+    ["PyTorch", "PyTorch"],
+    ["ci/cd", "Ci/Cd"],
+    ["  data   science ", "Data Science"],
+    ["scikit-learn", "Scikit-Learn"],
+    ["python", "Python"],
+    ["aws", "AWS"],
+    ["node.js", "Node.js"],
+    ["Kubernetes", "Kubernetes"],
+    ["", ""]
+  ]
+}

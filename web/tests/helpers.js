@@ -15,6 +15,16 @@ export const STATUSES = ['to_apply', 'applied', 'interviewing', 'offer', 'reject
 export const MB = 1024 * 1024
 export const DOCX = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
 
+// Pin the zone the test process formats local times in (the dev box is UTC+8,
+// CI is UTC). Node re-reads process.env.TZ on assignment, so call this at the
+// top of a test file, before any Date is formatted. Throws if it did not take.
+export function pinZone(tz = 'Asia/Singapore', expectedOffsetMin = -480) {
+  process.env.TZ = tz
+  if (new Date('2026-09-24T00:00:00Z').getTimezoneOffset() !== expectedOffsetMin) {
+    throw new Error(`could not pin the test zone to ${tz}`)
+  }
+}
+
 // jsdom keeps one URL per test file; start every test from a known hash.
 export function setHash(hash = '') {
   window.history.replaceState(null, '', `${window.location.pathname}${hash}`)
@@ -63,6 +73,8 @@ export function defaultProfile() {
     summary: 'Computer science graduate with cloud and backend internships.',
     skills: ['python', 'kubernetes', 'terraform'],
     target_titles: ['software engineer', 'site reliability engineer'],
+    years_experience: 1,            // Q-73: the summary card
+    graduation: '2025-06',
     interests: ['infrastructure', 'fintech'],
   }
 }
@@ -134,6 +146,14 @@ export function fakeApi({
   // Q-70 E: questions = the GET /api/questions payload ({groups, waiting, ...}), null = 404 as
   // before; applicationRows = exact rows for GET /api/applications instead of the status log.
   questions = null, applicationRows = null,
+  // Q-76: attempts = { job_id: [attempt views, newest first] } (the shape of attempt_view);
+  // GET /api/applications rows carry the first as `last_attempt`, and the count as `attempts`.
+  // attemptsFail = job ids whose GET /api/applications/<id>/attempts answers 500.
+  attempts = {}, attemptsFail = [],
+  // Q-44: refresh = the GET api/applicant/refresh payload ({state:'ready', etag, changes, skills, ...}),
+  // null = 404 (a server without the route). A POST is recorded in `calls`; set server.refreshPost to
+  // {status, detail} to make it fail, server.refreshAfter to the payload GET gives once it has saved.
+  refresh = null,
 } = {}) {
   const calls = []
   const apps = {}
@@ -144,6 +164,7 @@ export function fakeApi({
     companies: companies.map((c, i) => (typeof c === 'string' ? company(i + 1, c) : company(i + 1, c.name, c))),
     dismissals: { ...dismissals },           // M17: job id -> dismissed_at
     health,                                  // M17: GET /api/companies/health
+    refresh, refreshPost: null, refreshAfter: null,   // Q-44
   }
 
   function companiesView() {
@@ -286,13 +307,31 @@ export function fakeApi({
     }
     if (url === 'api/applications' && applicationRows) return respond(applicationRows)
     if (/^api\/questions\?status=/.test(url) && questions) return respond(questions)
+    if (url === 'api/applicant/refresh') {
+      if (!server.refresh) return respond({ detail: 'Not Found' }, 404)
+      if (init.method === 'POST') {
+        const body = JSON.parse(init.body)
+        if (server.refreshPost) return respond({ detail: server.refreshPost.detail }, server.refreshPost.status)
+        if (server.refreshAfter) server.refresh = server.refreshAfter
+        return respond({ profile: {}, etag: 'etag-after', saved: body.accept.length, ignored: [] })
+      }
+      return respond(server.refresh)
+    }
+    const att = /^api\/applications\/([\w.:-]+)\/attempts$/.exec(url)
+    if (att) {
+      if (attemptsFail.includes(att[1])) return respond({ detail: 'attempts are down' }, 500)
+      return respond(attempts[att[1]] ?? [])
+    }
     if (url === 'api/applications') {
       return respond(Object.entries(apps).map(([id, a]) => {
-        const j = fixture.jobs.find(x => x.id === id) ?? {}
+        const j = fixture.jobs.find(x => x.id === id)
+        const tries = attempts[id] ?? []
         return {
           job_id: id, status: a.status, notes: a.notes,
-          company: j.company ?? null, role: j.title ?? null, url: j.url ?? null,
-          run_no: j.run_no ?? null, events: a.events,
+          company: j?.company ?? null, role: j?.title ?? null, url: j?.url ?? null,
+          run_no: j?.run_no ?? null, events: a.events,
+          last_attempt: tries[0] ?? null, attempts: tries.length,
+          posting: j ? { reason: j.reason, matched_skills: j.matched_skills ?? [], yoe_min: j.yoe_min, decided_at: j.decided_at, closed: false } : null,
         }
       }))
     }
