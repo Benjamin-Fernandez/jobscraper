@@ -25,6 +25,7 @@ from mail_flow_support import (  # noqa: E402
 _W0 = len(WAITING)
 FLOW = "jobscraper.mailstatus_flow:sync"
 NOW = "2026-11-02T12:00:00"
+WIDE = "2026-09-14T00:00:00"
 REJ_ID = "1800000000000001019"         # golden rej_not_move_forward.eml: nw-analyst, 1 Nov 2026
 POISON = (b"From: Out of office <hr@b\xc3\xbccher.example>\r\n"
           b"To: alex.applicant@inbox.example\r\nSubject: Automatic reply\r\n"
@@ -222,6 +223,7 @@ def test_mail_d157f_get_mail_and_suggestions_never_write():
 @needs(FLOW)
 def test_mail_d157h_a_backfilled_application_gets_a_suggestion():
     with _World(seeded_at="2026-11-02T11:00:00") as w:      # entered after the 1 Nov rejection
+        w.st.mail_account_set(w.aid, first_sync_from=WIDE)     # D-159: the window reaches the mail
         golden_mail(w.srv)
         run(w.cfg, w.srv, backend=FakeBackend())
         assert statuses(w.st)["nw-analyst"] == "interviewing", "owner_newer: never automatic"
@@ -244,6 +246,29 @@ def test_mail_d157h_an_undone_mail_stays_silent_even_after_a_reconnect():
         run(w.cfg, w.srv, backend=FakeBackend(), now="2026-11-02T15:00:00")
         assert statuses(w.st)["nw-analyst"] == "interviewing", "an undone mail is never re-applied"
         assert not [s for s in w.st.mail_suggestions("2026-11-02T15:00:00") if s["gm_msgid"] == REJ_ID]
+
+
+@needs(FLOW)
+def test_mail_d159_an_older_applied_at_widens_the_first_sync_window():
+    """D-159: an application entered today but applied for in September (`applied_at` older)
+    sets the first-sync window by itself: its applied_at minus a day."""
+    from jobscraper.store import Store
+    with memory_keyring():
+        cfg = config(tmpdir("d159_"))
+        st = Store(cfg.db_path)
+        seed(st, at="2026-11-02T11:00:00")
+        st.set_application_status("nw-dataeng", "applied")
+        st.conn.execute("UPDATE applications SET applied_at='2026-09-20' WHERE job_id='nw-dataeng'")
+        st.conn.commit()
+        srv = FakeMailServer()
+        res, aid = connect(cfg, srv)
+        assert res == "ok", res
+        assert st.mail_account(aid)["first_sync_from"].startswith("2026-09-19"), st.mail_account(aid)
+        golden_mail(srv)
+        run(cfg, srv, backend=FakeBackend())
+        assert rows(st, "SELECT outcome FROM mail_messages WHERE gm_msgid=?", REJ_ID) != [("skipped",)]
+        assert rows(st, "SELECT reason FROM mail_messages WHERE gm_msgid=?", REJ_ID) != [("too_old",)]
+        st.close()
 
 
 # ------------------------------------------------------------------ (i) F3 residual
@@ -316,6 +341,7 @@ def test_mail_d158_a_cursor_write_after_a_disconnect_makes_no_orphan():
 @needs(FLOW)
 def test_mail_d158_accepting_a_backfilled_suggestion_applies_it():
     with _World(seeded_at="2026-11-02T11:00:00") as w:
+        w.st.mail_account_set(w.aid, first_sync_from=WIDE)     # D-159: the window reaches the mail
         golden_mail(w.srv)
         run(w.cfg, w.srv, backend=FakeBackend())
         sugg = [s for s in w.st.mail_suggestions(NOW) if s["gm_msgid"] == REJ_ID]
