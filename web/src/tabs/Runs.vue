@@ -12,7 +12,7 @@ import { ApiError, cancelJob, describeError, getSettings, startRun } from '../ap
 import { useJob } from '../composables/useJob.js'
 import { requestCompanyFilter } from '../companyFilter.js'
 import { ago, duration, plural, shortDate, utcMs, when } from '../format.js'
-import { asList, matchLabel, runStatusLabel, runStatusNote, takePickerRequest } from '../runs.js'
+import { asList, matchLabel, num, runStatusLabel, runStatusNote, takePickerRequest } from '../runs.js'
 import { tabEmits, tabProps } from '../shell.js'
 import CountPicker from '../components/CountPicker.vue'
 import TabLoading from '../components/TabLoading.vue'
@@ -45,7 +45,7 @@ const batchError = computed(() => {
   const n = batch.value
   if (n === '' || n === null) return ''
   if (!Number.isInteger(n) || n < 1) return 'Enter a whole number, 1 or more.'
-  if (max.value && n > max.value) return `At most ${max.value} - that is every enabled company.`
+  if (max.value && n > max.value) return `At most ${num(max.value)} - that is every enabled company.`
   return ''
 })
 
@@ -112,7 +112,7 @@ watch(() => job.value?.state, (now, before) => {
 
 function count(run, field, statsKey) {
   const v = run[field] ?? run.stats?.[statsKey]
-  return v === null || v === undefined ? '—' : v
+  return v === null || v === undefined ? '—' : num(v)
 }
 
 function runDate(run) {
@@ -241,7 +241,7 @@ onMounted(async () => {
             No companies are enabled yet - sync the watchlist first.
           </template>
           <template v-else-if="settings">
-            Saved setting: {{ settings.batch_size }} of {{ settings.enabled_companies }} enabled companies.
+            Saved setting: {{ num(settings.batch_size) }} of {{ num(settings.enabled_companies) }} enabled companies.
             Only companies that are due are checked.
             <span v-if="estimate" class="estimate">About {{ estimate }} at the pace of your recent runs.</span>
           </template>
@@ -364,8 +364,8 @@ onMounted(async () => {
                   :title="failedText(r)"
                   :aria-label="failedText(r)"
                   @click="showFailed"
-                >{{ r.stats.companies_failed }}</button>
-                <template v-else>{{ r.stats?.companies_failed ?? '—' }}</template>
+                >{{ num(r.stats.companies_failed) }}</button>
+                <template v-else>{{ num(r.stats?.companies_failed) ?? '—' }}</template>
               </td>
               <td>
                 <span class="pill" :data-status="r.status" :title="runStatusNote(r.status) || undefined">{{ runStatusLabel(r.status) }}</span>

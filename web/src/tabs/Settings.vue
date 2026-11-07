@@ -16,7 +16,7 @@
 import { computed, onMounted, ref } from 'vue'
 import { ApiError, describeError, getSettings, saveSettings } from '../api.js'
 import { plural } from '../format.js'
-import { cycleLabel } from '../runs.js'
+import { cycleLabel, num, runsPerDayLabel } from '../runs.js'
 import { tabEmits, tabProps } from '../shell.js'
 import CountPicker from '../components/CountPicker.vue'
 import MailCard from '../components/MailCard.vue'
@@ -43,7 +43,7 @@ const invalid = computed(() => {
   if (n === '' || n === null) return 'Enter how many companies a run should take.'
   if (!Number.isInteger(n)) return 'Enter a whole number.'
   if (n < 1) return 'A run needs at least 1 company.'
-  if (!noneEnabled.value && n > max.value) return `At most ${max.value} - that is every enabled company.`
+  if (!noneEnabled.value && n > max.value) return `At most ${num(max.value)} - that is every enabled company.`
   return ''
 })
 
@@ -62,7 +62,7 @@ const cadence = computed(() => {
   const perDay = unchanged.value && s.runs_per_day_needed !== undefined
     ? s.runs_per_day_needed
     : oneDecimal(runsPerCycle / s.cycle_days)
-  return `A full ${s.cycle_days}-day sweep needs ${perDay} runs/day at this size `
+  return `A full ${s.cycle_days}-day sweep takes ${runsPerDayLabel(perDay)} at this size `
     + `(${plural(runsPerCycle, 'run')} to cover ${plural(s.enabled_companies, 'company', 'companies')}).`
 })
 
@@ -114,8 +114,8 @@ const cycleHint = computed(() => {
   if (!s) return ''
   const every = `Every company is checked again ${s.cycle_days === 1 ? 'every day' : `every ${plural(s.cycle_days, 'day')}`}.`
   if (!s.enabled_companies) return every
-  return `${every} At ${plural(s.batch_size, 'company', 'companies')} per run that takes `
-    + `${s.runs_per_day_needed} runs a day.`
+  return `${every} At ${plural(s.batch_size, 'company', 'companies')} per run that is `
+    + `${runsPerDayLabel(s.runs_per_day_needed)}.`
 })
 
 async function chooseCycle(days) {
@@ -208,7 +208,7 @@ onMounted(load)
         <template v-else>{{ cadence }}</template>
       </p>
       <p class="muted small">
-        <template v-if="!noneEnabled">Between 1 and {{ max }}. </template>The config default is {{ settings.batch_size_default }}.
+        <template v-if="!noneEnabled">Between 1 and {{ num(max) }}. </template>The config default is {{ settings.batch_size_default }}.
         A run started with its own count (Runs tab) uses that instead.
       </p>
     </form>
