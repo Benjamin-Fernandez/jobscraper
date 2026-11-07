@@ -202,7 +202,10 @@ def test_store_mail_suggestions_go_superseded_when_the_status_moves():
     assert [s["id"] for s in st.mail_suggestions(NOW)] == [sid]
     st.set_application_status("nw-dataeng", "applied")
     assert st.mail_suggestions(NOW) == []
+    assert st.mail_evidence(sid)["state"] == "open", "D-157 (f): a read never writes"
+    st.mail_supersede(NOW)                  # what the sync, accept, dismiss and undo paths call
     assert st.mail_evidence(sid)["state"] == "superseded"
+    assert st.mail_suggestions(NOW) == []
 
 
 @needs(STORE)
