@@ -43,3 +43,8 @@ One entry per session. Older handover notes end up here, so `handover.md` stays 
 ### 2026-11-07 session (Q-70 UX + Q-71 details form)
 - Resumed Q-70 after an interruption: merged lanes A, B, D; lane C + C4 KeepAlive; Overview page (E); tester pins for each. Owner reported the details form ("can't enter my desired salary"): fixed the salary defect, reviewer audit (24 gaps), lanes F (form) + G (schema), browser pass incl. 390px fixes (rail containing block, country rows, Companies switcher). Merged Q-60 from personal into int (Applications.vue conflict resolved; assessment stage colour moved into StatusSelect.vue). Merged into personal e5d939e, bundle 370feab, pushed. web 481/482, Python 1122/1122.
 - Q-72: dismissed-job path found for the owner (Inbox → All runs → Not interested); re-test on a scratch copy confirmed the backfilled Rejected suggestion. D-161 row 7a `maybe_untracked` designed (architect), built (engineer), pinned (tester, 10 oracles + review F1/F2), reviewed APPROVE; merged into personal 4c6133f; 1139/1139, vitest 482/1 skipped.
+
+## 2026-11-07 · Q-60 session (continued): M20 Q-35/Q-48 merged
+- Q-48 fix round suite 1020/1024 → 3 stale pins/fixture fixed (test-only, spec-cited) → 1023/1024 (test_filter env). Re-review MERGE; F11 fixed + pinned on the sync branch.
+- R3 re-review of lane R fixes: MERGE (F12-F14 → Q-80). Lane M fit e2414c5 + lane R + Q-48 merged into int/Q-35-M; personal merged into int (contracts/applicant/store conflicts: keep both).
+- Merged into personal 7ba7597; 1262/1262, vitest 498/1 skipped; bundle 4b18695; smoke 16/16; pushed. Owner declarations written (D-162). Worktrees/branches removed. Coordinated order with the parallel session (wave 3 + Q-74 after).
