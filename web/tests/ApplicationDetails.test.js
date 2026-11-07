@@ -545,3 +545,45 @@ suite('Q-70 D1: the beforeunload guard', () => {
     expect(fire().defaultPrevented).toBe(false)               // listener removed
   })
 })
+
+// Q-71: a profile with no pay.expected_salary used to render the field with no inputs at all.
+const SALARY_FORM = [
+  { id: 'pay', title: 'Pay', note: '', items: [
+    item('pay.expected_salary', 'Expected salary', 'salary', { required: true }),
+  ] },
+]
+const salaryPayload = profile => payload({
+  profile, form: SALARY_FORM, missing: ['pay.expected_salary'], sensitive: [], completeness: { filled: 0, needed: 1 },
+})
+
+suite('Expected salary (Q-71)', () => {
+  for (const [name, profile] of [['missing', { pay: {} }], ['absent with no pay section', {}], ['null', { pay: { expected_salary: null } }]]) {
+    it(`shows the Amount input when pay.expected_salary is ${name}, and Save PUTs the amount`, async () => {
+      const w = await mountDetails({ applicant: salaryPayload(profile) })
+      const amount = w.find('#f-pay-expected-salary-in')
+      expect(amount.exists(), 'the Amount input').toBe(true)
+      expect(w.find('label[for="f-pay-expected-salary-in"]').text()).toBe('Amount')
+      expect(w.find('#f-pay-expected-salary-in-currency').element.value).toBe('SGD')
+      expect(w.find('#f-pay-expected-salary-in-period').element.value).toBe('monthly')
+      expect(button(w, 'Save details').attributes('disabled')).toBeDefined()    // nothing changed yet
+      // Untouched: nothing was written for the salary.
+      expect(w.text()).toContain('Needed')
+
+      await amount.setValue('4200')
+      expect(button(w, 'Save details').attributes('disabled')).toBeUndefined()
+      await button(w, 'Save details').trigger('click')
+      await flushPromises()
+      const puts = server.calls.filter(c => c.method === 'PUT' && c.url === 'api/applicant')
+      expect(puts).toHaveLength(1)
+      expect(puts[0].body.profile.pay.expected_salary).toEqual({ amount: 4200, currency: 'SGD', period: 'monthly' })
+    })
+  }
+
+  it('an untouched missing salary is not written on the way through', async () => {
+    const w = await mountDetails({ applicant: salaryPayload({ pay: {} }) })
+    expect(w.find('#f-pay-expected-salary-in').element.value).toBe('')
+    expect(button(w, 'Save details').attributes('disabled')).toBeDefined()    // untouched: nothing to save
+    const puts = server.calls.filter(c => c.method === 'PUT' && c.url === 'api/applicant')
+    expect(puts.every(p => !p.body.profile.pay?.expected_salary)).toBe(true)
+  })
+})

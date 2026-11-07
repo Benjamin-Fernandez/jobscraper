@@ -240,3 +240,9 @@ NAMING: the design's `overview.test.js` and `Overview.test.js` are the same file
 MUTATIONS (22 source breaks, all red except one noted): nextUp ordering (2), run card while a job runs, responseRate (rejection-after-apply, withdrawn, rejected-from-Saved, null rate), pastWeek (dry runs, window), followUps order, lastRunState (threshold, dry runs), openStages unknown append, single primary CTA (all primary, none primary), Answer questions (wrong view value, no navigation), caught-up despite failed questions check, 409 text, Runs tone (always red, never red), `:disabled="starting"` removed. Survivor: removing the `if (starting.value) return` guard in Overview.vue start() stays green because the disabled button already blocks a second click; the guard is unreachable from the UI (harmless defence, not a defect).
 SOURCE DEFECTS: none found. Notes: design §3 lists `waiting` in nextUp's arguments but the implementation reads it only in Overview.vue (fine); day counts use whole-day floor, so a run finished 15.9 days ago reads "15 days ago".
 STATUS: open
+
+### 2026-11-07 tester → coordinator
+TYPE: handoff
+RE: Q-71 expected salary pins (test/Q-71-pins on int/Q-70-ux 81c0950)
+BODY: FieldInput.test.js gains "FieldInput salary (required, Q-71)" and "(nullable)" (14 tests: null/undefined show Amount, Currency, Period, Negotiable; typing emits {amount, SGD, monthly}; untouched emits nothing; nullable null/undefined show "I don't have one" checked with no grid, unticking emits the defaults, ticking emits null; no Negotiable when nullable). ApplicationDetails.test.js gains "Expected salary (Q-71)" (4: pay missing / no pay section / null show #f-pay-expected-salary-in, Save disabled until typed, PUT carries pay.expected_salary = {amount, SGD, monthly}; untouched is not written). Mutations red: `v-if="salary"` (8 fail), shownSalary without defaults (7), nullable ignored (2). Full run 24 files, 423 passed, 1 skipped.
+STATUS: open
