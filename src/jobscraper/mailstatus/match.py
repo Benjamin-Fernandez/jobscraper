@@ -87,8 +87,18 @@ def sender_core(display_name: str, suffixes: Iterable[str] = ()) -> str:
     """D-157 i: a sender display name with the recruiting words of
     SENDER_SUFFIX_WORDS removed (as whole words, anywhere), then normalised like
     a company name: "Globex Pte Ltd Careers" -> "globex", "Globex Labs" ->
-    "globex labs"."""
+    "globex labs". A leading "<recruiting words> at" ("Careers at Globex",
+    "Talent Acquisition at Globex") is the bare name too; "at" counts only in
+    that position, so "Globex at Night" keeps it."""
     padded = f" {norm(display_name)} "
+    lead, stripped = padded, False
+    while True:
+        phrase = next((p for p in SENDER_SUFFIX_WORDS if lead.startswith(f" {p} ")), None)
+        if phrase is None:
+            break
+        lead, stripped = lead[len(phrase) + 1:], True
+    if stripped and lead.startswith(" at "):
+        padded = lead[3:]
     for phrase in SENDER_SUFFIX_WORDS:
         needle = f" {phrase} "
         while needle in padded:
