@@ -73,6 +73,8 @@ export function defaultProfile() {
     summary: 'Computer science graduate with cloud and backend internships.',
     skills: ['python', 'kubernetes', 'terraform'],
     target_titles: ['software engineer', 'site reliability engineer'],
+    years_experience: 1,            // Q-73: the summary card
+    graduation: '2025-06',
     interests: ['infrastructure', 'fintech'],
   }
 }
@@ -148,6 +150,10 @@ export function fakeApi({
   // GET /api/applications rows carry the first as `last_attempt`, and the count as `attempts`.
   // attemptsFail = job ids whose GET /api/applications/<id>/attempts answers 500.
   attempts = {}, attemptsFail = [],
+  // Q-44: refresh = the GET api/applicant/refresh payload ({state:'ready', etag, changes, skills, ...}),
+  // null = 404 (a server without the route). A POST is recorded in `calls`; set server.refreshPost to
+  // {status, detail} to make it fail, server.refreshAfter to the payload GET gives once it has saved.
+  refresh = null,
 } = {}) {
   const calls = []
   const apps = {}
@@ -158,6 +164,7 @@ export function fakeApi({
     companies: companies.map((c, i) => (typeof c === 'string' ? company(i + 1, c) : company(i + 1, c.name, c))),
     dismissals: { ...dismissals },           // M17: job id -> dismissed_at
     health,                                  // M17: GET /api/companies/health
+    refresh, refreshPost: null, refreshAfter: null,   // Q-44
   }
 
   function companiesView() {
@@ -300,6 +307,16 @@ export function fakeApi({
     }
     if (url === 'api/applications' && applicationRows) return respond(applicationRows)
     if (/^api\/questions\?status=/.test(url) && questions) return respond(questions)
+    if (url === 'api/applicant/refresh') {
+      if (!server.refresh) return respond({ detail: 'Not Found' }, 404)
+      if (init.method === 'POST') {
+        const body = JSON.parse(init.body)
+        if (server.refreshPost) return respond({ detail: server.refreshPost.detail }, server.refreshPost.status)
+        if (server.refreshAfter) server.refresh = server.refreshAfter
+        return respond({ profile: {}, etag: 'etag-after', saved: body.accept.length, ignored: [] })
+      }
+      return respond(server.refresh)
+    }
     const att = /^api\/applications\/([\w.:-]+)\/attempts$/.exec(url)
     if (att) {
       if (attemptsFail.includes(att[1])) return respond({ detail: 'attempts are down' }, 500)

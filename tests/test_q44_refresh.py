@@ -156,9 +156,11 @@ def test_r2_an_owner_entry_is_never_changed_even_when_the_resume_matches_it():
     assert [c["op"] for c in _by_op(plan, "experience", "kept")] == ["kept", "kept"]
     assert not _by_op(plan, "experience", "update") and not _by_op(plan, "experience", "add")
     assert not _by_op(plan, "experience", "remove")
-    new, ignored = applicant.apply_refresh(profile, props, [c["id"] for c in plan["changes"]], TEMPLATE)
+    kept_ids = [c["id"] for c in _by_op(plan, "experience", "kept")]
+    new, ignored = applicant.apply_refresh(profile, props, kept_ids, TEMPLATE)
     assert new["experience"] == [mine, mine2]
-    assert sorted(ignored) == sorted(c["id"] for c in plan["changes"]), "a kept row is info only"
+    assert sorted(ignored) == sorted(kept_ids), "a kept row is info only: asking for it changes nothing"
+    assert new == profile
 
 
 def test_r2_an_owner_entry_that_the_resume_lacks_is_not_removed():

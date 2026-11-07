@@ -123,7 +123,7 @@ describe('Profile tab: uploading a resume', () => {
     await flushPromises()
     expect(wrapper.find('.job-status').attributes('data-state')).toBe('succeeded')
     expect(wrapper.find('.version').text()).toBe('3')
-    expect(wrapper.find('.notice.ok').text()).toBe('Profile refreshed.')
+    expect(wrapper.find('.notice.ok').text()).toBe('Resume read: 3 skills, 2 job titles.')   // Q-73
   })
 
   it('a dropped DOCX works too, typed by its extension when the browser gives none', async () => {
