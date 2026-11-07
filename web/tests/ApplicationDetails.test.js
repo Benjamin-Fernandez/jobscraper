@@ -218,7 +218,7 @@ suite('saving', () => {
   })
 
   it('shows the comments note only when the file has comments', async () => {
-    const note = 'Saving rewrites applicant.yaml without its comments. A copy with the comments is kept as applicant.commented-backup.yaml.'
+    const note = 'Saving tidies your details file and removes its notes. A copy with your notes is kept.'
     const withComments = await mountDetails({ applicant: payload({ file: { exists: true, has_comments: true, error: '' } }) })
     expect(withComments.text()).toContain(note)
     const without = await mountDetails()
