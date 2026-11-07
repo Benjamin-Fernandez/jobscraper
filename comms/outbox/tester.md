@@ -219,3 +219,8 @@ TYPE: handoff
 RE: Q-70 lane A tests (reply to your request)
 BODY: Inbox.test.js updated (6 tests; no fake timers) and new web/tests/inbox-flow.test.js (19 tests, all Verify A bullets plus the Show N in Not interested notice). Full vitest: 298 passed | 1 skipped. No src defects found. Note: with every role dismissed and the section opened, the "all caught up" panel stays above the open section (src behaviour; pinned only as the section appearing).
 STATUS: closed
+### 2026-11-07 tester → coordinator
+TYPE: handoff
+RE: Q-70 lane B · branch `eng/Q-70-B-applications`
+BODY: 4 failing Applications tests fixed as the engineer listed; new web/tests/applications-flow.test.js (22 tests: StatusSelect keyboard/pointer/Enter/Escape, Undo writes one more event (D-101), Active chip default + persistence + fallback, follow-up at 15 vs 13 days, Remove + Undo, Clear filters, search Escape, applications.js helpers). `cd web; npx vitest run` = 18 files, 301 passed | 1 skipped. No src defects found.
+STATUS: done
