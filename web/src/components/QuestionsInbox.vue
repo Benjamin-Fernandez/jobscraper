@@ -270,7 +270,7 @@ defineExpose({ load })
 </template>
 
 <style scoped>
-.questions { display: grid; gap: var(--space-3); }
+.questions { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--space-3); min-width: 0; }
 .questions .section-title { margin: var(--space-2) 0 0; }
 .lead { margin: 0; font-size: var(--text-sm); max-width: 62ch; }
 .none { padding: var(--space-5) var(--space-4); }

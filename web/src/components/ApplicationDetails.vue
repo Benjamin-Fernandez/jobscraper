@@ -625,8 +625,13 @@ defineExpose({ load })
           </div>
           <span class="meter-text">{{ meter.filled }} of {{ meter.needed }} details filled</span>
         </div>
-        <p v-if="data.file?.has_comments" class="notice warn comments-note">
-          Saving rewrites applicant.yaml without its comments. A copy with the comments is kept as applicant.commented-backup.yaml.
+        <!-- Only while the file still has hand-written comments (the first save removes them). -->
+        <p
+          v-if="data.file?.has_comments"
+          class="notice warn comments-note"
+          title="The copy is data/applicant.commented-backup.yaml"
+        >
+          Saving tidies your details file and removes its notes. A copy with your notes is kept.
         </p>
 
         <div class="details-body" :class="{ 'has-rail': sections.length > 1 }">
@@ -810,12 +815,14 @@ defineExpose({ load })
 </template>
 
 <style scoped>
-.app-details { display: grid; gap: var(--space-4); }
+/* Every grid track is minmax(0, 1fr): an implicit `auto` track grows to its widest
+   child's min-content (the rail's chip row was 1587px at 390px, Q-71 D1). */
+.app-details { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--space-4); }
 .lead { margin: 0; font-size: var(--text-sm); }
 .missing { padding: var(--space-4); display: grid; gap: var(--space-2); }
 .missing .section-title { margin: 0; }
 .missing-list { list-style: none; margin: var(--space-2) 0 0; padding: 0; display: grid; gap: var(--space-1); }
-.missing-list li { display: flex; align-items: baseline; gap: var(--space-3); font-size: var(--text-sm); }
+.missing-list li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 var(--space-3); font-size: var(--text-sm); }
 .missing-label { font-weight: 600; }
 .path { font-size: var(--text-xs); }
 .summary-title { font-weight: 650; }
@@ -824,14 +831,15 @@ defineExpose({ load })
 .summary-list .go { margin-left: var(--space-2); min-height: 1.5rem; color: inherit; font-weight: 600; }
 .banner:focus-visible { outline-offset: 2px; }
 .app-details .section-title { margin: var(--space-2) 0 0; }
-.meter-row { display: flex; align-items: center; gap: var(--space-3); }
+.meter-row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-3); }
 .meter { flex: 0 1 16rem; height: 0.5rem; border-radius: 999px; background: var(--surface-3); overflow: hidden; }
 .meter span { display: block; height: 100%; background: var(--accent); border-radius: 999px; }
 .meter-text { font-size: var(--text-sm); color: var(--text-2); }
 .comments-note { margin: 0; }
-.details-body { display: grid; gap: var(--space-4); align-items: start; }
-.the-form { display: grid; gap: var(--space-4); min-width: 0; }
-.group { padding: var(--space-4) var(--space-5); display: grid; gap: var(--space-4); align-items: start; scroll-margin-top: calc(var(--header-h) + var(--space-4)); }
+.details-body { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--space-4); align-items: start; }
+.details-rail { min-width: 0; }
+.the-form { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--space-4); min-width: 0; }
+.group { padding: var(--space-4) var(--space-5); display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--space-4); align-items: start; min-width: 0; scroll-margin-top: calc(var(--header-h) + var(--space-4)); }
 .group-head { display: flex; align-items: center; gap: var(--space-2) var(--space-3); flex-wrap: wrap; }
 .group-head h3 { margin: 0; font-size: var(--text-md); font-weight: 650; }
 .group-head h3:focus { outline: none; }
@@ -847,7 +855,7 @@ defineExpose({ load })
   .group > .group-head, .group > .note, .field.wide, .extra-row, .others { grid-column: 1 / -1; }
 }
 /* The sticky save bar must not cover the field that has focus (WCAG 2.4.11). */
-.field { display: grid; gap: var(--space-1); align-content: start; scroll-margin-top: calc(var(--header-h) + var(--space-4)); scroll-margin-bottom: 6rem; }
+.field { display: grid; grid-template-columns: minmax(0, 1fr); min-width: 0; gap: var(--space-1); align-content: start; scroll-margin-top: calc(var(--header-h) + var(--space-4)); scroll-margin-bottom: 6rem; }
 .missing-list .upload { min-height: 1.5rem; }
 .field-head { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-2); }
 .field-label { font-size: var(--text-sm); font-weight: 600; }

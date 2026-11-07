@@ -535,7 +535,7 @@ function removeRow(i) {
 .chip-x:hover:not(:disabled) { background: var(--danger-soft); color: var(--danger); }
 .add { display: flex; gap: var(--space-2); }
 .add input { flex: 1; min-width: 0; }
-.entries { display: grid; gap: var(--space-3); justify-items: start; }
+.entries { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--space-3); justify-items: start; }
 /* A block, not a grid: the floated legend is then a normal row at the top (Q71-21). */
 .entry { position: relative; width: 100%; margin: 0; padding: var(--space-3) var(--space-4); border: 1px solid var(--border); border-radius: var(--radius); display: block; }
 .entry > .entry-grid, .entry > .field-error { clear: both; margin-top: var(--space-3); }
@@ -551,7 +551,7 @@ function removeRow(i) {
   min-height: 1.75rem; padding: 0 var(--space-2); font-weight: 500;
 }
 .clear { min-height: 1.5rem; }
-.entry-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr)); gap: var(--space-3) var(--space-4); width: 100%; }
+.entry-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(15rem, 100%), 1fr)); gap: var(--space-3) var(--space-4); width: 100%; }
 .entry-field { display: grid; gap: var(--space-1); align-content: start; min-width: 0; }
 .entry-field.wide { grid-column: 1 / -1; }
 .hint { margin: 0; font-size: var(--text-xs); color: var(--muted); }
