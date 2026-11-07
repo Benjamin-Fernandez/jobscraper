@@ -50,9 +50,13 @@ const emit = defineEmits(['go'])
 .tag.needed { color: var(--warn); background: var(--warn-soft); border-color: color-mix(in srgb, var(--warn) 35%, transparent); }
 .tag.fix { color: var(--danger); background: var(--danger-soft); border-color: color-mix(in srgb, var(--danger) 35%, transparent); }
 
-/* Narrow: one row of chips that scrolls sideways. */
+/* Narrow: one row of chips that scrolls sideways inside the nav. The nav never
+   takes its width from the chips (min-width: 0), so the page doesn't scroll. */
+.rail { min-width: 0; max-width: 100%; }
 @media (max-width: 899px) {
-  .rail ul { display: flex; gap: var(--space-1); overflow-x: auto; padding-bottom: var(--space-1); }
+  .rail { overflow-x: auto; overscroll-behavior-x: contain; scroll-snap-type: x proximity; padding-bottom: var(--space-1); }
+  .rail ul { display: flex; flex-wrap: nowrap; gap: var(--space-1); width: max-content; }
+  .rail li { flex: none; scroll-snap-align: start; }
   .rail-link {
     width: auto; white-space: nowrap; min-height: 2rem;
     border-color: var(--border); background: var(--surface); border-radius: 999px;
