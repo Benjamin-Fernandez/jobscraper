@@ -13,7 +13,7 @@ platforms:
   - {id: codility, kind: assessment, domains: [codility.com]}
 job_boards: [linkedin.com, indeed.com, indeedemail.com, jobstreet.com, mycareersfuture.gov.sg, glassdoor.com]
 company_suffixes: [pte, ltd, limited, private, inc, llc, plc, corp, corporation, co, company, group, holdings, singapore, sg]
-common_word_names: [sea, grab]
+common_word_names: [ocean, claim]
 bulk: {list_id: true, precedence: [bulk, list, junk]}
 gates:
   auto_reply:

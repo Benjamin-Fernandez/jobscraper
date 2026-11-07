@@ -1,5 +1,5 @@
 """Defect pins for the KA-3 review of Q-60 (docs/reviews/Q-60-stage-imap-ui.md) and its fix
-decisions D-104 (instructions/02_status.md). Verify: `python tests/run_tests.py -k mail_review_pins`.
+decisions D-154 (instructions/02_status.md). Verify: `python tests/run_tests.py -k mail_review_pins`.
 
 These fail until lanes S and I land the fixes; each test names its finding. The stage pins run on
 tests/fixtures/mail/rules_min.yaml and, when present, config/mail_rules.yaml. Headers are built with
@@ -58,13 +58,21 @@ def _run(rules_obj, frm, subject, body, apps, **kw):
     return None, m, v, decide(by[m.job_id], v, m, h, build_policy())
 
 
+def _rules(path):
+    """The rules file, with the neutral common-word names of these pins (Claim, Ocean) added
+    to its `common_word_names` (rules_min lists them; the shipped file lists real ones)."""
+    import dataclasses
+    r = load(path)
+    return dataclasses.replace(r, common_word_names=r.common_word_names | {"claim", "ocean"})
+
+
 def _not_auto(res, why):
     c = _c()
     _g, m, _v, ch = res
     assert ch is None or ch.kind != c.ChangeKind.AUTO, (why, m, ch)
 
 
-# ------------------------------------------------------------------ F1 (BLOCKER), D-104 a
+# ------------------------------------------------------------------ F1 (BLOCKER), D-154 a
 
 @needs(RULES, MATCH, TRANSITION)
 def test_review_f1_another_tenant_on_the_same_platform_never_auto_moves():
@@ -105,17 +113,17 @@ def test_review_f1_a_platform_domain_is_never_an_employer_signal():
             assert m is None or m.kind == c.MatchKind.NONE, (path.name, dom, m)
 
 
-# ------------------------------------------------------------------ F2 (MAJOR), D-104 b
+# ------------------------------------------------------------------ F2 (MAJOR), D-154 b
 
 @needs(RULES, MATCH, TRANSITION)
 def test_review_f2_a_reply_to_from_a_free_mail_sender_gives_no_strong_match():
     """F2 repro A: From random.person@gmail.com (dmarc=pass for gmail.com), Reply-To
     hr@acme.example, a rejection. Reply-To counts only when From is a platform domain and
-    Gmail authentication passed (D-104 b)."""
+    Gmail authentication passed (D-154 b)."""
     c = _c()
     acme = _app("Acme Example", domains=("acme.example",))
     for path in _paths():
-        rules_obj = load(path)
+        rules_obj = _rules(path)
         res = _run(rules_obj, "Recruiter <random.person@gmail.com>", "Your application", REJ, [acme],
                    headers={"Reply-To": "hr@acme.example"})
         _not_auto(res, f"{path.name}: free-mail From with an employer Reply-To")
@@ -127,30 +135,30 @@ def test_review_f2_a_reply_to_from_a_free_mail_sender_gives_no_strong_match():
                    headers={"Reply-To": "hr@acme.example"}, auth="none")
         m = res[1]
         assert m is None or c.Signal.EMPLOYER_DOMAIN not in m.signals, (path.name, "unauthenticated", m)
-        # The case D-104 b keeps: an authenticated platform From replying to the employer.
+        # The case D-154 b keeps: an authenticated platform From replying to the employer.
         res = _run(rules_obj, "Hiring <no-reply@us.greenhouse-mail.io>", "Your application", REJ, [acme],
                    headers={"Reply-To": "hr@acme.example"})
         assert c.Signal.EMPLOYER_DOMAIN in res[1].signals, (path.name, "platform + pass keeps it", res[1])
 
 
-# ------------------------------------------------------------------ F3 (MAJOR), D-104 c
+# ------------------------------------------------------------------ F3 (MAJOR), D-154 c
 
 @needs(RULES, MATCH, TRANSITION)
-def test_review_f3_grab_and_sea_on_shared_platforms_never_auto_move():
+def test_review_f3_common_word_names_on_shared_platforms_never_auto_move():
     c = _c()
-    grab = _app("Grab", domains=("grab.example",), role="Software Engineer")
-    sea = _app("Sea", domains=("sea.example",))
+    claim = _app("Claim", domains=("claim.example",), role="Software Engineer")
+    ocean = _app("Ocean", domains=("ocean.example",))
     acme = _app("Acme", domains=("acme.example",))
     for path in _paths():
-        rules_obj = load(path)
+        rules_obj = _rules(path)
         res = _run(rules_obj, "HackerRank <support@hackerrankforwork.com>",
-                   "Grab your spot: complete your coding assessment",
-                   "You have been invited to complete an online assessment for Other Co.", [grab])
-        _not_auto(res, f"{path.name}: Grab subject")
+                   "Claim your spot: complete your coding assessment",
+                   "You have been invited to complete an online assessment for Other Co.", [claim])
+        _not_auto(res, f"{path.name}: Claim subject")
         res = _run(rules_obj, "Other Co <no-reply@us.greenhouse-mail.io>",
-                   "Interview for the Sea of opportunities programme",
-                   "We would like to invite you to an interview for the role.", [sea])
-        _not_auto(res, f"{path.name}: Sea subject")
+                   "Interview for the Ocean of opportunities programme",
+                   "We would like to invite you to an interview for the role.", [ocean])
+        _not_auto(res, f"{path.name}: Ocean subject")
         res = _run(rules_obj, "Other Co <no-reply@us.greenhouse-mail.io>",
                    "Re: Your application - Acme Analytics partner role", REJ, [acme])
         _not_auto(res, f"{path.name}: Acme prefix of Acme Analytics")
@@ -159,24 +167,24 @@ def test_review_f3_grab_and_sea_on_shared_platforms_never_auto_move():
 @needs(RULES, MATCH)
 def test_review_f3_a_common_word_or_short_name_alone_is_at_most_weak():
     c = _c()
-    grab = _app("Grab", domains=("grab.example",))
+    claim = _app("Claim", domains=("claim.example",))
     zeta = _app("Zeta Pte Ltd", domains=("zeta.example",))
     for path in _paths():
-        rules_obj = load(path)
-        for app, frm, subject in ((grab, "Grab Careers <no-reply@us.greenhouse-mail.io>", "Your application"),
-                                  (grab, "Hiring <no-reply@us.greenhouse-mail.io>", "Your Grab application"),
+        rules_obj = _rules(path)
+        for app, frm, subject in ((claim, "Claim Careers <no-reply@us.greenhouse-mail.io>", "Your application"),
+                                  (claim, "Hiring <no-reply@us.greenhouse-mail.io>", "Your Claim application"),
                                   (zeta, "Zeta Careers <no-reply@us.greenhouse-mail.io>", "Your application"),
                                   (zeta, "Hiring <no-reply@us.greenhouse-mail.io>", "Your Zeta application")):
             m = _run(rules_obj, frm, subject, "Thank you for applying.", [app])[1]
             assert m is not None and m.kind in (c.MatchKind.WEAK, c.MatchKind.NONE), \
                 (path.name, frm, subject, m)
         # It still confirms a strong signal from the employer's own domain.
-        m = _run(rules_obj, "Grab Careers <careers@grab.example>", "Your Grab application",
-                 "Thank you for applying.", [grab])[1]
+        m = _run(rules_obj, "Claim Careers <careers@claim.example>", "Your Claim application",
+                 "Thank you for applying.", [claim])[1]
         assert m.kind == c.MatchKind.STRONG and c.Signal.EMPLOYER_DOMAIN in m.signals, (path.name, m)
 
 
-# ------------------------------------------------------------------ F5 (MINOR), D-104 f
+# ------------------------------------------------------------------ F5 (MINOR), D-154 f
 
 @needs(IMAPREAD)
 def test_review_f5_every_url_form_becomes_link():
@@ -208,7 +216,7 @@ def test_review_f5_every_url_form_becomes_link():
         assert flat == prose, (prose, flat)
 
 
-# ------------------------------------------------------------------ F6 (MINOR), D-104 d
+# ------------------------------------------------------------------ F6 (MINOR), D-154 d
 
 @needs(MODEL)
 def test_review_f6_a_model_quote_needs_15_characters_and_3_words():
@@ -228,10 +236,10 @@ def test_review_f6_a_model_quote_needs_15_characters_and_3_words():
             assert v.quote == "" and v.status_words, (quote, v)
 
 
-# ------------------------------------------------------------------ D-104 g
+# ------------------------------------------------------------------ D-154 g
 
 @needs(TRANSITION)
-def test_review_d104g_require_auth_false_as_text_is_false():
+def test_review_d154g_require_auth_false_as_text_is_false():
     from mail_support import golden_policy_raw
     for raw, want in (("false", False), ("False", False), ("no", False), ("0", False), (False, False),
                       ("true", True), ("yes", True), (True, True)):
@@ -240,7 +248,7 @@ def test_review_d104g_require_auth_false_as_text_is_false():
 
 
 @needs("jobscraper.config:MailStatusConfig")
-def test_review_d104g_mail_status_config_booleans_read_text_false():
+def test_review_d154g_mail_status_config_booleans_read_text_false():
     from jobscraper.config import MailStatusConfig
     cfg = MailStatusConfig.from_raw({"enabled": "false", "model": "false", "require_auth": "false"})
     assert (cfg.enabled, cfg.model, cfg.require_auth) == (False, False, False), cfg

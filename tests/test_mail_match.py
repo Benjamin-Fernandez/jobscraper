@@ -261,9 +261,9 @@ def test_mail_match_two_companies_tie_is_ambiguous_and_the_stronger_tier_wins():
 @needs(RULES, MATCH)
 def test_mail_match_common_word_and_short_names_count_in_the_body_only_capitalised():
     c = _c()
-    sea = _app("sea", "Sea Limited", "Graduate Analyst")
+    ocean = _app("ocean", "Ocean Limited", "Graduate Analyst")
     zeta = _app("zeta", "Zeta Pte Ltd", "Graduate Analyst")
-    for app, lower, upper in ((sea, "We met by the sea last week.", "Thank you for applying to Sea."),
+    for app, lower, upper in ((ocean, "We met by the ocean last week.", "Thank you for applying to Ocean."),
                               (zeta, "We studied the zeta function.", "Thank you for applying to Zeta.")):
         m = _match([app], "Hiring <%s>" % GH, "Update", lower)
         assert m.kind == c.MatchKind.NONE, (app.job_id, m)
