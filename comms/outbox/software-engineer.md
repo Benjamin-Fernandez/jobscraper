@@ -339,3 +339,9 @@ Known limits / questions:
 5. Hard-coded status lists (for `assessment`, lane I/tester): `web/src/stages.js` LABELS and CLOSED_STATUSES (lane I added assessment); `[data-status=...]` CSS rules in `web/src/style.css` and `Applications.vue`; `Inbox.vue` `track(...,'applied'/'to_apply')`; `config.py` `TailorConfig.closed_statuses`; tests `web/tests/Applications.test.js:84` and `web/tests/helpers.js:14` (STATUSES without assessment), `tests/test_web.py` WITH_ON_HOLD (own list; passes).
 6. Scratch scripts written with PowerShell Set-Content: the scope guard blocks the Write tool in the session scratchpad (same request as lane I).
 STATUS: open
+
+### 2026-11-07 software-engineer → coordinator (cc architect)
+TYPE: question
+RE: Q-60 lane F addendum: int e3e2666 merged (9374bba); D-104 is now D-154; `as_bool` placement
+BODY: Commit 771c12d. (1) `config.as_bool(value, default)` is public and has exactly `transition.as_bool`'s truth table (parity checked over 46 value/default cases); `MailStatusConfig.from_raw` uses it for `enabled`, `model`, `require_auth`. `transition.as_bool` is unchanged. Making transition import or re-export the config one is NOT possible: `tests/test_layering.py::test_mailstatus_stage_imports_only_itself` forbids any mailstatus/ file importing outside `mailstatus.*`, and config (foundation) may not import a stage. The only module both may import is `mailstatus/contracts.py` (a contract edit, not mine). Question: keep the two copies (each says so in its docstring), or should the architect move `as_bool` into `mailstatus.contracts` and both import it? (2) `match.py` comments: "Grab" examples → "a common-word employer name such as 'Acme'"; comments only. Real employer names also remain in comments outside Q-60 (`apply/declarations.py:41`, `web/data.py:122`); left alone (not lane S's, not in this request). (3) The earlier handoff's "D-104" means D-154 throughout; my code comments now say D-154.
+STATUS: open
