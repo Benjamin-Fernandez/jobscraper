@@ -22,6 +22,11 @@ whole profile and sends all of it back. Because a whole-file PUT can replace
 everything, `applicant.save` keeps the version it replaces as
 `applicant.prev.yaml` beside the profile (one rolling copy, Q-30 F7); GET reads
 the profile and its etag from one read of the file (Q-30 F6).
+
+`POST /api/applicant/check` (Q-71 G5) runs the same validation on a posted profile
+and writes nothing, so the form can flag a field when it loses focus. GET also
+carries `documents_status` (the resume and transcript in use: name, size,
+modified; never a path).
 """
 from __future__ import annotations
 
@@ -47,6 +52,12 @@ class ApplicantChange(BaseModel):
     """Body of `PUT /api/applicant`: the whole profile and the etag it was read at."""
     profile: dict[str, Any]
     etag: str = ""
+
+
+class ApplicantCheck(BaseModel):
+    """Body of `POST /api/applicant/check`: a profile to validate, nothing else
+    (no etag: it is never written)."""
+    profile: dict[str, Any]
 
 
 def _from_resume(profile: dict) -> list[str]:
@@ -98,6 +109,7 @@ def applicant_view(cfg: Config) -> dict[str, Any]:
         "errors": errors_json(applicant.validate(profile)) if error is None else [],
         "missing": applicant.missing_for_apply(profile, cfg.resume_dir),
         "completeness": {"filled": filled, "needed": needed},
+        "documents_status": applicant.documents_status(profile, cfg.resume_dir),
         "from_resume": _from_resume(profile),
         "sensitive": sensitive_paths(profile),
         "form": applicant.form_json(),
@@ -151,3 +163,13 @@ def put_applicant(body: ApplicantChange, cfg: Config = Depends(get_config)) -> A
         except applicant.ApplicantError as exc:
             return invalid(exc.errors)
     return applicant_view(cfg)
+
+
+@router.post("/applicant/check")
+def check_applicant(body: ApplicantCheck) -> dict[str, Any]:
+    """Validate a profile the way PUT would, without writing it (Q-71 G5): the
+    form calls this when a field loses focus, so a mistake shows under the field
+    and not only after Save. No etag and no write lock, because nothing is read
+    from or written to the file; `{errors: [{path, message}]}`, empty when valid."""
+    profile = with_version(dict(body.profile))
+    return {"errors": errors_json(applicant.validate(profile))}
