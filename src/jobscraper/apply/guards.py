@@ -701,7 +701,8 @@ def _model_field(c: _Ctx, pf: PageField, d: ModelDecision) -> Answer:
         return _answer_unknown(pf, "G3: value carries a withheld value", ungrounded=True)
     if c.sees and applicant.terms_hit(
             c.protected, [value] if not isinstance(value, (list, tuple)) else list(value),
-            corpus=" ".join((c.resume_corpus, c.job_corpus, c.facts_corpus))):
+            corpus=" ".join((c.resume_corpus, c.job_corpus, c.facts_corpus)),
+            labels=is_choice(pf)):
         # D-105 / ADR-0008 Option C (F1 on the llm_fill side): the model may read a protected
         # value but not write it, unless the resume, posting or facts also hold it.
         return _answer_unknown(pf, "G3: value carries a private value", ungrounded=True)
