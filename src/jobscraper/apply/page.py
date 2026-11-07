@@ -351,6 +351,20 @@ READER_JS = "(arg) => {" + HELPERS_JS + r"""
     if (prev && !prev.querySelector(CTRL) && txt(prev)) return txt(prev).slice(0, 300);
     return labelOf(g, containerOf(g, unit.concat([g])));
   };
+  // The visible control that opens a hidden file input: a visible label for it, or a visible
+  // button next to it (same parent) that is no other field's control.
+  const fileTrigger = el => {
+    if ([...(el.labels || [])].some(vis)) return true;
+    const p = el.parentElement;
+    return !!p && [...p.children].some(c => c !== el && vis(c) &&
+      (c.matches('button, [role="button"]') || (c.tagName === 'LABEL' && c.htmlFor === el.id && el.id)));
+  };
+  // A hidden file input's label: the first label in its parent that names no other control.
+  const fileLabel = el => {
+    const p = el.parentElement;
+    const l = p && [...p.querySelectorAll('label, legend')].find(x => !x.htmlFor && !x.querySelector(CTRL) && txt(x));
+    return l ? txt(l) : '';
+  };
   const CAND = CTRL + ', input[type="file"]';
   for (const el of root.querySelectorAll(CAND)) {
     if (done.has(el) || excluded(el)) continue;
@@ -368,8 +382,13 @@ READER_JS = "(arg) => {" + HELPERS_JS + r"""
     if (t === 'file') {
       if (off) continue;
       const cont = containerOf(el);
-      if (!(vis(el) || vis(cont))) continue;
-      push(el, 'file', 'file');
+      // A display:none file input is the target of a visible control (Greenhouse: an
+      // "Attach" button next to it, or a label[for]); any other hidden input stays out.
+      const trigger = !(vis(el) || vis(cont)) && fileTrigger(el);
+      if (!(vis(el) || vis(cont) || trigger)) continue;
+      // Its label is the field's own label (no label[for] points at a hidden input).
+      const own = labelOf(el, cont) ? null : fileLabel(el);
+      push(el, 'file', 'file', own ? { rawLabel: own } : undefined);
       continue;
     }
     if (tag === 'SELECT') {
