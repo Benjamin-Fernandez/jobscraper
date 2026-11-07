@@ -221,7 +221,7 @@ onMounted(async () => {
       </div>
     </header>
 
-    <h2 class="section-title">Start a run</h2>
+    <h3 class="section-title">Start a run</h3>
     <form class="start" novalidate @submit.prevent="start">
       <div class="field">
         <label for="run-batch">Companies this run</label>
@@ -284,7 +284,7 @@ onMounted(async () => {
     </p>
     <p v-else-if="jobError && !job" class="notice error" role="alert">Could not read the current job: {{ jobError }}</p>
 
-    <h2 class="section-title">Run history</h2>
+    <h3 class="section-title">Run history</h3>
     <TabLoading v-if="loading && !runs.length" :rows="2" />
     <!-- A failed load is not "no runs yet" (Q-75 G20); Try again reloads the list. -->
     <div v-else-if="!runs.length && error" class="notice error runs-error" role="alert">
