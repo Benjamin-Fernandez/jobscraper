@@ -306,17 +306,23 @@ onBeforeUnmount(() => {
       :aria-labelledby="`tab-${active.id}`"
       tabindex="0"
     >
-      <component
-        :is="active.view"
-        :key="active.id"
-        :run="run"
-        :runs="runs"
-        :jobs="jobs"
-        :loading="loading"
-        :error="error"
-        @changed="onChanged"
-        @select-run="selectRun"
-      />
+      <!-- Inbox and Applications keep their place (selection, scroll, filters)
+           while another tab is open (Q-70 C4, G15). The names are the SFC file
+           names; the async wrapper is matched by what it resolved to. Their
+           onActivated hooks do the quiet refresh. -->
+      <KeepAlive :include="['Inbox', 'Applications']">
+        <component
+          :is="active.view"
+          :key="active.id"
+          :run="run"
+          :runs="runs"
+          :jobs="jobs"
+          :loading="loading"
+          :error="error"
+          @changed="onChanged"
+          @select-run="selectRun"
+        />
+      </KeepAlive>
     </main>
     <ToastHost />
   </div>
