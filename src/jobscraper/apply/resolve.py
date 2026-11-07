@@ -1246,10 +1246,12 @@ def llm_schema(kind: str, n: int = 0, limit: int = 255) -> dict:
 
 def user_prompt(f: FormField, kind: str, ctx: ResolveContext, limit: int) -> str:
     """§7.6 user prompt. Only llm_extract + computed facts from the profile:
-    no S value can reach it."""
+    no S value can reach it, unless D-105 is in effect (ctx.model_sees_sensitive:
+    the owner's switch and a local backend), which adds the S paths."""
     facts = applicant.computed_facts(ctx.profile, applicant.today_sg())
     # D-75: the model is always told the standing work rights (not sensitive).
-    person = dict(applicant.llm_extract(ctx.profile), computed=facts,
+    person = dict(applicant.llm_extract(ctx.profile, sensitive=ctx.model_sees_sensitive),
+                  computed=facts,
                   work_rights=applicant.work_rights_text(ctx.profile))
     lines = [f"QUESTION: {f.label}", f"HELP: {f.description}",
              f"TYPE: {kind}", f"REQUIRED: {'yes' if f.required else 'no'}"]
@@ -1287,8 +1289,14 @@ def corpus_norm(text: str) -> str:
 
 
 def corpus_text(ctx: ResolveContext) -> str:
-    """Profile (non-sensitive) + resume + JD + employer name (§7.7)."""
-    return "\n".join([applicant.grounding_text(ctx.profile), ctx.resume_text or "",
+    """Profile (non-sensitive) + resume + JD + employer name (§7.7). Under D-105
+    the profile part adds the contact details only. The model may read the other
+    S values (race, religion, date of birth, ...) but they never ground an answer
+    (ADR-0008 Option C, review F1): evidence that only they support is not found."""
+    return "\n".join([applicant.grounding_text(ctx.profile,
+                                                sensitive=ctx.model_sees_sensitive,
+                                                protected=False),
+                      ctx.resume_text or "",
                       ctx.jd_text or "", ctx.employer_name or ""])
 
 
@@ -1434,7 +1442,65 @@ def _is_unknown(kind: str, reply: dict) -> bool:
     return bool(reply.get("unknown"))
 
 
-def _llm_failed(f: FormField, ungrounded: bool, note: str, model: str, phash: str) -> Answer:
+PRIVATE_MARK = "[private]"
+# A violation names a token the model wrote; under D-105 that token may be a piece
+# of an S value ("number 03", "month March"), so the stored note keeps the kind only.
+_TOKEN_VIOLATIONS = ("evidence not found", "number not found", "number", "year", "month", "word")
+
+
+def _note_for(bad: Sequence[str], ctx: ResolveContext) -> str:
+    """The audit/question note for a failed grounding check (review F2). Switch
+    off: the violations as they are (the model never saw an S value). Switch on:
+    token violations reduced to their kind, so no S fragment is stored."""
+    if not ctx.model_sees_sensitive:
+        return "; ".join(bad)
+    kinds = []
+    for v in bad:
+        kinds.append(next((k for k in _TOKEN_VIOLATIONS
+                           if v == k or v.startswith(k + " ") or v.startswith(k + ":")), v))
+    return "; ".join(dict.fromkeys(kinds))
+
+
+def _scrub_note(note: str, ctx: Optional[ResolveContext]) -> str:
+    """Under D-105, every S string (and a date's year) in `note` becomes
+    "[private]" before the note reaches the audit row or a captured question."""
+    if ctx is None or not ctx.model_sees_sensitive or not note:
+        return note
+    return applicant.scrub(note, applicant.sensitive_strings(ctx.profile)
+                           + applicant.protected_strings(ctx.profile), PRIVATE_MARK)
+
+
+def _protected_hit(ctx: ResolveContext, values: Sequence[Any], evidence: str = "",
+                   corpus: str = "", labels: bool = False) -> bool:
+    """D-105 / ADR-0008 Option C: True when the switch is on and the reply's values
+    (option labels, a number, a text) or its evidence quote hold a protected S value:
+    the stored text, the Profile form's wording of it ("Singapore Permanent
+    Resident" for `pr`) or a written form (dates, "Woman" for `female`, "Buddhism").
+    The model may read such a value but not decide or repeat it. Review R1: a generic
+    word matches only as a whole option label or evidence quote, and a value that is
+    also in the non-protected `corpus` (the resume, the posting, the employer name)
+    is no hit. Contact details are excluded."""
+    if not ctx.model_sees_sensitive:
+        return False
+    return applicant.terms_hit(applicant.protected_terms(ctx.profile), values, evidence,
+                               corpus=corpus, labels=labels)
+
+
+def _reply_texts(f: FormField, kind: str, r: dict) -> tuple[list[str], str]:
+    """(what a tier-5 reply would put in the form, its evidence quote)."""
+    ev = str(r.get("evidence") or "")
+    if kind == "text":
+        return [str(r.get("text") or "")], ""
+    if kind == "number":
+        return [str(r.get("value"))], ev
+    idx = [r.get("choice")] if kind == "choice" else list(r.get("choices") or [])
+    return [f.options[i].label for i in idx
+            if isinstance(i, int) and not isinstance(i, bool) and 0 <= i < len(f.options)], ev
+
+
+def _llm_failed(f: FormField, ungrounded: bool, note: str, model: str, phash: str, *,
+                ctx: Optional[ResolveContext] = None, sensitive: bool = False) -> Answer:
+    note = _scrub_note(note, ctx)
     if f.required:
         st = AnswerStatus.UNGROUNDED if ungrounded else AnswerStatus.UNKNOWN
     else:
@@ -1442,7 +1508,21 @@ def _llm_failed(f: FormField, ungrounded: bool, note: str, model: str, phash: st
     return Answer(field_key=f.key, value=None, tier=AnswerTier.LLM if ungrounded
                   else AnswerTier.NONE, source="llm" if ungrounded else "",
                   confidence=0.0, status=st, rule_id=RULE_ID_LLM if ungrounded else "",
-                  model=model, prompt_hash=phash, note=note[:300])
+                  model=model, prompt_hash=phash, note=note[:300], sensitive=sensitive)
+
+
+def _shows_s_value(value: Any, ctx: ResolveContext, corpus: str = "") -> bool:
+    """D-105 (q74 §3, Q-77): True when the model may read S values and this tier-5
+    value holds one, so the answer is tagged sensitive like any other S answer. The
+    match is on normalised text: option labels in the Profile form's wording, dates
+    in any usual format, contact details always. A generic word never tags, and a
+    non-contact value that the resume or posting also holds does not (a shared
+    employer name). Always False with the switch off."""
+    if not ctx.model_sees_sensitive:
+        return False
+    texts = [str(v) for v in value] if isinstance(value, (list, tuple)) else [str(value or "")]
+    return applicant.terms_hit(applicant.sensitive_terms(ctx.profile), texts,
+                               corpus=corpus or corpus_text(ctx), tag=True)
 
 
 def _tier5(f: FormField, ctx: ResolveContext, backend: Any) -> Optional[Answer]:
@@ -1472,8 +1552,13 @@ def _tier5(f: FormField, ctx: ResolveContext, backend: Any) -> Optional[Answer]:
             if _is_unknown(kind, r):
                 return _llm_failed(f, False, "model: the facts do not settle it", model, phash)
             bad = grounded(kind, r, ctx, n_options=n, corpus=corpus)
+            hit = _protected_hit(ctx, *_reply_texts(f, kind, r), corpus=corpus,
+                                 labels=kind in ("choice", "multi"))
+            if hit:
+                bad = bad + ["private value"]
             if bad:
-                return _llm_failed(f, True, "ungrounded: " + "; ".join(bad), model, phash)
+                return _llm_failed(f, True, "ungrounded: " + _note_for(bad, ctx), model,
+                                   phash, ctx=ctx, sensitive=hit)
             replies.append(r)
     except _Unavailable:
         return _llm_failed(f, False, "model unavailable", model, phash)
@@ -1497,7 +1582,7 @@ def _tier5(f: FormField, ctx: ResolveContext, backend: Any) -> Optional[Answer]:
     return Answer(field_key=f.key, value=fit[0], tier=AnswerTier.LLM, source="llm",
                   confidence=CONF_LLM_CHOICE, status=AnswerStatus.FILLED,
                   option_labels=tuple(fit[1]), rule_id=RULE_ID_LLM, model=model,
-                  prompt_hash=phash)
+                  prompt_hash=phash, sensitive=_shows_s_value(fit[0], ctx, corpus))
 
 
 def _tier5_text(f: FormField, ctx: ResolveContext, backend: Any, user: str, schema: dict,
@@ -1505,6 +1590,7 @@ def _tier5_text(f: FormField, ctx: ResolveContext, backend: Any, user: str, sche
     """One call at temperature 0.3; one retry naming the violations."""
     prompt = user
     bad: list[str] = []
+    private = False                       # a reply used a protected S value (F1)
     for attempt in range(2):
         if attempt:
             prompt = user + "\n\nPREVIOUS ANSWER WAS REJECTED BECAUSE: " + "; ".join(bad)
@@ -1516,13 +1602,21 @@ def _tier5_text(f: FormField, ctx: ResolveContext, backend: Any, user: str, sche
         if _is_unknown("text", r):
             return _llm_failed(f, False, "model: the facts do not settle it", model, phash)
         bad = grounded("text", r, ctx, limit=limit, corpus=corpus)
+        if _protected_hit(ctx, [str(r.get("text") or "")], corpus=corpus):
+            # Reading, not deciding: the reply volunteers a protected value. The
+            # one retry is told so (never the value).
+            bad = bad + ["private value"]
+            private = True
         if not bad:
             note = "cover letter text" if f.canonical is Canonical.COVER_LETTER else ""
-            return Answer(field_key=f.key, value=str(r.get("text")).strip(),
+            text = str(r.get("text")).strip()
+            return Answer(field_key=f.key, value=text,
                           tier=AnswerTier.LLM, source="llm", confidence=CONF_LLM_TEXT,
                           status=AnswerStatus.FILLED, rule_id=RULE_ID_LLM, model=model,
-                          prompt_hash=phash, note=note)
-    return _llm_failed(f, True, "ungrounded: " + "; ".join(bad), model, phash)
+                          prompt_hash=phash, note=note,
+                          sensitive=_shows_s_value(text, ctx, corpus))
+    return _llm_failed(f, True, "ungrounded: " + _note_for(bad, ctx), model, phash,
+                       ctx=ctx, sensitive=private)
 
 
 # ---------------------------------------------------------------- the resolver

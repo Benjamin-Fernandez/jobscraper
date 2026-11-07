@@ -34,7 +34,7 @@ from pathlib import Path
 from typing import Any, Callable, Optional, Sequence
 from urllib.parse import urlsplit
 
-from . import applicant, tailor_flow, vault
+from . import applicant, backends, tailor_flow, vault
 from .apply import browser as B
 from .apply import mail
 from .apply import resolve as R
@@ -76,19 +76,10 @@ check_attempt_table()
 # ---------------------------------------------------------------- log (§17)
 
 def redact(line: str, values: Sequence[str]) -> str:
-    """`line` with every value replaced by "[redacted]", case-insensitive,
-    longest first (a full address before one of its words). A purely
-    alphabetic value matches only as a whole word, so a short profile value
-    such as a grade type does not eat the word "captcha"; a value with a digit
-    or any other character (a phone, a postal code, an email) matches anywhere,
-    so 91234567 is caught inside +6591234567 (review F6)."""
-    for v in sorted({str(v).strip() for v in values if v and len(str(v).strip()) >= 3},
-                    key=lambda s: (-len(s), s)):
-        pat = re.escape(v)
-        if re.fullmatch(r"[A-Za-z ]+", v):
-            pat = r"(?<![A-Za-z])" + pat + r"(?![A-Za-z])"
-        line = re.sub(pat, REDACTED, line, flags=re.I)
-    return line
+    """`line` with every value replaced by "[redacted]" (the scrubber lives in
+    `applicant.scrub`, so the resolver can share it; see there for the matching
+    rules, review F6)."""
+    return applicant.scrub(line, values, REDACTED)
 
 
 class _Log:
@@ -653,12 +644,19 @@ class _Run:
         return self._resume_text
 
     def resolve_ctx(self, job: dict[str, Any], tenant: Any, adapter: Any,
-                    resume_path: str) -> ResolveContext:
+                    resume_path: str, attempt_id: Any = None) -> ResolveContext:
         aliases = tuple(dict.fromkeys(a for a in (job.get("company_key"), tenant.board)
                                       if a and a != job.get("company")))
         if self._aliases is None:
             self._aliases = tailor_flow.alias_groups(self.cfg)
         groups, ambiguous = self._aliases
+        # D-105 (q74_model_sees_sensitive.md §1): the owner's switch counts only when
+        # the model runs on this computer; computed once per attempt. A remote backend
+        # keeps S values out of prompts, and the log says so (no URL, no values).
+        sees_s = bool(self.acfg.model_sees_sensitive) and backends.is_local(self.backend)
+        if self.acfg.model_sees_sensitive and not sees_s:
+            prefix = f"[attempt {attempt_id}] " if attempt_id is not None else ""
+            self.log(f"{prefix}model_sees_sensitive ignored: model backend is not on this computer")
         # ResolveContext has no job title yet (Q-27): the company only.
         return ResolveContext(
             profile=self.profile, employer_name=str(job.get("company") or ""),
@@ -667,7 +665,8 @@ class _Run:
             jd_text=str(job.get("jd_text") or ""), resume_text=self.resume_text(resume_path),
             resume_path=resume_path, ats=adapter.name, alias_groups=groups,
             alias_ambiguous=ambiguous,
-            account_email=str(_profile_path(self.profile, "contact.email") or ""))
+            account_email=str(_profile_path(self.profile, "contact.email") or ""),
+            model_sees_sensitive=sees_s)
 
     def resolve(self, fields: Sequence[FormField], rctx: ResolveContext,
                 at: _Attempt) -> dict[str, Answer]:
@@ -809,7 +808,7 @@ class _Run:
                                          else acfg.attempt_timeout_s),
             http=self.http,
             applied_on_tenant=self.store.applied_on_tenant(adapter.name, tenant.host))
-        rctx = self.resolve_ctx(job, tenant, adapter, resume_path)
+        rctx = self.resolve_ctx(job, tenant, adapter, resume_path, attempt_id=at.id)
         plan = adapter.plan_from_schema(ctx)
         if plan is not None:
             self.store.update_attempt(at.id, plan_source=plan.source)

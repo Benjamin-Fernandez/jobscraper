@@ -109,6 +109,17 @@ BODY: Fast-track amendment to tier 4 (declarations). Budget ran out (36/35 calls
 - D-91 (2026-11-02): written into AD §7.5. Gate 3: freedom forms (free from/of, clear of/from, unrestricted by, unencumbered by, not bound/subject/party to) take the inverted value when they are the only negation and govern every class phrase. Gate 2: new class `nda_willingness` (an NDA object plus a consent verb) reads the new `declarations.willing_to_sign_nda` (default false; not standing). Also AD §5.4 yaml, the QD §3 row-14 Profile row, and `DeclarationLabel.NDA_WILLINGNESS` (v5 additive). Engineer: classifier + truth + form row + example yaml line. Tester: "Are you free from any restrictive covenants?" → Yes; "Are you willing to sign an NDA?" → the switch; "I agree to sign the NDA" box ticked only when true; "Are you willing to sign a non-compete?" → unknown; "Are you not free from …" / two negations → unknown.
 ### 2026-11-07 architect → coordinator
 TYPE: handoff + request
+RE: Q-74 (D-105, D-107), review `docs/reviews/Q-74.md` F1/F2/F3/F5/F8; `docs/architecture/q74_model_sees_sensitive.md`, `adr/0008-model-sees-sensitive.md`, `config/applicant.example.yaml`
+BODY: Spec amended to match the fix round as built (worktree eng-q74; no shell, please commit, e.g. `docs(arch): Q-74 amend design + ADR-0008 for review F1-F8 (D-107)`). Design §1/§3: under the flag, the tier-5 corpus holds contact details only, and a protected hit is UNGROUNDED with `sensitive=True`. Notes are scrubbed and token violations reduced to their kind. The cloud-tag rule and `is_local_config` are added. §4: ten llm_fill hook points, including the `pick_option` decision (keep the full redaction), G3 ≈421, text guard ≈691, and the flag folded into the fill-cache `inputs_hash`. §6 T5 is marked superseded. ADR-0008: Decision and Consequences amended; the old "cached fills re-run once" claim is corrected. Changelog line at the top of the design.
+REQUEST 1 (config/ is outside my scope): in `config/applicant.example.yaml`, replace line 3 with exactly:
+`# S = sensitive: never written to logs. The AI reads S values only when apply.model_sees_sensitive is on and the model runs on this computer; except contact details, they never ground an AI-written answer (those questions wait for you).`
+This supersedes the engineer's proposed wording.
+REQUEST 2: record D-107 in `instructions/02_status.md` §4 (no row exists yet). Suggested row: `| D-107 | Ollama cloud model tags are not local (review Q-74 F3) | backends.is_local / is_local_config are False when the model tag ends in -cloud or :cloud (case-insensitive), even on 127.0.0.1, since Ollama forwards those to ollama.com; D-105 then stays off | Architect, 2026-11-07 | DECIDED |`.
+Open questions: none.
+STATUS: open
+
+### 2026-11-07 architect → coordinator
+TYPE: handoff + request
 RE: Q-74 (D-105), Q-44 + Q-73, Q-76; `docs/architecture/q74_model_sees_sensitive.md`, `adr/0008-model-sees-sensitive.md`, `apply_design.md` §5.3 (D-105 amendment paragraph), `q44_refresh_from_resume.md`, `q76_application_detail.md`, `src/jobscraper/apply/contracts.py`
 BODY: All three are fast-track designs, each ending with "READY TO BUILD: yes". Please review, mark them READY, and commit (I have no shell). Suggested message: `docs(arch): Q-74 Q-44 Q-73 Q-76 lean designs + ADR-0008 + contracts D-105`.
 - **Q-74.** `apply.model_sees_sensitive` (owner value true in config/config.yaml) takes effect only when `backends.is_local` holds (Ollama on localhost, 127.0.0.1 or ::1). A Docker or LAN URL counts as remote.

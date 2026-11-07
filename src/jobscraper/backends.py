@@ -267,6 +267,58 @@ def build(budget: dict[str, Any]) -> Backend:
     return OffBackend(f"unknown budget.backend {kind!r} (expected ollama or off)")
 
 
+# D-105 (q74_model_sees_sensitive.md §1, ADR-0008): hosts that mean "this computer".
+# A Docker service name (`http://ollama:11434`), a LAN IP or any other host is remote.
+LOCAL_HOSTS = frozenset({"localhost", "127.0.0.1", "::1"})
+
+
+def _target_is_local(url: str, model: str) -> bool:
+    """The rule behind `is_local`, on a resolved URL and Ollama model tag.
+
+    Two checks. The host must be this computer. And the model tag must not be an
+    Ollama cloud model: a tag ending in `-cloud` or `:cloud` is served by a local
+    Ollama but forwarded to ollama.com, so a prompt would leave the machine (D-107).
+    Anything unparseable is not local."""
+    from urllib.parse import urlparse
+    try:
+        host = urlparse(str(url or "")).hostname or ""
+    except ValueError:
+        return False
+    tag = str(model or "").strip().lower()
+    if tag.endswith("-cloud") or tag.endswith(":cloud"):
+        return False
+    return host.lower() in LOCAL_HOSTS
+
+
+def is_local(backend: Backend) -> bool:
+    """True when `backend` is Ollama running on this computer, with a model that
+    runs on it too (an Ollama `-cloud` / `:cloud` tag is not: D-107).
+
+    The owner's switch `apply.model_sees_sensitive` lets private profile values into
+    prompts only when this holds, so a later remote backend can never receive them
+    silently. Reads the URL `build` already resolved (the `JOBSCRAPER_OLLAMA_URL`
+    override wins there); makes no network call. `OffBackend` and anything else: False.
+    """
+    if not isinstance(backend, OllamaBackend):
+        return False
+    return _target_is_local(backend.url, backend.model_id)
+
+
+def is_local_config(budget: dict[str, Any]) -> bool:
+    """`is_local(build(budget))` without building a backend (no `httpx.Client`):
+    for the web routers, which ask on every GET. Same resolution as `build`."""
+    budget = budget or {}
+    if not budget.get("enable_llm", True):
+        return False
+    kind = str(os.environ.get("JOBSCRAPER_BACKEND")
+               or budget.get("backend", "ollama")).strip().lower()
+    if kind != "ollama":
+        return False
+    url = str(os.environ.get("JOBSCRAPER_OLLAMA_URL")
+              or budget.get("ollama_url") or "http://127.0.0.1:11434").rstrip("/")
+    return _target_is_local(url, str(budget.get("ollama_model") or "qwen3:14b"))
+
+
 def _format(format: Optional[dict], schema: Optional[dict]) -> Any:
     """The request's `format`: a JSON schema dict when the caller gave one
     (`format` first, then the older `schema` argument), else plain "json"."""

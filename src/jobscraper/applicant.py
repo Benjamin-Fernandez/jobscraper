@@ -38,7 +38,7 @@ import tempfile
 from dataclasses import dataclass
 from fractions import Fraction
 from pathlib import Path
-from typing import Any, Iterable, Optional
+from typing import Any, Iterable, NamedTuple, Optional, Sequence
 
 import yaml
 
@@ -120,6 +120,17 @@ LLM_ALLOW: tuple[str, ...] = (
     "contact.city", "contact.country", "singapore_status.work_pass",
     "singapore_status.authorised_to_work", "singapore_status.requires_sponsorship",
 )
+
+# D-105 (q74_model_sees_sensitive.md §3, ADR-0008): what the model may also read when
+# ResolveContext.model_sees_sensitive is on (config switch + local backend). Every S
+# path; `extra` never (tier 3 reads it by code).
+LLM_ALLOW_SENSITIVE: tuple[str, ...] = (
+    "identity.date_of_birth", "identity.gender", "singapore_status", "us_self_id",
+    "declarations", "contact",
+)
+# The part of that addition that may also ground an answer (ADR-0008 Option C):
+# contact details are the applicant's own, typed by code into a form anyway.
+LLM_ALLOW_CONTACT: tuple[str, ...] = ("contact",)
 
 
 def is_sensitive(path: str) -> bool:
@@ -1728,11 +1739,20 @@ def json_safe(value: Any) -> Any:
 # What a model may see, the grounding corpus, log redaction (§5.3, §7.7)
 # --------------------------------------------------------------------------
 
-def llm_extract(profile: dict) -> dict:
+def llm_extract(profile: dict, *, sensitive: bool = False, protected: bool = True) -> dict:
     """The non-sensitive allow-list (§5.3) as a nested dict, in the profile's
-    shape. Nothing else from the profile ever reaches a prompt."""
+    shape. Nothing else from the profile ever reaches a prompt.
+
+    `sensitive=True` (D-105: only when ResolveContext.model_sees_sensitive) adds
+    LLM_ALLOW_SENSITIVE, so S values may be in the prompt. Never `extra`.
+    `protected=False` keeps only the contact details of that addition (the
+    grounding corpus, ADR-0008 Option C: the model may read a protected value,
+    but cannot ground an answer on it)."""
     out: dict = {}
-    for path in LLM_ALLOW:
+    extra_paths = LLM_ALLOW_SENSITIVE if sensitive else ()
+    if sensitive and not protected:
+        extra_paths = LLM_ALLOW_CONTACT
+    for path in LLM_ALLOW + extra_paths:
         v = _get(profile or {}, path)
         if v is None:
             continue
@@ -1740,7 +1760,13 @@ def llm_extract(profile: dict) -> dict:
         parts = path.split(".")
         for part in parts[:-1]:
             cur = cur.setdefault(part, {})
-        cur[parts[-1]] = _plain(v)
+        v = _plain(v)
+        if isinstance(v, dict) and isinstance(cur.get(parts[-1]), dict):
+            # A whole block after one of its allow-listed leaves ("contact" after
+            # "contact.city"): the block holds the leaf already; keep both.
+            cur[parts[-1]] = {**cur[parts[-1]], **v}
+        else:
+            cur[parts[-1]] = v
     return out
 
 
@@ -1808,18 +1834,23 @@ def work_rights_text(profile: dict) -> str:
     return " ".join(out)
 
 
-def grounding_text(profile: dict, today: Optional[_dt.date] = None) -> str:
+def grounding_text(profile: dict, today: Optional[_dt.date] = None, *,
+                   sensitive: bool = False, protected: bool = True) -> str:
     """The profile part of the tier-5 grounding corpus (§7.7): every
     non-sensitive value one per line (the legal and preferred names, then the
     llm_extract allow-list), then the computed facts as sentences, then the
-    work-rights sentence (D-75)."""
+    work-rights sentence (D-75).
+
+    `sensitive=True` (D-105) passes through to `llm_extract`. `protected=False`
+    leaves the protected S values (everything but contact details) out of the
+    corpus even though the model saw them: reading, not deciding (ADR-0008)."""
     lines: list[str] = []
     for path in ("identity.legal_first_name", "identity.legal_last_name",
                  "identity.preferred_name"):
         v = _get(profile or {}, path)
         if not _empty(v):
             lines.append(str(v))
-    for _path, v in _walk(llm_extract(profile)):
+    for _path, v in _walk(llm_extract(profile, sensitive=sensitive, protected=protected)):
         if v is None or isinstance(v, bool) or (isinstance(v, str) and not v.strip()):
             continue
         lines.append(str(v))
@@ -1832,6 +1863,254 @@ def grounding_text(profile: dict, today: Optional[_dt.date] = None) -> str:
     # answer may quote them as evidence (§7.7). Always the last line.
     lines.append(work_rights_text(profile or {}))
     return "\n".join(lines)
+
+
+def sensitive_strings(profile: dict) -> list[str]:
+    """The string leaves (3+ characters, dates as ISO text) of S paths (§5.3).
+    D-105: a tier-5 answer that contains one of these is tagged sensitive, so the
+    audit shows it first and it is treated as private. Longest first, deduplicated.
+    For matching only; never log the result."""
+    vals: set[str] = set()
+    for path, v in _walk(profile or {}):
+        if not is_sensitive(path):
+            continue
+        v = _date_text(v)
+        if isinstance(v, str) and len(v.strip()) >= 3:
+            vals.add(v.strip())
+    return sorted(vals, key=lambda s: (-len(s), s))
+
+
+def protected_strings(profile: dict) -> list[str]:
+    """`sensitive_strings` without the contact details: the S values the model may
+    read under D-105 but must never decide on or repeat to an employer (ADR-0008
+    Option C: race, religion, date of birth, gender, residency, NS, declarations,
+    US self-ID). A date also yields its year, since "born 2001" gives it away.
+    Longest first. For matching only; never log the result."""
+    vals: set[str] = set()
+    for path, v in _walk(profile or {}):
+        if not is_sensitive(path) or re.sub(r"\[\d+\]", "", path).split(".")[0] == "contact":
+            continue
+        v = _date_text(v)
+        if isinstance(v, str) and len(v.strip()) >= 3:
+            vals.add(v.strip())
+            m = re.match(r"(\d{4})-\d\d-\d\d$", v.strip())
+            if m:
+                vals.add(m.group(1))
+    return sorted(vals, key=lambda s: (-len(s), s))
+
+
+_MONTHS = ("January", "February", "March", "April", "May", "June", "July", "August",
+           "September", "October", "November", "December")
+
+
+def date_forms(iso: str) -> list[str]:
+    """An ISO date (or year-month) in the usual written forms: "2001-03-12" ->
+    "12/03/2001", "March 12, 2001", "12 Mar 2001", "20010312" ..."""
+    m = re.match(r"^(\d{4})-(\d{2})-(\d{2})$", iso or "")
+    if not m:
+        m2 = re.match(r"^(\d{4})-(\d{2})$", iso or "")
+        if not m2 or not 1 <= int(m2.group(2)) <= 12:
+            return [iso] if iso else []
+        y, mo = m2.groups()
+        return [iso, f"{mo}/{y}", f"{int(mo)}/{y}", f"{_MONTHS[int(mo) - 1]} {y}"]
+    y, mo, d = m.groups()
+    if not 1 <= int(mo) <= 12:
+        return [iso]
+    name, mon = _MONTHS[int(mo) - 1], _MONTHS[int(mo) - 1][:3]
+    out = [iso, f"{d}/{mo}/{y}", f"{int(d)}/{int(mo)}/{y}", f"{mo}/{d}/{y}",
+           f"{int(mo)}/{int(d)}/{y}", f"{d}-{mo}-{y}", f"{d}.{mo}.{y}",
+           f"{y}/{mo}/{d}", f"{y}.{mo}.{d}", f"{y}{mo}{d}"]
+    for dd in dict.fromkeys((str(int(d)), d)):       # "5" and "05"
+        for mm in (name, mon):                         # "March" and "Mar"
+            out += [f"{dd} {mm} {y}", f"{mm} {dd}, {y}", f"{mm} {dd} {y}",
+                    f"{dd}-{mm}-{y}"]
+    return list(dict.fromkeys(out))
+
+
+def form_item(path: str) -> tuple[Optional[FormItem], Optional[FormItem]]:
+    """(FORM item, its entries sub-item or None) for a profile path."""
+    b = re.sub(r"\[\d+\]", "", path)
+    for g in FORM:
+        for it in g.items:
+            if it.kind == "entries" and b.startswith(it.path + "."):
+                rest = b[len(it.path) + 1:]
+                for s in it.sub:
+                    if s.path == rest:
+                        return it, s
+            elif it.path == b or b.startswith(it.path + "."):
+                return it, None
+    return None, None
+
+
+def form_wording(path: str, value: Any) -> tuple[str, ...]:
+    """The Profile form's own wording of an enum value ("pr" -> "Singapore Permanent
+    Resident"); empty when the path has no option list or the value is not one."""
+    it, sub = form_item(path)
+    item = sub or it
+    if item is None or not isinstance(value, str):
+        return ()
+    return tuple(lab for v, lab in item.options if v == value)
+
+
+# Private values a form words differently from the stored text (review R2, Q-74):
+# each group is one idea; any member stands for the others. Gender and the faith words
+# are free text or plain enum slugs in the profile, so the FORM options do not list them.
+_SYNONYM_GROUPS: tuple[tuple[str, ...], ...] = (
+    ("female", "woman", "women"), ("male", "man", "men"),
+    ("buddhist", "buddhism", "buddhists"), ("christian", "christianity", "christians"),
+    ("catholic", "catholicism", "roman catholic"), ("muslim", "islam", "islamic", "muslims"),
+    ("hindu", "hinduism", "hindus"), ("sikh", "sikhism", "sikhs"),
+    ("taoist", "taoism", "daoist", "daoism"), ("jewish", "judaism", "jew"),
+    # residency, NS and marital status as employers word them (review N1)
+    ("pr", "permanent resident", "singapore pr", "spr", "singapore permanent resident"),
+    ("citizen", "singaporean", "singapore citizen"),
+    ("completed", "ord", "nsman", "ns completed", "completed ns"),
+    ("serving", "ns serving"),
+    ("single", "never married", "unmarried"),
+)
+# One-way: a stored race also stands for the broader group a US form asks about.
+_IMPLIES: dict[str, tuple[str, ...]] = {"chinese": ("asian",), "malay": ("asian",),
+                                        "indian": ("asian",)}
+# How a protected term is matched (review R1). "any": whole word anywhere. "exact": a
+# generic status or gender word counts only when an option label or the evidence quote
+# IS that word, so "I completed my degree" is not a hit but the option "Completed" is.
+# "evidence": a bare answer word (yes, decline, other) counts only as the whole evidence
+# quote; as an option it is just an answer, and S questions never reach the model's choice.
+_ANSWER_WORDS = frozenset({"yes", "no", "decline", "other", "none", "true", "false", "n a",
+                           "prefer not to say", "not applicable", "none needed",
+                           "none required", "always prefer not to say"})
+_EXACT_WORDS = frozenset({"single", "married", "completed", "serving", "exempted", "citizen",
+                          "foreigner", "male", "female", "man", "men", "woman", "women",
+                          "veteran", "asian", "white", "black", "malay", "indian", "chinese",
+                          "pr", "spr", "ord", "nsman", "singaporean", "never married",
+                          "unmarried"})
+
+
+class Term(NamedTuple):
+    """One thing to look for (matching only; never log `text`)."""
+    text: str
+    mode: str                    # "any" | "exact" | "evidence"
+    contact: bool = False
+
+
+def _fold(text: Any) -> str:
+    """Lowercase words joined by single spaces: separators and case do not matter."""
+    return re.sub(r"[\W_]+", " ", str(text)).strip().lower()
+
+
+def _term_mode(text: str) -> str:
+    f = _fold(text)
+    if f in _ANSWER_WORDS:
+        return "evidence"
+    if f in _EXACT_WORDS:
+        return "exact"
+    return "any"
+
+
+def _terms(profile: dict, *, contact: bool) -> list[Term]:
+    out: dict[str, Term] = {}
+
+    def add(text: str, is_contact: bool, short_ok: bool = False) -> None:
+        f = _fold(text)
+        if (len(f) >= 3 or short_ok) and f not in out:
+            out[f] = Term(text.strip(), _term_mode(text), is_contact)
+
+    for path, v in _walk(profile or {}):
+        if not is_sensitive(path):
+            continue
+        is_contact = re.sub(r"\[\d+\]", "", path).split(".")[0] == "contact"
+        if is_contact and not contact:
+            continue
+        v = _date_text(v)
+        if not isinstance(v, str) or not v.strip():
+            continue
+        v = v.strip()
+        add(v, is_contact)                         # `add` drops a stored slug under 3 characters
+        for w in form_wording(path, v):
+            add(w, is_contact)
+        if re.match(r"\d{4}-\d\d(-\d\d)?$", v):
+            for w in date_forms(v):
+                add(w, is_contact)
+            if not is_contact:
+                add(v[:4], False)                  # "born 2001" gives it away
+        fv = _fold(v)
+        for grp in _SYNONYM_GROUPS:
+            if fv in grp:
+                for w in grp:
+                    add(w, is_contact, short_ok=True)      # "PR" is a word on a form
+        for w in _IMPLIES.get(fv, ()):
+            add(w, is_contact)
+    return list(out.values())
+
+
+def protected_terms(profile: dict) -> list[Term]:
+    """What the model may read but must not decide or repeat: the protected values
+    (not contact details) in the stored text, in the Profile form's wording, in other
+    written forms (dates, "woman", "Buddhism"), each with the way it is matched."""
+    return _terms(profile, contact=False)
+
+
+def sensitive_terms(profile: dict) -> list[Term]:
+    """`protected_terms` plus the contact details, for tagging an answer Private."""
+    return _terms(profile, contact=True)
+
+
+def _term_regex(text: str) -> re.Pattern:
+    words = [re.escape(w) for w in _fold(text).split()]
+    return re.compile(r"(?<![A-Za-z0-9])" + r"[\W_]+".join(words) + r"(?![A-Za-z0-9])",
+                      re.IGNORECASE)
+
+
+def terms_hit(terms: Sequence[Term], values: Sequence[Any] = (), evidence: str = "", *,
+              corpus: str = "", tag: bool = False, labels: bool = False) -> bool:
+    """True when a term shows up in `values` (a number or a written text) or in the
+    `evidence` quote, by the term's mode. A term that is also in `corpus` (the
+    non-protected text: resume, posting, employer) is no hit unless it is a contact
+    detail: the answer can come from there. That exemption covers free text and the
+    evidence quote only. `labels=True` says `values` are chosen option labels
+    (review N1, N2): there an "exact" word counts as a whole word inside the label
+    ("Chinese (Han)", "NS Completed"), and the corpus never exempts a label, because
+    choosing it would let the model decide the private answer.
+    `tag=True` (the Private tag, Q-77): only "any" terms count, so a generic word
+    never makes an answer Private."""
+    vals = [str(v) for v in values if v not in (None, "")]
+    ev = str(evidence or "")
+    folded = [_fold(x) for x in vals + ([ev] if ev else [])]
+    efold = _fold(ev) if ev else ""
+    for t in terms:
+        if tag and t.mode != "any":
+            continue
+        rx = _term_regex(t.text)
+        in_label = False
+        if t.mode == "any":
+            in_label = labels and any(rx.search(x) for x in vals)
+            hit = in_label or any(rx.search(x) for x in (vals if not labels else []) + [ev])
+        elif t.mode == "exact":
+            in_label = labels and any(rx.search(x) for x in vals)
+            hit = in_label or _fold(t.text) in folded
+        else:
+            hit = bool(efold) and _fold(t.text) == efold
+        if hit and not in_label and not t.contact and corpus and rx.search(corpus):
+            continue
+        if hit:
+            return True
+    return False
+
+
+def scrub(line: str, values: Sequence[str], mark: str) -> str:
+    """`line` with every value replaced by `mark`, case-insensitive, longest
+    first (a full address before one of its words). A purely alphabetic value
+    matches only as a whole word, so a short profile value such as a grade type
+    does not eat the word "captcha"; a value with a digit or any other character
+    (a phone, a postal code, an email) matches anywhere, so 91234567 is caught
+    inside +6591234567 (review F6). Values under 3 characters are ignored."""
+    for v in sorted({str(v).strip() for v in values if v and len(str(v).strip()) >= 3},
+                    key=lambda s: (-len(s), s)):
+        pat = re.escape(v)
+        if re.fullmatch(r"[A-Za-z ]+", v):
+            pat = r"(?<![A-Za-z])" + pat + r"(?![A-Za-z])"
+        line = re.sub(pat, mark, line, flags=re.I)
+    return line
 
 
 _EXTRA_PATH = re.compile(r"^extra\.[^.\[]+\.(?:by_employer\.[^.\[]+\.)?([^.\[]+)")
