@@ -259,7 +259,7 @@ onMounted(() => {
 .te-chips { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: var(--space-1); }
 .te-chip { gap: 2px; padding-right: 2px; font-size: var(--text-sm); }
 .te-remove {
-  min-height: 0; width: 1.4rem; height: 1.4rem; padding: 0; border: none; box-shadow: none;
+  min-height: 0; width: 1.5rem; height: 1.5rem; padding: 0; border: none; box-shadow: none;
   background: transparent; color: var(--muted); border-radius: 999px;
 }
 .te-remove:hover:not(:disabled) { background: var(--danger-soft); color: var(--danger); }

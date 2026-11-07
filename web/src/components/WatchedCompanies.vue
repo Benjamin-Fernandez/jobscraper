@@ -4,7 +4,12 @@
 // /api/companies/health). Failed companies say why in words and, opened, what
 // the error was and what you can do about it; the Failed view groups them by
 // cause. The CSV download is the same list.
-import { computed, ref, watch } from 'vue'
+//
+// A long list can be read at a glance (Q-75 G30): "Compact" drops each row to
+// one line (the choice is remembered in this browser), and above 20 companies
+// an A-Z strip jumps to a letter. Off-screen rows are not laid out
+// (content-visibility, G41), so a thousand companies scroll smoothly.
+import { computed, nextTick, ref, watch } from 'vue'
 import { COMPANY_EXPORT_URL } from '../api.js'
 import { ago, plural } from '../format.js'
 import CompanyMark from './CompanyMark.vue'
@@ -89,6 +94,16 @@ const sort = ref('az')
 const searchEl = ref(null)
 const openAll = ref(false)             // every failure's detail open at once
 
+// ---- density (G30): remembered in this browser ----
+const DENSITY_KEY = 'jobscraper.companies.density'
+function rememberedDensity() {
+  try { return window.localStorage.getItem(DENSITY_KEY) === 'compact' } catch { return false }
+}
+const compact = ref(rememberedDensity())
+watch(compact, on => {
+  try { window.localStorage.setItem(DENSITY_KEY, on ? 'compact' : 'comfortable') } catch { /* private window */ }
+})
+
 watch(state, () => { cause.value = 'all' })
 
 const items = computed(() => props.health?.items ?? [])
@@ -98,6 +113,10 @@ const counts = computed(() => {
   return c
 })
 const hasYourList = computed(() => items.value.some(i => i.source === 'your list'))
+// The "your list" chip says which rows came from it; it says nothing when every
+// row did, or when the Source filter already picked them (G30).
+const showSource = computed(() => source.value === 'all'
+  && hasYourList.value && items.value.some(i => i.source !== 'your list'))
 
 const q = computed(() => query.value.trim().toLowerCase())
 function matches(row) {
@@ -144,6 +163,20 @@ const rows = computed(() => {
   }
   return out
 })
+
+// ---- A-Z jump (G30): only when the list is long enough to need it ----
+const JUMP_FROM = 20
+const jumpLetters = computed(() => (!lettered.value || shown.value.length <= JUMP_FROM
+  ? []
+  : rows.value.filter(r => r.letter).map(r => r.letter)))
+const listEl = ref(null)
+async function jumpTo(letter) {
+  await nextTick()
+  const el = listEl.value?.querySelector(`[data-letter="${letter}"]`)
+  if (!el) return
+  el.scrollIntoView?.({ block: 'start' })
+  el.focus?.({ preventScroll: true })
+}
 
 function clearFilters() {
   query.value = ''
@@ -212,6 +245,13 @@ const safe = url => (/^https?:\/\//i.test(url || '') ? url : null)
             <option v-for="(s, id) in SORTS" :key="id" :value="id">{{ s.label }}</option>
           </select>
         </label>
+        <button
+          type="button"
+          class="density"
+          :class="{ active: compact }"
+          :aria-pressed="compact ? 'true' : 'false'"
+          @click="compact = !compact"
+        >Compact rows</button>
         <a class="button health-csv" :href="COMPANY_EXPORT_URL" download>
           Download all (.csv)
         </a>
@@ -259,15 +299,19 @@ const safe = url => (/^https?:\/\//i.test(url || '') ? url : null)
         </template>
       </p>
 
-      <ul v-if="shown.length" class="dir surface">
+      <nav v-if="jumpLetters.length" class="jump" aria-label="Jump to a letter">
+        <button v-for="l in jumpLetters" :key="l" type="button" class="jump-letter" :aria-label="`Jump to ${l}`" @click="jumpTo(l)">{{ l }}</button>
+      </nav>
+
+      <ul v-if="shown.length" ref="listEl" class="dir surface" :class="{ compact }">
         <template v-for="item in rows" :key="item.key">
-          <li v-if="item.letter" class="letter" aria-hidden="true">{{ item.letter }}</li>
+          <li v-if="item.letter" class="letter" :data-letter="item.letter" tabindex="-1">{{ item.letter }}</li>
           <li v-else class="co" :data-state="item.row.state">
             <CompanyMark :name="item.row.company" size="sm" />
             <div class="co-main">
               <div class="co-top">
                 <span class="co-name">{{ item.row.company }}</span>
-                <span v-if="item.row.source === 'your list'" class="chip">your list</span>
+                <span v-if="showSource && item.row.source === 'your list'" class="chip">your list</span>
               </div>
               <p class="co-meta muted">
                 <span v-if="item.row.job_board">{{ boardName(item.row.job_board) }}</span>
@@ -355,7 +399,30 @@ const safe = url => (/^https?:\/\//i.test(url || '') ? url : null)
 .co {
   display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; align-items: start;
   gap: var(--space-3); padding: var(--space-3) var(--space-4); border-top: 1px solid var(--border);
+  /* Off-screen rows are skipped by layout and paint (G41); `auto` remembers the real height once seen. */
+  content-visibility: auto; contain-intrinsic-size: auto 4.25rem;
 }
+.letter { scroll-margin-top: var(--header-h); }
+.letter:focus { outline: none; }
+.letter:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
+
+/* Compact (G30): name, board and counts on one line. */
+.compact .co { padding: var(--space-1) var(--space-4); align-items: center; contain-intrinsic-size: auto 2.25rem; }
+.compact .co > .mark { display: none; }
+.compact .co { grid-template-columns: minmax(0, 1fr) auto auto; }
+.compact .co-main { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 var(--space-3); }
+.compact .co-meta { gap: 0 var(--space-3); }
+.compact .why { flex: 1 1 100%; }
+.compact .co-state, .compact .site { margin-top: 0; }
+
+.density.active { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
+.jump { display: flex; flex-wrap: wrap; gap: 2px; margin: 0 0 var(--space-2); }
+.jump-letter {
+  min-height: 1.5rem; min-width: 1.5rem; padding: 0 var(--space-1);
+  font-size: var(--text-xs); font-weight: 650; box-shadow: none; background: transparent;
+  border-color: transparent; color: var(--accent);
+}
+.jump-letter:hover:not(:disabled) { background: var(--accent-soft); color: var(--accent); }
 .letter + .co { border-top: 0; }
 .co > .mark { margin-top: 2px; }
 .co-main { min-width: 0; }
@@ -364,7 +431,10 @@ const safe = url => (/^https?:\/\//i.test(url || '') ? url : null)
 .co-meta { display: flex; flex-wrap: wrap; gap: 0 var(--space-3); margin: 0; font-size: var(--text-sm); }
 .co-meta span { white-space: nowrap; }
 .co-state, .site { margin-top: 2px; }
-.site { display: inline-flex; align-items: center; gap: var(--space-1); font-size: var(--text-sm); white-space: nowrap; }
+.site {
+  display: inline-flex; align-items: center; justify-content: center; gap: var(--space-1);
+  min-width: 1.5rem; min-height: 1.5rem; font-size: var(--text-sm); white-space: nowrap;
+}
 .pill[data-status='pending'] { color: var(--muted); background: var(--surface-2); }
 
 .why { margin-top: var(--space-1); font-size: var(--text-sm); }
@@ -391,6 +461,7 @@ const safe = url => (/^https?:\/\//i.test(url || '') ? url : null)
 @media (max-width: 640px) {
   .co { grid-template-columns: auto minmax(0, 1fr) auto; }
   .site { grid-column: 2; grid-row: 2; justify-self: start; }
+  .compact .site { grid-column: auto; grid-row: auto; justify-self: auto; }
   .site-text { display: none; }
   .why-detail div { grid-template-columns: 1fr; gap: 0; }
 }

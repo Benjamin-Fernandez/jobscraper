@@ -12,7 +12,7 @@ import { ApiError, cancelJob, describeError, getSettings, startRun } from '../ap
 import { useJob } from '../composables/useJob.js'
 import { requestCompanyFilter } from '../companyFilter.js'
 import { ago, duration, plural, shortDate, utcMs, when } from '../format.js'
-import { asList, matchLabel, runStatusLabel, takePickerRequest } from '../runs.js'
+import { asList, matchLabel, num, runStatusLabel, runStatusNote, takePickerRequest } from '../runs.js'
 import { tabEmits, tabProps } from '../shell.js'
 import CountPicker from '../components/CountPicker.vue'
 import TabLoading from '../components/TabLoading.vue'
@@ -45,7 +45,7 @@ const batchError = computed(() => {
   const n = batch.value
   if (n === '' || n === null) return ''
   if (!Number.isInteger(n) || n < 1) return 'Enter a whole number, 1 or more.'
-  if (max.value && n > max.value) return `At most ${max.value} - that is every enabled company.`
+  if (max.value && n > max.value) return `At most ${num(max.value)} - that is every enabled company.`
   return ''
 })
 
@@ -112,7 +112,7 @@ watch(() => job.value?.state, (now, before) => {
 
 function count(run, field, statsKey) {
   const v = run[field] ?? run.stats?.[statsKey]
-  return v === null || v === undefined ? '—' : v
+  return v === null || v === undefined ? '—' : num(v)
 }
 
 function runDate(run) {
@@ -166,8 +166,9 @@ const lastRun = computed(() => props.runs.find(r => r.finished_at) ?? null)
 // The failed count is red only when the run itself broke.
 const HARD = ['failed', 'aborted_unhealthy']
 const failedTone = r => (HARD.includes(r.status) ? 'hard' : 'partial')
+// The Companies tab lists who fails now, not who failed in that run: say so.
 const failedText = r =>
-  `${plural(Number(r.stats.companies_failed), 'company', 'companies')} could not be read. See which on the Companies tab.`
+  `${plural(Number(r.stats.companies_failed), 'company', 'companies')} could not be read in this run. The Companies tab lists the ones that fail now.`
 
 // "N failed" in the history: the Companies tab's Failed list says which and why.
 function showFailed() {
@@ -220,7 +221,7 @@ onMounted(async () => {
       </div>
     </header>
 
-    <h2 class="section-title">Start a run</h2>
+    <h3 class="section-title">Start a run</h3>
     <form class="start" novalidate @submit.prevent="start">
       <div class="field">
         <label for="run-batch">Companies this run</label>
@@ -240,7 +241,7 @@ onMounted(async () => {
             No companies are enabled yet - sync the watchlist first.
           </template>
           <template v-else-if="settings">
-            Saved setting: {{ settings.batch_size }} of {{ settings.enabled_companies }} enabled companies.
+            Saved setting: {{ num(settings.batch_size) }} of {{ num(settings.enabled_companies) }} enabled companies.
             Only companies that are due are checked.
             <span v-if="estimate" class="estimate">About {{ estimate }} at the pace of your recent runs.</span>
           </template>
@@ -279,11 +280,17 @@ onMounted(async () => {
     <p v-else-if="lastRun" class="last-run muted">
       Last run {{ ago(lastRun.finished_at, now) }} ({{ when(lastRun.finished_at) }})<template v-if="lastRun.status && lastRun.status !== 'ok'">, {{ runStatusLabel(lastRun.status) }}</template>:
       {{ matchLabel(lastRun.accepted) }}<template v-if="lastRun.accepted"> - <a href="#/inbox">see them in the Inbox</a></template>.
+      <template v-if="runStatusNote(lastRun.status)">{{ runStatusNote(lastRun.status) }}</template>
     </p>
     <p v-else-if="jobError && !job" class="notice error" role="alert">Could not read the current job: {{ jobError }}</p>
 
-    <h2 class="section-title">Run history</h2>
+    <h3 class="section-title">Run history</h3>
     <TabLoading v-if="loading && !runs.length" :rows="2" />
+    <!-- A failed load is not "no runs yet" (Q-75 G20); Try again reloads the list. -->
+    <div v-else-if="!runs.length && error" class="notice error runs-error" role="alert">
+      <p>Could not load your run history: {{ error }}</p>
+      <button type="button" @click="emit('changed', { runs: true })">Try again</button>
+    </div>
     <div v-else-if="!runs.length" class="empty">
       <p class="empty-title">No runs yet.</p>
       <p class="muted">Start one above; it appears here when it finishes.</p>
@@ -331,14 +338,17 @@ onMounted(async () => {
               :class="{ picked: picked.has(r.run_no) }"
             >
               <td class="pick">
-                <input
-                  type="checkbox"
-                  :checked="picked.has(r.run_no)"
-                  :disabled="!r.accepted"
-                  :title="r.accepted ? undefined : 'Nothing to show - this run found 0 matches'"
-                  :aria-label="`Show run ${r.run_no} in the Inbox`"
-                  @change="toggle(r)"
-                >
+                <!-- The label is the target: at least 24 px square, whatever the checkbox draws (G31). -->
+                <label class="pick-hit">
+                  <input
+                    type="checkbox"
+                    :checked="picked.has(r.run_no)"
+                    :disabled="!r.accepted"
+                    :title="r.accepted ? undefined : 'Nothing to show - this run found 0 matches'"
+                    :aria-label="`Show run ${r.run_no} in the Inbox`"
+                    @change="toggle(r)"
+                  >
+                </label>
               </td>
               <td>{{ r.run_no }}</td>
               <td :title="when(r.finished_at || r.started_at)">{{ runDate(r) }}</td>
@@ -354,10 +364,13 @@ onMounted(async () => {
                   :title="failedText(r)"
                   :aria-label="failedText(r)"
                   @click="showFailed"
-                >{{ r.stats.companies_failed }}</button>
-                <template v-else>{{ r.stats?.companies_failed ?? '—' }}</template>
+                >{{ num(r.stats.companies_failed) }}</button>
+                <template v-else>{{ num(r.stats?.companies_failed) ?? '—' }}</template>
               </td>
-              <td><span class="pill" :data-status="r.status">{{ runStatusLabel(r.status) }}</span></td>
+              <td>
+                <span class="pill" :data-status="r.status" :title="runStatusNote(r.status) || undefined">{{ runStatusLabel(r.status) }}</span>
+                <span v-if="runStatusNote(r.status)" class="visually-hidden">. {{ runStatusNote(r.status) }}</span>
+              </td>
             </tr>
           </tbody>
         </table>
@@ -391,7 +404,9 @@ onMounted(async () => {
 @keyframes spin { to { transform: rotate(360deg); } }
 /* A run that broke is red; a good run with a few unreadable companies is not
    an outage, so its count is quiet (Q-70 E4, G27). */
-.failed-link { font-family: var(--mono); }
+.failed-link { font-family: var(--mono); min-width: 1.5rem; min-height: 1.5rem; }
+.pick-hit { display: flex; align-items: center; justify-content: center; min-width: 1.5rem; min-height: 1.5rem; cursor: pointer; }
+.pick-hit:has(input:disabled) { cursor: not-allowed; }
 .failed-link.hard, .failed-link.hard:hover:not(:disabled) { color: var(--danger); }
 .failed-link.partial { color: var(--muted); text-decoration: underline dotted; }
 .failed-link.partial:hover:not(:disabled) { color: var(--text); }
