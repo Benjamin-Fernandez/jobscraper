@@ -45,6 +45,8 @@ CONTRACT_VERSION = 5   # 2: D-69 (no FAILED after the Submit click, ADR-0004), D
                        #    .composed/.composed_files, PageOutcome.compose_needed (§19).
                        #    Q-48 / D-87 (still v5, additive): DeclarationLabel.GOVERNMENT_EMPLOYMENT
                        #    and .DISABILITY (neither employer-specific; apply_design §7.5).
+                       #    N6a D1 / D-167 (still v5, additive): FormField.fit_type (derived
+                       #    property, not a field; CHOICE_TYPES unchanged; llm_fill_design §3.1).
 
 
 # --------------------------------------------------------------------------
@@ -323,6 +325,18 @@ class FormField:
     canonical: Optional[Canonical] = None   # set only for tier-1 fields
     locator: str = ""                       # adapter-private hint for finding it again (CSS); never shown
     alt_of: str = ""                        # this field is an alternative input for `alt_of` (e.g. resume_text for resume)
+
+    @property
+    def fit_type(self) -> FieldType:
+        """The type that option fitting reads (D-167; llm_fill_design §3.1). A TYPEAHEAD
+        with an offered list (the reader saw options before typing: a react-select, a
+        combobox, a Workday prompt) is fitted as a DROPDOWN. A search typeahead (no
+        options until typed: location, school) stays TYPEAHEAD and takes free search
+        words. Every other type is itself. Widgets, memory keys and capture rows keep
+        `type`; only the deterministic fit and shape checks read `fit_type`."""
+        if self.type is FieldType.TYPEAHEAD and self.options:
+            return FieldType.DROPDOWN
+        return self.type
 
 
 @dataclass
