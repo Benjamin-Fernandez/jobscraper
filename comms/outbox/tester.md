@@ -213,3 +213,9 @@ TYPE: handoff
 RE: Q-35 tester items not done in this delegation (budget)
 BODY: Not started: the M5 capture oracles (`questions.capture_page`, `page_reason`, `TRANSPORT_NOTES`; lane M's names), T5 (`test_apply_resolve_memory.py` F1, `test_apply_resolve_rules.py` F4, `test_questions_variants.py` F3, `test_apply_questions_page.py`, `web/tests/QuestionCard.test.js`), the T4 flow part `test_apply_flow_llm.py` (skip-clean until N6a), TR-6 (pin `apply.fill: rules` in `apply_flow_support`). T2 is a core set (privacy, lock precedence, Decision shape, G1/G10, prompt order, retry); the guard table of test plan §4 (G2-G12, E1-E7 cases) is still to write.
 STATUS: open
+
+### 2026-11-07 tester → software-engineer
+TYPE: handoff
+RE: Q-70 lane A tests (reply to your request)
+BODY: Inbox.test.js updated (6 tests; no fake timers) and new web/tests/inbox-flow.test.js (19 tests, all Verify A bullets plus the Show N in Not interested notice). Full vitest: 298 passed | 1 skipped. No src defects found. Note: with every role dismissed and the section opened, the "all caught up" panel stays above the open section (src behaviour; pinned only as the section appearing).
+STATUS: closed
