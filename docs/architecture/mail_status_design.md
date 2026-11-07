@@ -2,7 +2,8 @@
 
 Architect, 2026-11-02, branch `int/Q-60-mail-status`. Stage B. Input: `docs/research/mail_status_brief.md` (cited **MB §n**). ADR: `adr/0007-mail-status-imap.md`. Build plan: `mail_status_build_plan.md` (**BP**). Status: READY for stage-E review.
 
-**Changelog.** 2026-11-07: aligned with D-153 (§8 row 2) and D-154 (a)–(g), as built in the lane S and lane I fix rounds (§5.6, §6.2–§6.5, §7, §8, §10.4, §11.3, §12, §13). Q-60 decision IDs renumbered to D-150..D-154 per D-155's map. Contracts (§3) unchanged.
+**Changelog.** 2026-11-07 (2): aligned with D-157 (a)–(j) and D-156 (1), (3)–(5) from the lane F review (`docs/reviews/Q-60-flow.md`): §2.3 (PRD §7.2), §3 (additive, as built by lane S: `AppCandidate.first_event_at`, `Reason.BACKFILLED` in `SUGGEST_REASONS`, its `REASON_TEXTS` entry; `CONTRACT_VERSION` stays 1), §5.1, §5.4, §5.5, §6.5, §7, §8, §9, §10.1–§10.4, §11.1, §11.4 (new), §12, §15 R3. D-157 (e) supersedes D-156 (2): owner triggers ignore `retry_after`. Still READY.
+2026-11-07: aligned with D-153 (§8 row 2) and D-154 (a)–(g), as built in the lane S and lane I fix rounds (§5.6, §6.2–§6.5, §7, §8, §10.4, §11.3, §12, §13). Q-60 decision IDs renumbered to D-150..D-154 per D-155's map. Contracts (§3) unchanged.
 
 **In one paragraph.** With the owner's opt-in per mailbox, JobScraper reads one or more Gmail accounts over IMAP, read-only, using an app password from Credential Manager. While the web app runs, a timer starts `python -m jobscraper mail sync` as a separate process at start-up and then every 10 minutes. Each sync goes through every message after the stored cursor in All Mail and Spam. It reads headers first and fetches a body only for mail from a hiring platform or a tracked employer. It matches the message to one tracked application, classifies it with phrase rules (falling back to the local Qwen only for matched mail the rules can't sort), and then either moves the application forward automatically or leaves a suggestion. Every change carries a short quote from the email as evidence and can be undone. Nothing is ever written to the mailbox, no link is opened, and nothing from mail reaches a log.
 
@@ -36,6 +37,8 @@ Architect, 2026-11-02, branch `int/Q-60-mail-status`. Stage B. Input: `docs/rese
 **D-151 trace:** (a) → §4, §5, ADR. (b) → §4. (c) → §8. (d) → §5.6, §6.2, §13. (e) → §5.2.
 
 **D-154 trace** (review `docs/reviews/Q-60-stage-imap-ui.md`): (a) F1 → §6.2 item 5, §7 "Employer domains". (b) F2 → §6.2 "Reply-To", §7 `employer_domain`. (c) F3 → §7 "Restricted names", decision step 4. (d) F6 → §6.5, §13. (e) F7 → §6.3, §6.4 (D-152). (f) F4 → §5.6, §12; F5 → §5.6, §13; F8 → §11.3. (g) → §8 "Text booleans", §10.4. **D-153** → §8 row 2.
+
+**D-157 trace** (review `docs/reviews/Q-60-flow.md`): (a) FL-1 → §5.4 "Per-message isolation", §12 "Header fields" and row "Unexpected exception", §9 `_text()` (the `internal` reason and `errors` count await a §3 addition, outbox). (b) FL-3 → §9 `mail_record`, §12 row "Mailbox disconnected during a sync". (c) FL-4 → §10.1 Timer, §10.2, §15 R3. (d) FL-5 → §5.5. (e) FL-6 → §5.1, §10.1, §12. (f) FL-7 → §8 Accept / dismiss, §9 `mail_suggestions`. (g) FL-8 → §11.4. (h) FL-9 → §8 row 6, §3 (`first_event_at`, `backfilled`). (i) F3 residual → §7 "Sender display name". (j) FL-10 → §8 "Who wrote it". **D-156:** (1) → §8 "Text booleans", §10.4. (2) superseded by D-157 (e). (3) → §5.4 step 6, §6.5. (4) → §8 rows 2–4. (5) → §10.3, §11.1 "Command results".
 
 ---
 
@@ -79,7 +82,7 @@ Order: WP-T0 must merge **together with** WP-S0. `test_every_v2_module_is_classi
 - PRD §5: a new §5.6 "Application status from email (KA-3)" holding F-50a–t from §1.
 - PRD §6: the KA-3 row adds F-50.
 - PRD NF-02: add "mail-status account passwords".
-- PRD NF-04 and §8.2: add "`mailstatus/` is a stage package, `mailstatus_flow.py` is its orchestrator, and `imapread.py` is the foundation module that speaks IMAP; `web/` may not import it".
+- PRD NF-04 and §7.2 "Layering notes" (the PRD has no §8.2; done by the planner in WP-P1): add "`mailstatus/` is a stage package, `mailstatus_flow.py` is its orchestrator, and `imapread.py` is the foundation module that speaks IMAP; `web/` may not import it".
 - `docs/DESIGN.md` §8.2 module map: add the three modules; boundary rules: "web/ may import the foundation except `imapread.py`".
 - `docs/OVERVIEW.md`: one paragraph.
 
@@ -209,6 +212,7 @@ class Reason(str, enum.Enum):          # mail_messages.reason, mail_evidence.rea
     PORTAL_CHECK = "portal_check"
     UNCLEAR = "unclear"
     MODEL_UNAVAILABLE = "model_unavailable"    # also: pending
+    BACKFILLED = "backfilled"                  # owner_newer, but the application was entered after the email (D-157 h)
     # pending
     MODEL_DEFERRED = "model_deferred"
 
@@ -221,7 +225,7 @@ SUGGEST_REASONS = frozenset({Reason.MODEL_TIER, Reason.WEAK_MATCH,
                              Reason.CLOSED_ROLE, Reason.KEPT_ON_FILE, Reason.SUGGEST_ONLY,
                              Reason.FROM_SPAM, Reason.UNAUTHENTICATED,
                              Reason.CUSTOM_STATUS, Reason.PORTAL_CHECK, Reason.UNCLEAR,
-                             Reason.MODEL_UNAVAILABLE})
+                             Reason.MODEL_UNAVAILABLE, Reason.BACKFILLED})
 
 
 class AuthResult(str, enum.Enum):      # Gmail's Authentication-Results (mx.google.com)
@@ -367,6 +371,7 @@ class AppCandidate:
     threads: tuple[str, ...]           # gm_thrid of messages already matched to it
     owner_changed_at: Optional[str]    # latest app_events.at with by IS NULL
     last_event_at: Optional[str]
+    first_event_at: Optional[str] = None  # earliest app_events.at: when the application was entered (D-157 h)
 
 
 @dataclass(frozen=True)
@@ -482,6 +487,7 @@ REASON_TEXTS: dict[Reason, str] = {
     Reason.PORTAL_CHECK: "The employer posted an update. Log in to their site to see it.",
     Reason.UNCLEAR: "The email is about this application, but JobScraper couldn't tell what changed.",
     Reason.MODEL_UNAVAILABLE: "JobScraper couldn't read this email because the AI model wasn't running.",
+    Reason.BACKFILLED: "You added this application after this email arrived.",
 }
 ```
 
@@ -517,8 +523,8 @@ The route answers `200 {"ok": true, "account_id": N}` and asks the runner to syn
 
 ```
 mail sync ─▶ store.mail_run_begin (lease) ──busy──▶ exit BUSY
-  for each account (enabled, consent current, not PAUSED unless trigger in manual|cli|connect,
-                    retry_after <= now):
+  for each account (enabled, consent current, and, unless the trigger is an owner trigger
+                    (OWNER_TRIGGERS = manual|cli|connect), not PAUSED and retry_after <= now):
     vault.get ─▶ transport.open() ─▶ folders by special-use
     ctx = store.mail_match_context()           (applications + threads, once per account)
     for role in (ALL or INBOX, JUNK):
@@ -529,8 +535,10 @@ mail sync ─▶ store.mail_run_begin (lease) ──busy──▶ exit BUSY
       if scan.complete: store.mail_cursor_set(scan.end_cursor)
     retry pending_model rows (§5.5)
     transport.close(); store.mail_account_set(state, counts)
-  store.mail_purge(now); store.mail_run_end(...)
+  store.mail_supersede(now); store.mail_purge(now); store.mail_run_end(...)
 ```
+
+**Owner triggers and `retry_after` (D-157 e, review FL-6; supersedes D-156 2).** "Check now" (`manual`), `mail sync` on the CLI (`cli`) and the sync after a connect or a new password (`connect`) ignore `retry_after`, as they already ignore PAUSED: each click or command tries the account once. Only the timer (`startup`, `timer`) respects `retry_after` and PAUSED. A silent no-op on Check now is worse than one extra login attempt; the result of that attempt (a new `retry_after`, or the same failure text) is what the card then shows.
 
 ### 5.2 Folders (D-151 e)
 
@@ -558,13 +566,23 @@ The first-sync window (F-50f) is fixed when the account is added: `first_sync_fr
 3. **Body:** `transport.fetch_body(ref, max_body_bytes)` with `BODY.PEEK[]`. If `size > max_body_bytes` → `MailBody("", False, truncated=True)`: the subject alone is classified. `None` (the message was deleted in between) → `NO_CHANGE / vanished`. A dropped connection stops the scan without advancing (PARTIAL). At most `max_bodies_per_sync` (200); when the cap is reached the scan stops *before* this message.
 4. **Content gate** `rules.content_gate(h, body, rules, in_matched_thread)` → a skip reason or None.
 5. **Match** `match.match(h, body, ctx, rules)` (§7). `NONE` → `UNMATCHED / no_application`.
-6. **Classify** `rules.classify(h, body, rules)` (§6.3). If the verdict is `UNKNOWN` with `status_words` (including a conflict), the model tier follows (§6.5). If the model is unavailable, deferred (`--defer-model`) or over `model_max_calls` → `PENDING_MODEL` with reason `model_unavailable` or `model_deferred`.
+6. **Classify** `rules.classify(h, body, rules)` (§6.3). If the verdict is `UNKNOWN` with `status_words` (including a conflict), the model tier follows (§6.5). If the model is unavailable, deferred (`--defer-model`) or over `model_max_calls` → `PENDING_MODEL` with reason `model_unavailable` or `model_deferred`. With `mail_status.model: false` there is no model tier and nothing is left pending: the verdict stays `UNKNOWN` with `status_words`, so §8 row 2 makes it an `unclear` suggestion straight away (D-156 3).
 7. **Transition** `transition.decide(app, verdict, match, h, policy)` (§8) → `Change`.
-8. `store.mail_record(...)`: the message row, plus the status change, the event and the evidence for `AUTO`, or the evidence row for `SUGGEST`, plus the cursor upsert, all in **one transaction** (F-50s). For `AUTO` the store re-reads the status inside the transaction. If it no longer equals `change.from_status` (the owner changed it a moment ago), the row is stored as `NO_CHANGE / owner_newer` and nothing else is written.
+8. `store.mail_record(...)`: the message row, plus the status change, the event and the evidence for `AUTO`, or the evidence row for `SUGGEST`, plus the cursor upsert, all in **one transaction** (F-50s). For `AUTO` the store re-reads the status inside the transaction. If it no longer equals `change.from_status` (the owner changed it a moment ago), the row is stored as `NO_CHANGE / owner_newer` and nothing else is written. If the account row is gone (disconnected during the sync), `mail_record` writes nothing and returns `{outcome: "gone"}`; the flow stops the account at once (§9, D-157 b).
+
+**Per-message isolation (D-157 a, review FL-1).** Steps 2–8 for one message run inside `try/except Exception`. Excluded, so they keep their own handling: the flow's internal `_Stop`, `MailFailure` (connection and transport failures, §12) and the database-busy `sqlite3.OperationalError` (§12 row "Database busy": rollback, stop, the message is tried again next time). Any other exception is isolated to the message:
+1. the traceback is logged with no mail values (the log names the account id and the exception type only, §13);
+2. `store.mail_record` stores a minimal row, `outcome = skipped`, `reason = internal` (the value `"internal"`; a `Reason.INTERNAL` member and the count key `errors` are not yet in the §3 listing: open request in `comms/outbox/architect.md`): `gm_msgid`, `gm_thrid`, role, UIDVALIDITY, UID, `received_at`, `sender_domain = ""`, no category, no match, no evidence. The cursor advances in the **same transaction** (F-50s);
+3. `counts["errors"] += 1`, and the scan goes on with the next message;
+4. a run of **3 consecutive** isolated failures in one account stops that account with ERROR `internal` (the usual `retry_after` backoff, §12). A message processed normally resets the run to 0.
+
+If storing the minimal row itself fails, the account stops as before (ERROR `internal`; the cursor stays before the message). The `internal` row dedupes the message by X-GM-MSGID like any other row, so a poison message is passed over once and never retried; the 180-day purge removes it (§9). The account's counts (`last_counts_json`) carry `errors`, and the card shows the run as ok.
 
 ### 5.5 Pending-model retry
 
-After the scans, for rows `outcome = pending_model`, `retries < 3` and `processed_at > now − retry_model_days`, oldest first, while the model budget lasts: `transport.refind(gm_msgid)` (`UID SEARCH X-GM-MSGID n` in ALL or INBOX, then JUNK) → `fetch_body` → steps 4–8 again, with `store.mail_resolve_pending` (an update of the row, no cursor). If the model is still unavailable → `retries + 1`. When retries or age run out → `SUGGEST(to=None, model_unavailable)`, with the quote from the first status-word sentence (or the subject). `refind` None → `NO_CHANGE / vanished`.
+After the scans, for rows `outcome = pending_model`, `retries < 3` and `processed_at > now − retry_model_days`, oldest first, while the model budget lasts: `transport.refind(gm_msgid)` (`UID SEARCH X-GM-MSGID n` in ALL or INBOX, then JUNK) → `fetch_body` → steps 4–8 again, with `store.mail_resolve_pending` (an update of the row, no cursor). `refind` None → `NO_CHANGE / vanished`.
+
+**What counts as a retry (D-157 d, review FL-5).** `retries + 1` only when a model call was made (`backend.complete` was called for this message) and gave no usable answer, that is, it raised `BackendError` (a timeout, a dropped connection, an error reply). A model that is unavailable (`backend.available == False`), a deferred run (`--defer-model`) and a spent `model_max_calls` budget make no call and leave `retries` alone: the row simply stays pending. A reply that parses to `UNKNOWN` (`model:<why>`, §6.5) is an answer, not a retry: §8 turns it into an `unclear` suggestion and the row is resolved. Age still expires every row: once `processed_at <= now − retry_model_days` (3 days), or once `retries` reaches 3, the row becomes `SUGGEST(to=None, model_unavailable)`, with the quote from the first status-word sentence (or the subject). So an owner who keeps Ollama off for an afternoon loses nothing; one who keeps it off for 3 days gets the suggestions.
 
 ### 5.6 Read-only by construction (F-50g, D-151 d)
 
@@ -662,7 +680,7 @@ dominates:                         # when several categories hit, the key beats 
 
 ### 6.5 Model tier (`mailstatus/model.py`; the flow calls `backend.complete`)
 
-**When:** a gated, matched (`STRONG`, `WEAK` or `AMBIGUOUS`) message whose rule verdict is `UNKNOWN` with `status_words`, while `mail_status.model` is on and the budget lasts.
+**When:** a gated, matched (`STRONG`, `WEAK` or `AMBIGUOUS`) message whose rule verdict is `UNKNOWN` with `status_words`, while `mail_status.model` is on and the budget lasts. With `model: false` such mail becomes an `unclear` suggestion straight away, never `pending_model` (D-156 3, §5.4 step 6).
 
 `SYSTEM` (constant):
 ```
@@ -686,6 +704,8 @@ quote: the shortest sentence from the email that shows the category, copied exac
 
 **Restricted names (D-154 c, review F3).** A variant is *restricted* when it is a single token under 5 characters (`match.SHORT_NAME`) or is listed in `common_word_names`. In the sender name, the subject and the body alike, a restricted variant matches only as written: one of the application's `company_names` with accents dropped, capitalisation kept and trailing `company_suffixes` removed, as whole words. Board slugs, tenants and domain labels are identifiers with no written form, so a restricted one never matches in text. A restricted hit is never strong: alone it gives the employer tier WEAK (a suggestion); it can only confirm a strong signal (`thread`, `employer_domain`, `tenant`, or an unrestricted name in the sender or subject). "Summit" in a subject of shared-platform mail may name a conference, not the employer. The `tenant` signal is not restricted: it is read from the platform's sender address, not from text.
 
+**Sender display name (D-157 i, first-review F3 residual).** An unrestricted variant in the sender's display name is STRONG only when the name is the company and nothing else. `match.sender_core(display_name)` removes the recruiting words of `match.SENDER_SUFFIX_WORDS` (`campus recruiting`, `university recruiting`, `talent acquisition`, `careers`, `recruiting`, `recruitment`, `talent`, `hiring`, `jobs`, `team`, `hr`, `people`; longest phrases first, as whole words, anywhere in the name), then normalises the rest like a company name (`norm_company`, so `company_suffixes` such as "Pte Ltd" go too). A leading "<recruiting words> at" also counts as the bare name: "Careers at Globex", "Recruiting at Globex" and "Jobs at Globex" give `globex` (Coordinator addendum to D-157 i; lane S builds the `at` form). The result equal to a company variant → STRONG ("Acme Talent Acquisition Team" → `acme`, "Globex Pte Ltd Careers" → `globex`). Any other word left → WEAK ("Globex Labs" → `globex labs` ≠ `globex`), and, as for a restricted name (D-154 c), a role or req id never lifts it to STRONG (decision step 4). A restricted variant stays as in "Restricted names" (as written, never strong). The word list is a constant in `match.py`, not a rules-file entry.
+
 **Tenants (E1).** `match.tenants_from_hosts(hosts, rules) -> tuple[str, ...]`: for each host from `mail_match_context` (the attempt `tenant_host`, and the hosts of `jobs.url`, `applications.url` and `companies.careers_url`), take its lower-case first label when the host is a strict subdomain of a platform's `tenant_sites` suffix. The flow calls it when building each `AppCandidate`, so applications made by hand, with no attempt row, still get their tenant.
 
 **Signals per application:**
@@ -695,7 +715,7 @@ quote: the shortest sentence from the email that shows the category, copied exac
 | `thread` | `gm_thrid ∈ app.threads` | decides alone |
 | `employer_domain` | `from_reg` ∈ `employer_domains(app.employer_domains)`, or a Reply-To domain is, but Reply-To only when From is a platform domain and `h.auth == PASS` (D-154 b) | strong |
 | `tenant` | the sender's platform has `tenant_from_local_part` (tenant = `compact(from_local)`) or `tenant_from_subdomain` (tenant = `compact` of the first label of `from_domain`, strict subdomain only). The tenant equals `compact(t)` for some `t` ∈ `app.tenants`, **or** the compact form of any company variant. The compact comparison applies to **both** kinds, because Workday local parts are often the compact employer name too | strong |
-| `name_in_sender` | a variant occurs as whole words in `norm(from_name)`; a restricted variant only as written (above) | strong; restricted: weak |
+| `name_in_sender` | a variant occurs as whole words in `norm(from_name)`; a restricted variant only as written (above) | strong only when the name minus recruiting suffixes equals the company (above); extra words or restricted: weak |
 | `name_in_subject` | a variant occurs in `norm(subject)`; a restricted variant only as written | strong; restricted: weak |
 | `name_in_body` | a variant occurs in the normalised text; a restricted variant only as written | weak |
 | `role` | `norm_role(app.role)` occurs in the subject or text, or ≥ 80% of its tokens (at least 2) occur in one line | — |
@@ -705,7 +725,7 @@ quote: the shortest sentence from the email that shows the category, copied exac
 1. Some application has `thread` → it, `STRONG`. If several do (a shared thread) → continue below with those as the candidates.
 2. `E` = applications with an employer signal. If `E` is empty → `NONE`.
 3. If `E` spans several companies (by normalised name), keep those with the strongest employer signal tier. A tie across companies → `AMBIGUOUS`.
-4. `R` = the applications in `E` with `role` or `req_id`. If `|R| = 1` → that one, `STRONG`, unless its only employer evidence is a restricted name: then `WEAK` (D-154 c; a role or req id never lifts a restricted name). An unrestricted name in the body plus a role still gives `STRONG`. If `|R| > 1` → `AMBIGUOUS(R)`.
+4. `R` = the applications in `E` with `role` or `req_id`. If `|R| = 1` → that one, `STRONG`, unless its only employer evidence is a restricted name or a sender display name with extra words: then `WEAK` (D-154 c, D-157 i; a role or req id never lifts either). An unrestricted name in the body plus a role still gives `STRONG`. If `|R| > 1` → `AMBIGUOUS(R)`.
 5. If `|R| = 0` and `|E| = 1` → that one, `STRONG` with a strong employer signal, else `WEAK`.
 6. If `|R| = 0` and `|E| > 1` → `AMBIGUOUS(E)`.
 
@@ -717,7 +737,7 @@ quote: the shortest sentence from the email that shows the category, copied exac
 
 **Rank order** (config `mail_status.ranks`): `to_apply 0 < applied 1 < assessment 2 < interviewing 3 < offer 4`. **Terminal:** `rejected`, `withdrawn`. Moving to a terminal status from any open one counts as forward. **Category → status:** `acknowledged→applied, assessment→assessment, interview→interviewing, offer→offer, rejected→rejected, withdrawn→withdrawn, posting_closed→rejected, kept_on_file→rejected`. `policy.suggest_only = {posting_closed, kept_on_file}`. A target missing from `applications.statuses` is dropped from `category_status` when the `Policy` is built (doctor warns), so its category behaves like `unknown`.
 
-**Text booleans (D-154 g).** `build_policy` reads `require_auth` with `transition.as_bool(value, default)`: a real bool as is; a number, True when ≠ 0; a string, trimmed and casefolded, `false/no/0/off/n/f` → False and `true/yes/1/on/y/t` → True; anything else → the default (for `require_auth`: on). A quoted YAML `'false'` therefore turns the switch off, not on. The rules-file loader stays strict: a quoted boolean in `config/mail_rules.yaml` is a `RulesError`.
+**Text booleans (D-154 g).** `build_policy` reads `require_auth` with `transition.as_bool(value, default)`: a real bool as is; a number, True when ≠ 0; a string, trimmed and casefolded, `false/no/0/off/n/f` → False and `true/yes/1/on/y/t` → True; anything else → the default (for `require_auth`: on). A quoted YAML `'false'` therefore turns the switch off, not on. There are two copies of this function on purpose (D-156 1): `config.as_bool` (foundation, for `MailStatusConfig`) and `transition.as_bool` (the stage may import only `mailstatus.*`). The tester pins that they agree over the full truth table; no contract change. The rules-file loader stays strict: a quoted boolean in `config/mail_rules.yaml` is a `RulesError`.
 
 `decide(app, verdict, match, h, policy) -> Change`. The first rule that fires wins:
 
@@ -726,22 +746,25 @@ quote: the shortest sentence from the email that shows the category, copied exac
 | 1 | category `no_change` | NONE `no_update` |
 | 2 | category `unknown`, or a category whose target was dropped from the status list (D-153; never `portal_update`, which has no target by design: row 3 decides it) | `status_words` ? SUGGEST(to=None, `unclear`) : NONE `no_status_words` |
 | 3 | category `portal_update` | SUGGEST(to=None, `portal_check`) |
+| 2–3 with an `AMBIGUOUS` match | | the `unclear` or `portal_check` suggestion offers every matched candidate (`transition.remaining_candidates`), so the owner can see which applications it may be about (D-156 4) |
 | 4 | match `AMBIGUOUS` | rows 5–9 are evaluated per candidate, and the candidates they settle as NONE drop out. If none are left → NONE with the first candidate's reason. Otherwise → SUGGEST(to=target, `several_applications`, the remaining candidates). It never auto-picks, even when only one is left |
 | 5 | `app.status` neither ranked nor terminal (an owner-added status) | SUGGEST(`custom_status`) |
-| 6 | `app.owner_changed_at > h.received_at` | NONE `owner_newer` |
+| 6 | `app.owner_changed_at > h.received_at` | if `app.first_event_at` is set and `> h.received_at` (the owner entered the application after the mail arrived) **and** the verdict is forward for it (rows 7–9 would reach row 10) → SUGGEST(to=target, `backfilled`) (D-157 h). Otherwise NONE `owner_newer` (an undo, or any owner change after an application that already existed when the mail came, stays silent) |
 | 7 | `app.status` terminal | target terminal → NONE `terminal`; category ∈ {assessment, interview, offer} and `h.received_at > app.last_event_at` → SUGGEST(`reopen`); else NONE `terminal` |
 | 8 | target == `app.status` | NONE `same_status` |
 | 9 | target not terminal and rank(target) < rank(status) | NONE `backwards` |
 | 10 | (forward) | go to the bar |
 | 11 | **bar for AUTO**, in order: (a) `tier == MODEL` → SUGGEST `model_tier`; (b) category ∈ suggest_only → SUGGEST `closed_role` / `kept_on_file` / `suggest_only`; (c) match `WEAK` → SUGGEST `weak_match`; (d) `h.ref.role == JUNK` and category ∉ `junk_auto` → SUGGEST `from_spam`; (e) `require_auth` and `h.auth != PASS` → SUGGEST `unauthenticated` | else **AUTO `forward`** |
 
-**"Confident, unique":** a rule-tier verdict, a `STRONG` match, a category that isn't suggest-only, not from Spam (except acknowledgements), and Gmail-authenticated. **How D-151 c's "anything else → a suggestion" is read:** forward moves that miss the bar become suggestions, and so do the explicit cases in rows 2–5 and 7. Backwards moves (row 9), same-status mail (row 8) and mail older than an owner change (row 6) change nothing *and* raise no suggestion. Without that, every late acknowledgement and every assessment reminder after an interview would ask a question. Out-of-order mail of that kind is common (MB §4).
+**"Confident, unique":** a rule-tier verdict, a `STRONG` match, a category that isn't suggest-only, not from Spam (except acknowledgements), and Gmail-authenticated. **How D-151 c's "anything else → a suggestion" is read:** forward moves that miss the bar become suggestions, and so do the explicit cases in rows 2–5 and 7. Backwards moves (row 9), same-status mail (row 8) and mail older than an owner change (row 6, except a forward verdict on an application entered after the mail: `backfilled`) change nothing *and* raise no suggestion. Without that, every late acknowledgement and every assessment reminder after an interview would ask a question. Out-of-order mail of that kind is common (MB §4).
 
-**Who wrote it.** An automatic change writes `app_events(by='mail', at=now)`. `applied_at` is the email date when the move leaves `to_apply`. The evidence row has `kind='auto'`, `event_id`, the quote, the subject (≤ 120 characters), the sender domain, `received_at`, the category, tier, rule id or model, the reason and `prev_applied_at`. An accepted suggestion writes the same event (`by='mail'`), and its evidence row moves to `state='accepted'` with `event_id`.
+**Who wrote it.** An automatic change writes `app_events(by='mail', at=now)`. `applied_at` is the email date when the move leaves `to_apply`, including a move straight to a terminal status: a saved role rejected by mail gets `applied_at` = the rejection's date (kept on purpose, D-157 j; Undo restores the previous value, NULL). The evidence row has `kind='auto'`, `event_id`, the quote, the subject (≤ 120 characters), the sender domain, `received_at`, the category, tier, rule id or model, the reason and `prev_applied_at`. An accepted suggestion writes the same event (`by='mail'`), and its evidence row moves to `state='accepted'` with `event_id`.
 
 **Undo (F-50m).** `POST /api/mail/evidence/{id}/undo` → `store.mail_undo(id, now)`. It is allowed only when `event_id` is the application's latest event. It writes `app_events(from=to_status, to=from_status, by=NULL)`, restores `applied_at` to `prev_applied_at` and sets the evidence `state='undone'`. If the event isn't the latest → 409 `not_latest` ("Can't undo: the status changed after this email. Set it by hand."). The message's row stays, so a re-sync can't re-apply it (dedupe by X-GM-MSGID).
 
-**Accept / dismiss (F-50n).** `mail_accept(id, job_id, now)`: for an ambiguous suggestion, `job_id` must be one of `candidates`. The application's current status must equal `from_status` (for an ambiguous one, the status the chosen candidate had when the suggestion was made, stored in `candidates_json`); otherwise 409 `changed`. The target must still be forward per rows 6–9; otherwise 409 `changed`. On success the status is set, the event (`by='mail'`) and the evidence are written, and `mail_messages.job_id` is set, so the thread signal works for later mail. A suggestion with no target can only be dismissed ("Got it"). Open suggestions whose application status has since changed are marked `superseded` when listed.
+**Accept / dismiss (F-50n).** `mail_accept(id, job_id, now)`: for an ambiguous suggestion, `job_id` must be one of `candidates`. The application's current status must equal `from_status` (for an ambiguous one, the status the chosen candidate had when the suggestion was made, stored in `candidates_json`); otherwise 409 `changed`. The target must still be forward per rows 6–9; otherwise 409 `changed`. For a `backfilled` suggestion row 6 is not re-checked, since the owner's later entry is what the suggestion is about; rows 7–9 and the status check still apply. On success the status is set, the event (`by='mail'`) and the evidence are written, and `mail_messages.job_id` is set, so the thread signal works for later mail. A suggestion with no target can only be dismissed ("Got it").
+
+**Superseded (D-157 f, review FL-7). Reads never write.** An open suggestion whose application status no longer equals its `from_status` (for an ambiguous one: no candidate still has its stored status) is *stale*. `mail_suggestions()` and `GET /api/mail` compute staleness in the read and leave stale rows out (they count as not open), with no write and no write lock. The state change to `superseded` is written only by the write paths: `store.mail_supersede(now)` once at the end of each sync (§5.1), and `mail_accept` / `mail_dismiss`, which supersede the stale rows of the same application inside their own transaction.
 
 ---
 
@@ -831,9 +854,11 @@ CREATE TABLE IF NOT EXISTS mail_sync_runs (    -- the lease and the last result
 | `mail_cursor(account_id, role)`, `mail_cursor_set(cursor: dict)` | upsert |
 | `mail_seen_many(account_id, gm_msgids) -> set[str]` | |
 | `mail_match_context() -> list[dict]` | the `AppCandidate` fields in one query (applications ⟕ jobs ⟕ companies, owner and last event times, threads from `mail_messages`). Instead of `tenants` it returns raw `tenant_hosts`: the distinct `apply_attempts.tenant_host` values plus the hosts of `jobs.url`, `applications.url` and `companies.careers_url` (E1). The flow turns them into `tenants` with `match.tenants_from_hosts` |
-| `mail_record(*, account_id, message: dict, cursor: dict, change: dict \| None, evidence: dict \| None, now) -> dict` | **one transaction**; the re-check inside (§5.4 step 8); returns `{outcome, event_id, evidence_id}`. Uses a non-committing `_write_status(job_id, status, at, by, applied_at)` that `set_application_status` is refactored to call too |
-| `mail_pending(account_id, now, retry_days)`, `mail_resolve_pending(account_id, gm_msgid, message, change, evidence, now)` | update, not insert; same single transaction |
-| `mail_suggestions()`, `mail_accept(id, job_id, now) -> (bool, code)`, `mail_dismiss(id, now)`, `mail_undo(id, now) -> (bool, code)`, `mail_evidence_for(job_ids) -> dict` | §8. Codes: `ok`, `changed`, `not_latest`, `not_found`, `not_open` |
+| `mail_record(*, account_id, message: dict, cursor: dict, change: dict \| None, evidence: dict \| None, now) -> dict` | **one transaction**; the re-check inside (§5.4 step 8); returns `{outcome, event_id, evidence_id}`. **Account check (D-157 b, review FL-3):** first in the transaction, `SELECT 1 FROM mail_accounts WHERE id = ?`; no row → roll back, write nothing, return `{outcome: "gone"}`, and the flow stops the account. Uses a non-committing `_write_status(job_id, status, at, by, applied_at)` that `set_application_status` is refactored to call too. Also stores the minimal `skipped / internal` row of §5.4 "Per-message isolation" |
+| `mail_pending(account_id, now, retry_days)`, `mail_resolve_pending(account_id, gm_msgid, message, change, evidence, now)` | update, not insert; same single transaction, with the same account check → `{outcome: "gone"}` |
+| `mail_suggestions()`, `mail_accept(id, job_id, now) -> (bool, code)`, `mail_dismiss(id, now)`, `mail_undo(id, now) -> (bool, code)`, `mail_evidence_for(job_ids) -> dict` | §8. Codes: `ok`, `changed`, `not_latest`, `not_found`, `not_open`. `mail_suggestions` and `mail_evidence_for` are pure reads: staleness is computed, never written (D-157 f) |
+| `mail_supersede(now) -> int` | marks stale open suggestions `superseded` (§8); called by the flow at the end of a sync. `mail_accept` / `mail_dismiss` do the same for their application in their own transaction |
+| `_text(s)` (private) | `s.encode("utf-8", "replace").decode("utf-8")`, applied to **every** string bound in a `mail_*` statement, so a lone surrogate can never make sqlite refuse a row (D-157 a, second layer; the first is §12 "Header fields") |
 | `mail_run_begin(trigger, pid, now, ttl_s) -> Optional[int]` | `BEGIN IMMEDIATE`; a `running` row whose `heartbeat_at > now − ttl_s` → None; older running rows → `abandoned`; inserts and returns the id |
 | `mail_run_heartbeat(id, now)`, `mail_run_end(id, state, code, counts_json, now)`, `mail_last_run()` | |
 | `mail_purge(now)` | `mail_messages` with `job_id IS NULL` and `processed_at < now − 180 d`; suggestions `dismissed`/`superseded` older than 90 d; keeps the newest 200 `mail_sync_runs` |
@@ -851,20 +876,22 @@ CREATE TABLE IF NOT EXISTS mail_sync_runs (    -- the lease and the last result
 ### 10.1 `web/mailsync.py`: `MailSyncRunner(cfg, data_dir, store_factory, job_manager: JobManager, command, clock=time.time)`
 
 - **Not the JobManager.** A sync is its own child process, `python -m jobscraper mail sync --trigger <t> [--account N] [--defer-model]`, spawned with `web.jobs.child_env()` and `web.jobs._spawn_kwargs()`. It logs to `data/jobs/mail/<stamp>-mailsync.log` (newest 20 kept). It never takes the run/apply slot.
-- **Timer** (a daemon thread). It starts only when `create_app(mail_timer=True)`, which `cmd_web` passes unless `JOBSCRAPER_MAIL_SYNC=0`. Tests and dev instances default to off. First tick after `startup_delay_s` (60 s), then every `interval_min` (10). The next tick comes after `catchup_delay_s` (60 s) when the last run ended `partial`. A tick spawns only if `mail_status.enabled`, the store lists an enabled account that isn't paused, and its own previous child has exited. A shutdown handler (`app.router.add_event_handler("shutdown", runner.stop)`) stops the thread; a running child finishes on its own.
+- **Timer** (a daemon thread). It starts only when `create_app(mail_timer=True)`. `cmd_web` decides (D-157 c, review FL-4): `JOBSCRAPER_MAIL_SYNC=1` → on; `JOBSCRAPER_MAIL_SYNC=0` → off; unset → on, **except when `JOBSCRAPER_DB` is set** (a dev instance on a copied database) → off. The live app (no `JOBSCRAPER_DB`) keeps its timer; a dev instance reads no real mailbox unless asked to with `JOBSCRAPER_MAIL_SYNC=1`. The CLAUDE.md dev command also carries `JOBSCRAPER_MAIL_SYNC=0` (Coordinator). `create_app` defaults to `mail_timer=False`, so tests are off. First tick after `startup_delay_s` (60 s), then every `interval_min` (10). The next tick comes after `catchup_delay_s` (60 s) when the last run ended `partial`. A tick spawns only if `mail_status.enabled`, the store lists an enabled account that isn't paused, and its own previous child has exited. A shutdown handler (`app.router.add_event_handler("shutdown", runner.stop)`) stops the thread; a running child finishes on its own.
 - **Model courtesy:** `--defer-model` is added when `job_manager.current(tail=1)["state"] == "running"`, so the GPU stays with a run or an apply attempt; deferred messages are retried later (§5.5).
-- `trigger("manual")` ("Check now") → spawns now, or reports `busy`. `connect(...)`, `use_application(...)` and `set_password(...)` run the short child of §4 synchronously (`subprocess.run(..., input=..., timeout=45)`), then trigger `connect`.
+- `trigger("manual")` ("Check now") → spawns now, or reports `busy`. The child ignores `retry_after` and PAUSED for an owner trigger (§5.1); the timer's ticks respect both. `connect(...)`, `use_application(...)` and `set_password(...)` run the short child of §4 synchronously (`subprocess.run(..., input=..., timeout=45)`), then trigger `connect`.
 - `status()` → `{running, started_at, next_at}`; the rest of the state is read from the store.
 
 ### 10.2 Single flight across processes
 
-The lease is `store.mail_run_begin(ttl_s = sync_timeout_s + 60)`. The child renews `heartbeat_at` after every chunk of headers and before each model call. A crashed child's lease goes stale after the TTL; the next run marks it `abandoned` and proceeds. The CLI, the live app and a second web process all go through the same lease. A dev instance has its own database copy, so it would have its own lease. That is why dev instances keep `JOBSCRAPER_MAIL_SYNC=0` (§15 R3).
+The lease is `store.mail_run_begin(ttl_s = sync_timeout_s + 60)`. The child renews `heartbeat_at` after every chunk of headers and before each model call. A crashed child's lease goes stale after the TTL; the next run marks it `abandoned` and proceeds. The CLI, the live app and a second web process all go through the same lease. A dev instance has its own database copy, so it would have its own lease. That is why a dev instance (`JOBSCRAPER_DB` set) has its timer off by default, and the dev command adds `JOBSCRAPER_MAIL_SYNC=0` as well (§10.1, §15 R3).
 
 **When the app isn't running:** nothing syncs (D-150: "when the application is running"). At the next start the first tick continues from each cursor; a backlog drains in `partial` runs one minute apart.
 
 ### 10.3 CLI (`cli.py`)
 
-`mail sync [--trigger cli] [--account N] [--defer-model]`. It prints one line per account, `account 2: 37 scanned, 3 read, 1 updated, 2 to review, 4 unmatched (ok)`, and exits 0 for ok or partial, 1 otherwise. Also `mail accounts list` (id, address, on/off, state, last check), `mail accounts add (--address A | --use-application) [--password-stdin] [--json] [--consent VERSION]`, `mail accounts set-password --id N [--password-stdin]`, `mail accounts on|off --id N`, `mail accounts remove --id N`. Existing `mail set-password` and `mail test` (F-36) are unchanged.
+`mail sync [--trigger cli] [--account N] [--defer-model]`. It prints one line per account, `account 2: 37 scanned, 3 read, 1 updated, 2 to review, 4 unmatched (ok)`, and exits 0 for ok or partial, 1 otherwise. Also `mail accounts list` (id, address, on/off, state, last check), `mail accounts add (--address A | --use-application) [--password-stdin] [--json] [--consent VERSION]`, `mail accounts set-password --id N [--password-stdin]`, `mail accounts on|off --id N`, `mail accounts remove --id N`. Existing `mail set-password` and `mail test` (F-36) are unchanged. `mail sync` ignores `retry_after` and PAUSED (trigger `cli`, §5.1).
+
+**Command results (D-156 5).** `exists` (the address is already connected), `bad_input` (address, consent version or password missing or malformed) and `not_found` (no account, suggestion or evidence row with that id) are results of one command: printed as `{"result": "<code>"}` by `--json`, or a one-line message, with exit 1. They are **not** `SyncCode`s: they are never stored in `mail_accounts.state_code` or `mail_sync_runs.code`, never pause or back off an account, and have no `SYNC_TEXTS` entry. Their owner texts live with the route (§11.1).
 
 ### 10.4 Config (`config.py` `MailStatusConfig.from_raw`; `config/config.yaml`)
 
@@ -893,7 +920,7 @@ mail_status:                   # F-50: application status from email (docs/archi
   suggest_only: [posting_closed, kept_on_file]
   junk_auto: [acknowledged]
 ```
-`applications.statuses: [to_apply, applied, assessment, interviewing, offer, rejected, withdrawn]`. `cfg.mail_rules_path = self._path("mail_rules", "config/mail_rules.yaml")`. Out-of-range values are clamped. Unknown keys are ignored, as in `TailorConfig`. The booleans `enabled`, `model` and `require_auth` are read with the truth table of `transition.as_bool` (§8, D-154 g), so `'false'` is False; an unreadable value keeps the default shown. `MailStatusConfig` is lane F's (its pin in `mail_review_pins` waits for it).
+`applications.statuses: [to_apply, applied, assessment, interviewing, offer, rejected, withdrawn]`. `cfg.mail_rules_path = self._path("mail_rules", "config/mail_rules.yaml")`. Out-of-range values are clamped. Unknown keys are ignored, as in `TailorConfig`. The booleans `enabled`, `model` and `require_auth` are read with `config.as_bool`, the foundation copy of `transition.as_bool`'s truth table (§8, D-154 g, D-156 1), so `'false'` is False; an unreadable value keeps the default shown. `MailStatusConfig` is lane F's (its pin in `mail_review_pins` waits for it).
 
 ---
 
@@ -915,6 +942,8 @@ mail_status:                   # F-50: application status from email (docs/archi
 | `POST /api/mail/suggestions/{id}/dismiss` | → `{ok}` |
 | `POST /api/mail/evidence/{id}/undo` | → `{ok, status}` \| `409 {code, detail}` |
 | `GET /api/applications` (changed) | each event gains `by` and `mail: {evidence_id, kind: auto\|accepted, state, quote, subject, sender_domain, received_at, gmail_url, undoable} \| null` |
+
+**Command results (D-156 5)** are route answers, not `SyncCode`s (§10.3): `400 {"code": "bad_input", "detail": "Enter your Gmail address and app password, and tick the box."}`, `409 {"code": "exists", "detail": "This mailbox is already connected."}`, and `404 {"code": "not_found", "detail": …}` for an unknown account, suggestion or evidence id. A `SyncCode` failure from the connect child is answered `400 {code, detail: SYNC_TEXTS[code]}` as before. `GET /api/mail` and `GET /api/mail/suggestions` never write (§8 "Superseded").
 
 `gmail_url` is built by the router from the account's address (joined through `account_id`; null after a disconnect) and `gm_msgid`: `https://mail.google.com/mail/?authuser=<address>#all/<hex(gm_msgid)>`. The X-GM-MSGID hex form is the web id (MB §2). It is a link we build to the owner's own Gmail, never one taken from mail; if the format ever stops working, only the button breaks.
 
@@ -939,6 +968,10 @@ mail_status:                   # F-50: application status from email (docs/archi
 | Password field | The typed app password is not cleared before the consent check passes (D-154 f, F8), so an implicit submit without consent loses nothing |
 | Timeline badge | **From email**; tooltip "{sender domain}, {date}" |
 
+### 11.4 Blocking work off the event loop (D-157 g, review FL-8)
+
+The routes in `web/routers/mail.py` that are `async def` (they read the JSON body themselves, §4) do only that in the async part: `await request.json()`, the input checks and `Secret` wrapping. Everything that blocks then runs in `starlette.concurrency.run_in_threadpool`: `open_store`, every `store.mail_*` call (`mail_accept` takes `BEGIN IMMEDIATE` and may wait the 5 s busy timeout while a sync holds the write lock), `vault` calls and the `MailSyncRunner` child calls (already there). Plain `def` routes run in the thread pool already. So an Accept during a sync waits on its own, and the other tabs stay responsive.
+
 ---
 
 ## 12. Failure and degradation
@@ -949,9 +982,9 @@ mail_status:                   # F-50: application status from email (docs/archi
 | App password revoked or wrong | LOGIN `AUTHENTICATIONFAILED` / "invalid credentials" | stop this account | PAUSED `login_refused`; the timer never retries; Check now or a new password tries once | yes |
 | Account password instead of an app password | "application-specific password required" | as above | PAUSED `app_password_required` | yes |
 | Google security block | `[ALERT]` "log in via your web browser" | as above | PAUSED `web_login_required` | yes |
-| Network down, DNS, TLS, timeout (20 s) | `OSError`, `ssl.SSLError`, `IMAP4.abort` | stop this account at a message boundary | ERROR `network`; `retry_after = now + interval × min(2^(fails−1), 6)` | yes |
-| Throttled | `[OVERQUOTA]`, `[UNAVAILABLE]`, `[THROTTLED]`, "Too many simultaneous connections" | stop | BACKOFF `rate_limited`, `retry_after = now + 60 min` | yes |
-| Not Gmail | no `X-GM-EXT-1` | refuse | ERROR `not_gmail`, `retry_after = now + 24 h` | yes |
+| Network down, DNS, TLS, timeout (20 s) | `OSError`, `ssl.SSLError`, `IMAP4.abort` | stop this account at a message boundary | ERROR `network`; `retry_after = now + interval × min(2^(fails−1), 6)` (the timer waits for it; Check now and `mail sync` try at once, §5.1) | yes |
+| Throttled | `[OVERQUOTA]`, `[UNAVAILABLE]`, `[THROTTLED]`, "Too many simultaneous connections" | stop | BACKOFF `rate_limited`, `retry_after = now + 60 min` (timer only; owner triggers try once) | yes |
+| Not Gmail | no `X-GM-EXT-1` | refuse | ERROR `not_gmail`, `retry_after = now + 24 h` (timer only) | yes |
 | All Mail hidden / Spam hidden | LIST lacks `\All` / `\Junk` | read INBOX + Spam / skip Spam | note `all_mail_hidden` / `junk_hidden` | yes |
 | UIDVALIDITY changed | EXAMINE | RESCAN (§5.3) + dedupe | ok; logged as a count | no |
 | Connection dropped mid-scan | `IMAP4.abort`, `OSError` | cursor stays at the last stored message | ERROR `network` → PARTIAL at the next check | yes |
@@ -967,11 +1000,15 @@ mail_status:                   # F-50: application status from email (docs/archi
 | Database busy or locked | `sqlite3.OperationalError` in `mail_record` | rollback; cursor unchanged; stop | run failed `db_busy` | yes |
 | Owner changed the status while a sync ran | re-check in `mail_record` | `NO_CHANGE / owner_newer` | — | no |
 | Child crashed | stale lease | next run `abandoned` → continues from the cursors | — | last run "failed" |
-| Unexpected exception | catch-all per account | stop that account; log the traceback with no mail values | ERROR `internal` | yes |
+| Unexpected exception while processing one message (D-157 a) | `except Exception` around §5.4 steps 2–8 (not `_Stop`, `MailFailure` or the busy-DB `OperationalError`) | that message only: a minimal `skipped / internal` row and the cursor in one transaction, `errors + 1`, the scan goes on; the traceback is logged with no mail values (§5.4 "Per-message isolation") | none, until **3 consecutive** messages fail: then the account stops, ERROR `internal` | the count; the stop: yes |
+| Unexpected exception outside a message (open, scan setup, the minimal row itself) | catch-all per account | stop that account; log the traceback with no mail values | ERROR `internal` | yes |
+| Mailbox disconnected during a sync (D-157 b) | `mail_record` / `mail_resolve_pending` find no `mail_accounts` row | nothing written (`{outcome: "gone"}`); the flow stops the account and writes no account state | — | no (the account is gone) |
 | `mail_status.enabled: false` | config | the timer doesn't spawn; `mail sync` exits `disabled` | — | yes |
 | Consent text version changed | `consent_version != CONSENT_VERSION` | account skipped | — | the consent box again |
 
-No retry storm: per account, at most one connect attempt per timer tick, with backoff on network errors and none on auth errors. Google can lock an account that keeps sending a wrong password; the PAUSED state prevents that.
+No retry storm: per account, at most one connect attempt per timer tick, with backoff on network errors and none on auth errors. Owner triggers ignore `retry_after` and PAUSED, but each is one attempt per click or command (D-157 e). Google can lock an account that keeps sending a wrong password; the PAUSED state keeps the timer from doing that.
+
+**Header fields (D-157 a, first layer).** Header bytes reach Python as `str` with surrogate escapes, and sqlite refuses a lone surrogate (review FL-1: one raw-UTF-8 sender domain wedged a mailbox). `imapread.parse_header` therefore returns only clean strings: `from_domain` and `from_reg` are ASCII, made by recovering the bytes (`encode("utf-8", "surrogateescape")`), decoding them as UTF-8 and IDNA-encoding each label to punycode (`bücher.example` → `xn--bcher-kva.example`); a domain that fails any step becomes `""` (then it is no employer or platform evidence). Every other `str` field of `MailHeader` (display name, subject, list id, …) is decoded the same way with `errors="replace"`, so it holds no surrogate. The store's `_text()` (§9) is the second layer and the per-message isolation (§5.4) the third.
 
 ---
 
@@ -1015,7 +1052,7 @@ No retry storm: per account, at most one connect attempt per timer tick, with ba
 **Risks:**
 - R1: app passwords are withdrawn by Google → ADR-0007 fallback (`gmail.readonly` transport).
 - R2: `require_auth` may turn too many ATS mails into suggestions if their DKIM doesn't align → the researcher's header-only spike (BP WP-R2) measures the pass rate, and `require_auth: false` is the switch.
-- R3: a dev instance (8768) with a copied database would read the real mailbox → `JOBSCRAPER_MAIL_SYNC=0` is the default for dev (CLAUDE.md note: Coordinator).
+- R3: a dev instance (8768) with a copied database would read the real mailbox → `cmd_web` turns the timer off when `JOBSCRAPER_DB` is set unless `JOBSCRAPER_MAIL_SYNC=1` (D-157 c), and the CLAUDE.md dev command carries `JOBSCRAPER_MAIL_SYNC=0` (Coordinator).
 - R4: the concurrent session's `SCHEMA_VERSION` or ADR number collides → §9 rule; renumber this ADR at merge if 0007 is taken.
 - R5: common-word employer names mis-match → `common_word_names` plus the bar (a body-only name is `WEAK` → suggestion).
 - R6: Qwen and an apply run competing for the GPU → `--defer-model`.
