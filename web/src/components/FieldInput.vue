@@ -221,7 +221,7 @@ function removeRow(i) {
         v-bind="aria"
         @change="set($event.target.checked)"
       >
-      <span aria-hidden="true">{{ modelValue === true ? 'Yes' : 'No' }}</span>
+      <span :aria-hidden="modelValue === true || modelValue === false ? 'true' : undefined">{{ modelValue === true ? 'Yes' : modelValue === false ? 'No' : 'Not set' }}</span>
     </label>
     <div v-else-if="kind === 'yes_no'" :id="id" class="radios" role="radiogroup" v-bind="aria">
       <label><input type="radio" :name="id" :checked="modelValue === true" :disabled="disabled" @change="set(true)"> Yes</label>
@@ -410,7 +410,7 @@ function removeRow(i) {
   min-height: var(--control-h);
   padding: 0 var(--space-3);
   background: var(--surface);
-  border: 1px solid var(--border-strong);
+  border: 1px solid var(--control-border, var(--border-strong));
   border-radius: var(--radius);
   max-width: 100%;
 }
@@ -430,7 +430,7 @@ function removeRow(i) {
 .chip-list { list-style: none; margin: 0 0 var(--space-2); padding: 0; display: flex; flex-wrap: wrap; gap: var(--space-1); }
 .chip { gap: 2px; padding-right: 2px; font-size: var(--text-sm); }
 .chip-x {
-  min-height: 0; width: 1.4rem; height: 1.4rem; padding: 0; border: none; box-shadow: none;
+  min-height: 0; width: 1.5rem; height: 1.5rem; padding: 0; border: none; box-shadow: none;
   background: transparent; color: var(--muted); border-radius: 999px;
 }
 .chip-x:hover:not(:disabled) { background: var(--danger-soft); color: var(--danger); }
