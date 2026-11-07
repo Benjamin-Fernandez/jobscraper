@@ -82,6 +82,12 @@ export function getApplications() {
   return request('applications')
 }
 
+// One job's auto-apply attempts, newest first (Q-76). [] when there are none.
+// {id, mode, state, kind, reason_code, text, hint, queued_at, finished_at, ...}
+export function getApplicationAttempts(jobId) {
+  return request(`applications/${encodeURIComponent(jobId)}/attempts`)
+}
+
 // Counts, plus `statuses`: the ordered status vocabulary from config.
 export function getStats() {
   return request('stats')
