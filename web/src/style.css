@@ -483,3 +483,7 @@ textarea { padding: var(--space-2) var(--space-3); line-height: var(--leading); 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { transition-duration: 0.01ms !important; animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; }
 }
+
+/* A scroller is the containing block of the visually-hidden text inside it (Q-75 I):
+   otherwise that text is placed against the page and widens it on a phone. */
+.table-wrap { position: relative; }
