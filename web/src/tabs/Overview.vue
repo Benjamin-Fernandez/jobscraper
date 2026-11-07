@@ -138,7 +138,7 @@ async function start() {
       <section v-if="cards.length || caughtUp || errors.questions" aria-labelledby="next-title">
         <h2 id="next-title" class="section-title">Next up</h2>
         <div v-if="errors.questions" class="notice warn" role="status">
-          <p>Could not check for open questions: {{ errors.questions }}.</p>
+          <p>Could not check for open questions: {{ errors.questions.replace(/\.$/, '') }}.</p>
           <button type="button" class="link" @click="load">Try again</button>
         </div>
         <ul v-if="cards.length" class="next-cards">
