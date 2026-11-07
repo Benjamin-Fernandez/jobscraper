@@ -292,3 +292,16 @@ Also `test_q72_contract_has_the_reason_its_text_and_is_a_suggestion` (MS 3: memb
 - Existing suite: `test_mail_contracts_module_is_the_design_listing` already fails on this base because the design lists `MAYBE_UNTRACKED` and contracts.py doesn't; it clears when the member and text are added.
 - Flow fixture: Northwind stands in for Acme (one closed application, owner-closed 2026-10-13); the crafted ack names an untracked role, so signals are employer-only (probed: name_in_sender/subject/body).
 STATUS: open
+
+## 2026-11-07 handoff: Q-75 lanes I+J pins (branch test/Q-75-pins, base int/Q-75-wave3 b3908e1)
+Baseline `cd web; npx vitest run` on b3908e1: 8 failed | 474 passed | 1 skipped (the 8 = the changes lanes I and J listed). After: 546 passed | 1 expected fail | 1 skipped, 29 files, green 3 runs in a row.
+- Listed changes applied: m16 Clear list (inline confirm, no window.confirm), Runs x2 (failed-link title), Settings x2 (cadence wording), Applications/Profile times (local zone + UTC tooltip), ux1 kbd list (adds Z and ?).
+- Time tests are machine-independent: `pinZone()` in web/tests/helpers.js sets process.env.TZ and throws if it did not take; Applications, Profile and q75-shell pin Asia/Singapore, unit cases also run America/New_York.
+- shell-job "page becoming visible" made deterministic: `quiet()` flushes until the fake API sees no new request for 4 turns, `until()` waits on the request itself; visibilityState override is restored in `finally`. I could not make the old version fail even with 24 CPU burners, so the root cause is unproven; the new one cannot depend on a fixed flush count.
+- New: web/tests/q75-shell.test.js (29: g-sequences for all 8 tabs, lapse at 1.5 s, typing/Ctrl/Meta ignored, switch off, `/`, ? sheet open/close/Esc/focus return/backdrop/Tab trap/inert/blocks Inbox keys/switch, Z undo incl. 60 s and X, Profile badge x4, Inbox write-error Dismiss, when/shortDate/exactTime in two zones) and web/tests/q75-pages.test.js (36: Clear list inline confirm, one set of counts, density/A-Z/chip, Runs error state incl. end to end through App, aborted reason, separators, num/matchLabel/runsPerDayLabel, Settings cycle keys + notices clear, theme incl. blocked storage).
+- Mutation check (break src, red, `git checkout -- src`): 13/13 caught: g-window never lapses; go keys while typing; no Tab trap; unbounded Z window; Keep list not focused; arrow saves at once; when() in UTC; Runs error state removed; System theme leaves data-theme; Dismiss does nothing; badge counts answered; no inline ask; App clears runsError after shortlist load.
+### defect (engineer, low): failed-link title/aria-label lacks thousands separators
+Repro: Runs with `stats.companies_failed: 1234`. Expected title "1,234 companies could not be read in this run..."; actual "1234 companies ..." beside the visible "1,234" (`plural()` in format.js has no separator; lane J flagged it). Pinned as `it.fails` in q75-pages.test.js (goes red when fixed: convert to `it`).
+### not covered
+G41 `content-visibility`, G17 pinned action bar, G38 phone selected style, G31 touch-target sizes, N18 heading levels, and the `<meta theme-color>`: CSS/layout, not observable in jsdom; need the browser check lane I did by hand.
+STATUS: open
