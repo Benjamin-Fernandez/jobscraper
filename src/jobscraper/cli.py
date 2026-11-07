@@ -263,7 +263,11 @@ def cmd_web(args) -> int:
     print(f"JobScraper web: http://{host}:{port}  (Ctrl+C to stop)")
     # Jobs started from the web app re-invoke the CLI; they must use the same
     # config the web app was started with (`--config X web`).
-    uvicorn.run(create_app(cfg, config_path=getattr(args, "config", None)),
+    # F-50 (mail_status_design §10.1): the mail timer runs in the real app;
+    # JOBSCRAPER_MAIL_SYNC=0 turns it off (a dev instance on a copied DB).
+    mail_timer = os.environ.get("JOBSCRAPER_MAIL_SYNC", "1").strip() != "0"
+    uvicorn.run(create_app(cfg, config_path=getattr(args, "config", None),
+                           mail_timer=mail_timer),
                 host=host, port=port, log_level="warning")
     return 0
 
