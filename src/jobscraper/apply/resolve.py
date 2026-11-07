@@ -1148,10 +1148,12 @@ def llm_schema(kind: str, n: int = 0, limit: int = 255) -> dict:
 
 def user_prompt(f: FormField, kind: str, ctx: ResolveContext, limit: int) -> str:
     """§7.6 user prompt. Only llm_extract + computed facts from the profile:
-    no S value can reach it."""
+    no S value can reach it, unless D-105 is in effect (ctx.model_sees_sensitive:
+    the owner's switch and a local backend), which adds the S paths."""
     facts = applicant.computed_facts(ctx.profile, applicant.today_sg())
     # D-75: the model is always told the standing work rights (not sensitive).
-    person = dict(applicant.llm_extract(ctx.profile), computed=facts,
+    person = dict(applicant.llm_extract(ctx.profile, sensitive=ctx.model_sees_sensitive),
+                  computed=facts,
                   work_rights=applicant.work_rights_text(ctx.profile))
     lines = [f"QUESTION: {f.label}", f"HELP: {f.description}",
              f"TYPE: {kind}", f"REQUIRED: {'yes' if f.required else 'no'}"]
@@ -1188,8 +1190,11 @@ def corpus_norm(text: str) -> str:
 
 
 def corpus_text(ctx: ResolveContext) -> str:
-    """Profile (non-sensitive) + resume + JD + employer name (§7.7)."""
-    return "\n".join([applicant.grounding_text(ctx.profile), ctx.resume_text or "",
+    """Profile (non-sensitive) + resume + JD + employer name (§7.7). Under D-105
+    the profile part holds the S values too: the corpus is what the model saw."""
+    return "\n".join([applicant.grounding_text(ctx.profile,
+                                                sensitive=ctx.model_sees_sensitive),
+                      ctx.resume_text or "",
                       ctx.jd_text or "", ctx.employer_name or ""])
 
 
@@ -1346,6 +1351,20 @@ def _llm_failed(f: FormField, ungrounded: bool, note: str, model: str, phash: st
                   model=model, prompt_hash=phash, note=note[:300])
 
 
+def _shows_s_value(value: Any, ctx: ResolveContext) -> bool:
+    """D-105 (q74 §3): True when the model may read S values and this tier-5
+    value contains one (case-insensitive, whole word), so the answer is tagged
+    sensitive like any other S answer. Always False with the switch off."""
+    if not ctx.model_sees_sensitive:
+        return False
+    texts = [str(v) for v in value] if isinstance(value, (list, tuple)) else [str(value or "")]
+    for s in applicant.sensitive_strings(ctx.profile):
+        pat = _term_pattern(s)
+        if any(pat.search(t) for t in texts):
+            return True
+    return False
+
+
 def _tier5(f: FormField, ctx: ResolveContext, backend: Any) -> Optional[Answer]:
     """The local model (§7.6), checked by `grounded` (§7.7). None when the
     field is not one the model may answer; otherwise a final Answer."""
@@ -1398,7 +1417,7 @@ def _tier5(f: FormField, ctx: ResolveContext, backend: Any) -> Optional[Answer]:
     return Answer(field_key=f.key, value=fit[0], tier=AnswerTier.LLM, source="llm",
                   confidence=CONF_LLM_CHOICE, status=AnswerStatus.FILLED,
                   option_labels=tuple(fit[1]), rule_id=RULE_ID_LLM, model=model,
-                  prompt_hash=phash)
+                  prompt_hash=phash, sensitive=_shows_s_value(fit[0], ctx))
 
 
 def _tier5_text(f: FormField, ctx: ResolveContext, backend: Any, user: str, schema: dict,
@@ -1419,10 +1438,12 @@ def _tier5_text(f: FormField, ctx: ResolveContext, backend: Any, user: str, sche
         bad = grounded("text", r, ctx, limit=limit, corpus=corpus)
         if not bad:
             note = "cover letter text" if f.canonical is Canonical.COVER_LETTER else ""
-            return Answer(field_key=f.key, value=str(r.get("text")).strip(),
+            text = str(r.get("text")).strip()
+            return Answer(field_key=f.key, value=text,
                           tier=AnswerTier.LLM, source="llm", confidence=CONF_LLM_TEXT,
                           status=AnswerStatus.FILLED, rule_id=RULE_ID_LLM, model=model,
-                          prompt_hash=phash, note=note)
+                          prompt_hash=phash, note=note,
+                          sensitive=_shows_s_value(text, ctx))
     return _llm_failed(f, True, "ungrounded: " + "; ".join(bad), model, phash)
 
 
