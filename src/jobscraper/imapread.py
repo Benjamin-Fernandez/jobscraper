@@ -97,6 +97,31 @@ def _check_fetch_items(items: str) -> None:
             raise ValueError("read-only: only RFC822.SIZE may be fetched among the RFC822 items")
 
 
+# imaplib sends an argument as given, and a CR or LF in one ends the command
+# line: what follows would reach the server as a second command (review F4). So
+# every argument is checked here, before imaplib sees it, and a UID set must be
+# exactly that: numbers, ranges and `*` (`16:*`, `3,5,9`).
+_UID_SET_RE = re.compile(r"[0-9]+(?:[:,](?:[0-9]+|\*))*")
+_LINE_BREAKERS = ("\r", "\n", "\0")
+
+
+def _check_arg(value: Any, what: str) -> str:
+    """`value` as a str with no CR, LF or NUL, else ValueError."""
+    text = value.decode("ascii", "replace") if isinstance(value, (bytes, bytearray)) else value
+    if not isinstance(text, str):
+        raise ValueError(f"read-only: {what} must be text")
+    if any(c in text for c in _LINE_BREAKERS):
+        raise ValueError(f"read-only: a line break in the {what} is refused")
+    return text
+
+
+def _check_uid_set(uids: Any) -> str:
+    text = _check_arg(uids, "UID set")
+    if not _UID_SET_RE.fullmatch(text):
+        raise ValueError("read-only: the UID set holds something other than UIDs")
+    return text
+
+
 class _ReadOnly:
     """The IMAP commands F-50 may send, and no others (MS §5.6).
 
@@ -118,21 +143,24 @@ class _ReadOnly:
         return self._conn.capability()
 
     def list(self, directory: str = '""', pattern: str = "*"):
-        return self._conn.list(directory, pattern)
+        return self._conn.list(_check_arg(directory, "LIST reference"), _check_arg(pattern, "LIST pattern"))
 
     def examine(self, name: str) -> tuple[str, int, int]:
         """Open `name` read-only. (typ, UIDVALIDITY, UIDNEXT); 0 for a value the
-        server didn't report."""
-        typ, _data = self._conn.select(quote_folder(name), readonly=True)
+        server didn't report. A name with CR, LF or NUL is refused."""
+        typ, _data = self._conn.select(quote_folder(_check_arg(name, "folder name")), readonly=True)
         if typ != "OK":
             return typ, 0, 0
         return typ, _response_int(self._conn, "UIDVALIDITY"), _response_int(self._conn, "UIDNEXT")
 
     def uid_search(self, *criteria: str):
-        return self._conn.uid("SEARCH", *criteria)
+        """UID SEARCH; every criterion token is checked for CR, LF and NUL."""
+        return self._conn.uid("SEARCH", *(_check_arg(c, "search criteria") for c in criteria))
 
     def uid_fetch(self, uids: str, items: str):
-        _check_fetch_items(items)
+        """UID FETCH of a checked UID set with read-only items."""
+        uids = _check_uid_set(uids)
+        _check_fetch_items(_check_arg(items, "fetch items"))
         return self._conn.uid("FETCH", uids, items)
 
     def noop(self):
@@ -228,7 +256,10 @@ def quote_folder(name: str) -> str:
     """A mailbox name as EXAMINE takes it. imaplib sends it as given, so a name
     with a space, a quote or another character an IMAP atom can't hold is quoted
     here; `INBOX` and `[Gmail]/Spam` go bare, as Gmail expects. The name is never
-    decoded: localised names stay in modified UTF-7, exactly as LIST gave them."""
+    decoded: localised names stay in modified UTF-7, exactly as LIST gave them.
+    A name with CR, LF or NUL (a LIST literal could hold one) is refused, since
+    quoting can't keep it inside one command line (review F4)."""
+    _check_arg(name, "folder name")
     if name and not any(c in name for c in ' "(){%*\\') and all(32 < ord(c) < 127 for c in name):
         return name
     return '"' + name.replace("\\", "\\\\").replace('"', '\\"') + '"'
@@ -325,6 +356,8 @@ def special_use_folders(conn: Any) -> dict[MailboxRole, str]:
         return {}
     found: dict[MailboxRole, str] = {}
     for flags, name in _list_entries(data):
+        if any(c in name for c in _LINE_BREAKERS):
+            continue                    # can't be opened safely (F4): as if not flagged
         if "\\all" in flags:
             found.setdefault(MailboxRole.ALL, name)
         if "\\junk" in flags:
@@ -680,9 +713,75 @@ class _HtmlText(HTMLParser):
         return "\n".join(l for l in lines if l)
 
 
+# What `links=False` replaces (MS §5.6 "every URL"; review F5). Wider than
+# URL_RE, which F-36 keeps as it was. A URL may hold balanced parentheses
+# (`/a(b)c`), so text after an unbalanced `(` or `)` survives.
+_URL_BODY = r"""(?:[^\s<>"'()\[\]{}]|\([^\s<>"'()\[\]{}]*\))"""
+# Hosts named without a scheme count only with a path, query or fragment after
+# them (`careers.example.com/reset?token=...`): a bare domain stays readable.
+# Three labels or more take any TLD; two labels only a common one, so that
+# `Node.js/React` or `e.g.` is never taken for an address.
+_COMMON_TLDS = ("com|org|net|io|co|ai|app|dev|me|info|biz|jobs|careers|edu|gov|"
+                "sg|my|hk|cn|jp|kr|in|id|ph|th|vn|tw|au|nz|uk|us|ca|de|fr|nl|eu|ch|ie|"
+                "ly|gl|to|xyz|site|online|link|page|cloud|tech")
+_ANY_URL_RE = re.compile(
+    r"\b[a-z][a-z0-9+.\-]{1,15}://" + _URL_BODY + "*"              # any scheme: https, ftp, hxxps
+    r"|(?<![\w:/.])//[\w-]+(?:\.[\w-]+)+" + _URL_BODY + "*"         # //host/... (scheme-relative)
+    r"|\bwww\.[\w-]+" + _URL_BODY + "*"                              # www.host...
+    r"|(?<![\w@.\-/])(?:[\w-]+\.){2,}[a-z]{2,}(?::\d+)?[/?#]" + _URL_BODY + "*"
+    r"|(?<![\w@.\-/])[\w-]+\.(?:" + _COMMON_TLDS + r")(?::\d+)?[/?#]" + _URL_BODY + "*",
+    re.I)
+# A URL cut by a line break: a quoted-printable soft break left in the text
+# (`...=` then the break) joins whatever follows; another break (a hard wrap, or
+# format=flowed's "space + break") joins only a piece that looks like the rest
+# of an address: it holds `?`, `=`, `&`, `%`, `#`, two `/`, or a dotted host.
+_QP_BREAK_RE = re.compile(r"\r?\n")
+_SOFT_BREAK_RE = re.compile(r"[ \t]?\r?\n[ \t]*")
+_URL_TAIL_RE = re.compile(_URL_BODY + "+")
+_LOOKS_URL_RE = re.compile(r"[?=&%#]|/\S*/|[\w-]\.[a-z]{2,}\b", re.I)
+_ABBREV_RE = re.compile(r"(?:\w\.)+\w?[.,;:!?]?", re.I)     # e.g.  i.e.  U.S.
+_SENTENCE_END = ".,;:!?"
+
+
+def _url_end(text: str, end: int) -> int:
+    """Where the URL that the pattern ended at `end` really ends, across line breaks."""
+    while True:
+        if text[end - 1] == "=":
+            brk = _QP_BREAK_RE.match(text, end)
+            tail = _URL_TAIL_RE.match(text, brk.end()) if brk else None
+            if tail:
+                end = tail.end()
+                continue
+        if text[end - 1] in _SENTENCE_END:
+            return end                  # it ended a sentence: the next line is text
+        brk = _SOFT_BREAK_RE.match(text, end)
+        tail = _URL_TAIL_RE.match(text, brk.end()) if brk else None
+        if not tail:
+            return end
+        piece = tail.group(0)
+        if _ABBREV_RE.fullmatch(piece) or not _LOOKS_URL_RE.search(piece):
+            return end
+        end = tail.end()
+
+
 def hide_links(text: str) -> str:
-    """Every http(s) URL and bare `www.` address in `text` replaced by `[link]`."""
-    return _WWW_RE.sub(LINK_TEXT, URL_RE.sub(LINK_TEXT, text or ""))
+    """Every URL in `text` replaced by `[link]` (MS §5.6): any scheme, `//host`,
+    `www.`, a host with a path or query, and a URL broken across lines.
+    Sentence punctuation right after a URL stays."""
+    text = text or ""
+    out: list[str] = []
+    pos = 0
+    while True:
+        m = _ANY_URL_RE.search(text, pos)
+        if not m:
+            break
+        end = _url_end(text, m.end())
+        while end > m.start() + 1 and text[end - 1] in _SENTENCE_END:
+            end -= 1
+        out += [text[pos:m.start()], LINK_TEXT]
+        pos = end
+    out += [text[pos:]]
+    return "".join(out)
 
 
 def body_text(msg: email.message.EmailMessage, links: bool = True
