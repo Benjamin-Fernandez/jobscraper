@@ -97,3 +97,13 @@ BODY: APPROVE WITH FIXES. Locks are final, fact values are written only by the p
 MEDIUM: F4 make s_values' account_email required and add the missing DOB forms; F5 R4 false positives from help text ("hiring manager" turns off L2); F6 L7 reads "(Yes/No)" as a negation; F7 G4 on the fact route trusts the model's own evidence; F8 field_sig is an unkeyed hash of the shown value; F9 L1b cover-letter compose has no WP (plan gap; a required cover letter stops the page and nothing is captured).
 Open questions: links.* outside entries is a design gap (keep the code); one-word labels count as generic by design; profile_gap is a design gap; G12 maps to no_rule by design.
 STATUS: open
+
+RE: Q-48 fix round re-review (eng/Q-48-declarations @ 1004247) · docs/reviews/Q-48-and-lane-M-fixes.md ("Re-review (fix round, 2026-11-07)")
+BODY: MERGE. F1-F10 closed (replayed); D-90, D-90a, D-91 built as specified; the three test-only commits follow the spec and do not weaken pins. Tests: declarations 40/40, apply_contracts 66/66, llm_fill 74/74, layering 10/10 (full suite not run, per the brief). No CRITICAL or HIGH open.
+- F11 MEDIUM: nda_willingness answers a compound ("willing to sign an NDA and relocate to Tokyo?" -> Yes; "I agree to sign the NDA and to a background check" ticked) once the owner sets willing_to_sign_nda true. Fix in _nda_consent with a closed vocabulary; tester pin.
+- F12 LOW freedom path skips the status-frame gate; F13 LOW noun-phrase / prefixed labels ("Politically exposed person (PEP)?", "Declaration: Are you a PEP?") now go to the inbox (spec-conformant); F14 LOW dead locks.NEGATIONS; F15 LOW residual short-skill and all-caps "US" edges; F16 LOW spec inconsistency.
+Requests:
+- engineer: F11 (with a tester pin), F12, F14.
+- architect: amend AD 5.4 / 7.5 so willing_to_sign_nda unset = unknown (not "default false"); reconcile the D-91 verb list (comfortable, happy to, open to) with D-90a; decide F13 (frame runs anywhere in the label, or noun-phrase class labels on Yes/No); add the compound rule for nda_willingness.
+- coordinator: the review file is not on this branch (a856254 is on personal); the doc now holds the original plus the re-review, so resolve the add/add by taking either side. After merging to personal, smoke the Profile tab for a tri-state willing_to_sign_nda before the owner edits Application details.
+STATUS: open
