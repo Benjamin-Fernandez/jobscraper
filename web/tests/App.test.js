@@ -12,7 +12,7 @@ let api
 const LAST = TABS.at(-1).id
 
 beforeEach(() => {
-  setHash('')
+  setHash('#/inbox')
   resetDismissed()
   api = fakeApi()
   vi.stubGlobal('fetch', api.fetch)
@@ -66,7 +66,7 @@ describe('App shell', () => {
     expect(labels).toEqual(TABS.map(t => t.label))
     // In this order (M16: Companies after Runs, Developer last); a later tab
     // (the M7-T4 probe) goes after them.
-    expect(labels.slice(0, 7)).toEqual(['Inbox', 'Applications', 'Runs', 'Companies', 'Profile', 'Settings', 'Developer'])
+    expect(labels.slice(0, 8)).toEqual(['Overview', 'Inbox', 'Applications', 'Runs', 'Companies', 'Profile', 'Settings', 'Developer'])
     expect(wrapper.find('header [role="tablist"]').exists()).toBe(true)
   })
 
@@ -181,16 +181,24 @@ describe('App shell', () => {
 })
 
 describe('Navigation: the active tab lives in the URL hash', () => {
-  it('an empty hash opens the Inbox and the URL says #/inbox', async () => {
-    const wrapper = await mountApp()
-    expect(selectedId(wrapper)).toBe('inbox')
-    expect(window.location.hash).toBe('#/inbox')
+  it('an empty hash opens the Overview and the URL says #/overview', async () => {
+    const wrapper = await mountOn('', '.overview')
+    expect(selectedId(wrapper)).toBe('overview')
+    expect(window.location.hash).toBe('#/overview')
   })
 
-  it('an unknown hash falls back to the Inbox', async () => {
-    const wrapper = await mountOn('#/no-such-tab', '.inbox')
-    expect(selectedId(wrapper)).toBe('inbox')
-    expect(window.location.hash).toBe('#/inbox')
+  it('an unknown hash falls back to the Overview', async () => {
+    const wrapper = await mountOn('#/no-such-tab', '.overview')
+    expect(selectedId(wrapper)).toBe('overview')
+    expect(window.location.hash).toBe('#/overview')
+  })
+
+  it('the brand link goes to the Overview', async () => {
+    const wrapper = await mountApp({ attachTo: document.body })
+    expect(wrapper.find('.brand a').attributes('href')).toBe('#/overview')
+    await wrapper.find('.brand a').trigger('click')
+    expect(window.location.hash).toBe('#/overview')
+    expect(selectedId(wrapper)).toBe('overview')
   })
 
   it('a bookmarked or refreshed hash opens that tab (URL -> tab)', async () => {
@@ -239,10 +247,10 @@ describe('Navigation: the active tab lives in the URL hash', () => {
     const ids = TABS.map(t => t.id)
     expect(tabFromHash('#/runs', ids)).toBe('runs')
     expect(tabFromHash('#/runs/', ids)).toBe('runs')
-    expect(tabFromHash('#runs', ids)).toBe('inbox')
-    expect(tabFromHash('#/Runs', ids)).toBe('inbox')
-    expect(tabFromHash('', ids)).toBe('inbox')
-    expect(tabFromHash('#/runs/../x', ids)).toBe('inbox')
+    expect(tabFromHash('#runs', ids)).toBe('overview')
+    expect(tabFromHash('#/Runs', ids)).toBe('overview')
+    expect(tabFromHash('', ids)).toBe('overview')
+    expect(tabFromHash('#/runs/../x', ids)).toBe('overview')
   })
 })
 
@@ -250,7 +258,7 @@ describe('Keyboard: WAI-ARIA tabs', () => {
   it('only the selected tab is in the Tab order', async () => {
     const wrapper = await mountApp()
     const stops = wrapper.findAll('[role="tab"]').map(t => t.attributes('tabindex'))
-    expect(stops).toEqual(TABS.map((t, i) => (i === 0 ? '0' : '-1')))
+    expect(stops).toEqual(TABS.map((t, i) => (t.id === 'inbox' ? '0' : '-1')))
   })
 
   it('ArrowRight / ArrowLeft move focus and selection, wrapping at the ends', async () => {
@@ -266,11 +274,14 @@ describe('Keyboard: WAI-ARIA tabs', () => {
     expect(selectedId(wrapper)).toBe('inbox')
 
     await tab(wrapper, 'inbox').trigger('keydown', { key: 'ArrowLeft' })
+    expect(selectedId(wrapper)).toBe('overview')
+
+    await tab(wrapper, 'overview').trigger('keydown', { key: 'ArrowLeft' })
     expect(selectedId(wrapper)).toBe(LAST)
     expect(document.activeElement).toBe(tab(wrapper, LAST).element)
 
     await tab(wrapper, LAST).trigger('keydown', { key: 'ArrowRight' })
-    expect(selectedId(wrapper)).toBe('inbox')
+    expect(selectedId(wrapper)).toBe('overview')
   })
 
   it('Home and End jump to the first and last tab; other keys do nothing', async () => {
@@ -278,9 +289,9 @@ describe('Keyboard: WAI-ARIA tabs', () => {
     await tab(wrapper, 'inbox').trigger('keydown', { key: 'End' })
     expect(selectedId(wrapper)).toBe(LAST)
     await tab(wrapper, LAST).trigger('keydown', { key: 'Home' })
-    expect(selectedId(wrapper)).toBe('inbox')
-    await tab(wrapper, 'inbox').trigger('keydown', { key: 'a' })
-    expect(selectedId(wrapper)).toBe('inbox')
+    expect(selectedId(wrapper)).toBe('overview')
+    await tab(wrapper, 'overview').trigger('keydown', { key: 'a' })
+    expect(selectedId(wrapper)).toBe('overview')
   })
 })
 
