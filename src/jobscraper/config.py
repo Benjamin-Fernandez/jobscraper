@@ -223,6 +223,22 @@ _MAIL_CLAMPS: dict[str, tuple[float, Optional[float]]] = {
     "model_max_calls": (0, None), "model_max_chars": (1, None), "model_timeout_s": (1, None),
     "retry_model_days": (0, None)}
 
+_MAIL_FALSE = frozenset({"false", "no", "0", "off", "n", "f"})
+_MAIL_TRUE = frozenset({"true", "yes", "1", "on", "y", "t"})
+
+
+def _mail_bool(value: Any, default: bool) -> bool:
+    """D-104 (g): the same reading as `mailstatus.transition.as_bool` (config is
+    foundation and may not import a stage). `bool("false")` is True, so a quoted
+    'false' / 'no' / '0' is read as text; anything unreadable keeps the default,
+    so a typo never turns `require_auth` off."""
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return value != 0
+    s = str(value).strip().lower()
+    return False if s in _MAIL_FALSE else True if s in _MAIL_TRUE else default
+
 
 @dataclass(frozen=True)
 class MailStatusConfig:
@@ -261,8 +277,7 @@ class MailStatusConfig:
                 continue
             v, default = raw[name], f.default
             if isinstance(default, bool):
-                out[name] = v if isinstance(v, bool) else str(v).strip().lower() in (
-                    "1", "true", "yes", "on")
+                out[name] = _mail_bool(v, default)
                 continue
             try:
                 n = int(float(v))
