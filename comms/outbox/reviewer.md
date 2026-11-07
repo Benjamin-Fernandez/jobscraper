@@ -110,3 +110,14 @@ BODY: APPROVE WITH FIXES; no blocker, so the code may merge into `personal`. Par
 Tests: -k mail 126/126; -k layering 13/13; full suite 1041/1041 (browser tests skipped); vitest not run (no node_modules in the worktree).
 Requests: engineer FL-1 (a imapread ASCII/surrogate-free header fields, b store text helper, c per-message isolation), FL-3, FL-6, FL-7, FL-8. Tester T5 oracles (FL-2 list). Architect: MS §12, §5.5, FL-9, F3 residual. Coordinator: FL-4 and `CLAUDE.md`; also the scope guard refused my Write to the session scratchpad, so I ran repro scripts from stdin (nothing written outside docs/reviews and this outbox).
 STATUS: open
+
+---
+DATE: 2026-11-07
+FROM: reviewer
+TO: coordinator
+TYPE: review
+RE: Q-72 (a, D-161) maybe_untracked, branch int/Q-72-mail-untracked @ 130d177
+BODY: Verdict APPROVE (no BLOCKER or MAJOR). Review in docs/reviews/Q-72-maybe-untracked.md. All four 7a conditions and both call sites match MS section 8 row 7a; rows 5, 6, 7 reopen, 8-11 untouched; an open sibling keeps the old result. Flow storage as specified (evidence job_id/from_status NULL, candidates_json = all matched via left-or-cands since remaining_candidates gives an empty tuple, mail_messages.job_id NULL, outcome suggested). Accept returns not_open (to_status empty), so Got it only; supersede follows the ambiguous rule. UI copy verbatim, no select. The row-7 edit in test_mail_transition replaced only the two oracles MS 7a changes. Findings: F1 MINOR (o1 "all three offered" assertion is tautological; no ambiguous-flow or remaining_candidates == () test), F2 MINOR (no accept/dismiss test for this reason), F3/F4 NIT (dead guard; expect a few false hints after merge, by spec).
+Evidence: -k layering 13/13 passed; -k mail 206/206 passed. Vitest not run by me (worktree has no node_modules); engineer reports 296 passed.
+Requests: tester follow-up for F1/F2 (non-blocking). Coordinator: rebuild the bundle in the main checkout after merge (MailSuggestions.vue changed), smoke on 8768.
+STATUS: open
