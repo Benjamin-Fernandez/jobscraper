@@ -194,7 +194,6 @@ class _Account:
         self.id = int(row["id"])
         self.report = AccountReport(self.id)
         self.c = self.report.counts
-        self.c.setdefault("errors", 0)      # messages stored as skipped/internal (FL-1)
         self.failures_in_row = 0
         self.refresh()
 
@@ -271,7 +270,7 @@ class _Sync:
         except MailFailure as exc:
             rep.code = exc.code
         except Exception as exc:                    # noqa: BLE001 - per account (MS §12)
-            if isinstance(exc, sqlite3.OperationalError):
+            if _db_busy(exc):
                 rep.code = SyncCode.DB_BUSY
             else:
                 _log_crash(f"mail sync account {row['id']}", exc)
@@ -301,7 +300,7 @@ class _Sync:
             if i and i % HEARTBEAT_EVERY == 0:
                 self.beat()
             if h.gm_msgid in seen:
-                self.st.mail_cursor_set(h.cursor_after)
+                self.cursor(h.cursor_after)
                 acc.c["duplicates"] += 1
                 continue
             res, msg = self.isolated(acc, h, lambda: self.record(acc, h))
@@ -312,8 +311,13 @@ class _Sync:
         if not scan.complete:
             raise _Stop("headers cap")
         if scan.end_cursor is not None:
-            self.st.mail_cursor_set(scan.end_cursor)
+            self.cursor(scan.end_cursor)
         return budget - len(scan.headers)
+
+    def cursor(self, cursor: Cursor) -> None:
+        """Move a cursor; an account disconnected meanwhile stops the scan (D-158 4)."""
+        if self.st.mail_cursor_set(cursor) is False:
+            raise _Stop("gone")
 
     def record(self, acc: _Account, h: MailHeader) -> tuple[dict, dict]:
         """Steps 2-8 for one new header: decide, then store with the cursor."""
@@ -335,9 +339,11 @@ class _Sync:
         stores the minimal row (default: `mail_record` with the cursor)."""
         try:
             res, msg = work()
-        except (_Stop, MailFailure, sqlite3.OperationalError):
+        except (_Stop, MailFailure):
             raise
         except Exception as exc:                    # noqa: BLE001 - this message only
+            if _db_busy(exc):
+                raise                               # D-158 3: the run ends and retries
             _log_crash(f"mail sync account {acc.id}: one message failed", exc)
             acc.c["errors"] += 1
             acc.failures_in_row += 1
@@ -360,7 +366,7 @@ class _Sync:
         date only, no domain, no text (MS §12 as amended, D-157 a)."""
         return {"gm_msgid": h.gm_msgid, "gm_thrid": None, "role": h.ref.role,
                 "validity": h.ref.validity, "uid": h.ref.uid, "received_at": h.received_at,
-                "sender_domain": "", "outcome": Outcome.SKIPPED, "reason": "internal",
+                "sender_domain": "", "outcome": Outcome.SKIPPED, "reason": Reason.INTERNAL,
                 "category": None, "tier": None, "rule_id": None, "job_id": None,
                 "match_json": None}
 
@@ -550,6 +556,10 @@ class _Sync:
         fails = int(row.get("fail_count") or 0)
         fields: dict[str, Any] = {"last_sync_at": now, "notes": [n.value for n in rep.notes],
                                   "last_counts_json": rep.counts}
+        if code is SyncCode.DB_BUSY:
+            # D-158 3: not the mailbox's fault; no backoff, the next sync retries.
+            self.st.mail_account_set(int(row["id"]), last_sync_at=now)
+            return
         if code in (SyncCode.OK, SyncCode.PARTIAL):
             fields.update(state=AccountState.OK.value, state_code=None, fail_count=0,
                           retry_after=None, last_ok_at=now)
@@ -568,6 +578,13 @@ class _Sync:
             fields.update(state=AccountState.ERROR.value, state_code=code.value,
                           fail_count=n, retry_after=_shift(now, minutes=wait))
         self.st.mail_account_set(int(row["id"]), **fields)
+
+
+def _db_busy(exc: BaseException) -> bool:
+    """A locked or busy database (another writer held it past the timeout): not
+    the message's fault, so the run ends and the next one retries (D-158 3)."""
+    text = str(exc).lower() if isinstance(exc, sqlite3.OperationalError) else ""
+    return "locked" in text or "busy" in text
 
 
 def _value(v: Any) -> str:
@@ -646,6 +663,9 @@ def sync(cfg: Any, *, trigger: str, account_id: Optional[int] = None, defer_mode
                 rep = flow.account(row)
                 flow.settle(row, rep)
                 report.accounts.append(rep)
+                if rep.code is SyncCode.DB_BUSY:
+                    log.info("mail sync: the database is busy; the next sync retries")
+                    break
                 c = rep.counts
                 log.info("mail sync account %s: %s scanned, %s read, %s updated, %s to review, "
                          "%s unmatched, %s waiting for the model, %s failed (%s)", rep.account_id,

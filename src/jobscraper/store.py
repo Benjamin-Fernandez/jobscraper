@@ -2114,11 +2114,21 @@ class Store:
         d["validity"] = d["uidvalidity"]
         return d
 
-    def mail_cursor_set(self, cursor: Any) -> None:
+    def mail_cursor_set(self, cursor: Any) -> bool:
         """Upsert a cursor (a dict, or a contracts.Cursor; `validity` or
-        `uidvalidity`). Commits."""
-        self._mail_cursor_upsert(cursor)
-        self.conn.commit()
+        `uidvalidity`). Commits. False (nothing written) when the account no
+        longer exists (disconnected during a sync, D-158 4), else True."""
+        try:
+            self.begin_immediate()
+            if not self._mail_account_exists(_as_dict(cursor).get("account_id")):
+                self.conn.commit()
+                return False
+            self._mail_cursor_upsert(cursor)
+            self.conn.commit()
+        except BaseException:
+            self.conn.rollback()
+            raise
+        return True
 
     def _mail_cursor_upsert(self, cursor: Any) -> None:
         """The cursor write without a commit: `mail_record` calls it inside its
@@ -2529,7 +2539,10 @@ class Store:
         owner_at = self.conn.execute(
             "SELECT MAX(at) FROM app_events WHERE job_id = ? AND by IS NULL",
             (target,)).fetchone()[0]
-        if owner_at and owner_at > ev["received_at"]:
+        # Row 6. A `backfilled` suggestion exists because the owner entered the
+        # application after this email (D-157 h), so the re-check would always
+        # refuse it: skipped for that reason only (D-158 6).
+        if owner_at and owner_at > ev["received_at"] and ev["reason"] != "backfilled":
             return False, "changed"                                    # row 6
         status = app["status"]
         if status in terminal and to in terminal:
