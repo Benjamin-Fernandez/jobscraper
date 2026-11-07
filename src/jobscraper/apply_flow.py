@@ -188,6 +188,10 @@ _SIGNAL_NOTE = {
 
 # ---------------------------------------------------------------- one attempt
 
+# The llm path may not press Submit until the pre-Submit scan exists (WP-N6b; review F1).
+AUTO_SUBMIT_BLOCKED = "auto submit needs the pre-Submit scan (N6b)"
+
+
 class _Attempt:
     """The bookkeeping of one attempt: state writes, evidence, audit rows."""
 
@@ -1143,13 +1147,16 @@ class _Run:
         else:
             raise ApplyFailure(ReasonCode.PAGE_UNRECOGNISED, f"{nav.name}: too many steps")
 
-        # review (the pre-Submit scan and the review text check arrive with WP-N6b)
+        # review (the pre-Submit scan and the review text check arrive with WP-N6b).
+        # Until then an auto-mode attempt fails closed (review F1, NF-06): it stops here, as a
+        # dry run does, and never reaches Submit. The owner sees "ready to submit" with the note.
+        at.shot(page, "review")
+        at.result.url = (page.url or "").split("?", 1)[0]
         if self.dry_run:
-            at.shot(page, "review")
-            at.result.url = (page.url or "").split("?", 1)[0]
             at.to(S.READY_TO_SUBMIT, end_url=at.result.url)
-            return nav, ctx
-        self.submit(page, ctx, nav, at, job)
+        else:
+            self.log(f"[attempt {at.id}] {AUTO_SUBMIT_BLOCKED}")
+            at.to(S.READY_TO_SUBMIT, end_url=at.result.url, detail=AUTO_SUBMIT_BLOCKED)
         return nav, ctx
 
     def page_result(self, at: _Attempt, page: Any, outcome: PageOutcome, rctx: ResolveContext,
