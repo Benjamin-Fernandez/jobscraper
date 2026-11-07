@@ -9,13 +9,16 @@
 // hands it to every tab (see shell.js). Choosing a run fetches that run's
 // shortlist and swaps it in place: one request, no navigation (M7-T2).
 import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { ApiError, describeError, getRuns, getShortlist, getStats } from './api.js'
+import { ApiError, describeError, failureText, getRuns, getShortlist, getStats } from './api.js'
+import { onJobStarted, useJob } from './composables/useJob.js'
+import { showToast } from './toast.js'
 import { TABS } from './tabs.js'
 import { runQuery, sameRun } from './runs.js'
 import { hashFor, tabFromHash } from './route.js'
 import TabLoading from './components/TabLoading.vue'
 import TabFailed from './components/TabFailed.vue'
 import ToastHost from './components/ToastHost.vue'
+import JobPill from './components/JobPill.vue'
 
 const runs = ref([])
 // What the Inbox shows (M15): 'all' (the default), 'week', 'month', or the
@@ -139,6 +142,28 @@ async function onChanged(options = {}) {
   await Promise.all([loadJobs(), loadStats()])
 }
 
+// The shell watches the background job for every tab (Q-70 C2, G7): a run that
+// finishes while the owner is on Profile or Applications still refreshes the
+// Inbox and says so. `consume: false` keeps its list of seen jobs apart, so the
+// Runs tab's own watcher still hears the ending first-hand.
+const shell = useJob({
+  consume: false,
+  onFinish: j => {
+    onChanged({ runs: j.kind === 'run' })
+    if (j.kind === 'run') {
+      showToast({
+        message: j.state === 'succeeded' ? 'Run finished. New roles are in the Inbox.' : failureText(j, 'The run stopped.'),
+        link: { label: 'Open Runs', href: '#/runs' },
+      })
+    }
+  },
+})
+// Coming back to the page, the job may have ended while the timers slept.
+function onVisible() {
+  if (document.visibilityState === 'visible') shell.refresh()
+}
+let stopStarters = () => {}
+
 watch(active, tab => { document.title = tab ? `${tab.label} · JobScraper` : 'JobScraper' }, { immediate: true })
 
 // On a narrow screen the tab bar scrolls sideways; keep the current tab in view
@@ -188,11 +213,16 @@ async function boot() {
 onMounted(() => {
   window.addEventListener('hashchange', onHashChange)
   window.addEventListener('keydown', onSlash)
+  document.addEventListener('visibilitychange', onVisible)
+  stopStarters = onJobStarted(j => shell.track(j, { started: true, announce: false }))
+  shell.refresh()
   return boot()
 })
 onBeforeUnmount(() => {
   window.removeEventListener('hashchange', onHashChange)
   window.removeEventListener('keydown', onSlash)
+  document.removeEventListener('visibilitychange', onVisible)
+  stopStarters()
 })
 </script>
 
@@ -236,6 +266,7 @@ onBeforeUnmount(() => {
             </button>
           </div>
         </div>
+        <JobPill :job="shell.job.value" />
       </div>
     </header>
 
@@ -290,6 +321,7 @@ onBeforeUnmount(() => {
   align-items: stretch;
   gap: var(--space-5);
   min-height: var(--header-h);
+  position: relative;
 }
 .brand {
   display: flex;
