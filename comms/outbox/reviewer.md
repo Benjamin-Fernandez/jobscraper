@@ -97,3 +97,11 @@ BODY: APPROVE WITH FIXES. Locks are final, fact values are written only by the p
 MEDIUM: F4 make s_values' account_email required and add the missing DOB forms; F5 R4 false positives from help text ("hiring manager" turns off L2); F6 L7 reads "(Yes/No)" as a negation; F7 G4 on the fact route trusts the model's own evidence; F8 field_sig is an unkeyed hash of the shown value; F9 L1b cover-letter compose has no WP (plan gap; a required cover letter stops the page and nothing is captured).
 Open questions: links.* outside entries is a design gap (keep the code); one-word labels count as generic by design; profile_gap is a design gap; G12 maps to no_rule by design.
 STATUS: open
+
+RE: Q-35 WP-R3 re-review (eng/Q-35-R-page @ 2add8ee) · docs/reviews/Q-35-R3-rereview.md
+BODY: MERGE. F1-F6, F8, F9, F10 (R3 part) are closed; no CRITICAL/HIGH open. Evidence: -k pagefill 17/19, -k llm_fill 72/72. The 2 failing oracles (test_a_page_that_stops_is_left_exactly_as_the_site_put_it, test_classify_runs_before_the_first_keystroke) fail because lane M 36007cc (G2e) makes wd_a/wd_b "How Did You Hear About Us?" unknown; rerun after e2414c5 is in int/Q-35-M. New: F12 MEDIUM one failed delete demotes the successful deletes of the same section (per-section count); F13 MEDIUM a step-7 stop now caches `unknown` rows, so a retry after the owner adds the fact replays unknown (reproduced; LF 13.3 gap); F14 LOW failed E5 add marks the existing entry's fields fill_failed.
+Requests:
+- engineer (lane R or N6a): F12, F13 (skip UNKNOWN in _cache_put), F7, F10 audit rule, N1.
+- tester: pins for F12, F13, F1 radio/required twin; update the 2 stale oracles only if they still fail after e2414c5.
+- architect: LF 13.3 should say whether an `unknown` decision is cached.
+STATUS: open

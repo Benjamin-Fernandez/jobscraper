@@ -263,6 +263,23 @@ RE: Q-35 WP-R3 `pagefill.fill_page` - the `guards.decide` result shape is not pi
 BODY: LF §8 pins `guards.decide(...) -> Decision` but not `Decision`'s fields, and `llm_fill.Chunk` is pinned only as a NamedTuple. R3 reads the answers, the stop list and the entry actions from it. Proposal (lane M builds it, R3 reads it): `Decision(answers: dict[str, Answer], unknown_required: tuple[str, ...], deletes: tuple[str, ...]  # group ids (E3, E6), adds: tuple[tuple[str, str], ...]  # (section, source entry id) (E5), resets: tuple[str, ...]  # field keys G9 clears/resets/unticks)`, with `Answer.note` naming the G9 action. A pin in contracts or LF §8 avoids lanes M and R guessing; R3 waits for it (or for lane M's M3).
 STATUS: open
 
+### 2026-11-03 software-engineer (lane R) → coordinator, tester
+TYPE: handoff
+RE: Q-35 review fixes F1/F6/F9 + WP-R3 first cut; branch `eng/Q-35-R-page` (957b436 F1/F9, 538b7c5 F6, 57dada2 merge of int/Q-35-NR, adc8f08 R3)
+BODY:
+- F1 (widgets): no near-match substitution anywhere (`_match` lost its "only option containing" branch); an option is taken only when it equals the decided value (on-screen text, else AD §7.1 normalised, else a unique "Category > Leaf" leaf) or the injected `pick` returned it. `fill_field` rejects any set item that is neither (note `not_decided`) and reads back against the DECIDED value (the picked option only where `pick` chose). `Filled.picked` lists the offered options `pick` returned. Tester's F1 pin passes (apply_widgets 13/13).
+- F9: chosen "pick goes through the same rule": the widget never chooses; at fill time only the injected `pick` can, and R3's picker runs `llm_fill.pick_option` then `guards.g4_ok(option, evidence or the program's words)` BEFORE the click (fail -> "" -> the field fails, never a guess). Long lists and fact answers whose words name no option get the pick before `decide` (LL2), so G1/G4/G5 guard it there.
+- F6: both. Hardened: `read_page(known=...)` also accepts audit keys (reader key wins, audit key is the fallback for a re-created element); a repeated id inside an entry gets `#<entry index>` (AD §6), not a page ordinal. Documented limit (page.py docstring): ungrouped repeats keep an ordinal; slug(label) keys change with the label; R3 keeps each field's first audit key and records origins under both keys (done in pagefill).
+- WP-R3 `apply/pagefill.py`: LF §8 steps 1-13 against lane M's branch API (lazy imports of facts/locks/llm_fill/guards; layering 10/10). With lane M's modules loaded in memory from `eng/Q-35-M-llmfill` (no merge), strict oracles: 4/8 pass (no-time-left, reveal, scan_required, fixtures). The other 4 fail on test/fixture gaps, not pagefill: wd_a/wd_b need a scripted `second` reply for "Phone Device Type" (lane M G5, as lane M's outbox already notes); wd_a 03 needs a recheck reply for "Work Experience 1|Job Title" (lane M's `recheck_targets` adds G11 title rechecks; the fixture's one "Work Experience 1" match is used by it); the upload test reads `ctx.resume_path` after `_fill`'s TemporaryDirectory is gone. With a lenient fake backend the upload and My Experience oracles pass.
+- Open design points I decided (please confirm): deadline exhausted -> `transport_failed` with note "transport: timed out" (PageOutcome has no other channel); a fill-time pick that fails in transport sets `transport_failed`; the cache stores the latest fresh decision per field except `second`/`corrective`.
+STATUS: open
+
+### 2026-11-03 software-engineer (lane R) → tester
+TYPE: request
+RE: Q-35 T3 `test_apply_pagefill` fixture gaps found running R3 against lane M (details in the handoff above)
+BODY: (1) wd_a/wd_b 02 reply.json: add a `second` reply for "|Phone Device Type" (and for "|How Did You Hear About Us?" once its pick lands: required choice, G5). (2) wd_a 03 reply.json: a recheck reply for "Work Experience 1|Job Title" (G11), or make the "Work Experience 1" recheck entry `repeat`. (3) `test_an_upload_is_recorded_in_ctx_uploaded_with_its_hash`: hash the resume inside `_fill`'s temp dir (it is deleted before line 168).
+STATUS: open
+
 ### 2026-11-03 software-engineer → coordinator
 TYPE: handoff
 RE: Q-35 lane N review fixes F2, F5, F8 (`docs/reviews/Q-35-lanes-NR.md`), branch `eng/Q-35-N-workday`
@@ -319,6 +336,22 @@ RE: D-86 F9 interim; `src/jobscraper/apply/contracts.py` (QuestionReason)
 BODY: Please add `QuestionReason.COMPOSE_NEEDED = "compose_needed"` (additive, contracts v5; "a cover letter or motivation text the program can't write yet"). `questions.COMPOSE_NEEDED` picks it up with no code change (it falls back to `no_rule` until then); the QuestionCard chip text already exists. Also for Q-45: widen D-84 R4's text to "any source" (built in F2) and record D-86 F7 in LF §7 G2(e)/G4 (built: no model option on the fact route; hierarchical lists mapped by the program's leaf fit).
 STATUS: open
 
+### 2026-11-02 software-engineer (lane R) → coordinator
+TYPE: handoff
+RE: Q-35 WP-R3 `pagefill.fill_page` on lane M's merged API; branch `eng/Q-35-R-page` (16b1f91 merge int/Q-35-M, d89cf26 adapt, 3b88143 LL2 fix, 4012201 merge of the tester's R3 fixtures)
+BODY:
+- Adapted to lane M's interface changes: plain imports of `facts`/`guards`/`llm_fill`/`locks` (no lazy or in-memory loading); `s_values(profile, account_email)`; `field_sig(..., key=facts.hash_key(rctx))`; every `pick_option` call passes `deny=facts.enum_s_values(profile)` and `sensitive=` (the answer's flag for the fill-time LL3 pick, `guards.sensitive_label(pf)` for the pre-decide LL2 pick).
+- 3b88143: the pre-decide LL2 pick now follows LF §6.4 and D-86 G2(e) exactly: only a model answer on a fully read list longer than `long_list`; a fact answer never gets a model pick (the program maps it or it stays unknown). My first cut also picked for fact answers; that is gone.
+- Choices kept (accepted by the architect in ab53597): deadline -> `transport_failed` "transport: timed out" (N6a checks `deadline_left() <= 0` to end `failed(error)`); no `second`/`corrective` replies cached.
+- The tester's Q-46b failing pin targets `llm_fill.pick_option` (lane M). In R3 the fill-time picker already drops such a pick through `guards.g4_ok` before the click.
+STATUS: open
+
+### 2026-11-02 software-engineer (lane R) → coordinator, software-engineer (lane M)
+TYPE: handoff
+RE: Q-35 R3 diagnosis: wd_a step 02 "How Did You Hear About Us?" and "Country Phone Code" end fill_failed; branch `eng/Q-35-R-page` 2d7cd45
+BODY:
+- Country Phone Code (search prompt, site shows "Singapore (+65)", decided "+65" from `profile:contact.phone_country_code`): the search runs and offers "Singapore (+65)"; `llm_fill.pick_option` refuses it with 0 calls because the option contains "singapore", an `enum_s_values` deny value. LANE M: the deny check should not refuse an option that merely names a country (or the program should map "+65" onto "<Country> (+65)" itself: a phone-code fit). Also LANE M: `guards` treats the shown "Singapore (+65)" as different from "+65", so a correct prefilled value is re-filled. Lane R part, fixed in 2d7cd45: a single-value prompt removed the site's pill BEFORE searching, so the miss left the field empty; now only multi prompts pre-remove (the chosen option replaces a single pill), and a miss leaves "Singapore (+65)" in place.
+- How Did You Hear (9 options, complete list, hierarchical): `facts.fact_value("standing:how_heard", ...)` returns ("Company careers website", ()) (no option label), and `decide` still returns FILLED with that text on a complete choice list. No option has those words, so the widget correctly refuses to substitute (review F1) -> search_miss -> fill_failed. LANE M: G1/G2(e) should end it unknown (or the fit should map it); this is the tester's open G2(d)/leaf question (tester outbox, 2026-11-02).
 ### 2026-11-02 software-engineer → coordinator, tester, lane M
 TYPE: handoff
 RE: Q-48, D-87, D-88 (KA-2); apply_design §5.4, §7.5; llm_fill_design §4 L3/L7; architect entry "Q-48, D-87" sections A-G
