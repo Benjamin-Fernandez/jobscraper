@@ -331,14 +331,17 @@ onMounted(async () => {
               :class="{ picked: picked.has(r.run_no) }"
             >
               <td class="pick">
-                <input
-                  type="checkbox"
-                  :checked="picked.has(r.run_no)"
-                  :disabled="!r.accepted"
-                  :title="r.accepted ? undefined : 'Nothing to show - this run found 0 matches'"
-                  :aria-label="`Show run ${r.run_no} in the Inbox`"
-                  @change="toggle(r)"
-                >
+                <!-- The label is the target: at least 24 px square, whatever the checkbox draws (G31). -->
+                <label class="pick-hit">
+                  <input
+                    type="checkbox"
+                    :checked="picked.has(r.run_no)"
+                    :disabled="!r.accepted"
+                    :title="r.accepted ? undefined : 'Nothing to show - this run found 0 matches'"
+                    :aria-label="`Show run ${r.run_no} in the Inbox`"
+                    @change="toggle(r)"
+                  >
+                </label>
               </td>
               <td>{{ r.run_no }}</td>
               <td :title="when(r.finished_at || r.started_at)">{{ runDate(r) }}</td>
@@ -391,7 +394,9 @@ onMounted(async () => {
 @keyframes spin { to { transform: rotate(360deg); } }
 /* A run that broke is red; a good run with a few unreadable companies is not
    an outage, so its count is quiet (Q-70 E4, G27). */
-.failed-link { font-family: var(--mono); }
+.failed-link { font-family: var(--mono); min-width: 1.5rem; min-height: 1.5rem; }
+.pick-hit { display: flex; align-items: center; justify-content: center; min-width: 1.5rem; min-height: 1.5rem; cursor: pointer; }
+.pick-hit:has(input:disabled) { cursor: not-allowed; }
 .failed-link.hard, .failed-link.hard:hover:not(:disabled) { color: var(--danger); }
 .failed-link.partial { color: var(--muted); text-decoration: underline dotted; }
 .failed-link.partial:hover:not(:disabled) { color: var(--text); }

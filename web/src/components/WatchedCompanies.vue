@@ -431,7 +431,10 @@ const safe = url => (/^https?:\/\//i.test(url || '') ? url : null)
 .co-meta { display: flex; flex-wrap: wrap; gap: 0 var(--space-3); margin: 0; font-size: var(--text-sm); }
 .co-meta span { white-space: nowrap; }
 .co-state, .site { margin-top: 2px; }
-.site { display: inline-flex; align-items: center; gap: var(--space-1); font-size: var(--text-sm); white-space: nowrap; }
+.site {
+  display: inline-flex; align-items: center; justify-content: center; gap: var(--space-1);
+  min-width: 1.5rem; min-height: 1.5rem; font-size: var(--text-sm); white-space: nowrap;
+}
 .pill[data-status='pending'] { color: var(--muted); background: var(--surface-2); }
 
 .why { margin-top: var(--space-1); font-size: var(--text-sm); }
