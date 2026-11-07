@@ -37,7 +37,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
-from jobscraper import applicant
+from jobscraper import applicant, backends
 from jobscraper.config import Config
 from jobscraper.web.deps import get_config
 
@@ -93,6 +93,15 @@ def errors_json(errors: list[applicant.FieldError]) -> list[dict[str, str]]:
     return [{"path": e.path, "message": e.message} for e in errors]
 
 
+def model_sees_private(cfg: Config) -> bool:
+    """D-105 (q74_model_sees_sensitive.md §1, §5): the effective switch, which the
+    Private badges follow - config `apply.model_sees_sensitive` and a local model
+    backend. `backends.build` makes no network call."""
+    if not bool(getattr(getattr(cfg, "apply", None), "model_sees_sensitive", False)):
+        return False
+    return backends.is_local(backends.build(getattr(cfg, "budget", None) or {}))
+
+
 def applicant_view(cfg: Config) -> dict[str, Any]:
     """The GET payload (questions_design §9.1)."""
     path = cfg.applicant_path
@@ -112,6 +121,7 @@ def applicant_view(cfg: Config) -> dict[str, Any]:
         "documents_status": applicant.documents_status(profile, cfg.resume_dir),
         "from_resume": _from_resume(profile),
         "sensitive": sensitive_paths(profile),
+        "model_sees_private": model_sees_private(cfg),
         "form": applicant.form_json(),
         "file": {"exists": path.is_file(), "has_comments": applicant.has_comments(path),
                  "error": error},
