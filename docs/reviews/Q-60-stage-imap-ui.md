@@ -148,3 +148,21 @@ fixed (and pinned) before lane F wires `mail_match_context` and the flow merges 
 - **Tester:** oracles for F1 (another tenant on the same platform), F2 (Reply-To spoof), F3 (Grab/Sea/prefix subjects), F5
   (URL forms); T3/T4 should include these as adversarial rows.
 - **Architect:** amend MS §6.2/§7 for F2 and F3, and §6.4 for F7.
+
+## Re-review (fixes)
+
+**Reviewer agent, 2026-11-07, head 2662865.** Fix commits: lane S `a78ce9d`, lane I `0cd8c32` (merged at 1996116 and 5409278), D-154. Method: the original
+repros re-run against the worktree (`PYTHONPATH=src;tests`, synthetic `acme.example` mail, `config/mail_rules.yaml`, no network), plus new variants.
+`python tests/run_tests.py -k mail` gives `126/126 passed  (-k 'mail')`; `-k layering` gives `13/13 passed  (-k 'layering')`. The web tests (vitest) could not be run:
+the worktree has no `node_modules`; F8 was checked by reading the diff.
+
+- **F1 closed.** `tal.net` handed in as an employer domain, with another tenant's rejection from `noreply@otherbank.tal.net`, gives `none`, no change (it was `strong employer_domain`, AUTO). `match.employer_domains(["acmebank.tal.net","https://jobs.smartrecruiters.com/Acme","careers.acme.example","acme.workable.com"])` keeps only `careers.acme.example`. The flow applies the same filter before building `AppCandidate` (`mailstatus_flow.py:128-130`), so it fails closed twice.
+- **F2 closed per D-154 b, with a residual.** `From: random.person@gmail.com` + `Reply-To: hr@acme.example` (DMARC pass for gmail.com) gives `none`, no change. Residual by design: an authenticated *platform* From with a Reply-To naming the employer still gives `strong employer_domain` and AUTO (MS §7). It needs a Greenhouse/Workday-class sender to set that Reply-To, so I accept it; noted for the architect.
+- **F3 partly closed (MINOR residual).** Common-word and short names are now WEAK in sender, subject and body: the "Grab your spot" HackerRank mail gives `weak name_in_subject` and a `weak_match` suggestion. A name of 5 or more characters is still STRONG from a shared platform: tracked "Globex", Greenhouse mail from "Globex Labs Recruiting" with subject "Update on your application with Globex Labs" gives `strong [name_in_sender, name_in_subject] | auto forward rejected`; subject alone ("Your application to Globex Labs") also gives AUTO. D-154 c only restricts common/short names, so this is the spec. The prefix-collision half of the original F3 scenario ("Acme Analytics") is closed only because "Acme" is under 5 characters. Suggest the architect make name-only evidence on a shared platform WEAK whatever the length (the original F3 fix text), or accept the risk knowingly. Every such change is undoable and carries its quote.
+- **F4 closed.** A UID set with CR/LF, `BODY[]`, a search criterion with `\r\nA1 EXPUNGE`, an `examine` name with CR/LF and a LIST pattern with CR/LF are all refused with `ValueError` before imaplib; `uid_fetch("1:*","(UID)")` passes.
+- **F5 closed, NIT residual.** `careers.example.com/reset?token=abc`, `example.org/x`, `ftp://`, `//cdn.example.com/a`, `hxxps://`, `https://x.example/a(b)token123`, a QP-wrapped URL (`...=\r\n123def`) and `accounts.example.co.uk/reset?token=XYZ` all become `[link]`; `Node.js/React` and `e.g.` are kept. One survives: a bare three-label host with the path on the next line (`foo.example.com\r\n/reset/token`). That is a hard-wrap case, the host alone is meant to stay readable, so I treat it as a NIT.
+- **F6 closed.** `{"category":"offer","quote":"s"}` gives `model:short_quote`; a 20-character quote that occurs in the body gives `model:ok`.
+- **F7 closed.** MS §6.4 row now says a live interview through an assessment vendor reads as `assessment` and points to D-152 (design lines 645 and 653).
+- **F8 closed (by reading; vitest not run).** `MailSuggestions.vue` reloads and emits `changed` on a 409 (toast when the row is gone); `MailEvidence.vue` emits `stale` on an Undo 409 and `Applications.vue` reloads; the password field is cleared only after the consent guard.
+
+**Outcome:** F1, F2, F4, F5, F6, F7, F8 closed; F3 closed for the cases the spec chose, with the 5-plus-character name residual above (MINOR, architect's call). Nothing from the first review blocks the merge.
