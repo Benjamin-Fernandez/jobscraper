@@ -1,9 +1,9 @@
-"""`/api/mail` - application status from email (F-50; mail_status_design Â§11.1).
+"""`/api/mail` - application status from email (F-50; mail_status_design §11.1).
 
 The routes read and write the store, the vault (a local Credential Manager
 read, no network) and the `MailSyncRunner` on `app.state.mail`. They never speak
-IMAP: connecting and syncing happen in child processes (MS Â§4, Â§10), so `web/`
-imports neither `imapread` nor the orchestrator (MS Â§2.2 rule 4).
+IMAP: connecting and syncing happen in child processes (MS §4, §10), so `web/`
+imports neither `imapread` nor the orchestrator (MS §2.2 rule 4).
 
 The password routes parse the JSON body themselves. No pydantic model ever
 holds the app password, so a validation error can't echo it back (FastAPI's 422
@@ -117,7 +117,7 @@ def _counts(text: Any) -> dict[str, int]:
 
 
 def account_view(row: dict[str, Any]) -> dict[str, Any]:
-    """One `mail_accounts` row as the card shows it (MS Â§11.1)."""
+    """One `mail_accounts` row as the card shows it (MS §11.1)."""
     code = row.get("state_code")
     notes = [n for n in str(row.get("notes") or "").split(",") if n]
     return {
@@ -128,7 +128,7 @@ def account_view(row: dict[str, Any]) -> dict[str, Any]:
         "last_sync_at": row.get("last_sync_at"), "last_ok_at": row.get("last_ok_at"),
         "first_sync_from": row.get("first_sync_from"),
         "counts": _counts(row.get("last_counts_json")),
-        # MS Â§4 consent record: a version other than CONSENT_VERSION is skipped
+        # MS §4 consent record: a version other than CONSENT_VERSION is skipped
         # by the sync until the owner ticks the box again.
         "consent_current": row.get("consent_version") == CONSENT_VERSION,
     }
@@ -178,9 +178,13 @@ async def add_account(request: Request) -> JSONResponse:
             or body.get("consent_version") != CONSENT_VERSION or pw is None):
         return _problem(400, "bad_input", BAD_INPUT)
     address = address.strip().lower()
-    with open_store(request) as store:
-        if any(a["address"] == address for a in store.mail_accounts()):
-            return _problem(409, "exists", EXISTS)
+
+    def taken() -> bool:
+        with open_store(request) as store:
+            return any(a["address"] == address for a in store.mail_accounts())
+    # FL-8: SQLite (and its busy wait) off the event loop.
+    if await run_in_threadpool(taken):
+        return _problem(409, "exists", EXISTS)
     result = await run_in_threadpool(_runner(request).connect, address, pw, CONSENT_VERSION)
     return _child_answer(result)
 
@@ -202,24 +206,30 @@ async def set_account_password(request: Request, account_id: int = _id()) -> JSO
     pw = _password(body) if body is not None else None
     if pw is None:
         return _problem(400, "bad_input", BAD_INPUT)
-    with open_store(request) as store:
-        if store.mail_account(account_id) is None:
-            return _problem(404, "not_found", NOT_FOUND)
+    if not await run_in_threadpool(_account_exists, request, account_id):
+        return _problem(404, "not_found", NOT_FOUND)
     result = await run_in_threadpool(_runner(request).set_password, account_id, pw)
     return _child_answer(result)
 
 
 @router.patch("/mail/accounts/{account_id}")
 async def switch_account(request: Request, account_id: int = _id()) -> JSONResponse:
-    """The owner's switch (MS Â§4): a store write only; the cursor is kept."""
+    """The owner's switch (MS §4): a store write only; the cursor is kept."""
     body = await _json_body(request)
     if body is None or not isinstance(body.get("enabled"), bool):
         return _problem(400, "bad_input", "Send enabled: true or false.")
+    def switch() -> JSONResponse:
+        with open_store(request) as store:
+            if store.mail_account(account_id) is None:
+                return _problem(404, "not_found", NOT_FOUND)
+            store.mail_account_set(account_id, enabled=body["enabled"])
+            return JSONResponse(account_view(store.mail_account(account_id)))
+    return await run_in_threadpool(switch)
+
+
+def _account_exists(request: Request, account_id: int) -> bool:
     with open_store(request) as store:
-        if store.mail_account(account_id) is None:
-            return _problem(404, "not_found", NOT_FOUND)
-        store.mail_account_set(account_id, enabled=body["enabled"])
-        return JSONResponse(account_view(store.mail_account(account_id)))
+        return store.mail_account(account_id) is not None
 
 
 @router.delete("/mail/accounts/{account_id}")
@@ -249,7 +259,7 @@ def delete_account(request: Request, account_id: int = _id()) -> JSONResponse:
 @router.post("/mail/sync")
 def start_sync(request: Request) -> JSONResponse:
     """"Check now": spawns a sync now. Paused mailboxes are tried once too
-    (MS Â§5.1: the manual trigger)."""
+    (MS §5.1: the manual trigger)."""
     cfg = request.app.state.cfg
     if not cfg.mail_status.enabled:
         return _problem(400, "disabled", _sync_text("disabled"))
@@ -303,14 +313,18 @@ async def accept_suggestion(request: Request, evidence_id: int = _id()) -> JSONR
     if body is None or not isinstance(body.get("job_id", None), (str, type(None))):
         return _problem(400, "bad_input", "Send the job_id of the application, or nothing.")
     ms = request.app.state.cfg.mail_status
-    with open_store(request) as store:
-        ok, code = store.mail_accept(evidence_id, body.get("job_id"),
-                                     ranks=dict(ms.ranks), terminal=ms.terminal)
-        if not ok:
-            status, text = _ACCEPT_ERRORS.get(code, (409, CHANGED))
-            return _problem(status, code, text)
-        status = _current_status(store, evidence_id)
-    return JSONResponse({"ok": True, "status": status})
+
+    def accept() -> JSONResponse:
+        # FL-8: mail_accept takes the write lock (BEGIN IMMEDIATE) and may wait
+        # out a running sync's transaction; never on the event loop.
+        with open_store(request) as store:
+            ok, code = store.mail_accept(evidence_id, body.get("job_id"),
+                                         ranks=dict(ms.ranks), terminal=ms.terminal)
+            if not ok:
+                status, text = _ACCEPT_ERRORS.get(code, (409, CHANGED))
+                return _problem(status, code, text)
+            return JSONResponse({"ok": True, "status": _current_status(store, evidence_id)})
+    return await run_in_threadpool(accept)
 
 
 def _current_status(store: Any, evidence_id: int) -> Optional[str]:

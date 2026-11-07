@@ -29,7 +29,8 @@ import re
 import time
 import traceback
 from dataclasses import replace
-from datetime import datetime, timedelta
+import sqlite3
+from datetime import datetime, timedelta, timezone
 from typing import Any, Callable, Optional, Union
 
 from . import applicant, imapread, vault
@@ -58,8 +59,17 @@ TransportFactory = Callable[[dict, Secret], Any]
 
 
 class _Stop(Exception):
-    """Stop the account's scan before this message (a cap, the deadline or a
-    lost lease): the run ends `partial` and the next one continues here."""
+    """Stop the account's scan before this message (a cap, the deadline, a
+    lost lease, or the account disconnected meanwhile): the run ends `partial`
+    and the next one continues here."""
+
+
+class _Wedged(Exception):
+    """MAX_MESSAGE_FAILURES messages in a row failed: something is wrong beyond
+    one email, so the account stops as `internal` (MS §12, D-157 a)."""
+
+
+MAX_MESSAGE_FAILURES = 3        # consecutive per-message failures before the account stops
 
 
 def _clock(now: Clock) -> Callable[[], str]:
@@ -134,23 +144,41 @@ def candidates(st: Any, rules: Any) -> list[AppCandidate]:
             tenants=mmatch.tenants_from_hosts(c["tenant_hosts"], rules),
             board_slugs=tuple(c["board_slugs"]), req_ids=tuple(c["req_ids"]),
             threads=tuple(c["threads"]), owner_changed_at=c["owner_changed_at"],
-            last_event_at=c["last_event_at"]))
+            last_event_at=c["last_event_at"],
+            # D-157 h: when the application was entered (a backfill shows up as
+            # an entry later than the mail: a `backfilled` suggestion).
+            first_event_at=c.get("first_event_at")))
     return out
+
+
+def _utc_stamp(value: Any) -> Optional[str]:
+    """A stored date or time as UTC TIME_FMT text, or None when unreadable
+    (review FL-10: `applied_at` may carry an offset, microseconds or "Z")."""
+    s = str(value or "").strip()
+    if not s:
+        return None
+    try:
+        dt = datetime.fromisoformat(s[:-1] + "+00:00" if s.endswith("Z") else s)
+    except ValueError:
+        return None
+    if dt.tzinfo is not None:
+        dt = dt.astimezone(timezone.utc).replace(tzinfo=None)
+    return dt.strftime(TIME_FMT)
 
 
 def first_sync_from(cfg: Any, st: Any, now: str) -> str:
     """MS §5.3 / F-50f: the earliest open application's date minus a day,
-    clamped to [now - first_sync_max_days, now - 1 day]."""
+    clamped to [now - first_sync_max_days, now - 1 day]. An unreadable date
+    counts as the widest window (FL-10): nothing is missed, nothing crashes."""
     terminal = set(cfg.mail_status.terminal)
+    lo = _shift(now, days=-float(cfg.mail_status.first_sync_max_days))
     starts = []
     for c in st.mail_match_context():
         if c["status"] in terminal:
             continue
         stamp = c["first_event_at"] if c["status"] == "to_apply" else c["applied_at"]
         if stamp:
-            s = str(stamp)
-            starts.append(s if "T" in s else f"{s[:10]}T00:00:00")
-    lo = _shift(now, days=-float(cfg.mail_status.first_sync_max_days))
+            starts.append(_utc_stamp(stamp) or _shift(lo, days=1))
     hi = _shift(now, days=-1)
     start = _shift(min(starts), days=-1) if starts else hi
     return max(lo, min(start, hi))
@@ -166,7 +194,7 @@ class _Account:
         self.id = int(row["id"])
         self.report = AccountReport(self.id)
         self.c = self.report.counts
-        self.seen_in_run = 0
+        self.failures_in_row = 0
         self.refresh()
 
     def refresh(self) -> None:
@@ -189,6 +217,7 @@ class _Sync:
         self.own = own_addresses(cfg, st)
         self.deadline = time.monotonic() + float(self.ms.sync_timeout_s)
         self.model_calls = 0
+        self.call_failed = False
         self.model_down = not self.ms.model or backend is None or not _available(backend)
 
     # ---------------------------------------------------------------- lease
@@ -234,11 +263,14 @@ class _Sync:
             self.retry_pending(acc)
         except _Stop:
             rep.code = SyncCode.PARTIAL
+        except _Wedged:
+            log.error("mail sync account %s: %s messages in a row failed; stopping",
+                      row["id"], MAX_MESSAGE_FAILURES)
+            rep.code = SyncCode.INTERNAL
         except MailFailure as exc:
             rep.code = exc.code
         except Exception as exc:                    # noqa: BLE001 - per account (MS §12)
-            import sqlite3
-            if isinstance(exc, sqlite3.OperationalError):
+            if _db_busy(exc):
                 rep.code = SyncCode.DB_BUSY
             else:
                 _log_crash(f"mail sync account {row['id']}", exc)
@@ -268,21 +300,75 @@ class _Sync:
             if i and i % HEARTBEAT_EVERY == 0:
                 self.beat()
             if h.gm_msgid in seen:
-                self.st.mail_cursor_set(h.cursor_after)
+                self.cursor(h.cursor_after)
                 acc.c["duplicates"] += 1
                 continue
-            msg, change, evidence = self.process(acc, h)
-            res = self.st.mail_record(account_id=acc.id, message=msg, cursor=h.cursor_after,
-                                      change=change, evidence=evidence, now=self.now())
+            res, msg = self.isolated(acc, h, lambda: self.record(acc, h))
             seen.add(h.gm_msgid)
             self.count(acc, res["outcome"])
-            if res["event_id"] or msg.get("job_id"):
+            if res["event_id"] or (msg and msg.get("job_id")):
                 acc.refresh()
         if not scan.complete:
             raise _Stop("headers cap")
         if scan.end_cursor is not None:
-            self.st.mail_cursor_set(scan.end_cursor)
+            self.cursor(scan.end_cursor)
         return budget - len(scan.headers)
+
+    def cursor(self, cursor: Cursor) -> None:
+        """Move a cursor; an account disconnected meanwhile stops the scan (D-158 4)."""
+        if self.st.mail_cursor_set(cursor) is False:
+            raise _Stop("gone")
+
+    def record(self, acc: _Account, h: MailHeader) -> tuple[dict, dict]:
+        """Steps 2-8 for one new header: decide, then store with the cursor."""
+        msg, change, evidence = self.process(acc, h)
+        res = self.st.mail_record(account_id=acc.id, message=msg, cursor=h.cursor_after,
+                                  change=change, evidence=evidence, now=self.now())
+        return res, msg
+
+    def isolated(self, acc: _Account, h: MailHeader, work: Callable[[], tuple],
+                 fallback: Optional[Callable[[dict], dict]] = None) -> tuple:
+        """Run one message's work so that one bad email can't wedge the mailbox
+        (review FL-1, D-157 a). A failure is logged by class and frames only,
+        the message is stored as a minimal `skipped / internal` row with its
+        cursor (one transaction; no text), and counted in `errors`; after
+        MAX_MESSAGE_FAILURES in a row the account stops. A cap, the deadline, a
+        lost lease (`_Stop`), a transport failure and a locked database are the
+        account's business, not the message's, and pass through. An account
+        disconnected meanwhile (`gone`, FL-3) stops the scan. `fallback(row)`
+        stores the minimal row (default: `mail_record` with the cursor)."""
+        try:
+            res, msg = work()
+        except (_Stop, MailFailure):
+            raise
+        except Exception as exc:                    # noqa: BLE001 - this message only
+            if _db_busy(exc):
+                raise                               # D-158 3: the run ends and retries
+            _log_crash(f"mail sync account {acc.id}: one message failed", exc)
+            acc.c["errors"] += 1
+            acc.failures_in_row += 1
+            row = self.failed_row(h)
+            res = (fallback(row) if fallback is not None else self.st.mail_record(
+                account_id=acc.id, message=row, cursor=h.cursor_after, now=self.now()))
+            msg = None
+            if res["outcome"] != "gone" and acc.failures_in_row >= MAX_MESSAGE_FAILURES:
+                raise _Wedged() from None
+        else:
+            acc.failures_in_row = 0
+        if res["outcome"] == "gone":
+            log.info("mail sync account %s was disconnected during the sync; stopping", acc.id)
+            raise _Stop("gone")
+        return res, msg
+
+    @staticmethod
+    def failed_row(h: MailHeader) -> dict:
+        """The minimal row for a message whose processing failed: position and
+        date only, no domain, no text (MS §12 as amended, D-157 a)."""
+        return {"gm_msgid": h.gm_msgid, "gm_thrid": None, "role": h.ref.role,
+                "validity": h.ref.validity, "uid": h.ref.uid, "received_at": h.received_at,
+                "sender_domain": "", "outcome": Outcome.SKIPPED, "reason": Reason.INTERNAL,
+                "category": None, "tier": None, "rule_id": None, "job_id": None,
+                "match_json": None}
 
     @staticmethod
     def count(acc: _Account, outcome: Any) -> None:
@@ -329,6 +415,7 @@ class _Sync:
                   expired: bool) -> Optional[Verdict]:
         """The model tier (MS §6.5) through `backends`; None = pending. Expired
         rows and `mail_status.model: false` get no call: an unclear suggestion."""
+        self.call_failed = False
         if expired or not self.ms.model:
             return replace(verdict, category=Category.UNKNOWN, status_words=True)
         if (self.defer_model or self.model_down
@@ -348,6 +435,7 @@ class _Sync:
             log.warning("mail model call failed (%s); the rest wait for the next sync",
                         type(exc).__name__)
             self.model_down = True
+            self.call_failed = True                 # FL-5: this is a try that counts
             return None
         return mmodel.parse(getattr(reply, "text", reply), h, body,
                             str(getattr(self.backend, "model_id", "") or ""))
@@ -411,6 +499,12 @@ class _Sync:
     # ---------------------------------------------------------------- pending model (MS §5.5)
 
     def retry_pending(self, acc: _Account) -> None:
+        """MS §5.5 as amended (D-157 d, review FL-5): a `pending_model` row is
+        retried when the model can be asked. A retry counts only when a call
+        was made and gave no usable answer; a deferred run, a model that is off
+        or down, or the call budget leaves the row as it is, so only its age
+        (`retry_model_days`) expires it. An expired row becomes a
+        `model_unavailable` suggestion with no target."""
         rows = self.st.mail_pending(acc.id, self.now(), float(self.ms.retry_model_days))
         for p in rows:
             self.check_time()
@@ -419,27 +513,35 @@ class _Sync:
             if not expired and self.ms.model and (
                     self.defer_model or self.model_down
                     or self.model_calls >= int(self.ms.model_max_calls)):
-                if not self.defer_model:            # deferral isn't a failed try
-                    self.st.mail_resolve_pending(acc.id, p["gm_msgid"],
-                                                 {"outcome": "pending_model",
-                                                  "reason": "model_unavailable"},
-                                                 now=self.now())
-                continue
+                continue                            # no call: no try is used up
             h = acc.t.refind(p["gm_msgid"])
             if h is None:
                 res = self.st.mail_resolve_pending(
                     acc.id, p["gm_msgid"], {"outcome": "no_change", "reason": "vanished"},
                     now=self.now())
+                if res["outcome"] == "gone":
+                    raise _Stop("gone")
                 self.count(acc, res["outcome"])
                 continue
-            try:
+            retries = int(p.get("retries") or 0)
+
+            def work(h=h, expired=expired, retries=retries):
                 msg, change, evidence = self.process(acc, h, expired=expired)
-            except _Stop:
-                return                              # the body cap: the next sync retries
-            if msg["outcome"] is Outcome.PENDING_MODEL:
-                msg = {"outcome": "pending_model", "reason": _value(msg["reason"])}
-            res = self.st.mail_resolve_pending(acc.id, p["gm_msgid"], msg, change, evidence,
-                                               now=self.now())
+                if msg["outcome"] is Outcome.PENDING_MODEL:
+                    msg = {"outcome": "pending_model", "reason": _value(msg["reason"]),
+                           "retries": retries + 1 if self.call_failed else retries}
+                return self.st.mail_resolve_pending(acc.id, h.gm_msgid, msg, change, evidence,
+                                                    now=self.now()), msg
+
+            def fallback(row, gm_msgid=p["gm_msgid"]):
+                return self.st.mail_resolve_pending(acc.id, gm_msgid, row, now=self.now())
+
+            try:
+                res, _msg = self.isolated(acc, h, work, fallback)
+            except _Stop as stop:
+                if str(stop) == "bodies cap":
+                    return                          # the next sync retries the rest
+                raise
             if res["outcome"] != "pending_model":
                 self.count(acc, res["outcome"])
             if res["event_id"]:
@@ -454,6 +556,10 @@ class _Sync:
         fails = int(row.get("fail_count") or 0)
         fields: dict[str, Any] = {"last_sync_at": now, "notes": [n.value for n in rep.notes],
                                   "last_counts_json": rep.counts}
+        if code is SyncCode.DB_BUSY:
+            # D-158 3: not the mailbox's fault; no backoff, the next sync retries.
+            self.st.mail_account_set(int(row["id"]), last_sync_at=now)
+            return
         if code in (SyncCode.OK, SyncCode.PARTIAL):
             fields.update(state=AccountState.OK.value, state_code=None, fail_count=0,
                           retry_after=None, last_ok_at=now)
@@ -474,6 +580,13 @@ class _Sync:
         self.st.mail_account_set(int(row["id"]), **fields)
 
 
+def _db_busy(exc: BaseException) -> bool:
+    """A locked or busy database (another writer held it past the timeout): not
+    the message's fault, so the run ends and the next one retries (D-158 3)."""
+    text = str(exc).lower() if isinstance(exc, sqlite3.OperationalError) else ""
+    return "locked" in text or "busy" in text
+
+
 def _value(v: Any) -> str:
     return str(getattr(v, "value", v))
 
@@ -486,13 +599,17 @@ def _available(backend: Any) -> bool:
 
 
 def _eligible(row: dict, trigger: str, now: str, account_id: Optional[int]) -> bool:
-    """MS §5.1: switched on, consent current, not PAUSED unless the owner asked,
-    and not waiting out a backoff."""
+    """MS §5.1: switched on, consent current, and, unless the owner asked (Check
+    now, the CLI, a connect), not PAUSED and not waiting out a backoff. D-157 e
+    (review FL-6, supersedes D-156 (2)): an owner trigger tries once more even
+    in backoff, since a silent no-op is worse than one extra login."""
     if account_id is not None and int(row["id"]) != int(account_id):
         return False
     if not row["enabled"] or row.get("consent_version") != CONSENT_VERSION:
         return False
-    if row.get("state") == AccountState.PAUSED.value and trigger not in OWNER_TRIGGERS:
+    if trigger in OWNER_TRIGGERS:
+        return True
+    if row.get("state") == AccountState.PAUSED.value:
         return False
     return not row.get("retry_after") or row["retry_after"] <= now
 
@@ -546,12 +663,16 @@ def sync(cfg: Any, *, trigger: str, account_id: Optional[int] = None, defer_mode
                 rep = flow.account(row)
                 flow.settle(row, rep)
                 report.accounts.append(rep)
+                if rep.code is SyncCode.DB_BUSY:
+                    log.info("mail sync: the database is busy; the next sync retries")
+                    break
                 c = rep.counts
                 log.info("mail sync account %s: %s scanned, %s read, %s updated, %s to review, "
-                         "%s unmatched, %s waiting for the model (%s)", rep.account_id,
+                         "%s unmatched, %s waiting for the model, %s failed (%s)", rep.account_id,
                          c["scanned"], c["bodies"], c["applied"], c["suggested"], c["unmatched"],
-                         c["pending_model"], rep.code.value)
+                         c["pending_model"], c.get("errors", 0), rep.code.value)
             report.code = _overall(report.accounts)
+            st.mail_supersede(clock())          # FL-7: reads no longer do this
             st.mail_purge(clock())
         except Exception as exc:                    # noqa: BLE001 - the run row must close
             import sqlite3
@@ -563,8 +684,8 @@ def sync(cfg: Any, *, trigger: str, account_id: Optional[int] = None, defer_mode
         finally:
             state = ("ok" if report.code is SyncCode.OK else
                      "partial" if report.code is SyncCode.PARTIAL else "failed")
-            totals = {k: sum(a.counts[k] for a in report.accounts) for k in
-                      (report.accounts[0].counts if report.accounts else {})}
+            keys = list(dict.fromkeys(k for a in report.accounts for k in a.counts))
+            totals = {k: sum(a.counts.get(k, 0) for a in report.accounts) for k in keys}
             try:
                 st.mail_run_end(run_id, state, report.code.value, totals, clock())
             except Exception as exc:                # noqa: BLE001

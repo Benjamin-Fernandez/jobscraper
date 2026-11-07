@@ -122,6 +122,8 @@ class Reason(str, enum.Enum):          # mail_messages.reason, mail_evidence.rea
     BACKFILLED = "backfilled"                  # owner_newer, but the application was entered after the email (D-157 h)
     # pending
     MODEL_DEFERRED = "model_deferred"
+    # skipped by the flow, not a gate: processing this one message failed (D-157 a, D-158 1)
+    INTERNAL = "internal"
 
 
 SKIP_REASONS = frozenset({Reason.TOO_OLD, Reason.OWN_MAIL, Reason.AUTO_REPLY,
@@ -323,7 +325,8 @@ class Policy:
 # ---------------------------------------------------------------- reports
 
 COUNT_KEYS = ("scanned", "duplicates", "skipped", "bodies", "matched", "applied",
-              "suggested", "unmatched", "pending_model", "model_calls")
+              "suggested", "unmatched", "pending_model", "model_calls",
+              "errors")                    # messages stored skipped/internal (D-158 1)
 
 
 @dataclass
@@ -395,4 +398,5 @@ REASON_TEXTS: dict[Reason, str] = {
     Reason.UNCLEAR: "The email is about this application, but JobScraper couldn't tell what changed.",
     Reason.MODEL_UNAVAILABLE: "JobScraper couldn't read this email because the AI model wasn't running.",
     Reason.BACKFILLED: "You added this application after this email arrived.",
+    Reason.INTERNAL: "This email couldn't be read, so it was skipped.",
 }
