@@ -447,8 +447,9 @@ def cmd_profile(args) -> int:
         return 1
 
     print(BAR)
-    print(f"profile          {cfg.profile_path}")
-    print(f"overrides        {cfg.profile_overrides_path}")
+    # Relative to the project root (Q-73): the web job log shows this output.
+    print(f"profile          {_rel(cfg.profile_path)}")
+    print(f"overrides        {_rel(cfg.profile_overrides_path)}")
     print(f"profile_version: {p['profile_version']}")
     print(f"years_experience: {p['years_experience']}   "
           f"graduation: {p.get('graduation') or '-'}")
@@ -461,7 +462,51 @@ def cmd_profile(args) -> int:
         print("title_aliases: " + ", ".join(
             f"{k} -> {v}" for k, v in sorted(p["title_aliases"].items())))
     print(BAR)
+    if getattr(args, "plan_applicant", False):
+        _plan_applicant(cfg)
     return 0
+
+
+def _rel(path) -> str:
+    """`path` relative to the project root as data/x.yaml; the file name alone
+    when it lies outside the project, so no output carries an absolute path."""
+    from .config import ROOT
+    p = Path(path)
+    try:
+        return p.resolve().relative_to(ROOT.resolve()).as_posix()
+    except (ValueError, OSError):
+        return p.name
+
+
+SKIP_MODEL_DOWN = "application details check skipped: the AI model isn't running"
+
+
+def _plan_applicant(cfg) -> None:
+    """Q-44 (q44_refresh_from_resume.md 3.5): after the profile job, prepare the
+    "Update your application details" proposals from the resume. Never fails
+    the profile job: any error prints one skip line (no resume text, no path)
+    and leaves no new proposals file. Prints counts only."""
+    from . import applicant
+    try:
+        props = tailor_flow.profile_proposals(cfg, backends.build(cfg.budget))
+        applicant.save_proposals(applicant.proposals_path(cfg.applicant_path), props)
+    except backends.BackendError:
+        print(SKIP_MODEL_DOWN)
+        return
+    except Exception as exc:                     # noqa: BLE001 - the job must still succeed
+        print(f"application details check skipped: {type(exc).__name__}")
+        return
+    if not cfg.applicant_path.is_file():
+        print("application details check: no application details yet")
+        return
+    try:
+        profile = applicant.load(cfg.applicant_path)
+    except applicant.ApplicantError:
+        print("application details check: the application details file is unreadable")
+        return
+    plan = applicant.refresh_plan(profile, props, applicant.load_template())
+    n = sum(1 for c in plan["changes"] if c["op"] != "kept")
+    print(f"application details check: {n} change{'' if n == 1 else 's'} to review")
 
 
 def cmd_titles(args) -> int:
@@ -681,7 +726,11 @@ def cmd_applicant(args) -> int:
     Prints each error as `path: message` (messages never repeat a value), the
     missing paths, the completeness meter and the resume file's name. Exit 0
     only when there are no errors and nothing is missing. `applicant init` is
-    M21 (WP-W1)."""
+    M21 (WP-W1).
+
+    `applicant refresh-resume [--yes]` (Q-44) reads the resume, prints what
+    would change in the application details (the plan the Profile tab shows)
+    and, with `--yes`, saves the changes that are ticked by default."""
     from . import applicant
 
     try:
@@ -689,6 +738,8 @@ def cmd_applicant(args) -> int:
     except (AttributeError, ValueError):
         pass
     cfg = load_config(getattr(args, "config", None))
+    if args.applicant_cmd == "refresh-resume":
+        return _applicant_refresh(cfg, bool(getattr(args, "yes", False)))
     path = Path(args.file) if getattr(args, "file", None) else cfg.applicant_path
     if not path.exists():
         print(f"applicant: no profile at {path} - copy config/applicant.example.yaml "
@@ -714,6 +765,89 @@ def cmd_applicant(args) -> int:
     print(f"Resume: {resume.name} ok" if resume else "Resume: not found")
     print(BAR)
     return 0 if not errors and not missing else 1
+
+
+_REFRESH_LABELS = {"add": "Add", "update": "Update", "kept": "Kept: you edited this",
+                   "not_on_resume": "Remove: no longer on your resume",
+                   "template": "Remove: example from the template"}
+
+
+def _entry_line(lst: str, e) -> str:
+    """`employer · title · start – end` for one entry (the panel's row)."""
+    if not isinstance(e, dict):
+        return "-"
+    org, title = ("employer", "title") if lst == "experience" else ("institution", "degree")
+    start = e.get("start") or "?"
+    end = e.get("end") or ("present" if e.get("start") else "?")
+    return f"{e.get(org) or '-'} · {e.get(title) or '-'} · {start} – {end}"
+
+
+def _applicant_refresh(cfg, save: bool) -> int:
+    """`applicant refresh-resume`: the Q-44 plan in the terminal (the owner's
+    own screen; nothing here goes to a log file)."""
+    from . import applicant
+    path = cfg.applicant_path
+    if not path.is_file():
+        print(f"applicant: no profile at {_rel(path)} - copy config/applicant.example.yaml "
+              "there and fill it in", file=sys.stderr)
+        return 1
+    try:
+        profile = applicant.load(path)
+        props = tailor_flow.profile_proposals(cfg, backends.build(cfg.budget))
+        applicant.save_proposals(applicant.proposals_path(path), props)
+    except applicant.ApplicantError as exc:
+        print(f"applicant: {exc}", file=sys.stderr)
+        return 1
+    except backends.BackendError:
+        print(f"applicant: {SKIP_MODEL_DOWN}", file=sys.stderr)
+        return 1
+    except Exception as exc:                     # noqa: BLE001 - no resume, unreadable file
+        print(f"applicant: the resume could not be read ({type(exc).__name__})", file=sys.stderr)
+        return 1
+    template = applicant.load_template()
+    plan = applicant.refresh_plan(profile, props, template)
+    print(BAR)
+    print(f"Update your application details from {props.get('source_name') or 'your resume'}")
+    print(BAR)
+    rows = [c for c in plan["changes"] if c["list"] != "skills"]
+    for c in rows:
+        label = _REFRESH_LABELS[c.get("reason") or c["op"]] if c["op"] == "remove"             else _REFRESH_LABELS[c["op"]]
+        box = "[x]" if c["default"] else ("   " if c["op"] == "kept" else "[ ]")
+        if c["op"] == "update":
+            line = f"{_entry_line(c['list'], c['before'])} -> {_entry_line(c['list'], c['after'])}"
+        else:
+            line = _entry_line(c["list"], c["after"] if c["op"] == "add" else c["before"])
+        print(f"{box} {label} ({c['list']}): {line}")
+        if c.get("note") and c["op"] in ("add", "update"):
+            print(f"      {c['note']}")
+    for c in plan["changes"]:
+        if c["list"] == "skills":
+            n = len(plan["skills"]["add"])
+            what = "Replace the example skills with" if c["op"] == "replace" else "Add"
+            print(f"[x] {what} {n} skill{'' if n == 1 else 's'} from your resume: "
+                  + ", ".join(plan["skills"]["add"]))
+    if plan["skills"]["not_on_resume"]:
+        print("    Not on your resume, so not added: " + ", ".join(plan["skills"]["not_on_resume"]))
+    accept = [c["id"] for c in plan["changes"] if c["default"]]
+    if not accept:
+        print("Your application details match your resume.")
+        print(BAR)
+        return 0
+    if not save:
+        print(f"{len(accept)} change{'' if len(accept) == 1 else 's'} ticked. "
+              "Run again with --yes to save them, or pick them in the Profile tab.")
+        print(BAR)
+        return 0
+    new, _ignored = applicant.apply_refresh(profile, props, accept, template)
+    try:
+        applicant.save(path, new)
+    except applicant.ApplicantError as exc:
+        print(f"applicant: nothing saved: {exc}", file=sys.stderr)
+        return 1
+    print(f"Saved {len(accept)} change{'' if len(accept) == 1 else 's'}. "
+          "Check them in Profile -> Application details.")
+    print(BAR)
+    return 0
 
 
 def cmd_mail(args) -> int:
@@ -1246,6 +1380,9 @@ def build_parser() -> argparse.ArgumentParser:
                       help="re-derive from the resume even if it is unchanged")
     prof.add_argument("--bump", action="store_true",
                       help="bump profile_version: every cached decision goes stale")
+    prof.add_argument("--plan-applicant", action="store_true",
+                      help="then compare the resume with your application details "
+                           "(the Profile tab offers the changes)")
     prof.set_defaults(fn=cmd_profile)
 
     tl = sub.add_parser("titles", help="job titles to search for, and Qwen's recommendations")
@@ -1284,6 +1421,10 @@ def build_parser() -> argparse.ArgumentParser:
     apc = ap_sub.add_parser("check", help="validate the profile and list what "
                                           "auto-apply still needs")
     apc.add_argument("--file", help="profile to check (default paths.applicant)")
+    apr = ap_sub.add_parser("refresh-resume", help="compare your resume with the "
+                                                   "application details and show what would change")
+    apr.add_argument("--yes", action="store_true",
+                     help="save the changes that are ticked by default")
     ap.set_defaults(fn=cmd_applicant)
 
     # --- tailor (M20 lane T)

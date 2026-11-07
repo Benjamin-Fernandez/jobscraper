@@ -82,6 +82,12 @@ export function getApplications() {
   return request('applications')
 }
 
+// One job's auto-apply attempts, newest first (Q-76). [] when there are none.
+// {id, mode, state, kind, reason_code, text, hint, queued_at, finished_at, ...}
+export function getApplicationAttempts(jobId) {
+  return request(`applications/${encodeURIComponent(jobId)}/attempts`)
+}
+
 // Counts, plus `statuses`: the ordered status vocabulary from config.
 export function getStats() {
   return request('stats')
@@ -261,6 +267,22 @@ export function saveApplicant(profile, etag) {
 // written; an older server answers 404 and the form simply stops asking.
 export function checkApplicant(profile) {
   return sendJson('applicant/check', 'POST', { profile })
+}
+
+// ---- Q-44: "Update your application details" from the resume ----
+// Shapes: docs/architecture/q44_refresh_from_resume.md section 4.
+
+// {state:'ready', source_name, created_at, resume_hash, etag,
+//  changes:[{id, list, op, index, before, after, note, default, reason?}],
+//  skills:{add:[..], not_on_resume:[..]}}, or {state:'none'|'stale'|'no_profile'|'unreadable'}.
+export function getResumeRefresh() {
+  return request('applicant/refresh')
+}
+
+// {etag, accept:[id]} -> the GET api/applicant payload plus {saved, ignored:[id]};
+// 409 {detail:'changed'|'unreadable'|'stale'|'none'|'no_profile'}; 422 {errors}.
+export function saveResumeRefresh(etag, accept) {
+  return sendJson('applicant/refresh', 'POST', { etag, accept })
 }
 
 // {mode:'auto'|'dry_run', groups:[...], ready:[{job_id,attempt_id,company,title}],

@@ -1428,6 +1428,18 @@ class Store:
         return [dict(r) for r in self.conn.execute(
             "SELECT * FROM apply_attempts WHERE job_id = ? ORDER BY id", (job_id,))]
 
+    def last_attempts(self) -> dict[str, dict[str, Any]]:
+        """job_id -> the newest apply_attempts row plus `attempts` (how many).
+
+        One query for the whole Applications list (Q-76), so the tab never asks
+        per row. Jobs without an attempt are absent.
+        """
+        rows = self.conn.execute(
+            "SELECT a.*, n.attempts AS attempts FROM apply_attempts a "
+            "JOIN (SELECT job_id, MAX(id) AS last_id, COUNT(*) AS attempts "
+            "FROM apply_attempts GROUP BY job_id) n ON a.id = n.last_id")
+        return {r["job_id"]: dict(r) for r in rows}
+
     def attempts_in_flight(self, exclude_id: Optional[int] = None) -> list[dict[str, Any]]:
         """Attempts in a non-terminal state other than `queued` (apply_design
         §12.1 (4): one in flight)."""

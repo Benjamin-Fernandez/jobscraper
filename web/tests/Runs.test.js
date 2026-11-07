@@ -285,7 +285,7 @@ describe('failed N tone (Q-70 E4)', () => {
     expect(link.text()).toBe('28')
     expect(link.classes()).toContain('partial')
     expect(link.classes()).not.toContain('hard')
-    const sentence = '28 companies could not be read. See which on the Companies tab.'
+    const sentence = '28 companies could not be read in this run. The Companies tab lists the ones that fail now.'
     expect(link.attributes('title')).toBe(sentence)
     expect(link.attributes('aria-label')).toBe(sentence)
     // Still the way into the Companies tab's Failed list.
@@ -306,7 +306,7 @@ describe('failed N tone (Q-70 E4)', () => {
 
   it('says "1 company" for one, and shows no link for zero', async () => {
     const wrapper = await mountRuns({ runs: [run(5, 'ok', 1), run(4, 'ok', 0)] })
-    expect(wrapper.find('tr[data-run="5"] .failed-link').attributes('title')).toBe('1 company could not be read. See which on the Companies tab.')
+    expect(wrapper.find('tr[data-run="5"] .failed-link').attributes('title')).toBe('1 company could not be read in this run. The Companies tab lists the ones that fail now.')
     expect(wrapper.find('tr[data-run="4"] .failed-link').exists()).toBe(false)
   })
 })

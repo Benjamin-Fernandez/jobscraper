@@ -119,7 +119,9 @@ def test_web_profile_without_a_derived_profile_is_not_an_error():
     assert body["present"] is False
     assert body["interests"] == INTERESTS                  # config, still shown
     assert set(body) == {"present", "profile_version", "source_file", "parsed_at",
-                         "parsed_by", "summary", "skills", "target_titles", "interests"}
+                         "parsed_by", "summary", "skills", "target_titles", "interests",
+                         "years_experience", "graduation"}           # Q-73: the summary card
+    assert body["years_experience"] is None and body["graduation"] is None
 
 
 def test_web_profile_serves_the_derived_profile():
@@ -129,13 +131,14 @@ def test_web_profile_serves_the_derived_profile():
             "parsed_at": "2026-09-24", "parsed_by": "qwen3:14b", "profile_version": 3,
             "summary": "Backend engineer.", "skills": ["python", "sql"],
             "target_titles": ["backend engineer"], "title_aliases": {},
-            "years_experience": 1}), encoding="utf-8")
+            "years_experience": 1, "graduation": "2025-06"}), encoding="utf-8")
         r = c.get("/api/profile")
     assert r.status_code == 200
     assert r.json() == {"present": True, "profile_version": 3,
                         "source_file": "resume.pdf", "parsed_at": "2026-09-24",
                         "parsed_by": "qwen3:14b", "summary": "Backend engineer.", "skills": ["python", "sql"],
                         "target_titles": ["backend engineer"],
+                        "years_experience": 1, "graduation": "2025-06",
                         "interests": INTERESTS}
 
 
@@ -410,7 +413,7 @@ def test_web_jobs_default_command_is_the_cli_as_a_child_process():
         sys.executable, "-m", "jobscraper", "run", "--batch-size", "7"]
     assert cli_command("C:/x/config.yaml")("profile", {}) == [
         sys.executable, "-m", "jobscraper", "--config", "C:/x/config.yaml",
-        "profile", "--refresh"]
+        "profile", "--refresh", "--plan-applicant"]      # Q-44: the application-details check
     env = child_env()
     src = str(ROOT / "src")
     assert env["PYTHONPATH"].split(os.pathsep)[0] == src

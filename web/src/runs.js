@@ -57,10 +57,29 @@ export function runsInRange(runs, value, now = Date.now()) {
   return new Set(asList(value))
 }
 
+// 1234 -> '1,234' (Q-75 G37). Anything that is not a number is returned as it is.
+export function num(n) {
+  const v = typeof n === 'string' && n.trim() !== '' ? Number(n) : n
+  return typeof v === 'number' && Number.isFinite(v) ? v.toLocaleString('en-US') : n
+}
+
 // '0 matches', '1 match', '12 matches'.
 export function matchLabel(n) {
   const count = Number(n) || 0
-  return `${count} ${count === 1 ? 'match' : 'matches'}`
+  return `${num(count)} ${count === 1 ? 'match' : 'matches'}`
+}
+
+// How often runs are needed, in words people use (Q-75 G37): "1.6 runs a day",
+// and under one a day "about 1 run every 2 days" - never "0.6 runs a day".
+export function runsPerDayLabel(perDay) {
+  const x = Number(perDay)
+  if (!Number.isFinite(x) || x <= 0) return ''
+  if (x >= 1) {
+    const n = Math.round(x * 10) / 10
+    return `${num(n)} ${n === 1 ? 'run' : 'runs'} a day`
+  }
+  const days = Math.round(1 / x)
+  return days <= 1 ? '1 run a day' : `about 1 run every ${num(days)} days`
 }
 
 // A run's status in words (M16): the store says `ok`, people read "success".
@@ -68,6 +87,17 @@ const RUN_STATUS = { ok: 'success', failed: 'failed', aborted_unhealthy: 'aborte
 export function runStatusLabel(status) {
   if (!status) return '—'
   return RUN_STATUS[status] ?? String(status).replace(/_/g, ' ')
+}
+
+// Why a run ended as it did, where the status alone does not say (Q-75 G27).
+// `aborted_unhealthy` is the pipeline's network-fault guard: most due companies
+// failed together, so nothing was counted against any of them.
+const RUN_STATUS_NOTE = {
+  aborted_unhealthy: 'Most companies failed together, which points to a network problem on this computer. '
+    + 'None were counted against them and the batch was not marked done. Run again to retry.',
+}
+export function runStatusNote(status) {
+  return RUN_STATUS_NOTE[status] ?? ''
 }
 
 // How often the cycle restarts, in words (M15, Settings).

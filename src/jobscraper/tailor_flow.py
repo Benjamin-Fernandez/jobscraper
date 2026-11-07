@@ -21,6 +21,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import re
 from dataclasses import asdict
 from pathlib import Path
 from typing import Any, Callable, Optional
@@ -34,8 +35,8 @@ from .scrape.net import HttpClient
 from .store import Store, utcnow
 from .models import RawJob
 from .tailor import mapping, master as master_mod, render, rewrite, storage, terms, validate
-from .tailor.contracts import (BulletChange, IssueCode, JdTerm, MasterResume, TailorResult,
-                               TailorStatus, TermStatus, ValidationIssue)
+from .tailor.contracts import (BulletChange, IssueCode, JdTerm, MasterResume, SectionKind,
+                               TailorResult, TailorStatus, TermStatus, ValidationIssue)
 
 log = logging.getLogger(__name__)
 
@@ -126,9 +127,10 @@ def _fetch_description(cfg: Config, store: Store, job: dict[str, Any]) -> str:
     return raw.description
 
 
-def _load_master(cfg: Config, backend) -> tuple[MasterResume, str, str]:
+def ensure_master(cfg: Config, backend) -> tuple[MasterResume, str, str]:
     """(master, resume_hash, resume text). Parses (one model call) only when the
-    resume file's hash changed or the cache fails its leaf check."""
+    resume file's hash changed or the cache fails its leaf check. Public since
+    Q-44: the profile job's application-details check reads the same master."""
     path = resume_ingest.find_resume(cfg.resume_dir)
     rhash = resume_ingest.file_hash(path)
     text = resume_ingest.extract_text(path)
@@ -207,7 +209,7 @@ def tailor(cfg: Config, store: Store, job_id: str, *, backend, report_only: bool
         attested = _strings(applicant.get("attested_skills"))
         a_skills = _strings(applicant.get("skills"))
 
-        master, rhash, _text = _load_master(cfg, backend)
+        master, rhash, _text = ensure_master(cfg, backend)
         base["resume_hash"] = rhash
 
         raw = job.get("jd_text") or _fetch_description(cfg, store, job)
@@ -371,3 +373,82 @@ def alias_groups(cfg: Config) -> tuple[tuple[tuple[str, ...], ...], tuple[str, .
     except Exception:
         return (), ()
     return tuple((e.canonical, *e.variants) for e in a.entries), tuple(sorted(a.ambiguous))
+
+
+# ---------------------------------------------------------------------------
+# Q-44: proposals for the application details, from the resume
+# ---------------------------------------------------------------------------
+
+DESCRIPTION_MAX = 500       # q44 design 3.1: the first bullet, cut at a space, nothing added
+
+
+def _first_bullet(entry) -> str:
+    text = entry.bullets[0].text.strip() if entry.bullets else ""
+    if len(text) <= DESCRIPTION_MAX:
+        return text
+    cut = text[:DESCRIPTION_MAX]
+    space = cut.rfind(" ")
+    return (cut[:space] if space > 0 else cut).rstrip()
+
+
+def _on_resume(skill: str, text: str) -> bool:
+    """`skill` appears in `text` as a whole word (or phrase), case-insensitively."""
+    words = skill.split()
+    if not words:
+        return False
+    pattern = r"(?<!\w)" + r"\s+".join(re.escape(w) for w in words) + r"(?!\w)"
+    return re.search(pattern, text, re.IGNORECASE) is not None
+
+
+def profile_proposals(cfg: Config, backend) -> dict[str, Any]:
+    """The resume-side facts the Profile tab offers for the application details
+    (q44_refresh_from_resume.md 3.1, 3.3), as the proposals file holds them:
+    `{resume_hash, source_name, created_at, experience, education, skills,
+    not_on_resume}`. KA-4: every value is copied from the parsed master, never
+    guessed. A location is the entry's own (never the contact line), a date
+    that `applicant.parse_resume_dates` cannot read stays empty, education's
+    major and grade stay empty (its subtitle travels as a note), and only the
+    experience and education sections count. An entry without both its org and
+    its title is left out: it could not be saved.
+
+    A derived skill is proposed only when the resume text has it as a whole
+    word; the ones the derive step implied go to `not_on_resume` and are never
+    added. One model call at most: `ensure_master` parses only a stale cache."""
+    from . import applicant as applicant_mod
+
+    m, rhash, raw_text = ensure_master(cfg, backend)
+    out: dict[str, Any] = {"resume_hash": rhash, "source_name": m.source_name,
+                           "created_at": utcnow(), "experience": [], "education": [],
+                           "skills": [], "not_on_resume": []}
+    for section, e in m.entries():
+        org, title = e.organisation.strip(), e.title.strip()
+        if section.kind not in (SectionKind.EXPERIENCE, SectionKind.EDUCATION) or not (org and title):
+            continue
+        start, end, _ok = applicant_mod.parse_resume_dates(e.dates)
+        if section.kind is SectionKind.EXPERIENCE:
+            out["experience"].append({
+                "employer": org, "title": title, "start": start, "end": end,
+                "location": e.location.strip(), "description": _first_bullet(e),
+                "from_resume": True, "dates_text": e.dates})
+        else:
+            out["education"].append({
+                "institution": org, "degree": title, "major": "", "minor": "",
+                "start": start, "end": end, "grade_type": "", "grade": "", "grade_scale": "",
+                "from_resume": True, "dates_text": e.dates, "subtitle": e.subtitle})
+
+    text = " ".join((mapping.resume_text(m) or raw_text or "").split())
+    try:
+        derived = yaml.safe_load(cfg.profile_path.read_text(encoding="utf-8")) or {}
+    except (OSError, UnicodeDecodeError, yaml.YAMLError):
+        derived = {}
+    seen: set[str] = set()
+    for s in _strings(derived.get("skills") if isinstance(derived, dict) else None):
+        label = applicant_mod.skill_label(s)
+        if not label or label.lower() in seen:
+            continue
+        seen.add(label.lower())
+        out["skills" if _on_resume(s, text) else "not_on_resume"].append(label)
+    log.info("application details check: %d experience, %d education, %d skills "
+             "(%d not on the resume)", len(out["experience"]), len(out["education"]),
+             len(out["skills"]), len(out["not_on_resume"]))
+    return out

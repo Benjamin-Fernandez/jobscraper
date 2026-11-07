@@ -642,6 +642,77 @@ EXISTING TEST NOW STALE (tester): `tests/test_mail_transition.py::test_mail_tran
 Known limits: Staleness of the new card follows the ambiguous rule (any candidate unchanged keeps it open). No "Find the role" link, per MS §11.3.
 STATUS: open
 
+## Q-75 lane J (Companies, Runs, Settings polish) - handoff
+Branch `eng/Q-75-J-pages` (base int/Q-75-wave3). Done: G30, G41, G25, G26, G31, G20, G27, G37, N17, G40, N18 (Runs/Settings only). Vitest 476 pass, 5 fail (all intended behaviour changes, below); build OK.
+Files: Companies.vue, WatchedCompanies.vue, Runs.vue, Settings.vue, TitleEditor.vue, runs.js, style.css, index.html, theme.js (new).
+
+### request (tester): test changes needed
+1. tests/m16.test.js "Clear list asks first, then empties it": no window.confirm now. Click `.clear` -> `.clear-ask` appears; `.keep-list` closes it (no DELETE); click `.clear` again then `.confirm-clear` -> 1 DELETE, `.empty-title` "No list yet.". Drop the `vi.stubGlobal('confirm')` lines.
+2. tests/Runs.test.js (~289, ~309) failed-link title is now "N companies could not be read in this run. The Companies tab lists the ones that fail now." ("1 company ..." for one).
+3. tests/Settings.test.js:33 -> 'A full 14-day sweep takes 1.6 runs a day at this size (23 runs to cover 224 companies).'; :42 -> 'A full 14-day sweep takes about 1 run every 2 days at this size (9 runs to cover 224 companies).'
+4. New pins (a scratch version that passed is at scratchpad/zz_scratch.test.js): cycle radios hold an arrow-key choice (`.cycle-pending`, no PUT) until Enter/blur, Esc restores; click/setValue alone still saves at once; theme radios set `data-theme` on <html> + localStorage `jobscraper.theme` (System removes both); `.watched-n` "N already watched" and `.found-n` = found+watched; WatchedCompanies `.density` toggle (class `compact` on `.dir`, key `jobscraper.companies.density`), `.jump-letter` buttons only above 20 rows, `.chip` only when Source=all and the list is mixed; Runs `.runs-error` when `runs=[]` + `error`; aborted pill `title`; `num()`/`runsPerDayLabel()` in runs.js; thousands separators on Runs counts.
+Note: tests/shell-job.test.js "page becoming visible" flaked once under load, passes alone.
+
+### notes for the Coordinator
+- G20: App.vue `boot()`/`onChanged()` set `error` from a failed loadRuns, then loadJobs() clears it, so the Runs error state shows only if the shortlist also fails. Fix in App.vue (lane I's file): keep a separate runsError, or do not clear after a runs failure.
+- G40: style.css media block selector is now `:root:not([data-theme='light'])`; a duplicate `:root[data-theme='dark']` block follows it (keep in step). index.html has a 1-line inline script applying the stored theme before paint. `<meta name="theme-color">` still follows the OS (mobile browser bar only).
+- Deferred: N18 on Profile, ApplicationDetails, QuestionsInbox, Overview (h2 -> h3; other lanes' files, file budget). `plural()` in format.js has no thousands separator (lane I's file). FieldInput chip-x was already 1.5rem.
+- Not checked in a real browser at 390px (no visual run); layout uses flex-wrap throughout, nothing fixed-width added.
+
+## 2026-11-07 handoff: Q-75 lane I (shell + Inbox polish)
+Branch `eng/Q-75-I-shell` (worktree `.claude/worktrees/eng-q75-i`, int/Q-75-wave3 f0698d4 merged in). Commits: 2745065 G18; 2f4d7f2 N16+G3r+N7+N19; 6b6fabf G17+G38+N20; 542eaf2 G20 fix; 5204334 Runs sideways scroll at 390px; cea067d a11y pass.
+Done: G18 local time (`when`, `shortDate` use the browser zone; new `exactTime()` for tooltips in Applications, Profile, Inbox cards); N16 `?` sheet + `/`, `g` then o/i/a/r/c/p/s/d (letters = `goKey` in tabs.js; `g` sequence follows the existing on/off switch, `?` and `/` always work; new `web/src/shortcuts.js`, `components/ShortcutsSheet.vue`); G3r `Z` undoes the last Save/Applied/Not interested for 60 s (same Undo as the toast); N7 Profile badge = open question groups, fetched at boot, after jobs end/changes, and on leaving Profile; G17 detail scrolls in its own box, action bar pinned (desktop only); G38 no selected style on a phone list (CSS); N20 Dismiss button on the write error; N19 Developer last, `quiet` style; G20 `runsError` prop (shell.js tabProps, App.vue, Runs.vue 2 lines).
+### request (tester): test changes needed
+1. tests/Applications.test.js:124 `/^24 Sep \d\d:\d\d UTC$/` -> `/^24 Sep \d\d:\d\d$/` (local zone now; or compute expected from `new Date('2026-09-24T08:10:00Z')` getHours/getMinutes; pin TZ in vitest if wanted).
+2. tests/Profile.test.js:67 `'24 Sep 10:05 UTC'` -> the local-zone string of 2026-09-24T10:05Z (machine at UTC+8 gives '24 Sep 18:05'); add `title` = '2026-09-24 10:05 UTC' on `.parsed`.
+3. tests/ux1.test.js:286 kbd list -> ['S','A','X','O','J','K','Z','?'].
+4. New pins: shell keys (g then a -> #/applications, lapses after 1.5 s or in an input, `?` opens role=dialog with focus on Close, Esc closes and restores focus, S inside the sheet does nothing, sheet switch writes localStorage jobscraper.inbox.shortcuts and updates an open Inbox); Z undo after S (DELETE api/applications/<id>) and none after 60 s; Profile badge from `questions` fixture (open groups only, none on 404); Inbox write error Dismiss clears it; `exactTime` and `when` unit cases (date-only stays as written; stamps with a zone keep it). A scratch version that passed: scratchpad/q75/keys.test.js.
+5. Runs tests that read the run-history error must pass prop `runsError` (not `error`). Lane J's 5 pending test changes (m16, Runs x2, Settings x2) are unchanged by this lane.
+### notes
+- Port 8768 was taken (lane J); I used 8769 with a DB copy in the scratchpad, stopped by PID. The copy had an empty shortlist, so the browser checks ran on Edge (Playwright) with the fixture shortlist routed in.
+- Browser checks (Edge): no horizontal scroll at 390px on inbox, applications, profile, developer, overview, runs, settings, companies (Runs was 594px wide: visually-hidden text in the table scroller had no containing block; fixed with `.table-wrap { position: relative }`, appended to style.css). Detail action bar pins at the top of the detail's scroll box. Focus trap, Esc and focus return verified.
+- Known limits: `?` and `/` are single-key shortcuts that the switch does not turn off (WCAG 2.1.4; `/` pre-existing); the `g` go-to moves focus to the new panel, which shows the panel focus ring; the pinned action bar is desktop only (phone keeps the actions in flow).
+
+### 2026-11-07 software-engineer → coordinator
+TYPE: handoff
+RE: Q-76 (N11, N12) · docs/architecture/q76_application_detail.md
+BODY: Ready for the tester. Branch `eng/Q-76-app-detail` (worktree `.claude/worktrees/eng-q76`), base int/Q-75-wave3 b3908e1. One commit per design §5 step (`git log --oneline b3908e1..`).
+- Done: (1) `Store.last_attempts()`; (2) `attempt_view`, `last_attempt`/`attempts`/`posting` on every `/api/applications` row, `GET /api/applications/{job_id}/attempts` (newest first, `[]` for none); (3) `getApplicationAttempts`, `attempts.js`, `profileView.js` (Profile.vue reads `PROFILE_VIEW_KEY`, re-reads it in `onActivated`); (4) pill + needs-input button on rows; (5) `JobDetail.vue` + `postingCache.js`, Inbox.vue uses them (action bar, back button, ni-note, did-apply stay in Inbox via the `actions` slot); (6) Details toggle, JobDetail and the attempts list in Applications.vue. Q-60 MailSuggestions/MailEvidence untouched.
+- Deviation 1: postingCache drops its entries when the last JobDetail unmounts (next microtask; fetches that land after a clear are ignored). Reason: a plain module-level Map leaked descriptions between mounts and broke 4 existing Inbox tests (m16, inbox-flow), which the design wants unchanged. In the app the tabs are kept alive, so the cache survives tab switches. `clearPostingCache()` is exported.
+- Deviation 2: browser pass ran on port 8771, not 8768 (8768 was held by another lane's server, which I left alone). Scratch DB, built bundle served from a scratch dir, no data/ access.
+- Evidence: `-k test_store` 55/55; `-k web` 121/121; `-k layering` 13/13; vite build to a scratch outDir OK; `npx vitest run` 474 passed, 8 failed. The same 8 fail on the base b3908e1 before any of my edits (Applications "advancing applied -> interviewing", m16 "Clear list", Profile "shows summary...", Runs x2 "failed N tone", Settings x2 "companies per run", ux1 "says which keys"). Not caused by Q-76. Browser (Chrome via playwright, scratch DB): at 1280 and 390 px `scrollWidth` <= viewport, one panel open at a time, "Needs your input" pill sets `profile.view=details` and lands on `#/profile` with the Application details tab selected; long unbreakable titles wrap.
+- Full suite: see the Coordinator report line for the result (run last).
+- Tests to add (D1-D5): D1 `last_attempts` (newest per job, count, absent when none); D2 `attempt_view` for each kind, `{detail}` formatting, unknown reason does not raise, no `job_log`/`end_url`/`tenant_host`/`resume_sha256` keys; D3 `/api/applications` `last_attempt` null without attempts, `posting` null off-shortlist, one `last_attempts` call per request (spy); D4 `/attempts` newest first, `[]`, bad id 422; D5 vitest: pill label per kind (`attemptLabel`), needs-input click sets `profile.view` and the hash, Details opens one row at a time with `aria-expanded`, attempts loading/empty/error + Try again, JobDetail facts/why/skills/JD + Show more, postingCache shared between Inbox and a row (one fetch). Existing Inbox suite needed no change.
+- Known limits: the 404 from `/api/postings/<id>` shows the existing "Could not load the description" line inside the panel. The 8 baseline vitest failures need a look by the tester (they predate this lane).
+STATUS: open
+## 2026-11-07 handoff: Q-44 + Q-73 (refresh application details from the resume; readable resume summary)
+Branch `eng/Q-44-refresh-resume` (worktree `.claude/worktrees/eng-q44`, base int/Q-75-wave3 b3908e1). Design `docs/architecture/q44_refresh_from_resume.md`, steps 1-7 one commit each: 4e84b12 (1), a672039 (2), 794b117 (3), 5833e50 (4), 1c09f7c (5), 6a846ab (6), c8b18ea (7). Step 8 needs no code (applicantForm.js `skillLabel` unchanged; the shared fixture is the tester's).
+Files: applicant.py (new functions appended at the end only: `parse_resume_dates`, `skill_label`, `proposals_path`, `load_proposals`/`save_proposals`, `load_template`, `original_resume_hash`, `refresh_plan`, `apply_refresh`), tailor_flow.py (`_load_master` renamed `ensure_master`; `profile_proposals`), cli.py (`profile --plan-applicant`, `applicant refresh-resume [--yes]`, `_rel` paths), web/jobs.py (profile argv), web/control.py (`years_experience`, `graduation`), web/routers/applicant.py (GET/POST `/applicant/refresh`), web/src/api.js, web/src/components/ResumeRefresh.vue (new), web/src/tabs/Profile.vue.
+Run: `PYTHONPATH=src python -m jobscraper applicant refresh-resume` (plan; `--yes` saves the default-ticked ones). Web: upload a resume or "Re-derive", the panel appears under the summary card.
+
+### request (tester): test changes needed (intended failures)
+1. tests/test_web_control.py:411 profile argv is now `[..., "profile", "--refresh", "--plan-applicant"]`.
+2. tests/test_web_control.py:121 and :135 (`/api/profile` exact key set / payload) gain `years_experience` (int|null) and `graduation` (str|null).
+3. web/tests/Profile.test.js:123 success note is now `Resume read: 3 skills, 2 job titles.` (was "Profile refreshed."; that text stays only when no profile is present).
+   (Profile.test.js:67 `.parsed` local-zone failure is lane I's request 2; `.parsed` keeps `title=exactTime`.) The other 7 vitest failures are lanes I/J's pending requests (baseline at b3908e1: 8 failures; this branch: 9 = those 8 + item 3).
+### request (tester): new pins (design §6 R1-R10)
+- R1-R7 on `applicant.parse_resume_dates` / `refresh_plan` / `apply_refresh` (pure dicts; template via `applicant.load_template()`). Change ids: `<list>:<op>:<org key>|<title key>` (`#2` suffix on a duplicate), `skills:add`, `skills:replace`. Remove rows carry `reason: template | not_on_resume`. `apply_refresh` returns `(profile, ignored_ids)`; a `kept` id is reported in `ignored`.
+- R5 skills fixture `tests/fixtures/skill_labels.json` shared by `applicant.skill_label` and `applicantForm.js skillLabel` (cases I checked: "machine learning"->"Machine Learning", "sql"->"SQL", "PyTorch" kept, "ci/cd"->"Ci/Cd", "  data   science "->"Data Science", "scikit-learn"->"Scikit-Learn").
+- `tailor_flow.profile_proposals(cfg, backend)` with `ensure_master` monkeypatched (fixture master `tests/fixtures/tailor/case_a/master.json` works): projects ignored, `location` never from contact, description cut at the last space before 500, implied skills in `not_on_resume`.
+- R8 web via the `_world` harness: GET states ready/none/stale/no_profile (+ `unreadable` for a broken file), POST 409 `changed` on a stale etag, 409 `stale`/`none`/`no_profile` when the proposals are unusable, `saved`/`ignored`, saved file validates. Stale = proposals `resume_hash` != `applicant.original_resume_hash(cfg.resume_dir)`.
+- R9 cli: `cli._plan_applicant(cfg)` with a backend whose `complete` raises `BackendError` prints `application details check skipped: the AI model isn't running` and `cmd_profile` still returns 0; `cmd_profile` output has `profile          data/profile.derived.yaml` (no absolute path).
+- R10 vitest (a scratch version passed, then deleted): card text has no "/" or "\\"; `.rr-check` default ticks; `.rr-save` "Save {n} changes" follows the ticks; POST body `{etag, accept}`; `.rr-saved` after save with a `.rr-go` button emitting go-view details; `.rr-not-now` hides it (localStorage `profile.refresh.dismissed` = resume_hash); `.job-details` closed on success, open on failure; `.rr-unavailable` when the job log has the skip line; panel hidden on a 404.
+
+### question (architect)
+1. "Aug 2021 – Expected May 2025" (a range with "Expected" before the end) is not accepted by §3.2, so a typical education line gets "Dates not understood" and its add is unticked. Accept an optional "Expected"/"Exp." before the second token? One regex change in `parse_resume_dates`.
+
+### notes / deviations
+- GET ready also returns `resume_hash` (for "Not now until the next resume") and `etag` (for the POST); state `unreadable` added (hidden in the UI). Remove rows carry `reason`.
+- `profile_proposals` leaves out an entry missing its org or its title (it would fail validation on save).
+- Skills replace row copy (not in §5): "Replace the example skills with {n} skills from your resume: …".
+- The card keeps a fine-print line "Profile version {v} · read by {model}" (keeps `.version`/`.parsed-by` pins) and the full skill list behind "and {k} more". While the job runs, "Reading your resume…" shows above the collapsed Details.
+- "Unavailable" is detected from the profile job's log line (the design has no proposals file in that case, so GET alone cannot say it).
+- Not checked in a real browser at 390px; the new UI uses flex-wrap and `overflow-wrap: anywhere`, nothing fixed-width. Vite build to a scratch outDir passed; the bundle in `src/jobscraper/web/static/` is not rebuilt.
 ### 2026-11-07 software-engineer → coordinator (cc reviewer, architect, tester)
 TYPE: handoff
 RE: eng/Q-35-sync-personal: `personal` merged into int/Q-35-M; Q-48 F11 fixed
