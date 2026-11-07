@@ -119,6 +119,7 @@ class Reason(str, enum.Enum):          # mail_messages.reason, mail_evidence.rea
     PORTAL_CHECK = "portal_check"
     UNCLEAR = "unclear"
     MODEL_UNAVAILABLE = "model_unavailable"    # also: pending
+    BACKFILLED = "backfilled"                  # owner_newer, but the application was entered after the email (D-157 h)
     # pending
     MODEL_DEFERRED = "model_deferred"
 
@@ -131,7 +132,7 @@ SUGGEST_REASONS = frozenset({Reason.MODEL_TIER, Reason.WEAK_MATCH,
                              Reason.CLOSED_ROLE, Reason.KEPT_ON_FILE, Reason.SUGGEST_ONLY,
                              Reason.FROM_SPAM, Reason.UNAUTHENTICATED,
                              Reason.CUSTOM_STATUS, Reason.PORTAL_CHECK, Reason.UNCLEAR,
-                             Reason.MODEL_UNAVAILABLE})
+                             Reason.MODEL_UNAVAILABLE, Reason.BACKFILLED})
 
 
 class AuthResult(str, enum.Enum):      # Gmail's Authentication-Results (mx.google.com)
@@ -277,6 +278,7 @@ class AppCandidate:
     threads: tuple[str, ...]           # gm_thrid of messages already matched to it
     owner_changed_at: Optional[str]    # latest app_events.at with by IS NULL
     last_event_at: Optional[str]
+    first_event_at: Optional[str] = None  # earliest app_events.at: when the application was entered (D-157 h)
 
 
 @dataclass(frozen=True)
@@ -392,4 +394,5 @@ REASON_TEXTS: dict[Reason, str] = {
     Reason.PORTAL_CHECK: "The employer posted an update. Log in to their site to see it.",
     Reason.UNCLEAR: "The email is about this application, but JobScraper couldn't tell what changed.",
     Reason.MODEL_UNAVAILABLE: "JobScraper couldn't read this email because the AI model wasn't running.",
+    Reason.BACKFILLED: "You added this application after this email arrived.",
 }

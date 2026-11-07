@@ -199,10 +199,26 @@ def _settle(app: AppCandidate, cat: Category, target: str, h: MailHeader,
         return Change(ChangeKind.SUGGEST, Reason.CUSTOM_STATUS, status, target)
     # 6
     if app.owner_changed_at and app.owner_changed_at > h.received_at:
+        # D-157 h (review FL-9): an application the owner entered after this
+        # email arrived (backfilled) would otherwise never hear about it. A
+        # forward move then becomes a question. An undo or a later hand edit on
+        # an application that already existed stays silent, as before.
+        if (app.first_event_at and app.first_event_at > h.received_at
+                and _after_owner(app, cat, target, policy) is None):
+            return Change(ChangeKind.SUGGEST, Reason.BACKFILLED, status, target)
         return Change(ChangeKind.NONE, Reason.OWNER_NEWER, status)
+    return _after_owner(app, cat, target, policy, h)
+
+
+def _after_owner(app: AppCandidate, cat: Category, target: str, policy: Policy,
+                 h: Optional[MailHeader] = None) -> Optional[Change]:
+    """Rows 7-9 for one application; None means a forward move. Without `h`
+    (the row 6 backfill check) a terminal application is never forward."""
+    status = app.status
+    terminal = policy.terminal
     # 7
     if status in terminal:
-        if target in terminal:
+        if target in terminal or h is None:
             return Change(ChangeKind.NONE, Reason.TERMINAL, status)
         if cat in REOPEN_CATEGORIES and (not app.last_event_at or h.received_at > app.last_event_at):
             return Change(ChangeKind.SUGGEST, Reason.REOPEN, status, target)
