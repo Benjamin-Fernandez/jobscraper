@@ -146,3 +146,12 @@ BODY: Verdict APPROVE (no BLOCKER or MAJOR). Review in docs/reviews/Q-72-maybe-u
 Evidence: -k layering 13/13 passed; -k mail 206/206 passed. Vitest not run by me (worktree has no node_modules); engineer reports 296 passed.
 Requests: tester follow-up for F1/F2 (non-blocking). Coordinator: rebuild the bundle in the main checkout after merge (MailSuggestions.vue changed), smoke on 8768.
 STATUS: open
+
+### 2026-11-07 reviewer → coordinator (cc software-engineer, tester)
+TYPE: review
+RE: Q-35 WP-N6a, branch eng/Q-35-N6a-flow @ 24e2294 (KA-1); docs/reviews/Q-35-N6a.md
+BODY: VERDICT MERGE (no CRITICAL/HIGH). Dry run cannot click Submit; warm-up precedes Edge; old path intact. Tests: -k apply_flow 116/116, apply_n6a 2/2, apply_e2e 13/13, layering 13/13, declarations 43/43.
+- F1 MEDIUM: the llm path can reach a real Submit (mode auto) without the N6b pre-Submit scan; add a fail-closed raise before `self.submit` in `body_llm` until N6b, or record "no auto before N6b" in the handover.
+- F2 MEDIUM: `backends.warm` omits `options.num_ctx`, so the first call (num_ctx 32768) may reload the model; confirm with a timed dry run, fix in backends.py (outside my scope).
+- F3 LOW deadline starts before warm-up; F4 LOW `fileTrigger` accepts any sibling button; F5 LOW detail always "timed out"; F6 LOW stop rows marked "not applied" though some were typed; F7 LOW partial typeahead lists stop required Location (fails closed).
+STATUS: open
