@@ -457,10 +457,10 @@ onMounted(() => Promise.all([loadList(), loadHealth(), refresh()]))
             <button type="button" class="dl-found" :disabled="!found.length" @click="downloadFound">Download found (.txt)</button>
             <button type="button" class="dl-failed" :disabled="!failed.length" @click="downloadFailed">Download failed (.txt)</button>
             <button type="button" class="dl-report" @click="downloadReport">Full report (.csv)</button>
-            <span v-if="confirmingClear" class="clear-ask" role="group" aria-label="Clear your list" @keydown.esc="keepList">
-              <span class="clear-q">Clear your list? The companies it added stop being watched.</span>
-              <button type="button" class="confirm-clear" :disabled="busy" @click="clear">Yes, clear it</button>
-              <button ref="keepEl" type="button" class="keep-list" @click="keepList">Keep it</button>
+            <span v-if="confirmingClear" class="clear-ask" role="group" aria-labelledby="clear-q" @keydown.esc="keepList">
+              <span id="clear-q" class="clear-q">Clear your list? The companies it added stop being watched.</span>
+              <button type="button" class="confirm-clear" :disabled="busy" @click="clear">Clear list</button>
+              <button ref="keepEl" type="button" class="keep-list" @click="keepList">Keep list</button>
             </span>
             <button v-else ref="clearEl" type="button" class="ghost clear" :disabled="busy" @click="askClear">Clear list</button>
           </div>

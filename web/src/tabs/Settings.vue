@@ -232,7 +232,7 @@ onMounted(load)
         </label>
       </div>
       <p v-if="cyclePending !== null" class="hint cycle-pending" role="status">
-        {{ cycleLabel(cyclePending) }} is chosen but not saved. Press Enter to save it, or Esc to keep {{ cycleLabel(settings.cycle_days).toLowerCase() }}.
+        {{ cycleLabel(cyclePending) }} is selected but not saved. Press Enter to save, or Esc to keep {{ cycleLabel(settings.cycle_days).toLowerCase() }}.
       </p>
       <p class="hint cycle-hint">{{ cycleHint }}</p>
       <p class="muted small">

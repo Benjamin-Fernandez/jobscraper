@@ -93,8 +93,8 @@ export function runStatusLabel(status) {
 // `aborted_unhealthy` is the pipeline's network-fault guard: most due companies
 // failed together, so nothing was counted against any of them.
 const RUN_STATUS_NOTE = {
-  aborted_unhealthy: 'Most of the companies due failed together, which looks like a network problem on this computer. '
-    + 'Nothing was counted against any company, and the batch was not marked as done: run again to retry it.',
+  aborted_unhealthy: 'Most companies failed together, which points to a network problem on this computer. '
+    + 'None were counted against them and the batch was not marked done. Run again to retry.',
 }
 export function runStatusNote(status) {
   return RUN_STATUS_NOTE[status] ?? ''

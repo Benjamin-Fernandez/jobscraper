@@ -300,7 +300,7 @@ const safe = url => (/^https?:\/\//i.test(url || '') ? url : null)
       </p>
 
       <nav v-if="jumpLetters.length" class="jump" aria-label="Jump to a letter">
-        <button v-for="l in jumpLetters" :key="l" type="button" class="jump-letter" @click="jumpTo(l)">{{ l }}</button>
+        <button v-for="l in jumpLetters" :key="l" type="button" class="jump-letter" :aria-label="`Jump to ${l}`" @click="jumpTo(l)">{{ l }}</button>
       </nav>
 
       <ul v-if="shown.length" ref="listEl" class="dir surface" :class="{ compact }">
