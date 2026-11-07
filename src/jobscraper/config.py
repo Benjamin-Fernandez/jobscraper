@@ -223,21 +223,31 @@ _MAIL_CLAMPS: dict[str, tuple[float, Optional[float]]] = {
     "model_max_calls": (0, None), "model_max_chars": (1, None), "model_timeout_s": (1, None),
     "retry_model_days": (0, None)}
 
-_MAIL_FALSE = frozenset({"false", "no", "0", "off", "n", "f"})
-_MAIL_TRUE = frozenset({"true", "yes", "1", "on", "y", "t"})
+_FALSE_WORDS = frozenset({"false", "no", "0", "off", "n", "f"})
+_TRUE_WORDS = frozenset({"true", "yes", "1", "on", "y", "t"})
 
 
-def _mail_bool(value: Any, default: bool) -> bool:
-    """D-104 (g): the same reading as `mailstatus.transition.as_bool` (config is
-    foundation and may not import a stage). `bool("false")` is True, so a quoted
-    'false' / 'no' / '0' is read as text; anything unreadable keeps the default,
-    so a typo never turns `require_auth` off."""
+def as_bool(value: Any, default: bool) -> bool:
+    """D-154 (g), MS §10.4: a config boolean. `bool("false")` is True, so a
+    quoted YAML 'false' / 'no' / '0' would otherwise turn a switch on by
+    accident. A real bool as is; a number, True when not 0; a string, trimmed
+    and casefolded, against the words above; anything else keeps `default`
+    (so a typo never turns `require_auth` off).
+
+    The same truth table as `mailstatus.transition.as_bool`, which keeps its own
+    copy: config (foundation) may not import a stage, and a mailstatus/ file
+    imports only mailstatus.* (tests/test_layering.py)."""
     if isinstance(value, bool):
         return value
     if isinstance(value, (int, float)):
         return value != 0
-    s = str(value).strip().lower()
-    return False if s in _MAIL_FALSE else True if s in _MAIL_TRUE else default
+    if isinstance(value, str):
+        s = value.strip().lower()
+        if s in _FALSE_WORDS:
+            return False
+        if s in _TRUE_WORDS:
+            return True
+    return default
 
 
 @dataclass(frozen=True)
@@ -277,7 +287,7 @@ class MailStatusConfig:
                 continue
             v, default = raw[name], f.default
             if isinstance(default, bool):
-                out[name] = _mail_bool(v, default)
+                out[name] = as_bool(v, default)
                 continue
             try:
                 n = int(float(v))

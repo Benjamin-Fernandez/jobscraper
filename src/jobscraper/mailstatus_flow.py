@@ -121,7 +121,7 @@ def own_addresses(cfg: Any, st: Any) -> frozenset[str]:
 def candidates(st: Any, rules: Any) -> list[AppCandidate]:
     """`store.mail_match_context` as AppCandidates. Employer domains are the
     registrable domains of the job, application and careers hosts, with every
-    platform, tenant-site and job-board domain dropped (D-104 a,
+    platform, tenant-site and job-board domain dropped (D-154 a,
     `match.employer_domains`); tenants come from `match.tenants_from_hosts` (E1)."""
     out = []
     for c in st.mail_match_context():

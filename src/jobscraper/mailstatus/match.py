@@ -250,8 +250,9 @@ def _evaluate(app: AppCandidate, mail: _Mail) -> tuple[tuple[Signal, ...], int, 
 
     D-104 (c), review F3: a variant listed in `common_word_names`, or a single
     token under 5 characters, matches only as written (capitalisation kept) and
-    is never strong, in the sender name, the subject or the body: "Grab your
-    spot" or "Acme Analytics" on shared-platform mail names someone else. Alone
+    is never strong, in the sender name, the subject or the body: a
+    common-word employer name such as "Acme", used as an ordinary word in a
+    subject, or "Acme Analytics" on shared-platform mail, names someone else. Alone
     it gives WEAK (a suggestion); it can only confirm another strong signal."""
     h, rules = mail.h, mail.rules
     found: set[Signal] = set()
@@ -338,7 +339,8 @@ def match(h: MailHeader, body: Optional[MailBody], apps: Sequence[AppCandidate],
             return several(emp)
     # 4. Role or requisition id separates applications at one employer. When the
     # only employer evidence is a restricted name (D-104 c), the role can't make it
-    # strong: "Grab" in a subject plus a common title still names someone else.
+    # strong: a common-word employer name such as "Acme" in a subject plus a
+    # common title still names someone else.
     roles = [a for a in emp if {Signal.ROLE, Signal.REQ_ID} & set(sig[a.job_id])]
     if len(roles) == 1:
         return one(roles[0], MatchKind.WEAK if capped[roles[0].job_id] else MatchKind.STRONG)
