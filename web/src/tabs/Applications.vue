@@ -15,8 +15,10 @@
 // made wears a "From email" badge in History (MailEvidence) with its quote and
 // Undo. Either action reloads the rows and the suggestions.
 import { computed, onActivated, onMounted, ref, watch } from 'vue'
-import { describeError, getApplications, getStats, setApplicationStatus, untrackApplication } from '../api.js'
+import { describeError, getApplicationAttempts, getApplications, getStats, setApplicationStatus, untrackApplication } from '../api.js'
+import { attemptLabel, modeLabel } from '../attempts.js'
 import { ageLabel, isActive, lastAt, needsFollowUp, secondLine, STAGE_KEY } from '../applications.js'
+import { openProfile } from '../profileView.js'
 import { exactTime, plural, safeUrl, shortDate, when } from '../format.js'
 import { tabEmits, tabProps } from '../shell.js'
 import { statusLabel } from '../stages.js'
@@ -24,6 +26,7 @@ import { showToast } from '../toast.js'
 import { runsInRange } from '../runs.js'
 import CompanyMark from '../components/CompanyMark.vue'
 import Icon from '../components/Icon.vue'
+import JobDetail from '../components/JobDetail.vue'
 import MailEvidence from '../components/MailEvidence.vue'
 import MailSuggestions from '../components/MailSuggestions.vue'
 import RunSelector from '../components/RunSelector.vue'
@@ -225,6 +228,39 @@ async function saveNote(row) {
   }
 }
 
+// ---- the posting under a row (Q-76 N12): one open at a time ----
+
+const openId = ref(null)           // job id whose detail is open
+const attempts = ref({})           // job id -> { state: 'loading' | 'ok' | 'error', items, error }
+
+// The shortlist's shape for JobDetail: the row's own fields, filled out by the
+// posting data the server found for it (null once the role left the shortlist).
+function detailJob(row) {
+  return {
+    ...row,
+    ...(row.posting ?? {}),
+    id: row.job_id,
+    title: row.role ?? row.job_id,
+    closed: row.posting?.closed ?? Boolean(row.closed_at),
+  }
+}
+
+async function loadAttempts(id) {
+  attempts.value = { ...attempts.value, [id]: { state: 'loading', items: [] } }
+  try {
+    const items = await getApplicationAttempts(id)
+    attempts.value = { ...attempts.value, [id]: { state: 'ok', items } }
+  } catch (e) {
+    attempts.value = { ...attempts.value, [id]: { state: 'error', items: [], error: describeError(e) } }
+  }
+}
+
+function toggleDetail(row) {
+  if (openId.value === row.job_id) { openId.value = null; return }
+  openId.value = row.job_id
+  loadAttempts(row.job_id)
+}
+
 onMounted(load)
 // A cached tab coming back shows what changed meanwhile (Q-70 B9).
 let shownOnce = false
@@ -314,6 +350,21 @@ onActivated(() => { if (shownOnce) load(); shownOnce = true })
                 </a>
                 <span v-else class="role-title">{{ row.role ?? row.job_id }}</span>
                 <span v-if="needsFollowUp(row)" class="pill follow-up">Follow up?</span>
+                <!-- The latest auto-apply attempt (Q-76 N11); "Needs your input" leads to the answers. -->
+                <button
+                  v-if="row.last_attempt?.kind === 'needs_input'"
+                  type="button"
+                  class="pill attempt attempt-link"
+                  data-kind="needs_input"
+                  :title="row.last_attempt.text"
+                  @click="openProfile('details')"
+                >{{ attemptLabel('needs_input', row.last_attempt.mode) }}</button>
+                <span
+                  v-else-if="row.last_attempt"
+                  class="pill attempt"
+                  :data-kind="row.last_attempt.kind"
+                  :title="row.last_attempt.text || undefined"
+                >{{ attemptLabel(row.last_attempt.kind, row.last_attempt.mode) }}</span>
                 <p v-if="secondLine(row)" class="row-meta">{{ secondLine(row) }}</p>
                 <form
                   v-if="noteFor === row.job_id"
@@ -349,6 +400,16 @@ onActivated(() => { if (shownOnce) load(); shownOnce = true })
                     {{ row.notes ? 'Edit note' : 'Add note' }}
                   </button>
                   <button
+                    type="button"
+                    class="link details-toggle"
+                    :aria-expanded="openId === row.job_id ? 'true' : 'false'"
+                    :aria-controls="`app-panel-${row.job_id}`"
+                    :aria-label="`${openId === row.job_id ? 'Hide details' : 'Details'}: ${row.company ?? row.job_id} · ${row.role ?? ''}`"
+                    @click="toggleDetail(row)"
+                  >
+                    {{ openId === row.job_id ? 'Hide details' : 'Details' }}
+                  </button>
+                  <button
                     v-if="(row.events?.length ?? 0) <= 1"
                     type="button"
                     class="link row-remove"
@@ -376,6 +437,41 @@ onActivated(() => { if (shownOnce) load(); shownOnce = true })
                   </li>
                 </ol>
               </details>
+              <div
+                v-if="openId === row.job_id"
+                :id="`app-panel-${row.job_id}`"
+                class="app-detail"
+                role="region"
+                :aria-labelledby="`app-detail-${row.job_id}`"
+              >
+                <JobDetail :job="detailJob(row)" :title-id="`app-detail-${row.job_id}`">
+                  <template #extra>
+                    <section class="attempts" aria-labelledby="attempts-heading">
+                      <h4 id="attempts-heading">Auto-apply attempts</h4>
+                      <p v-if="!attempts[row.job_id] || attempts[row.job_id].state === 'loading'" class="muted attempts-status">Loading…</p>
+                      <div v-else-if="attempts[row.job_id].state === 'error'" class="notice error attempts-error" role="alert">
+                        <p>Couldn't load the attempts: {{ attempts[row.job_id].error }}.</p>
+                        <button type="button" @click="loadAttempts(row.job_id)">Try again</button>
+                      </div>
+                      <p v-else-if="!attempts[row.job_id].items.length" class="muted attempts-status">No auto-apply attempts for this role.</p>
+                      <ul v-else class="attempt-list">
+                        <li v-for="a in attempts[row.job_id].items" :key="a.id" class="attempt-item" :data-kind="a.kind">
+                          <div class="attempt-head">
+                            <span class="at" :title="exactTime(a.queued_at)">{{ when(a.queued_at) }}</span>
+                            <span class="attempt-mode">{{ modeLabel(a.mode) }}</span>
+                            <span class="pill attempt" :data-kind="a.kind">{{ attemptLabel(a.kind, a.mode) }}</span>
+                          </div>
+                          <p v-if="a.text" class="attempt-text">{{ a.text }}</p>
+                          <p v-if="a.hint" class="attempt-hint muted">{{ a.hint }}</p>
+                          <button v-if="a.kind === 'needs_input'" type="button" class="link attempt-answer" @click="openProfile('details')">
+                            Answer in Application details
+                          </button>
+                        </li>
+                      </ul>
+                    </section>
+                  </template>
+                </JobDetail>
+              </div>
             </li>
           </ul>
         </section>
@@ -444,7 +540,7 @@ onActivated(() => { if (shownOnce) load(); shownOnce = true })
 .app-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto 10.5rem;
-  grid-template-areas: 'role updated status' 'history history history';
+  grid-template-areas: 'role updated status' 'history history history' 'detail detail detail';
   align-items: center;
   gap: 0 var(--space-4);
   padding: var(--space-3) 0;
@@ -476,9 +572,47 @@ a.role-title .icon { color: var(--muted); }
 /* StatusSelect renders its own label root; place it in the row's status area. */
 .app-row > :deep(.status-field) { grid-area: status; }
 .follow-up { color: var(--warn); background: var(--warn-soft); margin-left: var(--space-2); }
+/* The auto-apply pill: green when sent, amber when it waits for you, red when it stopped. */
+.attempt { margin-left: var(--space-2); color: var(--text-2); background: var(--surface-3); }
+.attempt[data-kind='sent'] { color: var(--ok); background: var(--ok-soft); }
+.attempt[data-kind='dry_run'], .attempt[data-kind='unconfirmed'], .attempt[data-kind='needs_input'] { color: var(--warn); background: var(--warn-soft); }
+.attempt[data-kind='stopped'] { color: var(--danger); background: var(--danger-soft); }
+button.attempt-link { border: 0; cursor: pointer; font: inherit; font-size: var(--text-xs); font-weight: 600; line-height: 1.7; min-height: 0; padding: 0 var(--space-2); box-shadow: none; }
+button.attempt-link:hover { text-decoration: underline; }
 .row-meta { margin: 2px 0 0; font-size: var(--text-xs); color: var(--muted); }
 .row-remove { display: flex; width: max-content; margin-top: 2px; font-size: var(--text-xs); color: var(--muted); text-decoration: none; }
 .row-remove:hover:not(:disabled) { color: var(--accent); text-decoration: underline; }
+.details-toggle { display: flex; width: max-content; margin-top: 2px; font-size: var(--text-xs); color: var(--muted); text-decoration: none; }
+.details-toggle:hover:not(:disabled) { color: var(--accent); text-decoration: underline; }
+
+/* The posting under its row, as wide as the row; min-width 0 so a long word wraps. */
+.app-detail {
+  grid-area: detail;
+  min-width: 0;
+  margin-top: var(--space-3);
+  padding: var(--space-4);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.app-detail :deep(.detail-title) { font-size: var(--text-lg); overflow-wrap: anywhere; }
+/* JobDetail's scoped heading style does not reach slot content, so this repeats it. */
+.attempts { margin-top: var(--space-5); padding-top: var(--space-4); border-top: 1px solid var(--border); }
+.attempts h4 {
+  margin: 0 0 var(--space-2);
+  font-size: var(--text-xs); font-weight: 650; letter-spacing: 0.06em;
+  text-transform: uppercase; color: var(--muted);
+}
+.attempts-status { margin: 0; font-size: var(--text-sm); }
+.attempts-error { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-2); }
+.attempts-error p { min-width: 0; margin: 0; overflow-wrap: anywhere; }
+.attempt-list { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--space-3); }
+.attempt-item { min-width: 0; font-size: var(--text-sm); }
+.attempt-head { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-1) var(--space-3); }
+.attempt-mode { color: var(--text-2); font-weight: 600; }
+.attempt-head .attempt { margin-left: 0; }
+.attempt-text, .attempt-hint { margin: 2px 0 0; overflow-wrap: anywhere; text-wrap: pretty; }
+.attempt-answer { margin-top: 2px; font-size: var(--text-sm); }
 
 .history { grid-area: history; margin-top: var(--space-2); font-size: var(--text-sm); }
 .history summary { cursor: pointer; color: var(--muted); width: max-content; }
@@ -491,7 +625,7 @@ a.role-title .icon { color: var(--muted); }
   .page-controls, .page-controls .search { width: 100%; }
   .app-row {
     grid-template-columns: minmax(0, 1fr) 9rem;
-    grid-template-areas: 'role status' 'updated updated' 'history history';
+    grid-template-areas: 'role status' 'updated updated' 'history history' 'detail detail';
     gap: var(--space-1) var(--space-3);
   }
 }

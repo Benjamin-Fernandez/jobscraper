@@ -12,13 +12,14 @@
 // "Application details" (the applicant form and the questions employers asked).
 // The view last chosen is remembered; a first visit opens Application details
 // when something there needs the owner, and its label carries that count.
-import { computed, nextTick, onMounted, ref } from 'vue'
+import { computed, nextTick, onActivated, onMounted, ref } from 'vue'
 import {
   ApiError, RESUME_TYPES, describeError, failureText, getApplicant, getProfile, getQuestions,
   startProfileRefresh, uploadResume,
 } from '../api.js'
 import { useJob } from '../composables/useJob.js'
 import { exactTime, when } from '../format.js'
+import { PROFILE_VIEW_KEY } from '../profileView.js'
 import { tabEmits, tabProps } from '../shell.js'
 import ApplicationDetails from '../components/ApplicationDetails.vue'
 import JobStatus from '../components/JobStatus.vue'
@@ -50,7 +51,7 @@ const { job, error: jobError, running, refresh, track } = useJob({
 })
 
 // ---- which view: Resume and titles, or Application details ----
-const VIEW_KEY = 'profile.view'
+const VIEW_KEY = PROFILE_VIEW_KEY
 const VIEWS = [
   { id: 'resume', label: 'Resume and titles' },
   { id: 'details', label: 'Application details' },
@@ -202,6 +203,13 @@ function refreshOnly() {
   note.value = ''
   startRefresh()
 }
+
+// Another tab may have chosen the view while this one was kept alive (Q-76: a
+// "Needs your input" attempt opens Application details).
+onActivated(() => {
+  const v = rememberedView()
+  if (v && v !== view.value) { view.value = v; chosen = true }
+})
 
 onMounted(() => Promise.all([loadProfile(), refresh(), ...(view.value === 'resume' ? [probeCounts()] : [])]))
 </script>
