@@ -1903,12 +1903,15 @@ _MONTHS["sept"] = 9
 
 # One date token (§3.2): "Mon YYYY" / "Month YYYY", "MM/YYYY" or "YYYY-MM".
 _RESUME_TOKEN = r"(?:[A-Za-z]{3,9}\.?\s+\d{4}|\d{1,2}/\d{4}|\d{4}-\d{2})"
-_RESUME_OPEN = r"(?:present|current|now|ongoing)"
+_RESUME_OPEN = r"(?:present|current|now|ongoing|to\s+date)"
+# D-106: the end date may carry an expected-graduation prefix; it is still the end.
+_RESUME_EXPECTED = r"(?:expected:?|exp\.|exp|anticipated)"
 _RESUME_RANGE_RE = re.compile(
-    rf"^(?P<a>{_RESUME_TOKEN})\s*(?:–|—|-|\bto\b)\s*(?P<b>{_RESUME_TOKEN}|{_RESUME_OPEN})$",
+    rf"^(?P<a>{_RESUME_TOKEN})\s*(?:(?:–|—|-|\bto\b)\s*(?:{_RESUME_EXPECTED}\s*)?"
+    rf"(?P<b>{_RESUME_TOKEN}|{_RESUME_OPEN})|(?P<b2>to\s+date))$",
     re.IGNORECASE)
 _RESUME_SINGLE_RE = re.compile(
-    rf"^(?:(?P<exp>expected|exp\.?)\s*)?(?P<a>{_RESUME_TOKEN})$", re.IGNORECASE)
+    rf"^(?:(?P<exp>{_RESUME_EXPECTED})\s*)?(?P<a>{_RESUME_TOKEN})$", re.IGNORECASE)
 
 
 def _resume_token(tok: str) -> Optional[str]:
@@ -1936,8 +1939,10 @@ def parse_resume_dates(text: Any) -> tuple[Optional[str], Optional[str], bool]:
     """(start, end, ok) for a resume's verbatim dates line (§3.2).
 
     "May 2024 – Aug 2024" -> ("2024-05", "2024-08", True); an open end
-    (Present / Current / Now / Ongoing) is `end None`; one token is both start
-    and end, except after "Expected" / "Exp.", where it is the end only. A year
+    (Present / Current / Now / To date / Ongoing) is `end None`. An end date may
+    carry "Expected", "Expected:", "Exp." or "Anticipated" (D-106: the expected
+    graduation, stored as the end). One token is both start and end, except
+    after one of those prefixes, where it is the end only. A year
     with no month ("2021 – 2025") and anything else is (None, None, False): no
     month is invented. A range that ends before it starts is not understood
     either (it would not save)."""
@@ -1948,8 +1953,9 @@ def parse_resume_dates(text: Any) -> tuple[Optional[str], Optional[str], bool]:
     m = _RESUME_RANGE_RE.match(t)
     if m:
         start = _resume_token(m.group("a"))
-        is_open = re.fullmatch(_RESUME_OPEN, m.group("b"), re.IGNORECASE) is not None
-        end = None if is_open else _resume_token(m.group("b"))
+        b = m.group("b") or m.group("b2")
+        is_open = re.fullmatch(_RESUME_OPEN, b, re.IGNORECASE) is not None
+        end = None if is_open else _resume_token(b)
         if start is None or (end is None and not is_open):
             return fail
         if end is not None and end < start:
