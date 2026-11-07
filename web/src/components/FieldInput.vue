@@ -455,6 +455,7 @@ function removeRow(i) {
             <select
               v-if="mapCountries.length"
               :id="`${id}-code-${i}`"
+              class="cbm-country"
               :value="r.k"
               :disabled="disabled"
               :aria-invalid="rowError(r) ? 'true' : undefined"
@@ -559,11 +560,15 @@ function removeRow(i) {
 .salary { display: grid; gap: var(--space-2); }
 .salary-grid { display: flex; flex-wrap: wrap; align-items: flex-end; gap: var(--space-3); }
 .salary-grid > div { display: grid; gap: var(--space-1); }
-.cbm { display: grid; gap: var(--space-2); justify-items: start; }
-.cbm-default { display: flex; align-items: center; gap: var(--space-2); }
-.cbm-rows { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--space-2); }
-.cbm-rows li { display: grid; gap: var(--space-1); }
-.cbm-row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
+/* Country rows wrap on a phone: the country select takes the line, Yes/No and
+   Remove go below it. Tracks are minmax(0, 1fr) so a long country name never
+   widens the page. */
+.cbm { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--space-2); justify-items: start; }
+.cbm-default { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
+.cbm-rows { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--space-2); width: min(100%, 36rem); }
+.cbm-rows li { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--space-1); min-width: 0; }
+.cbm-row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); min-width: 0; }
+.cbm-row > .cbm-country { flex: 1 1 14rem; min-width: 0; }
 .fixed { margin: 0; font-size: var(--text-sm); color: var(--text-2); }
 .tag { margin-left: var(--space-2); }
 </style>
