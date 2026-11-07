@@ -258,6 +258,13 @@ suite('ready applications and the retry confirm', () => {
     expect(toast.current?.message).toBe('Started. Dry run: everything is filled in and nothing is sent.')
   })
 
+  it('Q-70 D6: the retry toast links to the Developer tab to follow the run', async () => {
+    const w = await mountInbox(questions([], { ready: READY, mode: 'dry_run' }))
+    await startsWith(w, 'Retry 2 applications').trigger('click')
+    await flushPromises()
+    expect(toast.current?.link).toEqual({ label: 'Follow it on the Developer tab', href: '#/developer' })
+  })
+
   it('in auto mode Retry asks first: "Send <n> applications now?", and Not now sends nothing', async () => {
     const w = await mountInbox(questions([], { ready: READY, mode: 'auto' }))
     await startsWith(w, 'Retry 2 applications').trigger('click')
@@ -312,5 +319,27 @@ suite('empty and answered states', () => {
     const w = await mountInbox(questions([answered]))
     expect(w.text()).toMatch(/Answered questions \(\d+\)/)
     expect(w.findAll('button').some(b => b.text().trim() === 'Change answer')).toBe(true)
+  })
+})
+
+suite('Q-70 D7: loading shows the skeleton, not a text line', () => {
+  it('while the questions load a .skeleton shows and "Loading questions" does not; both are gone after', async () => {
+    const Inbox = (await loaders['../src/components/QuestionsInbox.vue']()).default
+    let release
+    const gate = new Promise(r => { release = r })
+    server = fakeServer(questions([group()]))
+    const inner = server.fetch.getMockImplementation()
+    vi.stubGlobal('fetch', vi.fn(async (url, init) => {
+      if (String(url).startsWith('api/questions?') || String(url).startsWith('/api/questions?')) await gate
+      return inner(url, init)
+    }))
+    const w = mount(Inbox)
+    await flushPromises()
+    expect(w.find('.skeleton').exists()).toBe(true)
+    expect(w.text()).not.toContain('Loading questions')
+    release()
+    await flushPromises()
+    expect(w.find('.skeleton').exists()).toBe(false)
+    expect(w.text()).toContain('Visa status')
   })
 })

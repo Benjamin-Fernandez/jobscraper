@@ -9,13 +9,16 @@
 // hands it to every tab (see shell.js). Choosing a run fetches that run's
 // shortlist and swaps it in place: one request, no navigation (M7-T2).
 import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { ApiError, describeError, getRuns, getShortlist, getStats } from './api.js'
+import { ApiError, describeError, failureText, getRuns, getShortlist, getStats } from './api.js'
+import { onJobStarted, useJob } from './composables/useJob.js'
+import { showToast } from './toast.js'
 import { TABS } from './tabs.js'
 import { runQuery, sameRun } from './runs.js'
 import { hashFor, tabFromHash } from './route.js'
 import TabLoading from './components/TabLoading.vue'
 import TabFailed from './components/TabFailed.vue'
 import ToastHost from './components/ToastHost.vue'
+import JobPill from './components/JobPill.vue'
 
 const runs = ref([])
 // What the Inbox shows (M15): 'all' (the default), 'week', 'month', or the
@@ -139,6 +142,28 @@ async function onChanged(options = {}) {
   await Promise.all([loadJobs(), loadStats()])
 }
 
+// The shell watches the background job for every tab (Q-70 C2, G7): a run that
+// finishes while the owner is on Profile or Applications still refreshes the
+// Inbox and says so. `consume: false` keeps its list of seen jobs apart, so the
+// Runs tab's own watcher still hears the ending first-hand.
+const shell = useJob({
+  consume: false,
+  onFinish: j => {
+    onChanged({ runs: j.kind === 'run' })
+    if (j.kind === 'run') {
+      showToast({
+        message: j.state === 'succeeded' ? 'Run finished. New roles are in the Inbox.' : failureText(j, 'The run stopped.'),
+        link: { label: 'Open Runs', href: '#/runs' },
+      })
+    }
+  },
+})
+// Coming back to the page, the job may have ended while the timers slept.
+function onVisible() {
+  if (document.visibilityState === 'visible') shell.refresh()
+}
+let stopStarters = () => {}
+
 watch(active, tab => { document.title = tab ? `${tab.label} · JobScraper` : 'JobScraper' }, { immediate: true })
 
 // On a narrow screen the tab bar scrolls sideways; keep the current tab in view
@@ -147,6 +172,15 @@ watch(activeId, async id => {
   await nextTick()
   tabEls[id]?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' })
 })
+
+// A fade at the right edge says the tab bar scrolls (Q-70 C8, G29): on a phone
+// the later tabs are off screen with nothing to hint at them.
+const tablistEl = ref(null)
+const moreRight = ref(false)
+function measureTabs() {
+  const el = tablistEl.value
+  if (el) moreRight.value = el.scrollLeft + el.clientWidth < el.scrollWidth - 1
+}
 
 // "/" jumps to the open tab's search box, as on GitHub or Gmail - unless the
 // user is already typing somewhere.
@@ -188,11 +222,19 @@ async function boot() {
 onMounted(() => {
   window.addEventListener('hashchange', onHashChange)
   window.addEventListener('keydown', onSlash)
+  window.addEventListener('resize', measureTabs)
+  measureTabs()
+  document.addEventListener('visibilitychange', onVisible)
+  stopStarters = onJobStarted(j => shell.track(j, { started: true, announce: false }))
+  shell.refresh()
   return boot()
 })
 onBeforeUnmount(() => {
   window.removeEventListener('hashchange', onHashChange)
   window.removeEventListener('keydown', onSlash)
+  window.removeEventListener('resize', measureTabs)
+  document.removeEventListener('visibilitychange', onVisible)
+  stopStarters()
 })
 </script>
 
@@ -208,7 +250,14 @@ onBeforeUnmount(() => {
             </svg>JobScraper</a>
         </h1>
         <div class="tabbar">
-          <div class="tablist" role="tablist" aria-label="Sections">
+          <div
+            ref="tablistEl"
+            class="tablist"
+            :class="{ 'more-right': moreRight }"
+            role="tablist"
+            aria-label="Sections"
+            @scroll="measureTabs"
+          >
             <button
               v-for="(tab, i) in tabs"
               :id="`tab-${tab.id}`"
@@ -236,6 +285,7 @@ onBeforeUnmount(() => {
             </button>
           </div>
         </div>
+        <JobPill :job="shell.job.value" />
       </div>
     </header>
 
@@ -256,17 +306,23 @@ onBeforeUnmount(() => {
       :aria-labelledby="`tab-${active.id}`"
       tabindex="0"
     >
-      <component
-        :is="active.view"
-        :key="active.id"
-        :run="run"
-        :runs="runs"
-        :jobs="jobs"
-        :loading="loading"
-        :error="error"
-        @changed="onChanged"
-        @select-run="selectRun"
-      />
+      <!-- Inbox and Applications keep their place (selection, scroll, filters)
+           while another tab is open (Q-70 C4, G15). The names are the SFC file
+           names; the async wrapper is matched by what it resolved to. Their
+           onActivated hooks do the quiet refresh. -->
+      <KeepAlive :include="['Inbox', 'Applications']">
+        <component
+          :is="active.view"
+          :key="active.id"
+          :run="run"
+          :runs="runs"
+          :jobs="jobs"
+          :loading="loading"
+          :error="error"
+          @changed="onChanged"
+          @select-run="selectRun"
+        />
+      </KeepAlive>
     </main>
     <ToastHost />
   </div>
@@ -290,6 +346,7 @@ onBeforeUnmount(() => {
   align-items: stretch;
   gap: var(--space-5);
   min-height: var(--header-h);
+  position: relative;
 }
 .brand {
   display: flex;
@@ -314,6 +371,7 @@ onBeforeUnmount(() => {
   overscroll-behavior-x: contain;
 }
 .tablist::-webkit-scrollbar { display: none; }
+.tablist.more-right { mask-image: linear-gradient(to right, #000 calc(100% - 2rem), transparent); }
 .tab {
   position: relative;
   gap: var(--space-2);

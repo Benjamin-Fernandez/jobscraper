@@ -29,6 +29,7 @@
   --muted: #5d5c64;
   --border: #e3e1db;
   --border-strong: #cdcac1;
+  --control-border: #878479; /* inputs and selects: 3:1 against the page (WCAG 1.4.11) */
   --accent: #2f5bd3;
   --accent-hover: #2449b0;
   --accent-text: #ffffff;
@@ -118,6 +119,7 @@
     --muted: #a1a0a9;
     --border: #2d2d33;
     --border-strong: #42424a;
+    --control-border: #75757e;
     --accent: #8aa6ff;
     --accent-hover: #a8bdff;
     --accent-text: #0c1330;
@@ -148,6 +150,11 @@
   }
 }
 
+/* The phone header is two rows (brand, then tabs). */
+@media (max-width: 640px) {
+  :root { --header-h: 5.3rem; }
+}
+
 /* Touch screens get larger targets. */
 @media (pointer: coarse) {
   :root { --control-h: 2.75rem; }
@@ -157,7 +164,7 @@
 
 /* The scrollbar's space is always kept, so a page that grows past one screen
    when its data arrives does not shift sideways. */
-html { scrollbar-gutter: stable; }
+html { scrollbar-gutter: stable; scroll-padding-top: calc(var(--header-h) + var(--space-2)); }
 body { margin: 0; background: var(--bg); min-height: 100vh; }
 
 h1, h2, h3 { line-height: 1.25; font-family: var(--font-display); }
@@ -174,7 +181,7 @@ a:hover { color: var(--accent-hover); }
 
 /* ---- controls ---- */
 
-button, select, input, a.button {
+button, select, input, textarea, a.button {
   font: inherit;
   font-size: var(--text-sm);
   color: var(--text);
@@ -233,16 +240,18 @@ button.link {
 }
 button.link:hover:not(:disabled) { background: none; color: var(--accent-hover); }
 
-select, input[type='number'], input[type='text'], input[type='search'] {
+select, textarea, input[type='number'], input[type='text'], input[type='search'],
+input[type='email'], input[type='url'], input[type='date'], input[type='month'] {
   min-height: var(--control-h);
   padding: 0 var(--space-3);
   background: var(--surface);
-  border: 1px solid var(--border-strong);
+  border: 1px solid var(--control-border);
   border-radius: var(--radius);
   transition: border-color 0.12s, box-shadow 0.12s;
 }
-select:hover, input[type='search']:hover, input[type='text']:hover, input[type='number']:hover { border-color: var(--muted); }
-select:focus-visible, input:focus-visible {
+select:hover, textarea:hover, input[type='search']:hover, input[type='text']:hover, input[type='number']:hover,
+input[type='email']:hover, input[type='url']:hover, input[type='date']:hover, input[type='month']:hover { border-color: var(--muted); }
+select:focus-visible, textarea:focus-visible, input:focus-visible {
   outline: none;
   border-color: var(--accent);
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent);
@@ -251,7 +260,9 @@ select { padding-right: var(--space-2); max-width: 100%; }
 input[type='number'] { font-family: var(--mono); font-variant-numeric: tabular-nums; }
 input[aria-invalid='true'] { border-color: var(--danger); }
 input[type='checkbox'] { width: 1.1rem; height: 1.1rem; margin: 0; accent-color: var(--accent); }
-input:disabled, select:disabled { opacity: 0.6; }
+input:disabled, select:disabled, textarea:disabled { opacity: 0.6; }
+textarea { padding: var(--space-2) var(--space-3); line-height: var(--leading); }
+::placeholder { color: var(--muted); opacity: 1; }
 
 /* A search field with a leading icon: <label class="search"><Icon/><input></label>. */
 .search {

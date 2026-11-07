@@ -100,7 +100,7 @@ async function mountDetails(opts) {
 const button = (wrapper, text) => wrapper.findAll('button').find(b => b.text().trim() === text)
 const countOf = (text, re) => (text.match(re) || []).length
 
-beforeEach(() => { window.localStorage.clear() })
+beforeEach(() => { window.localStorage.clear(); window.sessionStorage.clear() })
 afterEach(() => { vi.unstubAllGlobals() })
 enableAutoUnmount(afterEach)
 
@@ -162,6 +162,7 @@ suite('field tags and the meter', () => {
 suite('saving', () => {
   it('PUTs {profile, etag} from the Save details bar and says Saved.', async () => {
     const w = await mountDetails()
+    await w.find('#f-contact-city-in').setValue('Singapore')     // Save is off until something changed (Q-70 D3)
     const save = button(w, 'Save details')
     expect(save, 'a "Save details" button').toBeTruthy()
     await save.trigger('click')
@@ -170,6 +171,7 @@ suite('saving', () => {
     expect(puts).toHaveLength(1)
     expect(puts[0].body.etag).toBe('aaaaaaaaaaaaaaaa')
     expect(puts[0].body.profile.contact.postal_code).toBe('000001')
+    expect(puts[0].body.profile.contact.city).toBe('Singapore')
     expect(w.text()).toContain('Saved.')
   })
 
@@ -177,10 +179,12 @@ suite('saving', () => {
     const w = await mountDetails({
       put: () => ({ status: 422, body: { detail: 'invalid', errors: [{ path: 'contact.postal_code', message: 'must be 6 digits' }] } }),
     })
+    await w.find('#f-contact-city-in').setValue('Singapore')
     await button(w, 'Save details').trigger('click')
     await flushPromises()
     const text = w.text()
-    expect(text).toContain("Some details need fixing. They're marked below.")
+    expect(text).toContain('1 detail needs fixing before you can save')
+    expect(text).toContain('Postal code: must be 6 digits')
     expect(text).toContain('must be 6 digits')
     expect(text).not.toContain('Saved.')
     // the inline message is tied to its input for screen readers (QD 10.3)
@@ -190,10 +194,11 @@ suite('saving', () => {
 
   it('a 409 "changed" explains why and offers Reload, which fetches the file again', async () => {
     const w = await mountDetails({ put: () => ({ status: 409, body: { detail: 'changed' } }) })
+    await w.find('#f-contact-city-in').setValue('Singapore')
     await button(w, 'Save details').trigger('click')
     await flushPromises()
     expect(w.text()).toContain(
-      'This file changed since you opened it, in another tab or by hand. Reload to get the latest, then make your change again.')
+      'This file changed since you opened it, in another tab or by hand. Reload to take in the latest. What you typed here is kept.')
     const reload = button(w, 'Reload')
     expect(reload, 'a Reload button').toBeTruthy()
     const before = server.calls.filter(c => c.method === 'GET' && c.url === 'api/applicant').length
@@ -213,7 +218,7 @@ suite('saving', () => {
   })
 
   it('shows the comments note only when the file has comments', async () => {
-    const note = 'Saving rewrites applicant.yaml without its comments. A copy with the comments is kept as applicant.commented-backup.yaml.'
+    const note = 'Saving tidies your details file and removes its notes. A copy with your notes is kept.'
     const withComments = await mountDetails({ applicant: payload({ file: { exists: true, has_comments: true, error: '' } }) })
     expect(withComments.text()).toContain(note)
     const without = await mountDetails()
@@ -302,9 +307,10 @@ suite('F2: a Questions-card save keeps the owner\'s unsaved edits, per leaf', ()
     const w = await mountDetails({ applicant: f2Payload(PROFILE_F2) })
     await cardSaved(w, { contact: { ...PROFILE_F2.contact, address_line1: '1 Road' } })
     expect(w.text()).not.toContain('You have unsaved changes.')
-    await button(w, 'Save details').trigger('click')
-    await flushPromises()
-    expect(putsOf()[0].body.profile.contact).toEqual({ ...PROFILE_F2.contact, address_line1: '1 Road' })
+    expect(w.find('#f-contact-address-line1-in').element.value).toBe('1 Road')
+    // nothing is unsaved, so Save is off (Q-70 D3) and no PUT can go out
+    expect(button(w, 'Save details').attributes('disabled')).toBeDefined()
+    expect(putsOf()).toHaveLength(0)
   })
 
   it('the same leaf typed here and saved by the card: the card\'s value wins and is shown', async () => {
@@ -312,10 +318,9 @@ suite('F2: a Questions-card save keeps the owner\'s unsaved edits, per leaf', ()
     await w.find('#f-contact-address-line1-in').setValue('Typed Street')
     await cardSaved(w, { contact: { ...PROFILE_F2.contact, address_line1: '1 Road' } })
     expect(w.find('#f-contact-address-line1-in').element.value).toBe('1 Road')
-    await button(w, 'Save details').trigger('click')
-    await flushPromises()
-    expect(putsOf()[0].body.profile.contact.address_line1).toBe('1 Road')
-    expect(putsOf()[0].body.etag).toBe(ETAG_FILE)
+    // the draft now equals the file: nothing unsaved, nothing to send (Q-70 D2/D3)
+    expect(w.text()).not.toContain('You have unsaved changes.')
+    expect(putsOf()).toHaveLength(0)
   })
 
   it('an `extra` answer edited here and a new `extra` answer from the file are both sent', async () => {
@@ -368,5 +373,218 @@ suite('F2: removing an answer says what else it saves', () => {
     await flushPromises()
     expect(putsOf()).toHaveLength(0)
     expect(w.text()).not.toContain(SAVED_TOO)
+  })
+})
+
+// ---- Q-70 lane D (D-100): the unsaved form survives leaving the tab (sessionStorage), Discard, the 409 Reload ----
+// Fake data only. The draft key is `jobscraper.applicant.draft`; the stored shape is {etag, base, draft}.
+
+const DRAFT_KEY = 'jobscraper.applicant.draft'
+const PROFILE_D = { contact: { email: 'alex.tan@example.com', city: 'Singapore' } }
+const cityIn = w => w.find('#f-contact-city-in')
+const emailIn = w => w.find('#f-contact-email-in')
+const storedDraft = () => JSON.parse(window.sessionStorage.getItem(DRAFT_KEY))
+
+suite('Q-70 D1: the draft survives leaving the Profile tab', () => {
+  it('(a) an edit survives unmount + remount, shows the restored note, and Discard them goes back to the file', async () => {
+    const w = await mountDetails({ applicant: f2Payload(PROFILE_D) })
+    expect(w.find('.restored').exists()).toBe(false)
+    await cityIn(w).setValue('Typed City')
+    expect(storedDraft().draft.contact.city).toBe('Typed City')
+    expect(storedDraft().etag).toBe('aaaaaaaaaaaaaaaa')
+    w.unmount()
+
+    const again = await mountDetails({ applicant: f2Payload(PROFILE_D) })
+    expect(cityIn(again).element.value).toBe('Typed City')
+    expect(again.find('.restored').exists()).toBe(true)
+    expect(again.text()).toContain('Your unsaved changes are back.')
+    expect(again.text()).toContain('You have unsaved changes.')
+
+    await button(again, 'Discard them').trigger('click')
+    await flushPromises()
+    expect(cityIn(again).element.value).toBe('Singapore')
+    expect(again.find('.restored').exists()).toBe(false)
+    expect(window.sessionStorage.getItem(DRAFT_KEY)).toBeNull()
+    expect(again.text()).not.toContain('You have unsaved changes.')
+  })
+
+  it('the draft lives in sessionStorage only, never localStorage (D-100)', async () => {
+    const w = await mountDetails({ applicant: f2Payload(PROFILE_D) })
+    await cityIn(w).setValue('Typed City')
+    expect(window.sessionStorage.getItem(DRAFT_KEY)).not.toBeNull()
+    expect(window.localStorage.getItem(DRAFT_KEY)).toBeNull()
+    expect(window.localStorage.length).toBe(0)
+  })
+
+  it("typing the file's own value back removes the stored draft (it equals the file again)", async () => {
+    const w = await mountDetails({ applicant: f2Payload(PROFILE_D) })
+    await cityIn(w).setValue('Typed City')
+    expect(window.sessionStorage.getItem(DRAFT_KEY)).not.toBeNull()
+    await cityIn(w).setValue('Singapore')
+    expect(window.sessionStorage.getItem(DRAFT_KEY)).toBeNull()
+  })
+
+  it('(b) a draft stored against an older etag merges per leaf into the newer file', async () => {
+    window.sessionStorage.setItem(DRAFT_KEY, JSON.stringify({
+      etag: 'oldoldoldoldoldo',
+      base: { contact: { email: 'alex.tan@example.com', city: 'Singapore' } },
+      draft: { contact: { email: 'alex.tan@example.com', city: 'Typed City' } },
+    }))
+    const newer = f2Payload({ contact: { email: 'alex.new@example.com', city: 'Singapore' } }, { etag: ETAG_FILE })
+    const w = await mountDetails({ applicant: newer })
+    expect(cityIn(w).element.value).toBe('Typed City')                  // the leaf the owner changed
+    expect(emailIn(w).element.value).toBe('alex.new@example.com')      // the leaf the file changed
+    expect(w.find('.restored').exists()).toBe(true)
+    await button(w, 'Save details').trigger('click')
+    await flushPromises()
+    expect(putsOf()).toHaveLength(1)
+    expect(putsOf()[0].body.etag).toBe(ETAG_FILE)
+    expect(putsOf()[0].body.profile.contact).toMatchObject({ email: 'alex.new@example.com', city: 'Typed City' })
+  })
+
+  it('a corrupt stored draft is ignored: the form shows the file and nothing is "restored"', async () => {
+    window.sessionStorage.setItem(DRAFT_KEY, '{not json')
+    const w = await mountDetails({ applicant: f2Payload(PROFILE_D) })
+    expect(cityIn(w).element.value).toBe('Singapore')
+    expect(w.find('.restored').exists()).toBe(false)
+  })
+})
+
+suite('Q-70 D2/D3: unsaved marker, Saved. note, Discard changes, Save enabled state', () => {
+  it('(c) after a save the next edit shows "You have unsaved changes." and hides "Saved."', async () => {
+    const w = await mountDetails({ applicant: f2Payload(PROFILE_D) })
+    await cityIn(w).setValue('Typed City')
+    await button(w, 'Save details').trigger('click')
+    await flushPromises()
+    expect(w.text()).toContain('Saved.')
+    expect(w.text()).not.toContain('You have unsaved changes.')
+    await cityIn(w).setValue('Another City')
+    expect(w.text()).toContain('You have unsaved changes.')
+    expect(w.text()).not.toContain('Saved.')
+  })
+
+  it('(d) Discard changes is disabled until an edit, then restores the file value', async () => {
+    const w = await mountDetails({ applicant: f2Payload(PROFILE_D) })
+    expect(button(w, 'Discard changes').attributes('disabled')).toBeDefined()
+    expect(button(w, 'Save details').attributes('disabled')).toBeDefined()
+    await cityIn(w).setValue('Typed City')
+    expect(button(w, 'Discard changes').attributes('disabled')).toBeUndefined()
+    expect(button(w, 'Save details').attributes('disabled')).toBeUndefined()
+    await button(w, 'Discard changes').trigger('click')
+    await flushPromises()
+    expect(cityIn(w).element.value).toBe('Singapore')
+    expect(button(w, 'Discard changes').attributes('disabled')).toBeDefined()
+    expect(w.text()).not.toContain('You have unsaved changes.')
+    expect(window.sessionStorage.getItem(DRAFT_KEY)).toBeNull()
+  })
+
+  it('(d) Save details stays enabled when applicant.yaml does not exist yet, so it can be created', async () => {
+    const w = await mountDetails({ applicant: f2Payload({}, { file: { exists: false, has_comments: false, error: '' } }) })
+    expect(w.text()).toContain('There is no data/applicant.yaml yet. Saving creates it.')
+    expect(button(w, 'Save details').attributes('disabled')).toBeUndefined()
+    await button(w, 'Save details').trigger('click')
+    await flushPromises()
+    expect(putsOf()).toHaveLength(1)
+  })
+})
+
+suite('Q-70 D4: a 409 "changed" Reload keeps what was typed', () => {
+  it("(e) Reload keeps the typed city, takes the file's newer email, and clears the conflict banner", async () => {
+    const w = await mountDetails({
+      applicant: f2Payload(PROFILE_D),
+      put: () => ({ status: 409, body: { detail: 'changed' } }),
+    })
+    await cityIn(w).setValue('Typed City')
+    await button(w, 'Save details').trigger('click')
+    await flushPromises()
+    expect(w.find('.conflict').exists()).toBe(true)
+    expect(w.text()).toContain('What you typed here is kept.')
+
+    // meanwhile the file changed by hand: a new email, a new etag
+    server.state.applicant = f2Payload({ contact: { email: 'alex.new@example.com', city: 'Singapore' } }, { etag: ETAG_FILE })
+    await button(w, 'Reload').trigger('click')
+    await flushPromises()
+    expect(w.find('.conflict').exists()).toBe(false)
+    expect(cityIn(w).element.value).toBe('Typed City')
+    expect(emailIn(w).element.value).toBe('alex.new@example.com')
+    expect(w.text()).toContain('You have unsaved changes.')
+  })
+
+  it('an unreadable-file conflict still just reloads the file', async () => {
+    const w = await mountDetails({
+      applicant: f2Payload(PROFILE_D),
+      put: () => ({ status: 409, body: { detail: 'unreadable' } }),
+    })
+    await cityIn(w).setValue('Typed City')
+    await button(w, 'Save details').trigger('click')
+    await flushPromises()
+    expect(w.text()).toContain("JobScraper can't read data/applicant.yaml")
+    const before = getsOf().length
+    await button(w, 'Reload').trigger('click')
+    await flushPromises()
+    expect(getsOf().length).toBe(before + 1)
+  })
+})
+
+suite('Q-70 D1: the beforeunload guard', () => {
+  const fire = () => {
+    const ev = new Event('beforeunload', { cancelable: true })
+    window.dispatchEvent(ev)
+    return ev
+  }
+
+  it('(f) is cancelled only while there are unsaved edits, and not after unmount', async () => {
+    const w = await mountDetails({ applicant: f2Payload(PROFILE_D) })
+    expect(fire().defaultPrevented).toBe(false)               // clean form: leave freely
+    await cityIn(w).setValue('Typed City')
+    expect(fire().defaultPrevented).toBe(true)                // dirty: ask first
+    await button(w, 'Discard changes').trigger('click')
+    expect(fire().defaultPrevented).toBe(false)               // clean again
+    await cityIn(w).setValue('Typed City')
+    expect(fire().defaultPrevented).toBe(true)
+    w.unmount()
+    expect(fire().defaultPrevented).toBe(false)               // listener removed
+  })
+})
+
+// Q-71: a profile with no pay.expected_salary used to render the field with no inputs at all.
+const SALARY_FORM = [
+  { id: 'pay', title: 'Pay', note: '', items: [
+    item('pay.expected_salary', 'Expected salary', 'salary', { required: true }),
+  ] },
+]
+const salaryPayload = profile => payload({
+  profile, form: SALARY_FORM, missing: ['pay.expected_salary'], sensitive: [], completeness: { filled: 0, needed: 1 },
+})
+
+suite('Expected salary (Q-71)', () => {
+  for (const [name, profile] of [['missing', { pay: {} }], ['absent with no pay section', {}], ['null', { pay: { expected_salary: null } }]]) {
+    it(`shows the Amount input when pay.expected_salary is ${name}, and Save PUTs the amount`, async () => {
+      const w = await mountDetails({ applicant: salaryPayload(profile) })
+      const amount = w.find('#f-pay-expected-salary-in')
+      expect(amount.exists(), 'the Amount input').toBe(true)
+      expect(w.find('label[for="f-pay-expected-salary-in"]').text()).toBe('Amount')
+      expect(w.find('#f-pay-expected-salary-in-currency').element.value).toBe('SGD')
+      expect(w.find('#f-pay-expected-salary-in-period').element.value).toBe('monthly')
+      expect(button(w, 'Save details').attributes('disabled')).toBeDefined()    // nothing changed yet
+      // Untouched: nothing was written for the salary.
+      expect(w.text()).toContain('Needed')
+
+      await amount.setValue('4200')
+      expect(button(w, 'Save details').attributes('disabled')).toBeUndefined()
+      await button(w, 'Save details').trigger('click')
+      await flushPromises()
+      const puts = server.calls.filter(c => c.method === 'PUT' && c.url === 'api/applicant')
+      expect(puts).toHaveLength(1)
+      expect(puts[0].body.profile.pay.expected_salary).toEqual({ amount: 4200, currency: 'SGD', period: 'monthly' })
+    })
+  }
+
+  it('an untouched missing salary is not written on the way through', async () => {
+    const w = await mountDetails({ applicant: salaryPayload({ pay: {} }) })
+    expect(w.find('#f-pay-expected-salary-in').element.value).toBe('')
+    expect(button(w, 'Save details').attributes('disabled')).toBeDefined()    // untouched: nothing to save
+    const puts = server.calls.filter(c => c.method === 'PUT' && c.url === 'api/applicant')
+    expect(puts.every(p => !p.body.profile.pay?.expected_salary)).toBe(true)
   })
 })

@@ -214,6 +214,37 @@ RE: Q-35 tester items not done in this delegation (budget)
 BODY: Not started: the M5 capture oracles (`questions.capture_page`, `page_reason`, `TRANSPORT_NOTES`; lane M's names), T5 (`test_apply_resolve_memory.py` F1, `test_apply_resolve_rules.py` F4, `test_questions_variants.py` F3, `test_apply_questions_page.py`, `web/tests/QuestionCard.test.js`), the T4 flow part `test_apply_flow_llm.py` (skip-clean until N6a), TR-6 (pin `apply.fill: rules` in `apply_flow_support`). T2 is a core set (privacy, lock precedence, Decision shape, G1/G10, prompt order, retry); the guard table of test plan §4 (G2-G12, E1-E7 cases) is still to write.
 STATUS: open
 
+### 2026-11-07 tester → software-engineer
+TYPE: handoff
+RE: Q-70 lane A tests (reply to your request)
+BODY: Inbox.test.js updated (6 tests; no fake timers) and new web/tests/inbox-flow.test.js (19 tests, all Verify A bullets plus the Show N in Not interested notice). Full vitest: 298 passed | 1 skipped. No src defects found. Note: with every role dismissed and the section opened, the "all caught up" panel stays above the open section (src behaviour; pinned only as the section appearing).
+STATUS: closed
+### 2026-11-07 tester → coordinator
+TYPE: handoff
+RE: Q-70 lane B · branch `eng/Q-70-B-applications`
+BODY: 4 failing Applications tests fixed as the engineer listed; new web/tests/applications-flow.test.js (22 tests: StatusSelect keyboard/pointer/Enter/Escape, Undo writes one more event (D-101), Active chip default + persistence + fallback, follow-up at 15 vs 13 days, Remove + Undo, Clear filters, search Escape, applications.js helpers). `cd web; npx vitest run` = 18 files, 301 passed | 1 skipped. No src defects found.
+STATUS: done
+
+### 2026-11-07 tester → coordinator
+TYPE: handoff
+RE: Q-70 lane C pins (test/Q-70-C-pins, base eng/Q-70-C-shell b511561 + C4 ea5f7d9 merged)
+BODY: Before: 2 files failed, 5 tests failed / 332 passed (exactly the 5 listed). The 5 are fixed (App.test.js x4 for the Choose runs… button; Runs.test.js counts relaxed to 2..3 for the shell's doubled reload). New: web/tests/shell-job.test.js (19 tests: Verify C a-f plus announce and consume checks) and web/tests/keepalive.test.js (4: Inbox state kept and no refetch, Applications kept and refreshes on return, Profile not kept, Inbox keys off while away). After: `npx vitest run` 21 files, all passed. Mutation checks, each red as expected then src restored: shell onFinish reload removed (2 fail), toast removed (4), JobPill v-if false (4), starter listener removed (2), visibility ignored (2), useJob consume ignored (1), label for broken (1), choosable ignored (1), more-right never (2), KeepAlive off (2), Profile in KeepAlive (1), Inbox onDeactivated removed (1), Applications reload on activation removed (1). No src changes committed.
+Note for the engineer: Inbox has no quiet refresh on activation (it uses the shell's data); only Applications reloads when it comes back. The App.vue comment says "Their onActivated hooks do the quiet refresh", slightly inexact for Inbox.
+STATUS: open
+
+### 2026-11-07 tester → coordinator
+TYPE: handoff
+RE: Q-70 lane E Overview pins (test/Q-70-E-pins; int/Q-70-ux ad2df54 + eng/Q-70-E-overview 8eecba3 merged)
+BODY: Baseline on the merge: 21 failed / 339 passed (the 20 empty-hash cases plus "Choose runs… opens the picker", which also assumed an Inbox default). Step 5 applied (App.test.js beforeEach #/inbox, tab order, Overview default and unknown hash, brand link, ArrowLeft/Home; Applications.test.js). After: `npx vitest run` 24 files, 409 passed, 1 skipped. New: web/tests/overview.helpers.test.js (20, pure, now injected), web/tests/Overview.test.js (25, fakeApi + vi.setSystemTime), Runs.test.js describe "failed N tone" (3). helpers.js fakeApi gained `questions` and `applicationRows` options.
+NAMING: the design's `overview.test.js` and `Overview.test.js` are the same file on Windows (case-insensitive), so the pure-helper file is `overview.helpers.test.js`. Please fix the name in overview_design.md §8.
+MUTATIONS (22 source breaks, all red except one noted): nextUp ordering (2), run card while a job runs, responseRate (rejection-after-apply, withdrawn, rejected-from-Saved, null rate), pastWeek (dry runs, window), followUps order, lastRunState (threshold, dry runs), openStages unknown append, single primary CTA (all primary, none primary), Answer questions (wrong view value, no navigation), caught-up despite failed questions check, 409 text, Runs tone (always red, never red), `:disabled="starting"` removed. Survivor: removing the `if (starting.value) return` guard in Overview.vue start() stays green because the disabled button already blocks a second click; the guard is unreachable from the UI (harmless defence, not a defect).
+SOURCE DEFECTS: none found. Notes: design §3 lists `waiting` in nextUp's arguments but the implementation reads it only in Overview.vue (fine); day counts use whole-day floor, so a run finished 15.9 days ago reads "15 days ago".
+STATUS: open
+
+### 2026-11-07 tester → coordinator
+TYPE: handoff
+RE: Q-71 expected salary pins (test/Q-71-pins on int/Q-70-ux 81c0950)
+BODY: FieldInput.test.js gains "FieldInput salary (required, Q-71)" and "(nullable)" (14 tests: null/undefined show Amount, Currency, Period, Negotiable; typing emits {amount, SGD, monthly}; untouched emits nothing; nullable null/undefined show "I don't have one" checked with no grid, unticking emits the defaults, ticking emits null; no Negotiable when nullable). ApplicationDetails.test.js gains "Expected salary (Q-71)" (4: pay missing / no pay section / null show #f-pay-expected-salary-in, Save disabled until typed, PUT carries pay.expected_salary = {amount, SGD, monthly}; untouched is not written). Mutations red: `v-if="salary"` (8 fail), shownSalary without defaults (7), nullable ignored (2). Full run 24 files, 423 passed, 1 skipped.
 ### 2026-11-07 tester → coordinator (cc lanes S, I, F, researcher)
 TYPE: handoff
 RE: Q-60 / F-50 oracles WP-T0..T3 · branch test/Q-60-mail-oracles
@@ -233,4 +264,11 @@ BODY: Commits dbfbd14 T5 (`test_store_mail`, `test_mail_flow`, `test_config_mail
 - Defect (LOW, lane F): `config.py` `MailStatusConfig.from_raw` crashes with OverflowError on `.inf`/"inf"/"1e400" (it catches only TypeError/ValueError around `int(float(v))`). Pin: `test_config_mail_an_infinite_number_keeps_the_default`.
 - Not covered: FL-2 (6) migration 4 to 5 (needs a v4 DB built with the old Store); the web child's job log is checked only for its `$ mail sync` line.
 - Real company names still in tests outside mail (not common-word examples, left alone): `test_apply_contracts.py:407` ("Grab"), `test_applicant_form.py:310-312` ("shopee"). Coordinator's call.
+STATUS: open
+
+### 2026-11-07 tester -> coordinator
+TYPE: handoff
+RE: Q-71 lanes F+G pins and fixes (test/Q-71-FG-pins on int/Q-70-ux incl. 7772b5b)
+BODY: Fixed: FieldInput salary Amount text/inputmode, error-summary wording, comments-note copy (ApplicationDetails.test.js), test_apply_flow_accounts consent case (PROFILE_INCOMPLETE + "consents.privacy_consent"; added a direct test of the sign-up "account terms" guard), test_filter CLI tests now use a temp config/profile (hermetic, no data/ read). New: tests/test_applicant_q71_pins.py (15: country validation/options, control/show_when/autocomplete JSON, consents only when True, documents_status names only, POST /check writes nothing), web/tests/ApplicationDetails.q71.test.js (41: Q71-02/03/04/05/06/07/09/11/12/13/14/15/16/17/18/20 plus the narrow minmax(0,1fr) layout check, which reads the SFC style text because jsdom has no layout). Mutations: 24 frontend source breaks all red (list in the report); 4 python breaks red.
+SOURCE DEFECTS: none. Note: a profile with an empty section dict (e.g. `pay: {}`) shows as "Other keys in your file" with a rail entry; the server's real profiles carry null leaves, so it only appears for hand-edited files.
 STATUS: open

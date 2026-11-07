@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import Applications from '../src/tabs/Applications.vue'
 import App from '../src/App.vue'
@@ -20,11 +20,13 @@ const row = (w, jobId) => w.find(`.app-row[data-job="${jobId}"]`)
 const groupNames = w => w.findAll('.company-group .group-name').map(g => g.text())
 const stageButton = (w, id) => w.find(`.stage[data-status="${id}"]`)
 
+beforeEach(() => { window.localStorage.clear() })
 afterEach(() => vi.unstubAllGlobals())
 
 describe('Applications tab', () => {
   it('groups applications by company, A to Z', async () => {
     const wrapper = await mountTab({ m4n5o6: 'rejected', a1b2c3: 'applied', j1k2l3: 'interviewing', g7h8i9: 'to_apply' })
+    await stageButton(wrapper, 'all').trigger('click')   // the default chip is Active, which hides rejected
     expect(groupNames(wrapper)).toEqual(['Grab', 'OKX', 'Shopee', 'Stripe'])
     const okx = wrapper.find('.company-group[data-company="OKX"]')
     expect(okx.find('.group-n').text()).toBe('1 role')
@@ -55,10 +57,10 @@ describe('Applications tab', () => {
     const wrapper = await mountTab({ m4n5o6: 'rejected', a1b2c3: 'applied', j1k2l3: 'applied', g7h8i9: 'to_apply' })
     const strip = wrapper.findAll('.stage').map(s => [s.find('.stage-label').text(), s.find('.stage-n').text()])
     expect(strip).toEqual([
-      ['All', '4'], ['Saved', '1'], ['Applied', '2'], ['Interviewing', '0'],
+      ['Active', '3'], ['All', '4'], ['Saved', '1'], ['Applied', '2'], ['Interviewing', '0'],
       ['Offer', '0'], ['Rejected', '1'], ['Withdrawn', '0'],
     ])
-    expect(stageButton(wrapper, 'all').attributes('aria-pressed')).toBe('true')
+    expect(stageButton(wrapper, 'active').attributes('aria-pressed')).toBe('true')
 
     await stageButton(wrapper, 'applied').trigger('click')
     expect(stageButton(wrapper, 'applied').attributes('aria-pressed')).toBe('true')
@@ -92,7 +94,9 @@ describe('Applications tab', () => {
     const wrapper = await mountTab({ a1b2c3: 'applied' }, vocabulary)
     expect(row(wrapper, 'a1b2c3').findAll('option').map(o => o.attributes('value'))).toEqual(vocabulary)
 
-    await row(wrapper, 'a1b2c3').find('select').setValue('on_hold')
+    const select = row(wrapper, 'a1b2c3').find('select')
+    await select.trigger('pointerdown')
+    await select.setValue('on_hold')
     await flushPromises()
     const post = api.calls.find(c => c.method === 'POST')
     expect(JSON.parse(post.body).status).toBe('on_hold')
@@ -103,7 +107,9 @@ describe('Applications tab', () => {
 
   it('advancing applied -> interviewing keeps both events, in order', async () => {
     const wrapper = await mountTab({ a1b2c3: 'applied' })
-    await row(wrapper, 'a1b2c3').find('select').setValue('interviewing')
+    const select = row(wrapper, 'a1b2c3').find('select')
+    await select.trigger('pointerdown')
+    await select.setValue('interviewing')
     await flushPromises()
 
     const post = api.calls.find(c => c.method === 'POST')
@@ -116,7 +122,7 @@ describe('Applications tab', () => {
     const steps = moved.findAll('.timeline li .to').map(s => s.text())
     expect(steps).toEqual(['Applied', 'Interviewing'])
     expect(moved.find('.timeline .at').text()).toMatch(/^24 Sep \d\d:\d\d UTC$/)
-    expect(moved.find('.updated').text()).toBe('Interviewing 24 Sep')
+    expect(moved.find('.updated').text()).toMatch(/^Interviewing · \d+ days$/)
     expect(wrapper.emitted('changed')).toHaveLength(1)
   })
 
@@ -171,7 +177,7 @@ describe('Applications tab', () => {
   })
 
   it('marking applied in the Inbox moves the role to this tab', async () => {
-    setHash('')
+    setHash('#/inbox')
     dismissToast()
     api = fakeApi()
     vi.stubGlobal('fetch', api.fetch)

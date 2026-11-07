@@ -263,8 +263,50 @@ describe('Runs tab inside the app', () => {
     api.finishJob()
     await tick()
 
-    expect(api.count(/^api\/runs$/)).toBe(2)
+    // Q-70 C2: the shell's own watcher also reloads on the finish (requestSeq-guarded),
+    // so the Runs tab's reload may be doubled; what matters is at least one more.
+    expect(api.count(/^api\/runs$/)).toBeGreaterThanOrEqual(2)
+    expect(api.count(/^api\/runs$/)).toBeLessThanOrEqual(3)
     expect(wrapper.findAll('tr[data-run]').map(r => r.attributes('data-run'))).toEqual(['13', '12', '11'])
-    expect(api.count(/^api\/shortlist\?run=all$/)).toBe(2)
+    expect(api.count(/^api\/shortlist\?run=all$/)).toBeGreaterThanOrEqual(2)
+    expect(api.count(/^api\/shortlist\?run=all$/)).toBeLessThanOrEqual(3)
+  })
+})
+
+describe('failed N tone (Q-70 E4)', () => {
+  const run = (run_no, status, failed) => ({
+    run_no, status, started_at: '2026-09-2%dT14:14:00'.replace('%d', run_no % 10), finished_at: '2026-09-2%dT14:30:00'.replace('%d', run_no % 10),
+    accepted: 1, stats: { companies_due: 40, postings_seen: 100, companies_failed: failed },
+  })
+
+  it("a successful run's failed count is muted with a title", async () => {
+    const wrapper = await mountRuns({ runs: [run(5, 'ok', 28)] })
+    const link = wrapper.find('tr[data-run="5"] .failed-link')
+    expect(link.text()).toBe('28')
+    expect(link.classes()).toContain('partial')
+    expect(link.classes()).not.toContain('hard')
+    const sentence = '28 companies could not be read. See which on the Companies tab.'
+    expect(link.attributes('title')).toBe(sentence)
+    expect(link.attributes('aria-label')).toBe(sentence)
+    // Still the way into the Companies tab's Failed list.
+    await link.trigger('click')
+    expect(window.location.hash).toBe('#/companies')
+    expect(takeCompanyFilter()).toBe('failed')
+  })
+
+  it("a failed or aborted run's count stays red", async () => {
+    const wrapper = await mountRuns({ runs: [run(7, 'failed', 3), run(6, 'aborted_unhealthy', 40), run(5, 'ok', 2)] })
+    for (const n of [7, 6]) {
+      const link = wrapper.find(`tr[data-run="${n}"] .failed-link`)
+      expect(link.classes()).toContain('hard')
+      expect(link.classes()).not.toContain('partial')
+    }
+    expect(wrapper.find('tr[data-run="5"] .failed-link').classes()).toContain('partial')
+  })
+
+  it('says "1 company" for one, and shows no link for zero', async () => {
+    const wrapper = await mountRuns({ runs: [run(5, 'ok', 1), run(4, 'ok', 0)] })
+    expect(wrapper.find('tr[data-run="5"] .failed-link').attributes('title')).toBe('1 company could not be read. See which on the Companies tab.')
+    expect(wrapper.find('tr[data-run="4"] .failed-link').exists()).toBe(false)
   })
 })

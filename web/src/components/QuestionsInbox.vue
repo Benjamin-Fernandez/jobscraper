@@ -17,6 +17,7 @@ import { findItem } from '../applicantForm.js'
 import { plural } from '../format.js'
 import { showToast } from '../toast.js'
 import QuestionCard from './QuestionCard.vue'
+import TabLoading from './TabLoading.vue'
 
 const props = defineProps({
   form: { type: Array, default: null },
@@ -148,6 +149,7 @@ async function retry() {
       message: mode.value === 'auto'
         ? 'Started. The applications are being filled in and sent in Edge.'
         : 'Started. Dry run: everything is filled in and nothing is sent.',
+      link: { label: 'Follow it on the Developer tab', href: '#/developer' },
     })
     await load()
   } catch (e) {
@@ -186,7 +188,7 @@ defineExpose({ load })
     <h2 id="qi-title" class="section-title">Questions from applications</h2>
     <p class="muted lead">Employers asked these, and JobScraper had no answer it could back up. Answer once and it's used on every application that asks.</p>
 
-    <p v-if="loading" class="muted" role="status">Loading questions…</p>
+    <TabLoading v-if="loading" :rows="2" />
     <p v-else-if="notOffered" class="notice warn not-offered" role="status">
       This server doesn't offer questions from applications yet. Update JobScraper and restart the web app.
     </p>
@@ -268,7 +270,7 @@ defineExpose({ load })
 </template>
 
 <style scoped>
-.questions { display: grid; gap: var(--space-3); }
+.questions { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--space-3); min-width: 0; }
 .questions .section-title { margin: var(--space-2) 0 0; }
 .lead { margin: 0; font-size: var(--text-sm); max-width: 62ch; }
 .none { padding: var(--space-5) var(--space-4); }

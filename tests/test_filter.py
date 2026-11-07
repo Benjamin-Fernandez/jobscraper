@@ -354,8 +354,21 @@ def _cli(*argv):
     return code, out.getvalue(), err.getvalue()
 
 
+def _hermetic_cfg():
+    """A config whose profile is this file's PROFILE, so `filter test` never reads the checkout's
+    data/profile.derived.yaml (a worktree's copy has other titles and changed these results)."""
+    tmp = Path(tempfile.mkdtemp())
+    (tmp / "profile.derived.yaml").write_text(yaml.safe_dump(PROFILE), encoding="utf-8")
+    cfg = tmp / "config.yaml"
+    cfg.write_text(yaml.safe_dump({"paths": {
+        "db": str(tmp / "v2.db"), "rules": str(RULES_PATH),
+        "profile": str(tmp / "profile.derived.yaml")}}), encoding="utf-8")
+    return cfg
+
+
 def test_filter_cli_test_names_the_deciding_rule_and_token():
-    code, out, _err = _cli("filter", "test", "--title", "Senior Backend Engineer",
+    code, out, _err = _cli("--config", str(_hermetic_cfg()),
+                           "filter", "test", "--title", "Senior Backend Engineer",
                            "--location", "Singapore")
     assert code == 0, out
     assert "REJECT by title_deny: senior" in out, out
@@ -364,7 +377,8 @@ def test_filter_cli_test_names_the_deciding_rule_and_token():
 
 def test_filter_cli_test_runs_against_a_draft_rules_file():
     rules = _rules(lambda d: _rule(d, "title_deny").update(enabled=False))
-    code, out, _err = _cli("filter", "test", "--title", "Senior Backend Engineer",
+    code, out, _err = _cli("--config", str(_hermetic_cfg()),
+                           "filter", "test", "--title", "Senior Backend Engineer",
                            "--location", "Remote, Global",
                            "--rules", str(rules.path))
     assert code == 0 and "REJECT by location_explicit: remote" in out, out

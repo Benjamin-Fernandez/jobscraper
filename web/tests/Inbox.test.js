@@ -52,7 +52,7 @@ describe('Inbox list', () => {
     const wrapper = mountInbox(jobsFor(12, { a1b2c3: 'applied', g7h8i9: 'to_apply' }))
     expect(companies(wrapper)).toEqual(['GovTech'])
     const link = wrapper.find('.count a.tracked')
-    expect(link.text()).toBe('2 in Applications')
+    expect(link.text()).toBe('2 already tracked')
     expect(link.attributes('href')).toBe('#/applications')
   })
 
@@ -219,9 +219,11 @@ describe('Inbox actions', () => {
   })
 
   // M17: Not interested is stored and listed in its own section at the bottom.
+  const openNi = () => window.localStorage.setItem('jobscraper.inbox.notInterestedOpen', '1')
   const inSection = (w, id) => w.findAll(`.cards.${id} .card .company`).map(c => c.text())
 
   it('Not interested moves the role to its own section at the bottom, stored, and Undo brings it back', async () => {
+    openNi()
     const wrapper = mountInbox()
     await card(wrapper, 'GovTech').find('.card-hit').trigger('click')
     await detail(wrapper).find('button.dismiss').trigger('click')
@@ -243,6 +245,7 @@ describe('Inbox actions', () => {
   })
 
   it('a role dismissed before a restart starts in the section, and can be moved back', async () => {
+    openNi()
     const jobs = jobsFor(12).map(j => (j.id === 'd4e5f6' ? { ...j, dismissed_at: '2026-09-25T10:00:00' } : j))
     const wrapper = mountInbox(jobs)
     expect(inSection(wrapper, 'new')).toEqual(['Shopee', 'OKX'])
@@ -258,6 +261,7 @@ describe('Inbox actions', () => {
   })
 
   it('the section folds away, and stays folded', async () => {
+    openNi()
     const jobs = jobsFor(12).map(j => (j.id === 'a1b2c3' ? { ...j, dismissed_at: '2026-09-25T10:00:00' } : j))
     const wrapper = mountInbox(jobs)
     await wrapper.find('.ni-head').trigger('click')
@@ -269,7 +273,8 @@ describe('Inbox actions', () => {
     expect(again.find('.ni-head').text()).toContain('1')
   })
 
-  it('when every role left is Not interested, the section still shows', async () => {
+  it('when every role left is Not interested and the section is open, it still shows', async () => {
+    openNi()
     const jobs = jobsFor(12).map(j => ({ ...j, dismissed_at: '2026-09-25T10:00:00' }))
     const wrapper = mountInbox(jobs)
     expect(wrapper.find('.list-note').text()).toContain('everything left is marked Not interested')
@@ -277,6 +282,7 @@ describe('Inbox actions', () => {
   })
 
   it('roles dismissed before M17 (this tab only) are stored on first load', async () => {
+    openNi()
     window.sessionStorage.setItem('jobscraper.dismissed', JSON.stringify(['g7h8i9']))
     const wrapper = mountInbox()
     await flushPromises()

@@ -12,7 +12,7 @@
 // "Application details" (the applicant form and the questions employers asked).
 // The view last chosen is remembered; a first visit opens Application details
 // when something there needs the owner, and its label carries that count.
-import { computed, onMounted, ref } from 'vue'
+import { computed, nextTick, onMounted, ref } from 'vue'
 import {
   ApiError, RESUME_TYPES, describeError, failureText, getApplicant, getProfile, getQuestions,
   startProfileRefresh, uploadResume,
@@ -74,6 +74,15 @@ function pickView(id) {
   view.value = id
   chosen = true
   try { window.localStorage.setItem(VIEW_KEY, id) } catch { /* private window */ }
+}
+
+// Application details asks for another view ("Upload in Resume and titles",
+// Q71-16): switch, and put the focus on that view's tab so the move is heard.
+async function goView(id) {
+  if (!VIEWS.some(v => v.id === id)) return
+  pickView(id)
+  await nextTick()
+  document.getElementById(`profile-tab-${id}`)?.focus()
 }
 
 function onViewKey(e, i) {
@@ -308,7 +317,7 @@ onMounted(() => Promise.all([loadProfile(), refresh(), ...(view.value === 'resum
       role="tabpanel"
       aria-labelledby="profile-tab-details"
     >
-      <ApplicationDetails @counts="setCounts" />
+      <ApplicationDetails @counts="setCounts" @go-view="goView" />
     </div>
   </section>
 </template>
