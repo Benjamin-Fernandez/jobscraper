@@ -32,6 +32,9 @@ const stats = ref(null)
 const openQuestions = ref(null)
 const loading = ref(true)
 const error = ref('')
+// Why the run list failed to load (G20): apart from `error`, which every shortlist
+// load clears; the Runs tab shows it.
+const runsError = ref('')
 
 // Resolve each registry entry's loader once, not on every render. A chunk that
 // fails to load (say, the bundle was rebuilt under an open page) shows a
@@ -143,6 +146,7 @@ async function loadRuns() {
   const data = await getRuns()
   if (seq !== runsSeq) return
   runs.value = data
+  runsError.value = ''
 }
 
 function selectRun(value) {
@@ -156,7 +160,7 @@ async function onChanged(options = {}) {
     try {
       await loadRuns()
     } catch (e) {
-      error.value = describeError(e)
+      runsError.value = describeError(e)
     }
   }
   await Promise.all([loadJobs(), loadStats(), loadQuestions()])
@@ -253,7 +257,7 @@ async function boot() {
       retrying.value = false
       return
     }
-    error.value = describeError(e)
+    runsError.value = describeError(e)
   }
   retrying.value = false
   await Promise.all([loadJobs(), loadStats(), loadQuestions()])
@@ -361,6 +365,7 @@ onBeforeUnmount(() => {
           :jobs="jobs"
           :loading="loading"
           :error="error"
+          :runs-error="runsError"
           @changed="onChanged"
           @select-run="selectRun"
         />

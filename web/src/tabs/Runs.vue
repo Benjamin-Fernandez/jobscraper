@@ -287,8 +287,8 @@ onMounted(async () => {
     <h3 class="section-title">Run history</h3>
     <TabLoading v-if="loading && !runs.length" :rows="2" />
     <!-- A failed load is not "no runs yet" (Q-75 G20); Try again reloads the list. -->
-    <div v-else-if="!runs.length && error" class="notice error runs-error" role="alert">
-      <p>Could not load your run history: {{ error }}</p>
+    <div v-else-if="!runs.length && runsError" class="notice error runs-error" role="alert">
+      <p>Could not load your run history: {{ runsError }}</p>
       <button type="button" @click="emit('changed', { runs: true })">Try again</button>
     </div>
     <div v-else-if="!runs.length" class="empty">
