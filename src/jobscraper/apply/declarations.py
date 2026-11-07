@@ -248,6 +248,17 @@ _NDA_CONSENT = frozenset({"willing", "willingness", "agree", "agrees", "consent"
 _NDA_CONSENT_RUNS = (("able", "to", "sign"), ("will", "you", "sign"), ("would", "you", "sign"),
                      ("can", "you", "sign"))
 # (comfortable / happy to / open to are willingness words but not consent to sign: D-90a)
+# Review F11: the WHOLE label must sit in this closed vocabulary (plus the NDA object words)
+# for the NDA willingness answer to apply. A label that adds any other commitment or
+# condition ("... and relocate to Tokyo", "... and to a background check") holds a word
+# outside it, is unknown, and is never ticked: the program does not claim one clause of a
+# compound consent. Deliberately absent: and, or, terms, check, relocate, background.
+_NDA_LABEL_VOCAB = frozenset({
+    "i", "you", "we", "are", "is", "am", "do", "does", "will", "would", "can", "able", "to",
+    "willing", "willingness", "agree", "agrees", "consent", "consents", "accept", "accepts",
+    "comply", "abide", "by", "with", "prepared", "sign", "signing", "please", "kindly",
+    "the", "a", "an", "our", "this", "that", "such", "any", "your", "employer", "company",
+    "agreement", "agreements", "obligation", "obligations", "confidentiality", "if", "asked"})
 # Disability, status frames only (D-90 (5)).
 _DISABILITY_FRAMES = (("do", "you", "have"), ("have", "you", "ever", "had"),
                       ("are", "you", "a", "person", "with"), ("do", "you", "consider", "yourself"),
@@ -515,6 +526,9 @@ def _nda_consent(label_toks: list[str], non_compete_spans: list[tuple[int, int]]
                       for a, b in non_compete_spans if a < len(label_toks)):
         return False
     words = set(label_toks)
+    in_nda = {i for s0, e0 in nda for i in range(s0, e0)}
+    if any(t not in _NDA_LABEL_VOCAB for i, t in enumerate(label_toks) if i not in in_nda):
+        return False                                   # review F11: closed vocabulary
     if (_WILLINGNESS & words) - _NDA_CONSENT:
         return False
     if not ((_NDA_CONSENT - {"sign", "signing"}) & words

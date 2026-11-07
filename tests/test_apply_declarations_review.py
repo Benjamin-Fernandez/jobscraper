@@ -77,6 +77,34 @@ def test_d91_pin_nda_willingness_answers_only_from_an_explicit_switch():
             assert _ticked("I agree to sign the NDA", prof=prof) is state, (state, nc)
 
 
+COMPOUND_NDA = ("Are you willing to sign an NDA and relocate to Tokyo?",
+                "Are you willing to sign an NDA and work night shifts?")
+
+
+def test_f11_pin_a_compound_nda_consent_is_never_answered_or_ticked():
+    """Review F11: with willing_to_sign_nda true, a consent label that adds another commitment
+    is unknown (required) / blank (optional) and a checkbox is not ticked. The closed
+    vocabulary (declarations._NDA_LABEL_VOCAB) is what decides it."""
+    for state in (True, False):
+        prof = _willing(state)
+        for label in COMPOUND_NDA:
+            _not_answered(label, prof=prof)
+            _not_answered(label, required=False, prof=prof)
+        assert not _ticked("I agree to sign the NDA and to a background check", prof=prof), state
+        assert not _ticked("I agree to sign the NDA and relocate to Tokyo", prof=prof), state
+
+
+def test_f11_a_plain_nda_willingness_still_answers_yes_with_true():
+    prof = _willing(True)
+    for label in ("Are you willing to sign an NDA?", "Are you willing to sign a non-disclosure agreement?",
+                  "Do you agree to sign our confidentiality agreement?",
+                  "Will you comply with our confidentiality obligations?"):
+        _lab, a = Q._ans(label, prof=prof)
+        Q._filled(a, "Yes")
+    assert _ticked("I agree to sign the NDA", prof=prof)
+    assert _ticked("I agree to sign the confidentiality agreement", prof=prof)
+
+
 def test_d91_pin_normalise_leaves_nil_and_na_unset_for_the_nda_switch():
     from jobscraper import applicant as A
     for raw in ("nil", "NA", None):
