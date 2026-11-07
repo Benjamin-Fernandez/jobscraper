@@ -14,7 +14,7 @@
 import { computed, nextTick, onActivated, onBeforeUnmount, onDeactivated, onMounted, ref, watch } from 'vue'
 import { describeError, getPosting, setApplicationStatus, untrackApplication } from '../api.js'
 import { dismiss, dismissedAt, isDismissed, migrateSessionDismissals, restore } from '../dismissed.js'
-import { cleanLocation, plural, safeUrl, shortDate } from '../format.js'
+import { cleanLocation, exactTime, plural, safeUrl, shortDate } from '../format.js'
 import { parseDescription, previewBlocks } from '../jd.js'
 import { tabEmits, tabProps } from '../shell.js'
 import { showToast } from '../toast.js'
@@ -501,7 +501,7 @@ onDeactivated(() => window.removeEventListener('keydown', onShortcut))
             </span>
             <span class="card-side">
               <span v-if="job.closed" class="pill stale" data-status="closed">closed</span>
-              <span class="seen">{{ shortDate(job.decided_at) }}</span>
+              <span class="seen" :title="exactTime(job.decided_at)">{{ shortDate(job.decided_at) }}</span>
             </span>
           </button>
         </li>
