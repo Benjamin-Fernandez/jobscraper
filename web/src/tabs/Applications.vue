@@ -577,7 +577,7 @@ a.role-title .icon { color: var(--muted); }
 .attempt[data-kind='sent'] { color: var(--ok); background: var(--ok-soft); }
 .attempt[data-kind='dry_run'], .attempt[data-kind='unconfirmed'], .attempt[data-kind='needs_input'] { color: var(--warn); background: var(--warn-soft); }
 .attempt[data-kind='stopped'] { color: var(--danger); background: var(--danger-soft); }
-button.attempt-link { border: 0; cursor: pointer; font: inherit; font-size: inherit; min-height: 0; box-shadow: none; }
+button.attempt-link { border: 0; cursor: pointer; font: inherit; font-size: var(--text-xs); font-weight: 600; line-height: 1.7; min-height: 0; padding: 0 var(--space-2); box-shadow: none; }
 button.attempt-link:hover { text-decoration: underline; }
 .row-meta { margin: 2px 0 0; font-size: var(--text-xs); color: var(--muted); }
 .row-remove { display: flex; width: max-content; margin-top: 2px; font-size: var(--text-xs); color: var(--muted); text-decoration: none; }
