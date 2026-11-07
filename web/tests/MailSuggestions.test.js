@@ -113,6 +113,33 @@ describe('MailSuggestions', () => {
     expect(api.of('POST', 'mail/suggestions/9/dismiss')).toHaveLength(1)
     expect(wrapper.find('.mail-suggestions').exists()).toBe(false)
   })
+
+  // Q-72 a (D-161; MS 11.3 "Maybe untracked"): no application, so the company comes from candidates[0].
+  it('"maybe untracked" shows the company alone, Check the email, Got it and Open in Gmail, no select', async () => {
+    const REASON = "This email may be about an application you haven't added."
+    const acme = { job_id: 'acme-1', company: 'Acme', role: 'Candidate Role Zed', status: 'rejected' }
+    const s = suggestion(12, {
+      job_id: null, company: null, role: null, status: null, to_status: null, category: 'acknowledged',
+      reason: 'maybe_untracked', reason_text: REASON, candidates: [acme],
+      quote: 'Thank you for applying for the DevOps Engineer role.',
+    })
+    const { api, wrapper } = await list({ 'GET mail/suggestions': { suggestions: [s] } })
+    const item = wrapper.find('.ms-item')
+    expect(item.attributes('data-reason')).toBe('maybe_untracked')
+    expect(item.find('.ms-app').text()).toBe('Acme')
+    expect(item.find('.ms-says').text()).toBe('Check the email')
+    expect(item.find('.ms-reason').text()).toBe(REASON)
+    expect(item.find('.ms-got-it').text()).toBe('Got it')
+    expect(item.find('.ms-gmail').text()).toBe('Open in Gmail')
+    expect(item.find('.ms-gmail').attributes('href')).toBe(GMAIL)
+    expect(item.findAll('button').map(b => b.text())).toEqual(['Got it'])
+    expect(item.find('select').exists()).toBe(false)
+    expect(item.find('.ms-pick').exists()).toBe(false)
+    expect(item.find('.ms-accept').exists()).toBe(false)
+    expect(item.find('.ms-dismiss').exists()).toBe(false)
+    expect(item.text()).not.toContain('Candidate Role Zed') // no candidate list
+    expect(api.calls.filter(c => c.method === 'POST')).toHaveLength(0)
+  })
 })
 
 function evidence(fields = {}) {
