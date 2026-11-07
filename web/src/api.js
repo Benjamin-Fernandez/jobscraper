@@ -256,6 +256,13 @@ export function saveApplicant(profile, etag) {
   return sendJson('applicant', 'PUT', { profile, etag })
 }
 
+// {profile} -> {errors:[{path,message}]}: the PUT's checks on a profile that is
+// not saved (Q71-18, a field checked when the owner leaves it). Nothing is
+// written; an older server answers 404 and the form simply stops asking.
+export function checkApplicant(profile) {
+  return sendJson('applicant/check', 'POST', { profile })
+}
+
 // {mode:'auto'|'dry_run', groups:[...], ready:[{job_id,attempt_id,company,title}],
 //  waiting:[...], busy}. `status` is open, answered or all.
 export function getQuestions(status = 'open') {

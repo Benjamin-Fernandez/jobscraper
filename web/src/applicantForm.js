@@ -323,6 +323,21 @@ export function newSkills(derived, current) {
   return out
 }
 
+// ---- a section's state (Q71-13): the rail and the group headers say the same ----
+
+// {tone, text}: what a section still needs. Errors first: they block saving.
+export function sectionStatus({ needed = 0, toFix = 0 } = {}) {
+  if (toFix) return { tone: 'fix', text: `${toFix} to fix` }
+  if (needed) return { tone: 'needed', text: `${needed} needed` }
+  return { tone: 'done', text: 'Nothing needed' }
+}
+
+// "City", "City and Country", "A, B and C".
+export function joinAnd(words) {
+  const w = (words || []).filter(Boolean)
+  return w.length < 2 ? (w[0] ?? '') : `${w.slice(0, -1).join(', ')} and ${w[w.length - 1]}`
+}
+
 // ---- conditional fields (Q71-14) ----
 
 // Does the item's `show_when` ({path, values}) hold in the draft? No condition: yes.
