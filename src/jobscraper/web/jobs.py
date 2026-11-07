@@ -97,7 +97,7 @@ def cli_command(config_path: Optional[str | os.PathLike] = None) -> CommandBuild
             if opts.get("dry_run"):
                 argv.append("--dry-run")
         elif kind == "profile":
-            argv += ["profile", "--refresh"]
+            argv += ["profile", "--refresh", "--plan-applicant"]   # Q-44
         elif kind == "titles":
             argv += ["titles", "suggest"]
         elif kind == "companies":
