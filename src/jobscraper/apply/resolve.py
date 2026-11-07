@@ -532,6 +532,57 @@ def _match_options(f: FormField, phrases: Sequence[str]) -> list[Option]:
     return [o for o, t in opts if any(phrase_match_tokens(p, t) for p in ptoks)]
 
 
+def path_hits(labels: Sequence[str], wanted: Any) -> list[str]:
+    """The option labels that name `wanted` (normalised) as their whole "Parent > Leaf"
+    path, their leaf or their parent (Workday hierarchical lists). Callers treat more
+    than one hit as ambiguous."""
+    w = norm_label(str(wanted or ""))
+    if not w:
+        return []
+    out = []
+    for label in labels:
+        parts = [p.strip() for p in str(label).split(" > ")]
+        if w in (norm_label(str(label)), norm_label(parts[-1]),
+                 norm_label(parts[0]) if len(parts) > 1 else ""):
+            out.append(label)
+    return out
+
+
+# How-heard (lane R wd_a 02, Q-41 tenant B): the owner's usual answer is the employer's
+# careers website; Workday lists it as "Company Website > Careers Page" or "<Employer>
+# Career Site > Corporate Website". Each concept group counts once.
+HOW_HEARD_CONCEPTS = (("company", "corporate"), ("career", "careers"),
+                      ("website", "site", "web"))
+
+
+def how_heard_fit(f: FormField, value: Any) -> Optional[Fit]:
+    """Canonical.HOW_HEARD on a listed choice: the one option naming the owner's answer
+    by path, leaf or parent; else, when that answer is about a careers website (or
+    blank), the one option whose whole path covers the most HOW_HEARD_CONCEPTS ("page"
+    counts as the website concept only next to a careers word). A tie, or nothing
+    naming a website or a company careers source, is no fit (G2e): never the model's."""
+    by_label = {o.label: o for o in f.options}
+    hits = path_hits(list(by_label), value)
+    if len(hits) == 1:
+        return _choose(f, [by_label[hits[0]]])
+    vt = set(tokens(str(value or "")))
+    if not _blank(value) and not vt & {w for g in HOW_HEARD_CONCEPTS for w in g}:
+        return None
+    scored: list[tuple[int, Option]] = []
+    for o in f.options:
+        t = set(tokens(o.label))
+        groups = [bool(t & set(g)) for g in HOW_HEARD_CONCEPTS]
+        if not groups[2] and groups[1] and "page" in t:
+            groups[2] = True
+        if groups[2] or (groups[0] and groups[1]):
+            scored.append((sum(groups), o))
+    if not scored:
+        return None
+    best = max(s for s, _ in scored)
+    top = [o for s, o in scored if s == best]
+    return _choose(f, top) if len(top) == 1 else None
+
+
 def fit_enum(f: FormField, value: Any, value_map: dict[str, Sequence[str]]) -> Optional[Fit]:
     """enum -> exactly one option: by the value_map phrases, then by the enum
     value itself ("_" read as a space). "decline" -> the decline option."""
@@ -822,18 +873,8 @@ def _field_map_value(c: Canonical, f: FormField, ctx: ResolveContext) -> Optiona
         return fit_date(f, _today_iso())
     if c is Canonical.HOW_HEARD:
         v = pv("sourcing.how_heard_default")
-        if f.type in CHOICE_TYPES:
-            got = fit_text(f, v) if not _blank(v) else None
-            # on a listed choice the text counts only when it is an offered option (lane R
-            # wd_a 02); else the career/website match below maps it, or nothing does (G2e)
-            if got and (not f.options or any(norm_label(str(got[0])) in
-                                             (norm_label(o.label), norm_label(o.value))
-                                             for o in f.options)):
-                return got
-            hits = _match_options(f, ["career", "careers", "website"])
-            if not hits:
-                hits = [o for o in f.options if re.search(r"career|website", o.label, re.I)]
-            return _choose(f, hits[:1]) if hits else None
+        if f.type in CHOICE_TYPES or f.options:       # incl. a typeahead with its list
+            return how_heard_fit(f, v)
         return fit_text(f, v)
     if c is Canonical.PREVIOUS_WORKER:
         return fit_bool(f, declarations.prior_employment(p, ctx.employer_name,

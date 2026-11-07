@@ -28,7 +28,7 @@ from dataclasses import dataclass, field as dc_field
 from typing import Any, Iterable, Mapping, NamedTuple, Optional, Sequence
 
 from ..backends import BackendError
-from . import facts as F, guards
+from . import facts as F, guards, resolve
 from .contracts import (
     CHOICE_TYPES, Answer, AnswerStatus, Fact, FieldType, FillSource, ModelDecision, PageField,
     ResolveContext,
@@ -594,9 +594,7 @@ def deterministic_pick(wanted: str, options: Sequence[str]) -> Optional[str]:
     model call is made, so the enum-S deny list (which keeps S values out of prompts) does
     not apply: a country named in a phone-code option is the program's match, not a
     model-chosen value."""
-    w = norm_label(str(wanted))
-    hits = [o for o in options if w and (norm_label(o) == w
-                                         or norm_label(o.split(" > ")[-1]) == w)]
+    hits = resolve.path_hits(options, wanted)          # whole path, leaf or parent
     m = _PHONE_CODE.match(str(wanted).strip())
     if not hits and m:
         code = re.compile(r"\+\s*" + m.group(1) + r"(?!\d)")
