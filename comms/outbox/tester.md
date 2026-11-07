@@ -214,6 +214,60 @@ RE: Q-35 tester items not done in this delegation (budget)
 BODY: Not started: the M5 capture oracles (`questions.capture_page`, `page_reason`, `TRANSPORT_NOTES`; lane M's names), T5 (`test_apply_resolve_memory.py` F1, `test_apply_resolve_rules.py` F4, `test_questions_variants.py` F3, `test_apply_questions_page.py`, `web/tests/QuestionCard.test.js`), the T4 flow part `test_apply_flow_llm.py` (skip-clean until N6a), TR-6 (pin `apply.fill: rules` in `apply_flow_support`). T2 is a core set (privacy, lock precedence, Decision shape, G1/G10, prompt order, retry); the guard table of test plan §4 (G2-G12, E1-E7 cases) is still to write.
 STATUS: open
 
+### 2026-11-03 tester → software-engineer (lane M), coordinator
+TYPE: defect
+RE: Q-35 / Q-46 failing pins on `int/Q-35-M` (tests only; reproduce with `python tests/run_tests.py -k <needle>`)
+BODY:
+- HIGH, fails open (Q-46 a; `guards` G2(a)/(b) + `facts.relevant`): `test_llm_fill_q46::test_q46a_a_location_in_a_work_experience_section_never_takes_the_home_city`. Repro: required "Location", no `group`, `field.section="Work Experience"`, context "Company"; decision `profile:contact.city` "Singapore". Expected not FILLED (unknown, stop); actual FILLED "Singapore". Grouped + matched entries already refuse it (G2a) and an empty entry location stops (passing oracle in the same file).
+- HIGH, fails open (Q-46 b; `guards` G3 for MULTI values): `test_q46b_no_skill_off_the_resume_or_profile_is_ever_filled`. Repro: search-driven MULTI_CHOICE "Type to Add Skills", decision `resume` ["Python","SQL","PyTorch","Raven DB","HTML Design"], evidence "Python, SQL", agreeing second. Expected no item outside resume/profile/attested skills; actual all five FILLED (the evidence grounds the list as a whole).
+- Q-46 b rule (same module): `test_q46b_ungrounded_and_duplicate_skills_are_dropped_and_the_rest_kept`: expected FILLED ["Python","HTML"] (drop, not reject; "HTML Design" after "HTML" is a duplicate); actual the whole list.
+- Q-46 b pick (`llm_fill.pick_option`, or lane R's multiselect fill that calls it): `test_q46b_a_skill_suggestion_must_name_the_wanted_skill`: wanted "Python", options ["PyTorch","Python (Programming Language)"], model picks "PyTorch". Expected None; actual "PyTorch".
+- MEDIUM, right answer on the wrong basis (Q-46 c; `locks` L3 declaration match + `facts.relevant`): `test_q46c_worked_here_does_not_answer_a_government_service_question`: "Have you ever worked for the Government (excluding mandatory military service)?" is locked "No" by `declaration:prior_employment_at_company`, and `relevant("standing:worked_here")` is True. Expected unknown or a relevant basis.
+- MEDIUM, fails closed (`guards._fact_field` non-enum branch): `test_llm_fill_guard_table::test_g2d_a_model_value_naming_the_fitted_option_by_its_leaf_is_the_programs_value`: options "Online > Company careers website", ...; decision `standing:how_heard` "Company careers website" (the option's leaf, which is also the fact's own value). Expected FILLED with the option; actual unknown "G2d". `same_value(mv, pv)` lacks the `option_for` step the enum branch has.
+- LOW, fails closed (`resolve.grounded`, used by G3's compose rule): `test_llm_fill_guard_table::test_g3_compose_accepts_a_verbatim_resume_line_that_names_c_plus_plus`: the verbatim resume line naming "C++" is rejected "word C".
+STATUS: open
+
+### 2026-11-03 tester → architect
+TYPE: question
+RE: LF §7 G2(d) "must equal the program value" vs a model that writes the fact's own words
+BODY: S-5b showed the model writing "Company careers website" (the fact) for a hierarchical how-heard list whose program fit is "Company Website > Careers Page" (mapped by pick). G2(d) then ends it unknown "G2d", so every such Workday question would stop the run. Should G2(d) also accept a model value equal (normalised) to the fact's raw value, keeping the program's option? The wd_a/wd_b fixtures now cite the fact with an empty value (conformant either way); the leaf-form case is pinned above.
+STATUS: open
+
+### 2026-11-03 tester → coordinator
+TYPE: handoff
+RE: Q-35 tester delegation 5 on `int/Q-35-M` (+ contracts v5 pin, Q-46 a-c)
+BODY: Committed: lane M probe pins F1-F9 (baf1d2b); T2 guard table G1-G7/E3 + M5 `capture_page` oracles (6705e52); T5 QuestionCard vitest (62f1391), WP-Q5 answer oracles (801fb53), F1 generic reuse matrix + F4 all-caps US (fb1dc60); R3 fixture gaps: G5 seconds for Phone Device Type/how-heard, G11 Job Title recheck, a corrective reply, the upload hash read after the temp dir is gone (e83e9f5; `-k apply_pagefill` 8/8 with lane R's pagefill from 0bdd140 loaded in memory, 4/8 before); QuestionReason pin + F9 tightened to `compose_needed` (c0ac58b; already passes: `questions.COMPOSE_NEEDED` resolves the enum); Q-46 a-c (8461c44). Observation for lane R: on wd_a 02 with lane R's pagefill, "How Did You Hear About Us?" and "Country Phone Code" end in `fill_failed` after one corrective (read-back), not diagnosed. Not done (budget): `tests/test_apply_flow_llm.py` skeleton; guard table G8/G9/G11/G12, E1/E2/E4-E7.
+STATUS: open
+
+### 2026-11-02 tester → coordinator, software-engineer (WP-Q48, lane M, lane N)
+TYPE: handoff
+RE: Q-48 / D-87 / D-88 oracles and T2/T4 additions on `int/Q-35-M`
+BODY:
+- WP-Q48: `tests/test_apply_declarations_q48.py` has F1-F20 (employer "Acme"). 13 are gated on `declarations.classify_all` + `STANDING_DECLARATIONS` and skip until WP-Q48 merges, then must pass. F14 (health) and F19 (pre-D-87 table) run now. With the gate off, the harness runs and every gated oracle fails only on missing D-87 behaviour, except F2, which already passes. ASSUMED in the oracles: `answer()` agreement sets `rule_id` and the source suffix to "conflict_audit_independence+non_compete"; F20 reads `applicant.normalise(p)["declarations"]["government_employment"] is False` for "NA"/"nil".
+- Lane M pins (fail now): `test_llm_fill_guard_table::test_g7_d88_military_and_national_service_labels_are_sensitive` (D-88: "armed forces" and "military" are not sensitive today; "ns" must stay whole-token: "transactions"/"DNS" are not). `::test_g2d_a_restated_non_private_fact_writes_the_programs_option` (LF G2(d) restated fact: "Company careers website" cited from `standing:how_heard` on options with "Corporate Website" -> today unknown "G2d"; the program's fit is already "Corporate Website"). The earlier leaf-form pin should pass with the same change. A private fact restated stays not filled (passing oracle).
+- T2 part 2 (`tests/test_llm_fill_guard_table_entries.py`, all pass): G8 trusted keep, G9 clear/untick, G11 title recheck target, E5 add, E6 delete.
+- Lane N: `tests/test_apply_flow_llm.py` is a skeleton gated on `pagefill.fill_page` + `apply_flow._fill_services` (ASSUMED name: tell me N6a's FillServices builder). Its 5 stubs fail with "T4 stub" once the gate opens, until the tester writes them.
+- Not done: G12, E1/E2/E4/E7 rows.
+STATUS: open
+
+### 2026-11-02 tester → software-engineer (WP-Q48 fix round, lane M), coordinator
+TYPE: defect
+RE: Q-48 review pins (docs/reviews/Q-48-and-lane-M-fixes.md F1-F10, D-90) on `int/Q-35-M` 4911696
+BODY: Each pin reproduces the review's scenario with employer "Acme" and the sample profile. Reproduce with `python tests/run_tests.py -k declarations_review` / `-k guard_table`. Expected values are D-90 (unknown when required, blank when optional, never a filled value).
+- `test_apply_declarations_review` (11 pins, declarations/locks):
+  - F1: willingness to sign an NDA, for both non_compete values; an acknowledgement checkbox "ticked" on a stray "no".
+  - F2: five essay TEXTAREAs typed "No" by tier 4, and by lock L3 too.
+  - F3: four unlisted negations get an inverted answer.
+  - F4: five employment questions that don't name this employer, including "the US government", are answered "No".
+  - F5: an accommodation/"prevent you from performing" frame is classed as disability; a decline-to-disclose checkbox is ticked from "no".
+  - F7: a compound clause gets an answer.
+  - F8: a note says "declined".
+  - F10: locks keeps its own NS_TERMS. The same-result check passes; the pin is on one list.
+  The positives pass now: "I am not bound by any non-compete" ticked, PEP in a TEXT box "No", "Are you bound by any non-compete?" "No", Acme / "us" filled by data.
+- `test_llm_fill_guard_table` (2 pins, lane M):
+  - F6 `ground_items`: keeps R, Go, C, Word, Excel and Swift from the prose quote.
+  - F9 `deterministic_pick("65", ["Level +65 items"])`: returns the option.
+- The 4 earlier guard pins now pass on 4911696: G2d leaf, G2(d) restated, G3 C++, D-88.
 ### 2026-11-07 tester → software-engineer
 TYPE: handoff
 RE: Q-70 lane A tests (reply to your request)

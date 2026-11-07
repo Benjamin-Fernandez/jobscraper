@@ -17,7 +17,9 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Iterator, Optional
 
-CONTRACT_VERSION = 1
+CONTRACT_VERSION = 2   # 2 (additive, Q-45, llm_fill_design §19): ComposeRequest, ComposeResult,
+                       #   COMPOSE_VERSION, IssueCode VERB_UPGRADE/PRIVATE_VALUE/OTHER_EMPLOYER/
+                       #   PLACEHOLDER. M22 adds its other §7.4 codes later (also additive).
 
 # PRD F-21: JD keyword coverage weights.
 WEIGHT_REQUIRED = 2
@@ -152,6 +154,11 @@ class IssueCode(str, Enum):
     PAGE_TRIM = "page_trim"               # a bullet dropped to keep the page ceiling
     PDF_UNAVAILABLE = "pdf_unavailable"
     ROUNDTRIP = "roundtrip"               # a heading, employer or date did not survive the file
+    # Q-45 composed texts (llm_fill_design §19.4); VERB_UPGRADE is also M22's (tailor_design §7.4).
+    VERB_UPGRADE = "verb_upgrade"         # an UPGRADE_WORDS token the master doesn't have
+    PRIVATE_VALUE = "private_value"       # an S value, email, phone or address in the text (detail names no value)
+    OTHER_EMPLOYER = "other_employer"     # names another employer the applicant didn't work for
+    PLACEHOLDER = "placeholder"           # "[Name]", "<company>", "Lorem ..." left in the text
 
 
 @dataclass(frozen=True)
@@ -203,3 +210,38 @@ class TailorResult:
     @property
     def missing(self) -> list[JdTerm]:
         return [t for t in self.terms if t.status is TermStatus.MISSING]
+
+
+# --------------------------------------------------------------------------
+# Composed texts (Q-45, llm_fill_design §19): a cover letter or a "why join" answer,
+# written by the local model from the master resume and checked like a tailored text.
+# --------------------------------------------------------------------------
+
+COMPOSE_VERSION = "compose:v1"   # the audit row's rule_id; bump when the prompt or checks change
+
+
+@dataclass(frozen=True)
+class ComposeRequest:
+    """What apply_flow asks `tailor_flow.compose` for. Employer text and limits only;
+    `s_values` are held to check the prompt and the text, never put into either."""
+    kind: str                                  # "letter" | "answer"
+    question: str                              # the form's label + help text (employer text)
+    employer: str
+    employer_aliases: tuple[str, ...] = ()
+    job_title: str = ""
+    jd_text: str = ""
+    max_words: int = 120
+    max_chars: int = 1500                      # the field's maxlength when it has one
+    s_values: tuple[str, ...] = ()             # redacted from the prompt; any in the text -> PRIVATE_VALUE
+    other_employers: tuple[str, ...] = ()      # must not appear (the applicant's own employers already removed)
+
+
+@dataclass(frozen=True)
+class ComposeResult:
+    ok: bool
+    text: str = ""                             # "" unless ok
+    issues: tuple[ValidationIssue, ...] = ()   # of the last attempt; details name tokens, never S values
+    model: str = ""
+    prompt_hash: str = ""
+    attempts: int = 0                          # 1, or 2 after the one retry
+    error: str = ""                            # "no master" | "transport: <kind>" | "" (no personal text)

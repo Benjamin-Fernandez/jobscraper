@@ -117,7 +117,8 @@ def _by_key(captured):
 def test_question_contract_types_are_the_ones_the_design_names():
     assert {k.value for k in QuestionKind} == {"yes_no", "choice", "multi", "text", "date", "number"}
     assert {r.value for r in QuestionReason} == {"no_rule", "ungrounded", "profile_gap", "no_option_fits",
-                                                 "attestation_unclear", "conflict"}
+                                                 "attestation_unclear", "conflict", "compose_needed"}
+    # contracts v5 (LF §19, D-86 F9): compose_needed is additive
     assert {s.value for s in QuestionStatus} == {"open", "answered", "dismissed"}
     q = _cq()
     assert q.required is True and q.sensitive is False and q.target_path == ""

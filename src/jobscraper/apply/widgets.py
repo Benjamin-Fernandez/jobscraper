@@ -346,7 +346,7 @@ def _fill_listbox(page: Any, loc: Any, value: Value, pf: PageField, pick: Option
 
 def _fill_prompt(page: Any, loc: Any, value: Value, pf: PageField, pick: Optional[Picker]) -> Value:
     """Workday prompt (selectinput / promptOption / selectedItem pills). Port of the
-    spike's _choose_prompt: wrong pills removed first; each wanted item: an option
+    spike's _choose_prompt: wrong pills removed first (multi only); each wanted item: an option
     shown on open, else a search (typed; Enter only where safe), exact match first,
     then `pick`; sub-lists followed up to MAX_LEVELS; a "Category > Leaf" path is
     clicked level by level. Success = the leaves show as pills."""
@@ -356,7 +356,10 @@ def _fill_prompt(page: Any, loc: Any, value: Value, pf: PageField, pick: Optiona
     if not wants:
         return _fail(page, "no_option")
     leaves = {_choice_norm(w) for w in wants}
-    for _ in range(12):                                   # wrong pills out first
+    # Wrong pills out first, multi only: in a single prompt the chosen option replaces the
+    # pill, so a search that finds nothing leaves the site's value in place (never an
+    # emptied field we then can't fill; R3 run on wd_a "Country Phone Code").
+    for _ in range(12 if multi else 0):
         pills = _pills(loc)
         wrong = [i for i, p in enumerate(pills) if _choice_norm(p) not in leaves]
         if not wrong:

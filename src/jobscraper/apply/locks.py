@@ -1,0 +1,286 @@
+"""Locks: the deterministic pre-pass before the model (llm_fill_design §4; D-78, D-82).
+
+Some answers must never depend on a model: the file we upload, the email whose mailbox
+is watched, work rights (D-75), sensitive facts (AD §5.3), consents, the owner's own
+explicit answers and the declarations (F-33). `lock_page` settles those fields first.
+A FILLED lock is final: the field is left out of the model's output schema and appears
+in the prompt only as context. An UNKNOWN lock is final too: the field is captured as a
+question (or stops the attempt), and it never goes to the model (ADR-0003 fail closed).
+
+Order per field (review M1, F-32): L1 resume file, L2 email, L4/L5 work rights and
+sensitive rows, L6 the owner's `extra` answers, L3/L7 declarations. An UNKNOWN from
+L4/L5 consults L6 before it stands; L3/L7 run after L6 had nothing, so an
+`attestation_unclear` the owner answers in Profile resolves on the retry through L6.
+
+Pure: no browser, no model, no store, no log. The resolver's tiers 2-4 do the mapping
+(`resolve`, `declarations`), so a lock and the old path answer a field the same way.
+"""
+from __future__ import annotations
+
+import dataclasses
+import os
+import re
+from typing import Any, Mapping, Optional, Sequence
+
+from .. import applicant
+from . import declarations, facts, resolve
+from .contracts import (
+    Answer, AnswerStatus, AnswerTier, Canonical, FieldType, PageField, ResolveContext,
+)
+from .plan import contains_run, norm_label, qualified_label, tokens
+
+# L1 (H6): what makes a FILE input the resume slot, and what never does.
+RESUME_RE = re.compile(r"r[eé]sum[eé]|\bcv\b|curriculum", re.I)
+RESUME_PAGE_RE = re.compile(r"r[eé]sum[eé]|\bcv\b|drop (off )?your|autofill", re.I)
+NOT_RESUME_RE = re.compile(r"cover\s*letter|transcript|portfolio|certificate|writing sample|"
+                           r"photo|passport|identity|\bid\b", re.I)
+COVER_RE = re.compile(r"cover\s*letter", re.I)
+TRANSCRIPT_RE = re.compile(r"transcript", re.I)
+# L2: a label that asks for an email (a one-token phrase: labels of 4 tokens or fewer).
+EMAIL_PHRASE = ("email",)
+# L5: consents that are locks although their tier-2 rows are not sensitive (AD §7.3).
+LOCKED_CONSENTS = frozenset({"consents.privacy_consent", "consents.certify_true"})
+# L4: the D-75 work-rights maps.
+WORK_RIGHTS_PREFIXES = ("singapore_status.authorised_to_work", "singapore_status.requires_sponsorship")
+# L5 EEO questions with no tier-2 row: label words -> the tier-1 value rule (AD §7.2 EEO_*).
+EEO_WORDS: tuple[tuple[tuple[str, ...], Canonical, str], ...] = (
+    (("veteran",), Canonical.EEO_VETERAN, "us_self_id.veteran_status"),
+    (("disability",), Canonical.EEO_DISABILITY, "us_self_id.disability_status"),
+    (("disabled",), Canonical.EEO_DISABILITY, "us_self_id.disability_status"),
+    (("hispanic",), Canonical.EEO_HISPANIC, "us_self_id.eeo_race_ethnicity"),
+    (("latino",), Canonical.EEO_HISPANIC, "us_self_id.eeo_race_ethnicity"),
+)
+# L7: a negated declaration on a Yes/No choice cannot be mapped safely.
+NEGATIONS = (("not",), ("never",), ("no",), ("none",), ("neither",), ("free", "of"), ("without",))
+
+
+def _shown_name(pf: PageField) -> str:
+    v = pf.shown
+    if isinstance(v, list):
+        v = v[0] if v else ""
+    return os.path.basename(str(v or "").strip())
+
+
+def _stamp(a: Answer, pf: PageField) -> Answer:
+    """Every row carries what the field showed and where it came from (§7)."""
+    a.shown = pf.shown
+    a.origin = pf.origin.value
+    a.entry = pf.group
+    return a
+
+
+def _filled(pf: PageField, value: Any, tier: AnswerTier, source: str, *, rule_id: str = "",
+            note: str = "", sensitive: bool = False, labels: Sequence[str] = ()) -> Answer:
+    return _stamp(Answer(field_key=pf.field.key, value=value, tier=tier, source=source,
+                         confidence=resolve.CONF_FIELD_MAP if tier is AnswerTier.FIELD_MAP
+                         else resolve.CONF_PROFILE, status=AnswerStatus.FILLED,
+                         option_labels=tuple(labels), rule_id=rule_id, sensitive=sensitive,
+                         note=note), pf)
+
+
+def _unknown(pf: PageField, note: str, *, rule_id: str = "", sensitive: bool = False) -> Answer:
+    """No answer and never the model: required -> UNKNOWN, optional -> BLANK_OPTIONAL."""
+    st = AnswerStatus.UNKNOWN if pf.field.required else AnswerStatus.BLANK_OPTIONAL
+    return _stamp(Answer(field_key=pf.field.key, value=None, tier=AnswerTier.NONE, source="",
+                         confidence=0.0, status=st, rule_id=rule_id, sensitive=sensitive,
+                         note=note), pf)
+
+
+def is_unknown(a: Answer) -> bool:
+    return a.status in (AnswerStatus.UNKNOWN, AnswerStatus.UNGROUNDED,
+                        AnswerStatus.BLANK_OPTIONAL)
+
+
+# ---------------------------------------------------------------- L1, L1b
+
+def _file_lock(pf: PageField, rctx: ResolveContext, uploaded: Mapping[str, str], *,
+               single_file: bool, page_text: str) -> Answer:
+    """L1 (H6, TR-8) and L1b: every FILE field is settled here; none reaches the model."""
+    f = pf.field
+    own = " ".join((f.label, f.section, f.description, pf.group_title))
+    other_doc = bool(NOT_RESUME_RE.search(own))
+    is_resume = not other_doc and (bool(RESUME_RE.search(own)) or (
+        single_file and bool(RESUME_PAGE_RE.search(own + " " + (page_text or "")))))
+    if is_resume:
+        if not rctx.resume_path:
+            return _unknown(pf, "L1: no resume file")
+        shown = _shown_name(pf)
+        if shown and shown in uploaded:
+            note = "L1: kept, uploaded in this attempt"
+        elif shown:
+            note = "L1: replace the attachment (not uploaded in this attempt)"
+        else:
+            note = ""
+        return _filled(pf, rctx.resume_path, AnswerTier.FIELD_MAP, "field_map:resume",
+                       rule_id="resume", note=note)
+    if TRANSCRIPT_RE.search(own):
+        path = resolve.profile_value(rctx.profile or {}, "documents.transcript")
+        if isinstance(path, str) and path.strip():
+            return _filled(pf, path.strip(), AnswerTier.FIELD_MAP, "field_map:transcript",
+                           rule_id="transcript")
+        return _unknown(pf, "L1b: no transcript file", rule_id="documents.transcript")
+    if COVER_RE.search(own):
+        if f.required:
+            # L1b: a required cover letter is composed by one model call and uploaded;
+            # that call is not part of the lock pre-pass (see comms: lane M question).
+            return _unknown(pf, "L1b: cover letter not composed")
+        return _unknown(pf, "cover letter is optional")
+    return _unknown(pf, "L1b: no file for this upload")
+
+
+# ---------------------------------------------------------------- L2
+
+def _email_lock(pf: PageField, rctx: ResolveContext) -> Optional[Answer]:
+    """L2: an EMAIL field, or a label asking for an email, gets the account identity
+    (D-70, AD §10.5). Not on a question about another person (D-84 R4)."""
+    f = pf.field
+    toks = tokens(f.label)
+    asks = f.type is FieldType.EMAIL or any(
+        len(toks) <= 4 and contains_run(toks, list(p.split())) for p in EMAIL_PHRASE)
+    if not asks or facts.about_other_person(pf):
+        return None
+    email = rctx.account_email or resolve.profile_value(rctx.profile or {}, "contact.email")
+    fit = resolve.fit_text(f, email)
+    if fit is None:
+        return _unknown(pf, "L2: no email fits", rule_id="contact.email", sensitive=True)
+    return _filled(pf, fit[0], AnswerTier.FIELD_MAP, "field_map:email", rule_id="email",
+                   sensitive=True, labels=fit[1])
+
+
+# ---------------------------------------------------------------- L4, L5
+
+def _work_rights_bool(f, label_norm: str, rctx: ResolveContext,
+                      r: resolve.Rule) -> Optional[Answer]:
+    """L4 on a per-country bool row (`...authorised_to_work.SG`): the D-75 map value."""
+    parts = r.key.split(".")
+    which, code = parts[1], parts[2] if len(parts) > 2 else applicant.WORK_RIGHTS_DEFAULT
+    value, src = applicant.work_right(rctx.profile or {}, which, code)
+    fit = resolve.fit_bool(f, value)
+    if fit is None:
+        return None
+    return Answer(field_key=f.key, value=fit[0], tier=AnswerTier.PROFILE_RULE,
+                  source=f"profile:singapore_status.{which}.{src}", confidence=resolve.CONF_PROFILE,
+                  status=AnswerStatus.FILLED, option_labels=tuple(fit[1]), rule_id=r.key)
+
+
+def _rule_lock(pf: PageField, label_norm: str, rctx: ResolveContext,
+               rules: Any) -> Optional[Answer]:
+    """L4 (D-75 work rights) and L5 (sensitive tier-2 rows, the two locked consents,
+    EEO). Returns a FILLED Answer, an UNKNOWN one (it consults L6 next), or None
+    when no lock row matches (non-sensitive rows don't answer on their own, §4)."""
+    f = pf.field
+    best, _score = rules.select(label_norm, f) if rules is not None else ([], 0)
+    if len(best) > 1:
+        if any(r.sensitive for r in best):
+            return _unknown(pf, "ambiguous: " + ", ".join(r.key for r in best), sensitive=True)
+        return None
+    if best:
+        r = best[0]
+        key = r.parent or r.key
+        if r.kind == "country_bool":
+            t2 = resolve._tier2_country_bool(f, label_norm, rctx, r)
+            if t2.answer:
+                return _stamp(t2.answer, pf)
+            note = t2.stop.note if t2.stop else t2.note
+            return _unknown(pf, note, rule_id=r.key)
+        if key.startswith(WORK_RIGHTS_PREFIXES):
+            a = _work_rights_bool(f, label_norm, rctx, r)
+            return _stamp(a, pf) if a else _unknown(pf, f"profile rule {r.key}: no value fits",
+                                                    rule_id=r.key)
+        if r.sensitive or key in LOCKED_CONSENTS:
+            t2 = resolve._tier2_one(f, label_norm, rctx, r)
+            if t2.answer:
+                return _stamp(t2.answer, pf)
+            note = t2.stop.note if t2.stop else t2.note
+            return _unknown(pf, note or f"profile rule {r.key}: no value fits", rule_id=r.key,
+                            sensitive=r.sensitive)
+        return None
+    toks = label_norm.split()
+    for words, canonical, path in EEO_WORDS:
+        if contains_run(toks, list(words)):
+            fit = resolve.field_map_fit(canonical, f, rctx)
+            if fit is None:
+                return _unknown(pf, f"field map {canonical.value}: no value fits",
+                                rule_id=path, sensitive=True)
+            return _filled(pf, fit[0], AnswerTier.PROFILE_RULE, f"profile:{path}",
+                           rule_id=canonical.value, sensitive=True, labels=fit[1])
+    return None
+
+
+# ---------------------------------------------------------------- L3, L7
+
+strip_ns_exclusion = declarations.strip_ns_exclusions     # the one NS-exclusion rule (F10)
+
+
+def _declaration_lock(pf: PageField, label_norm: str, rctx: ResolveContext) -> Optional[Answer]:
+    """L3 / L7: the tier-4 declaration answer. `declarations.answer()` owns every gate
+    (D-90: field type, status frame, known polarity incl. the D-91 freedom forms, this
+    employer, disability status frames; AMBIGUOUS included, which also runs the D-87
+    agreement rule). There is no second copy of the lists here (review F3, F10): a
+    refused question comes back unknown (attestation_unclear) / blank."""
+    f = pf.field
+    label = declarations.classify_field(f, rctx)
+    if label is None:
+        return None
+    a = declarations.answer(label, f, rctx)
+    if "negated declaration" in (a.note or ""):
+        a = dataclasses.replace(a, note="L7: " + a.note)       # the L7 trace in the audit row
+    return _stamp(a, pf)
+
+
+# ---------------------------------------------------------------- the pre-pass
+
+def lock_field(pf: PageField, rctx: ResolveContext, rules: Any, *, today: str = "",
+               uploaded: Optional[Mapping[str, str]] = None, single_file: bool = False,
+               page_text: str = "", qualified: str = "") -> Optional[Answer]:
+    """One field through L1, L2, L4/L5, L6, L3/L7. None = not locked (the model's)."""
+    f = pf.field
+    if f.type is FieldType.HIDDEN:
+        return _stamp(Answer(field_key=f.key, value=None, tier=AnswerTier.NONE, source="",
+                             confidence=0.0, status=AnswerStatus.SKIPPED, note="hidden"), pf)
+    if f.type is FieldType.FILE:
+        return _file_lock(pf, rctx, uploaded or {}, single_file=single_file,
+                          page_text=page_text)
+    a = _email_lock(pf, rctx)
+    if a is not None:
+        return a
+    label_norm = norm_label(f.label)
+    held = _rule_lock(pf, label_norm, rctx, rules)
+    if held is not None and held.status is AnswerStatus.FILLED:
+        return held
+    owner, _note = resolve.extra_answer(f, qualified or label_norm, rctx)
+    if owner is not None:
+        return _stamp(owner, pf)
+    if held is not None:
+        return held
+    return _declaration_lock(pf, label_norm, rctx)
+
+
+def generic_ordinals(fields: Sequence[PageField]) -> dict[str, int]:
+    """Reader key -> place among the step's generic-label fields (§12.1)."""
+    return resolve.generic_ordinals([pf.field for pf in fields])
+
+
+def qualified_labels(fields: Sequence[PageField]) -> dict[str, str]:
+    """Reader key -> the qualified label (§12.1) every lane matches and captures with."""
+    ords = generic_ordinals(fields)
+    return {pf.field.key: qualified_label(pf.field.label, pf.field.description, pf.context,
+                                          step=pf.field.step, ordinal=ords.get(pf.field.key, 0))
+            for pf in fields}
+
+
+def lock_page(fields: list[PageField], rctx: ResolveContext, rules: Any, *, today: str,
+              uploaded: dict[str, str], page_text: str = "") -> dict[str, Answer]:
+    """Every locked field's final Answer, keyed by reader key (§4). Fields not in the
+    result are open: the model is asked about them. `page_text` (the step's visible
+    text) feeds L1's one-FILE clause only; it is optional so the pinned call works."""
+    files = [pf for pf in fields if pf.field.type is FieldType.FILE]
+    quals = qualified_labels(fields)
+    out: dict[str, Answer] = {}
+    for pf in fields:
+        a = lock_field(pf, rctx, rules, today=today, uploaded=uploaded or {},
+                       single_file=len(files) == 1, page_text=page_text,
+                       qualified=quals.get(pf.field.key, ""))
+        if a is not None:
+            out[pf.field.key] = a
+    return out

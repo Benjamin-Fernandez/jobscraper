@@ -610,6 +610,7 @@ All three JDs put their terms on `- ` list lines, so under the patched step 4 ev
 
 ## 17. Extension notes
 
+- **Composed texts (Q-45):** cover letters and "why join" answers for auto-apply are a tailor job: `tailor/compose.py`, `tailor_flow.compose`/`write_letter`, contracts v2 (`ComposeRequest`, `ComposeResult`), checks C1–C7 built on this design's `validate.numbers`/`validate.facts` and §7.4's `UPGRADE_WORDS`. Spec: `llm_fill_design.md` §19.
 - **New synonym or tool:** add to `config/aliases.yaml` (researcher or owner); no code change; the inputs hash makes old drafts stale.
 - **New section kind:** contract change (SectionKind) → architect.
 - **Another output layout:** a new `render` template version (`TEMPLATE_VERSION` bump); the round trip stays mandatory.

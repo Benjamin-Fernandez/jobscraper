@@ -88,6 +88,31 @@ Requests:
 - engineer (lane N): F2, F8; F5 and F7 in N6a.
 - tester: oracles for F1, F3, F4 and F7.
 - lane M: the MM/DD/YYYY date of birth in s_values.
+
+RE: Q-35 lane M (eng/Q-35-M-llmfill @ a4f1c8c) · docs/reviews/Q-35-lane-M.md
+BODY: APPROVE WITH FIXES. Locks are final, fact values are written only by the program, every prompt is redacted as a whole, and transport, cut or malformed replies always raise BackendError. R1-R3 are built and layering is 10/10. Three HIGH findings to fix and pin before merge (each a few lines; reproduced with scratch probes):
+- F1: pick_option sends an enum S value (race, nationality) to the model as WANTED. The fix is to refuse when the label is sensitive or the answer is sensitive; WP-R3 passes pick=None for sensitive rows.
+- F2: R4 is bypassed through the resume. "Emergency contact name" gets filled with the applicant's own name, because only relevance checks R4. Apply the R4 check in _model_field and _keep_field too.
+- F3: G7 ignores a generic label's context. "Please specify" after "Race" is filled "Chinese" from the resume. sensitive_label should read the context when the label is generic.
+MEDIUM: F4 make s_values' account_email required and add the missing DOB forms; F5 R4 false positives from help text ("hiring manager" turns off L2); F6 L7 reads "(Yes/No)" as a negation; F7 G4 on the fact route trusts the model's own evidence; F8 field_sig is an unkeyed hash of the shown value; F9 L1b cover-letter compose has no WP (plan gap; a required cover letter stops the page and nothing is captured).
+Open questions: links.* outside entries is a design gap (keep the code); one-word labels count as generic by design; profile_gap is a design gap; G12 maps to no_rule by design.
+STATUS: open
+
+RE: Q-35 WP-R3 re-review (eng/Q-35-R-page @ 2add8ee) · docs/reviews/Q-35-R3-rereview.md
+BODY: MERGE. F1-F6, F8, F9, F10 (R3 part) are closed; no CRITICAL/HIGH open. Evidence: -k pagefill 17/19, -k llm_fill 72/72. The 2 failing oracles (test_a_page_that_stops_is_left_exactly_as_the_site_put_it, test_classify_runs_before_the_first_keystroke) fail because lane M 36007cc (G2e) makes wd_a/wd_b "How Did You Hear About Us?" unknown; rerun after e2414c5 is in int/Q-35-M. New: F12 MEDIUM one failed delete demotes the successful deletes of the same section (per-section count); F13 MEDIUM a step-7 stop now caches `unknown` rows, so a retry after the owner adds the fact replays unknown (reproduced; LF 13.3 gap); F14 LOW failed E5 add marks the existing entry's fields fill_failed.
+Requests:
+- engineer (lane R or N6a): F12, F13 (skip UNKNOWN in _cache_put), F7, F10 audit rule, N1.
+- tester: pins for F12, F13, F1 radio/required twin; update the 2 stale oracles only if they still fail after e2414c5.
+- architect: LF 13.3 should say whether an `unknown` decision is cached.
+
+RE: Q-48 fix round re-review (eng/Q-48-declarations @ 1004247) · docs/reviews/Q-48-and-lane-M-fixes.md ("Re-review (fix round, 2026-11-07)")
+BODY: MERGE. F1-F10 closed (replayed); D-90, D-90a, D-91 built as specified; the three test-only commits follow the spec and do not weaken pins. Tests: declarations 40/40, apply_contracts 66/66, llm_fill 74/74, layering 10/10 (full suite not run, per the brief). No CRITICAL or HIGH open.
+- F11 MEDIUM: nda_willingness answers a compound ("willing to sign an NDA and relocate to Tokyo?" -> Yes; "I agree to sign the NDA and to a background check" ticked) once the owner sets willing_to_sign_nda true. Fix in _nda_consent with a closed vocabulary; tester pin.
+- F12 LOW freedom path skips the status-frame gate; F13 LOW noun-phrase / prefixed labels ("Politically exposed person (PEP)?", "Declaration: Are you a PEP?") now go to the inbox (spec-conformant); F14 LOW dead locks.NEGATIONS; F15 LOW residual short-skill and all-caps "US" edges; F16 LOW spec inconsistency.
+Requests:
+- engineer: F11 (with a tester pin), F12, F14.
+- architect: amend AD 5.4 / 7.5 so willing_to_sign_nda unset = unknown (not "default false"); reconcile the D-91 verb list (comfortable, happy to, open to) with D-90a; decide F13 (frame runs anywhere in the label, or noun-phrase class labels on Yes/No); add the compound rule for nda_willingness.
+- coordinator: the review file is not on this branch (a856254 is on personal); the doc now holds the original plus the re-review, so resolve the add/add by taking either side. After merging to personal, smoke the Profile tab for a tri-state willing_to_sign_nda before the owner edits Application details.
 STATUS: open
 
 ### 2026-11-07 reviewer → coordinator
