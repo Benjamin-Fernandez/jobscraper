@@ -1,0 +1,18 @@
+Authentication-Results: mx.google.com;
+       dkim=pass header.i=@myworkday.com header.s=s1 header.b=Zm9vYmFy;
+       spf=pass (google.com: domain of examplecorp@myworkday.com designates 192.0.2.10 as permitted sender) smtp.mailfrom=examplecorp@myworkday.com;
+       dmarc=pass (p=REJECT sp=REJECT dis=NONE) header.from=myworkday.com
+From: Example Corp <examplecorp@myworkday.com>
+To: Alex Applicant <alex.applicant@inbox.example>
+Subject: Data Analyst Graduate (R0067890)
+Date: Sun, 01 Nov 2026 12:00:00 +0000
+Message-ID: <golden-30@synthetic.test>
+MIME-Version: 1.0
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: 7bit
+
+Dear Alex,
+
+We have added you to our talent pool and will consider you for future opportunities that match your profile.
+
+Example Corp

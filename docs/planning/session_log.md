@@ -28,3 +28,14 @@ One entry per session. Older handover notes end up here, so `handover.md` stays 
 - Q-48 designed (architect), built (WP-Q48), reviewed: needs fixes (frame-blind classification). Fix round was running at the pause (8393f98, not verified).
 - R3 reviewed (merge after fixes); lane R fixed F1–F6, F8, F9 (2add8ee); re-review was stopped at the pause.
 - int/Q-35-M 3aadc13: lane M + WP-Q48 (first build) + tester pins; 1007/1024, the 17 = WP-Q48 fix-round pins. Nothing new merged into personal from the build this session (only Q-41 and records).
+
+## 2026-11-02 · Q-60 session (separate Coordinator session, branch `int/Q-60-mail-status`; paused by the owner)
+- Owner request D-90: application status from email (opt-in Gmail, incremental from the last processed message, automatic status updates), on a separate branch. Ran in parallel with the session-3 Coordinator on `personal`; IDs Q-60/D-90+/F-50 chosen to avoid collisions; all work in worktree `feat-Q-60`.
+- Stage A brief (researcher; IMAP app password recommended over Gmail API OAuth: 7-day Testing-mode token expiry), stage B design + BP + ADR-0007 (architect), stage E by the Coordinator (READY; amendment E1 Oleeo `tal.net` tenants), R2 header-only scan of the application mailbox with owner consent (special-use folders present; ATS mail dkim/spf/dmarc pass; Oleeo found), rules v1 (researcher), S0 + T0 merged into int.
+- Decisions D-90, D-91, D-92. Owner answers: application Gmail first; header scan yes.
+- Paused mid-build: lanes S, I, F and the tester stopped on the owner's word; state in the handover Q-60 block.
+
+## 2026-11-07 · Q-60 session (resumed; merged)
+- Lane F review fixes (D-157, D-158, D-159), tester T5/T6 and pins merged on int; IDs renamed into D-150..D-169 (D-155). int e0e97e4: 1106/1106.
+- X1 dev check on a DB copy (8769). Owner dry run on a fresh copy: 19 read, 0 changes (D-160; untracked tenant B application → Q-72).
+- Live DB backed up; merged into personal c20332a; suite 1106/1106, vitest 296/1 skipped, bundle rebuilt, smoke OK; pushed.

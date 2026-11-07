@@ -1,0 +1,14 @@
+Authentication-Results: mx.google.com;
+       dkim=pass header.i=@myworkday.com header.s=s1 header.b=Zm9vYmFy;
+       spf=pass (google.com: domain of examplecorp@myworkday.com designates 192.0.2.10 as permitted sender) smtp.mailfrom=examplecorp@myworkday.com;
+       dmarc=pass (p=REJECT sp=REJECT dis=NONE) header.from=myworkday.com
+From: Example Corp <examplecorp@myworkday.com>
+To: Alex Applicant <alex.applicant@inbox.example>
+Subject: An update on your application
+Date: Sun, 01 Nov 2026 14:00:00 +0000
+Message-ID: <golden-32@synthetic.test>
+MIME-Version: 1.0
+Content-Type: text/html; charset="utf-8"
+Content-Transfer-Encoding: 7bit
+
+<html><body><p>Dear Alex,</p><p>There is an update on your application for Graduate Software Engineer. Please <a href="https://examplecorp.wd3.myworkdayjobs.com/en-US/careers/userHome">log in to view</a> the update on the candidate home page.</p><p>Example Corp</p></body></html>

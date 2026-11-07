@@ -9,16 +9,23 @@
 // a status is a config change (M8-T2); stages.js only says how one is written.
 // The run selector here is this tab's own filter and starts on "all runs": an
 // application outlives the run that found it (M12-T1).
+//
+// Email updates (Q-60, F-50l-n): suggestions an email raised sit above the stage
+// strip (MailSuggestions, hidden when there are none), and an event an email
+// made wears a "From email" badge in History (MailEvidence) with its quote and
+// Undo. Either action reloads the rows and the suggestions.
 import { computed, onActivated, onMounted, ref, watch } from 'vue'
 import { describeError, getApplications, getStats, setApplicationStatus, untrackApplication } from '../api.js'
 import { ageLabel, isActive, lastAt, needsFollowUp, secondLine, STAGE_KEY } from '../applications.js'
-import { plural, safeUrl, when } from '../format.js'
+import { plural, safeUrl, shortDate, when } from '../format.js'
 import { tabEmits, tabProps } from '../shell.js'
 import { statusLabel } from '../stages.js'
 import { showToast } from '../toast.js'
 import { runsInRange } from '../runs.js'
 import CompanyMark from '../components/CompanyMark.vue'
 import Icon from '../components/Icon.vue'
+import MailEvidence from '../components/MailEvidence.vue'
+import MailSuggestions from '../components/MailSuggestions.vue'
 import RunSelector from '../components/RunSelector.vue'
 import StatusSelect from '../components/StatusSelect.vue'
 import TabLoading from '../components/TabLoading.vue'
@@ -128,6 +135,17 @@ function retry() {
   load()
 }
 
+// ---- email updates ----
+
+const suggestions = ref(null)
+
+// A suggestion was accepted or an email-made change undone: the status moved.
+async function afterMail() {
+  await load()
+  emit('changed')
+  await suggestions.value?.load()
+}
+
 async function change(row, status) {
   if (status === row.status) return
   const before = row.status
@@ -142,6 +160,8 @@ async function change(row, status) {
       message: `Moved to ${statusLabel(status)}: ${row.role ?? row.job_id}`,
       action: { label: 'Undo', run: () => change({ ...row, status }, before) },
     })
+    // A suggestion about this application may no longer apply (superseded).
+    suggestions.value?.load()
   } catch (e) {
     error.value = `Could not change ${row.company ?? row.job_id}: ${describeError(e)}`
   } finally {
@@ -255,6 +275,8 @@ onActivated(() => { if (shownOnce) load(); shownOnce = true })
     </div>
 
     <template v-else-if="rows.length">
+      <MailSuggestions ref="suggestions" @changed="afterMail" />
+
       <div class="stages" role="group" aria-label="Filter by stage">
         <button
           v-for="s in stages"
@@ -347,9 +369,10 @@ onActivated(() => { if (shownOnce) load(); shownOnce = true })
               <details v-if="row.events && row.events.length > 1" class="history">
                 <summary>History <span class="num">{{ row.events.length }}</span></summary>
                 <ol class="timeline">
-                  <li v-for="e in row.events" :key="e.id">
+                  <li v-for="e in row.events" :key="e.id" :data-by="e.by ?? null">
                     <span class="to pill" :data-status="e.to_status">{{ statusLabel(e.to_status) }}</span>
                     <span class="at">{{ when(e.at) }}</span>
+                    <MailEvidence v-if="e.by === 'mail' && e.mail" :event="e" @undone="afterMail" @stale="afterMail" />
                   </li>
                 </ol>
               </details>
@@ -405,6 +428,7 @@ onActivated(() => { if (shownOnce) load(); shownOnce = true })
 .stage.active[data-status='active']::after { background: var(--accent); }
 .stage.active[data-status='to_apply']::after { background: var(--stage-saved); }
 .stage.active[data-status='applied']::after { background: var(--stage-applied); }
+.stage.active[data-status='assessment']::after { background: var(--stage-assessment); }
 .stage.active[data-status='interviewing']::after { background: var(--stage-interview); }
 .stage.active[data-status='offer']::after { background: var(--stage-offer); }
 .stage.active[data-status='rejected']::after { background: var(--stage-rejected); }
@@ -460,7 +484,7 @@ a.role-title .icon { color: var(--muted); }
 .history summary { cursor: pointer; color: var(--muted); width: max-content; }
 .history summary .num { font-size: var(--text-xs); }
 .timeline { list-style: none; margin: var(--space-2) 0 0; padding: 0 0 0 var(--space-3); border-left: 2px solid var(--border); }
-.timeline li { display: flex; align-items: center; gap: var(--space-3); padding: 2px 0; }
+.timeline li { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-1) var(--space-3); padding: 2px 0; }
 .at { color: var(--muted); font-family: var(--mono); font-size: var(--text-xs); white-space: nowrap; }
 
 @media (max-width: 640px) {

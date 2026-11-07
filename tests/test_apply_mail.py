@@ -371,6 +371,96 @@ def test_mailbox_for_maps_each_address_to_its_mailbox():
     assert mailbox_for("someone.else@example.org", prof, _settings()) is None
 
 
+# ================================================================== WP-T4 (Q-60): apply/mail on imapread
+# MS 5.7: the watcher reads the special-use Spam name, falls back to [Gmail]/Spam, and its
+# moved helpers are the imapread functions. These run on tests/mail_support.FakeMailServer
+# (special-use LIST, per-session command log, write refusal, \Seen tracking).
+
+def _gmail(layout="gmail", inbox=(), spam=()):
+    from mail_support import FakeMailServer
+    srv = FakeMailServer(layout)
+    for n in inbox:
+        srv.deliver(_raw(n), to=("inbox", "all") if layout != "all_hidden" else ("inbox",))
+    for n in spam:
+        srv.deliver(_raw(n), to=("junk",))
+    return srv
+
+
+def _gmail_watcher(srv):
+    from jobscraper.apply.mail import MailWatcher
+    return MailWatcher("imap.example.test", 993, PRIMARY, Secret("synthetic-app-password"),
+                       connect=srv.factory, sleep=lambda _s: None)
+
+
+def _watcher_read_only(srv):
+    assert set(srv.verbs()) <= {"CONNECT", "LOGIN", "CAPABILITY", "LIST", "EXAMINE", "SEARCH", "FETCH",
+                                "UID SEARCH", "UID FETCH", "NOOP", "LOGOUT"}, srv.verbs()
+    assert srv.violations == [], srv.violations
+    assert all(not srv.seen(b.role) for b in srv.boxes if b.role), "nothing marked read"
+
+
+@needs("jobscraper.imapread", "jobscraper.apply.mail")
+def test_apply_mail_helpers_are_the_imapread_functions():
+    from jobscraper import imapread
+    from jobscraper.apply import mail
+    pairs = {"_host": "host_of", "domain_matches": "domain_matches", "employer_domain": "employer_domain",
+             "_HtmlText": "_HtmlText", "_body": "body_text", "_sender_domain": "sender_domain",
+             "_quote_folder": "quote_folder", "_internaldate": "internaldate", "_imap_date": "imap_date",
+             "URL_RE": "URL_RE", "ATS_DOMAINS": "ATS_DOMAINS"}
+    for alias, name in pairs.items():
+        assert getattr(mail, alias) is getattr(imapread, name), alias
+    # F-36 keeps its links (the verification-link search); F-50 hides them.
+    msg = email.message_from_bytes(_raw("workday_verify_primary"), policy=policy.default)
+    text, links = mail._body(msg)
+    assert links and any("/activate/abc123primary" in u for u, _a in links)
+    hidden, none = imapread.body_text(msg, links=False)
+    assert none == [] and "abc123primary" not in hidden
+
+
+@needs("jobscraper.imapread", "jobscraper.apply.mail")
+def test_apply_mail_reads_the_special_use_spam_name():
+    from jobscraper import imapread
+    from jobscraper.apply import mail
+    from mail_support import mutf7
+    for layout, spam in (("googlemail_de", "[Google Mail]/Spam"), ("zh", "[Gmail]/" + mutf7("垃圾邮件")),
+                         ("gmail", "[Gmail]/Spam"), ("plain", "Junk")):
+        srv = _gmail(layout, spam=("workday_verify_primary",))
+        with srv.patched(mail, imapread):
+            v = _wait(_gmail_watcher(srv), to_addr=PRIMARY)
+        assert v.kind == "link" and v.value.endswith("/activate/abc123primary"), layout
+        examined = [c[1] for c in srv.commands("EXAMINE")]
+        assert imapread.quote_folder(spam) in examined, (layout, examined)
+        if spam != "[Gmail]/Spam":
+            assert "[Gmail]/Spam" not in examined, (layout, examined)
+        _watcher_read_only(srv)
+
+
+@needs("jobscraper.imapread", "jobscraper.apply.mail")
+def test_apply_mail_falls_back_to_gmail_spam_when_no_junk_is_flagged():
+    from jobscraper import imapread
+    from jobscraper.apply import mail
+    srv = _gmail("junk_hidden", inbox=("workday_verify_primary",))
+    with srv.patched(mail, imapread):
+        v = _wait(_gmail_watcher(srv), to_addr=PRIMARY)
+    assert v.kind == "link"
+    assert "[Gmail]/Spam" in [c[1] for c in srv.commands("EXAMINE")], "the fixed fallback is tried"
+    _watcher_read_only(srv)
+
+    class Conn:                                       # LIST refused, then a dropped connection
+        def __init__(self, exc):
+            self.exc = exc
+
+        def list(self, *_a):
+            raise self.exc
+    assert mail._folders(Conn(imaplib.IMAP4.error("LIST refused"))) == ("INBOX", "[Gmail]/Spam")
+    try:
+        mail._folders(Conn(imaplib.IMAP4.abort("socket error: EOF")))
+    except imaplib.IMAP4.abort:
+        pass
+    else:
+        raise AssertionError("a dropped connection must propagate, not fall back")
+
+
 if WAITING:
     print(f"test_apply_mail: waiting on {sorted({m for _n, m in WAITING})} "
           f"({len(WAITING)} oracles not yet defined)", file=sys.stderr)

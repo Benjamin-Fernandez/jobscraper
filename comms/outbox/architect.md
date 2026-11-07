@@ -10,6 +10,33 @@ BODY: <concise message>
 STATUS: open
 -->
 
+### 2026-11-07 architect → coordinator
+TYPE: handoff + request
+RE: Q-60 MS amendment for D-157 (a)–(j), D-156 (1)(3)(4)(5); `docs/architecture/mail_status_design.md` §2.3, §3, §5.1, §5.4, §5.5, §6.5, §7, §8, §9, §10.1–§10.4, §11.1, §11.4 (new), §12, §15 R3
+BODY: MS amended, still READY; no ADR change (all additive; ADR-0007 never mentioned retry_after). §3 matches lane S's contracts.py (c076f68) exactly: `AppCandidate.first_event_at`, `Reason.BACKFILLED` + `SUGGEST_REASONS`, `REASON_TEXTS` "You added this application after this email arrived." Please run `-k mail_contracts`.
+Points to decide (no silent pick):
+1. REQUEST (lane F, FL-1): D-157 (a) stores a `skipped/internal` row and counts `errors`, but contracts.py has no `Reason.INTERNAL` and `COUNT_KEYS` has no `errors`. MS §5.4 uses the value `"internal"` and `counts["errors"]` and marks them "not yet in §3". Recommend adding `INTERNAL = "internal"` (skipped section, in `SKIP_REASONS`) and `"errors"` to `COUNT_KEYS`; tell me and I'll add both to §3 in the same commit as the code, or lane F transcribes them into §3 too.
+2. D-157 (i) says "suffix words"; lane S drops the words *anywhere* in the name and compares with any company variant; it also blocks a role/req id from lifting an extra-words sender name to STRONG (MS §7, decision step 4), where D-157 says only "→ WEAK". I wrote MS to the built code plus your "<words> at <name>" addendum. Confirm the role rule; note that a body name plus a role still gives STRONG, so "Globex Labs" mail that names "Globex" in the body with a matching role still matches the Globex application.
+3. D-157 (a) isolation: I excluded the busy-DB `sqlite3.OperationalError` from per-message isolation (otherwise a locked DB would mark messages skipped forever); it keeps the §12 "stop, retry next time" row. Confirm.
+4. D-157 (b) covers `mail_record` / `mail_resolve_pending` only. The duplicate path and the end-of-scan path call `mail_cursor_set` (an upsert), which can still create an orphan cursor after a disconnect. Recommend the same account check there.
+5. D-157 (d): "a call was made and gave no usable answer" read as `BackendError` from `backend.complete`; a parsed but unusable reply is already an `unclear` suggestion (§6.5), so it resolves the row rather than counting a retry.
+6. D-157 (f): I named the write path `store.mail_supersede(now)` (end of sync) plus accept/dismiss for their own application. Rename freely if lane F built another name.
+7. D-157 (h) accept: a `backfilled` suggestion would always fail §8 row 6 on accept (the owner change is newer by definition), so MS says accept skips row 6 for it. Lane F/S must build that, or Accept gives 409 `changed`.
+8. `POST /api/mail/sync` `400 {code: "no_mailbox"}` is also a command result, not a SyncCode; D-156 (5) didn't list it, so I left it out of the "Command results" paragraph.
+STATUS: open
+
+### 2026-11-07 architect → coordinator
+TYPE: handoff
+RE: Q-60 MS alignment (D-153, D-154 a–g, D-155 renumber); `docs/architecture/mail_status_design.md`, `mail_status_build_plan.md`, `adr/0007-mail-status-imap.md`
+BODY: MS now describes the code as built on int/Q-60-mail-status e2b3998: §5.6 (F4 argument refusal, F5 URL forms, T4 punctuation), §6.2 (shared domains dropped from the gate; Reply-To still opens the gate and triggers `job_board`), §6.3/§6.4 (D-152 assessment vendors, live included), §6.5 (quote ≥ 15 chars and ≥ 3 words on the normalised quote, `model:short_quote`), §7 (employer_domains/is_shared_domain; restricted names as-written everywhere, never STRONG, not via role/req id), §8 (D-153 row 2; `as_bool`), §10.4, §11.3 (F8), §12, §13. Q-60 IDs renumbered to D-150..D-154 in docs/architecture. MS stays READY; §3 contracts unchanged (the code didn't change them).
+Points to check (no silent pick):
+1. D-155 says "the architect already uses the new IDs in docs/architecture/"; before this pass it didn't (D-90/D-91 were still there). Now true.
+2. D-154 g names `enabled` and `model` too; only `require_auth` (transition.build_policy) is built. `MailStatusConfig` is lane F's: MS §10.4 asks it to use the `as_bool` truth table. Whether config.py may import `mailstatus.transition` is a layering question (`tests/test_layering.py`); a local copy of the same table is fine. The per-account `enabled` in `PATCH /api/mail/accounts/{id}` is JSON; I did not check the router.
+3. Code comments in `mailstatus/match.py` (`_evaluate` docstring, step-4 comment) use a real employer name as the common-word example; the doc uses "Summit"/"Acme". Public repo: suggest an engineer swaps it to a neutral word at the next touch.
+4. The `stale` emit and the F8 password behaviour are written from the review fix text and `MailEvidence.vue` lines 9/48; `MailCard.vue`'s consent order was not re-read.
+5. `contracts.py` comment on `AppCandidate.employer_domains` ("careers_url and a non-ATS posting host") is still true as input; the filter is in the stage. No contract change needed.
+STATUS: open
+
 ### 2026-11-02 architect → coordinator
 TYPE: handoff
 RE: Q-04, Q-05; F-10–F-12, F-20–F-25, F-30–F-40, NF-01–NF-09
@@ -127,4 +154,34 @@ STATUS: open
 TYPE: request
 RE: Q-35 amendment; llm_fill_build_plan §2 deltas
 BODY: The amendment is in (`llm_fill_design.md` §3.2, §6.2, §6.5, §7, §8, §16; contracts v5 additions). For the running WPs: T0 add the new-field and `FillServices` oracles; T1 pre-fill wd_a My Information with the sample phone/address, route the fake on `SYSTEM`/`SECOND_SYSTEM`/`PICK_SYSTEM`/`RECHECK_SYSTEM`, parse the `FIELDS (JSON):` block (last before the fixed final line), add the reveal stub; T3 add the M8/M14/H3 widget oracles and `tests/test_apply_pagefill.py`. T2, T4, T5 are READY with the inputs listed in the plan; T6 (eval) optional. Rule ids changed: list rules are now LL1–LL4; locks stay L1–L7; guards are G1–G12; entries E1–E7.
+STATUS: open
+
+### 2026-11-02 architect → coordinator
+TYPE: handoff
+RE: Q-60 / F-50 (D-90, D-91); docs/architecture/mail_status_design.md, mail_status_build_plan.md, adr/0007-mail-status-imap.md
+BODY: Stage-B design for application status from email is READY for stage E. Written only in `.claude/worktrees/feat-Q-60/` on `int/Q-60-mail-status`; not committed (no shell): please commit as `docs(architecture): Q-60 stage-B design, build plan, ADR-0007`.
+- Placement (ADR-0007): foundation `imapread.py` (the only F-50 IMAP code; web/ may not import it) + stage package `mailstatus/` (contracts, rules, match, transition, model; pure) + orchestrator `mailstatus_flow.py`. The web timer (`web/mailsync.py`) spawns `python -m jobscraper mail sync` as its own child (not JobManager), with a DB lease (`mail_sync_runs`, BEGIN IMMEDIATE + heartbeat).
+- Contracts: new `mailstatus/contracts.py` v1 (full listing in MS §3; WP-S0 transcribes it, and I sign off at review). `apply/contracts.py` is untouched.
+- New tables (SCHEMA_VERSION 4 → 5): `mail_accounts`, `mail_cursors`, `mail_messages`, `mail_evidence`, `mail_sync_runs`. If the concurrent session also bumps to 5, make it 6 at merge, with the comment listing both (MS §9).
+- Lanes: S (S0–S3 stage), I (I1 imapread, I2 apply/mail Spam fix, U1 Settings card, U2 Applications), F (F1 store, F2 config, F5a web backend, F3 flow, F4 CLI, F5b real children). Tester T0–T6, researcher R1 (rules file) + R2 (spike, owner consent), planner P1. T0 must merge together with S0 (the layering sets).
+- Decided (MS §6.4, §8, §15): HireVue on-demand → assessment; posting closed and lone kept-on-file → suggestions; `assessment` added to `applications.statuses`; model-tier verdicts never automatic; automatic changes need Gmail DKIM/DMARC pass and (except acknowledgements) not Spam; no unmatched-mail list; no X-GM-RAW; no IDLE.
+- D-91 readings (no contradiction): "anything else → suggestion" = forward moves below the confidence bar plus the explicit cases. Backwards, same-status and stale (older than an owner change) mail change nothing and raise no suggestion. "Confident" excludes model-tier verdicts.
+Requests:
+(1) Add `config/mail_rules.yaml` to the researcher's write scope (`.claude/scopes.json`) for WP-R1.
+(2) Add `JOBSCRAPER_MAIL_SYNC=0` to the dev-instance command in CLAUDE.md: a copied DB would otherwise read the real mailbox (MS §15 R3).
+(3) If ADR-0007 is taken on `personal` at merge time, renumber this ADR and its two references.
+Owner questions (recommendations in MS §15; none blocks the build): which mailboxes (application Gmail first); keep automatic offer and rejected under the bar; the `assessment` status; the owner triggers the first real sync after the merge go-ahead.
+Evidence: none runnable (docs only). After the commit, `python tests/run_tests.py -k layering` should stay green (no code changed).
+STATUS: open
+
+### 2026-11-02 architect → coordinator
+TYPE: handoff
+RE: Q-60 stage-E amendment E1 (Oleeo tenants); mail_status_design.md §3, §6.1, §7, §9, §14; mail_status_build_plan.md WP-S1, S2, F1, T3, R1, R2
+BODY: E1 is in.
+- §6.1: platform keys `tenant_from_subdomain` (strict subdomain of a platform domain; at most one tenant flag per platform) and `tenant_sites`; Oleeo `{id: oleeo, kind: ats, domains: [tal.net], tenant_from_subdomain: true, tenant_sites: [tal.net]}` in the seed; Workday gains `tenant_sites: [myworkdayjobs.com]`.
+- §7: `compact()` (normalised, spaces removed); the `tenant` signal covers both flags and compares in compact form against `app.tenants` and every company variant (both flags: yes, as asked).
+- §3, §9: `mail_match_context` returns raw `tenant_hosts` (attempt `tenant_host` plus the hosts of `jobs.url`, `applications.url` and `companies.careers_url`); `match.tenants_from_hosts` builds `AppCandidate.tenants`.
+- BP: S1, S2, F1, R1 and T3 point at E1; R2 is DONE.
+CONTRACT_VERSION stays 1: only the `AppCandidate.tenants` comment changed.
+One deviation from the literal ask: the host suffixes come from the rules key `tenant_sites` rather than a hard-coded `myworkdayjobs.com` / `tal.net` list in store or code. That keeps "a new ATS without code edits" (§14) true and keeps domain data out of `store.py`. Please commit as `docs(architecture): Q-60 E1 Oleeo tenants (tenant_from_subdomain, compact match)`.
 STATUS: open

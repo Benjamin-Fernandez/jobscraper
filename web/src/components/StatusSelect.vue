@@ -77,6 +77,7 @@ function onChange(e) {
 }
 .status-select[data-status='to_apply'] { color: var(--stage-saved); background-color: var(--stage-saved-soft); }
 .status-select[data-status='applied'] { color: var(--stage-applied); background-color: var(--stage-applied-soft); }
+.status-select[data-status='assessment'] { color: var(--stage-assessment); background-color: var(--stage-assessment-soft); }
 .status-select[data-status='interviewing'] { color: var(--stage-interview); background-color: var(--stage-interview-soft); }
 .status-select[data-status='offer'] { color: var(--stage-offer); background-color: var(--stage-offer-soft); }
 .status-select[data-status='rejected'] { color: var(--stage-rejected); background-color: var(--stage-rejected-soft); }

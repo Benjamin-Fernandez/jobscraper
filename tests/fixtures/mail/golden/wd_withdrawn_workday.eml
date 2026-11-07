@@ -1,0 +1,19 @@
+Authentication-Results: mx.google.com;
+       dkim=pass header.i=@myworkday.com header.s=s1 header.b=Zm9vYmFy;
+       spf=pass (google.com: domain of examplecorp@myworkday.com designates 192.0.2.10 as permitted sender) smtp.mailfrom=examplecorp@myworkday.com;
+       dmarc=pass (p=REJECT sp=REJECT dis=NONE) header.from=myworkday.com
+From: Example Corp <examplecorp@myworkday.com>
+To: Alex Applicant <alex.applicant@inbox.example>
+Reply-To: Example Corp Talent <talent@example.com>
+Subject: Application withdrawn: Graduate Software Engineer (R0012345)
+Date: Sun, 01 Nov 2026 05:00:00 +0000
+Message-ID: <golden-23@synthetic.test>
+MIME-Version: 1.0
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: 7bit
+
+Dear Alex,
+
+Your application has been withdrawn for the Graduate Software Engineer position (R0012345). If this was a mistake, you can apply again while the posting is open.
+
+Example Corp

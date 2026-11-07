@@ -1,0 +1,187 @@
+# config/mail_rules.yaml v1: domain data for F-50 (application status from email).
+# Owner: researcher (WP-R1, Q-60). Schema: docs/architecture/mail_status_design.md s6.1-s6.4.
+# Evidence: docs/research/mail_status_brief.md s3-s4 and Appendix A (entries marked K there are unverified).
+# Public data only: platform domains, public company names and phrases. No address, person or message text.
+#
+# Regex conventions (every `re` is compiled with IGNORECASE and wrapped as (?<!\w)(?:re)(?!\w)):
+# - single-quoted YAML, so backslashes are literal; the file is ASCII only;
+# - "." stands for an apostrophe (straight or curly) in won.t, you.ve, we.re, didn.t, can.t;
+# - lookbehinds are fixed-width literals only (Python re);
+# - guards keep process descriptions ("if shortlisted, we will invite you to ...") and conditional notices
+#   ("please assume your application has been unsuccessful") from deciding, because the higher stages
+#   dominate `acknowledged`;
+# - interview phrases refuse one-way video qualifiers (on-demand, digital, recorded, HireVue) so a HireVue
+#   on-demand invite stays `assessment` (MS s6.4).
+version: 1
+
+platforms:
+  # applicant tracking systems
+  - {id: greenhouse, kind: ats, domains: [greenhouse-mail.io, greenhouse.io]}
+  - {id: workday, kind: ats, domains: [myworkday.com], tenant_from_local_part: true, tenant_sites: [myworkdayjobs.com]}
+  - {id: oleeo, kind: ats, domains: [tal.net], tenant_from_subdomain: true, tenant_sites: [tal.net]}
+  - {id: lever, kind: ats, domains: [lever.co]}
+  - {id: ashby, kind: ats, domains: [ashbyhq.com]}
+  - {id: smartrecruiters, kind: ats, domains: [smartrecruiters.com]}
+  - {id: successfactors, kind: ats, domains: [successfactors.com, successfactors.eu]}
+  - {id: oracle, kind: ats, domains: [taleo.net, oraclecloud.com]}
+  - {id: icims, kind: ats, domains: [icims.com]}
+  - {id: eightfold, kind: ats, domains: [eightfold.ai]}
+  - {id: phenom, kind: ats, domains: [phenom.com, phenompeople.com]}
+  - {id: workable, kind: ats, domains: [workablemail.com, workable.com]}
+  - {id: jobvite, kind: ats, domains: [jobvite.com]}
+  - {id: pageup, kind: ats, domains: [pageuppeople.com]}
+  - {id: avature, kind: ats, domains: [avature.net]}
+  # assessment vendors
+  - {id: hackerrank, kind: assessment, domains: [hackerrank.com, hackerrankforwork.com]}
+  - {id: codility, kind: assessment, domains: [codility.com]}
+  - {id: codesignal, kind: assessment, domains: [codesignal.com]}
+  - {id: hirevue, kind: assessment, domains: [hirevue.com]}
+  - {id: shl, kind: assessment, domains: [shl.com]}
+  - {id: harver, kind: assessment, domains: [harver.com, pymetrics.com, pymetrics.ai]}
+  - {id: mettl, kind: assessment, domains: [mettl.com]}
+  - {id: testgorilla, kind: assessment, domains: [testgorilla.com]}
+  # interview schedulers
+  - {id: goodtime, kind: scheduler, domains: [goodtime.io]}
+  - {id: calendly, kind: scheduler, domains: [calendly.com]}
+  - {id: modernloop, kind: scheduler, domains: [modernloop.io]}
+
+job_boards: [linkedin.com, indeed.com, indeedemail.com, jobstreet.com, jobstreet.com.sg, mycareersfuture.gov.sg,
+  glassdoor.com, efinancialcareers.com, nodeflair.com, glints.com, techinasia.com, wellfound.com]
+
+company_suffixes: [pte, ltd, limited, private, inc, incorporated, llc, llp, plc, corp, corporation, co, company,
+  group, holdings, gmbh, ag, sa, nv, bv, pty, bhd, berhad, sdn, kk, singapore, sg, asia, apac, pacific, international]
+
+# public company names that are also ordinary English words: body text alone never matches them
+common_word_names: [sea, grab, visa, apple, meta, block, square, stripe, shell, unity, snap, wise, oracle, circles,
+  bolt, ripple, kraken, gemini, mercury, notion]
+
+bulk: {list_id: true, precedence: [bulk, list, junk]}
+
+gates:
+  auto_reply:   # subject only: a recruiter's real mail may mention being out of office in its body
+    - {id: ar.automatic_reply, re: 'automatic reply|auto[- ]?reply', in: subject}
+    - {id: ar.out_of_office, re: 'out of (the )?office|away from (the |my )?office', in: subject}
+    - {id: ar.on_leave, re: 'on (annual |parental |maternity |medical )?leave until|on vacation until', in: subject}
+  account:      # the bare word "confirm" is deliberately absent (acknowledgements say "this email confirms")
+    - {id: acc.verify_email, re: '(verify|confirm) your (email|e-mail)( address)?|verify (email|e-mail)( address)?|(email|e-mail) (address )?verification|verify your (candidate |careers? |applicant )?account'}
+    - {id: acc.security_code, re: '(security|verification|one[- ]time|login|sign[- ]in) (code|passcode|pin)|one[- ]time password|otp'}
+    - {id: acc.password_subject, re: 'pass(word|code)', in: subject}
+    - {id: acc.password_reset, re: '(reset|set|create|change) your password (by|using|here|now|below)|password (reset|change) (request|link)|(did not|didn.t) request (a |this )?password'}
+    - {id: acc.account_created, re: '(candidate |careers? |applicant |job seeker )?account (has been|was|is now) (successfully )?(created|registered|set up|activated)|thank(s| you) for (creating|registering) (an?|your) (candidate |careers? |applicant )?account'}
+    - {id: acc.activate, re: 'activate your (candidate |careers? |applicant )?account|(account|email) activation'}
+  job_alert:    # alerts, talent-community welcomes, newsletters; "added to our talent pool" stays kept_on_file
+    - {id: alert.talent_welcome, re: '(welcome to|thank(s| you) for joining|you( have|.ve) (successfully )?joined) (the |our )?([\w&-]+ ){0,3}talent (community|network|pool|hub|club)'}
+    - {id: alert.newsletter_subject, re: 'newsletter|digest', in: subject}
+    - {id: alert.newsletter_body, re: 'you( are|.re) receiving this (newsletter|email|message) because you (subscribed|signed up|opted in|set up a job alert|created a job alert)'}
+    - {id: alert.jobs_you_may_like, re: 'jobs? (you may|you might|that may|that might) (like|be interested in|interest you|suit you)|(recommended|suggested) (jobs|roles|positions|openings)|jobs? (recommended|picked|selected|matched) for you'}
+    - {id: alert.new_jobs, re: 'new (jobs?|roles|positions|openings|vacancies) (matching|that match|based on) (your|you)|\d+ new (jobs?|roles|positions|openings)|new jobs? for you|this jobs? alert|based on your (saved search|job alert|search criteria)'}
+    - {id: alert.subject, re: 'job alerts?|jobs? for you|jobs? matching|recommended (jobs|roles)', in: subject}
+  outreach:     # applied only outside a matched thread (MS s6.2)
+    - {id: out.came_across, re: '(came across|come across|stumbled (up)?on|noticed) your (linkedin |online |github )?profile|came across your (resume|cv|background|experience)'}
+    - {id: out.on_behalf_of_client, re: 'on behalf of (a|an|my|our) (client|clients|partner company)|(my|our) client,? (a|an|is|who)'}
+    - {id: out.open_to_opportunities, re: '(are|would) you (be )?(open|interested) (to|in) (exploring |hearing about |discussing |considering )?(a |an |some )?(new )?(opportunit(y|ies)|roles?|positions?|career (move|change|opportunit(y|ies)))'}
+    - {id: out.profile_caught, re: 'your (linkedin |online )?profile (caught my (eye|attention)|stood out|looks? like a (great|strong|good) (fit|match))|impressed (by|with) your (linkedin |online )?profile'}
+
+categories:
+  acknowledged:
+    phrases:
+      - {id: ack.thank_applying, re: 'thank(s| you) for (applying|submitting your application|your (job )?application|your interest and application)'}
+      - {id: ack.received, re: '(we have|we.ve|we) (successfully )?received your (job )?application|your (job )?application (has been|was|is) (successfully )?(received|submitted)|application (successfully )?(received|submitted)'}
+      - {id: ack.confirm_receipt, re: '(this (email|message) )?confirms? (that )?(we have |we.ve |we )?received your (job )?application|(confirm|acknowledge|confirming|acknowledging) (the )?receipt of your (job )?application|application (submission )?confirmation'}
+      - {id: ack.successfully_submitted, re: 'successfully (submitted|applied|received)|submission (was |has been )?(successful|received)'}
+      - {id: ack.under_review, re: '(we|our ([\w-]+ ){0,2}team) (will|are going to|shall) (now )?(review|be reviewing|carefully review|assess|consider) your (application|resume|cv|profile|submission|candidacy)|your application is (now )?(under review|being reviewed|in review|being considered)'}
+    weak: ["thank you for your interest", "next steps", "your application"]
+
+  assessment:   # tests, coding challenges, one-way video (HireVue on-demand); an assessment centre is filed under interview
+    phrases:
+      - {id: asm.invited_to, re: '(?<!will )(?<!may )(?<!then )(invite|invited|inviting) you to (take|complete|attempt|sit|start|do|participate in|undertake) (an?|the|our|your|this|these|some) ([\w-]+ ){0,5}(assessment|test|challenge|exercise|questionnaire|evaluation)s?(?! cent(re|er)| day)'}
+      - {id: asm.been_invited, re: '(?<!if )(?<!when )(you have been|you.ve been|you are|you.re) (invited|selected|shortlisted) to (take|complete|attempt|sit|start|do|participate in|undertake|proceed to) (an?|the|our|your|this|these) ([\w-]+ ){0,5}(assessment|test|challenge|exercise|questionnaire)s?(?! cent(re|er)| day)'}
+      - {id: asm.complete, re: '(?<!will )(?<!then )(?<!be invited to )(?<!be asked to )(complete|start|begin|access|launch|take|attempt|finish|submit) (the|your|this) ([\w-]+ ){0,4}(assessment|test|challenge|exercise|questionnaire)s?(?! cent(re|er)| day)'}
+      - {id: asm.invitation, re: '(online |coding |technical |cognitive |psychometric )?(assessment|test|challenge) invitation|invitation to (complete |take |attempt |sit )?(an?|the|our|your) ([\w-]+ ){0,3}(assessment|test|challenge)s?(?! cent(re|er)| day)'}
+      - {id: asm.on_demand_video, re: '(on[- ]demand|one[- ]way|digital|pre[- ]?recorded|recorded|asynchronous|async) (video )?interviews?'}
+      - {id: asm.complete_video, re: '(complete|record|submit|finish|start|take) (an?|the|your|this) ([\w-]+ ){0,2}(video (interview|responses?|assessment)|interview (by|before|within|no later than))'}
+      - {id: asm.coding, re: '(your|the following|this) (online )?(coding|programming|technical|hackerrank|codility|codesignal) (challenge|assessment|test|exercise|task)s?'}
+      - {id: asm.expires, re: '(assessment|test|challenge)( link| invitation| invite)? (will expire|expires|is expiring|will close|closes) (in|on|soon|at|after|within)'}
+      - {id: asm.games, re: '(play|complete|take|start) (the|our|your|these|a set of|a series of) ([\w-]+ ){0,2}(game[- ]based (assessment|challenge)s?|games)'}
+    weak: ["assessment", "online test", "hirevue", "video interview", "coding challenge"]
+
+  interview:    # a conversation with a person, live video included
+    phrases:
+      - {id: int.invite, re: '(?<!will )(?<!may )(?<!then )(invite|invited|inviting) you (to|for) (?!(complete|record|submit|finish|take|start) )(?!([\w-]+ ){0,3}(on[- ]demand|one[- ]way|digital|pre[- ]?recorded|recorded|asynchronous|async|hirevue)[ -])((an?|the|your|our|another|a further) )?([\w-]+ ){0,4}(interview|phone screen|screening call|phone call|video call)s?'}
+      - {id: int.invitation, re: '(?<!hirevue )(?<!demand )(?<!digital )(?<!video )(?<!recorded )(?<!one-way )interview invitation|invitation (to|for) (?!(complete|record|submit|finish|take|start) )(?!([\w-]+ ){0,3}(on[- ]demand|one[- ]way|digital|pre[- ]?recorded|recorded|asynchronous|async|hirevue|video)[ -])((an?|the|your) )?([\w-]+ ){0,3}interviews?'}
+      - {id: int.schedule, re: '(?<!will )(?<!may )(?<!then )(?<!you to )(?<!out to )(?<!touch to )(?<!asked to )(schedule|book|arrange|set up|coordinate) (?!([\w-]+ ){0,3}(on[- ]demand|one[- ]way|digital|pre[- ]?recorded|recorded|asynchronous|async|hirevue)[ -])(an?|your|the) ([\w-]+ ){0,3}(interview|phone screen|phone interview|screening call)s?'}
+      - {id: int.select_time, re: '(?<!asked to )(?<!able to )(?<!will )(select|choose|pick|book) (a|your|an available|a convenient|your preferred|a suitable) (time|time ?slot|slot|date and time|interview (time|slot|date))s?(?![^.!?\n]{0,50}to (complete|take|record|start|do|sit|attempt) )'}
+      - {id: int.availability, re: '(share|send|provide|let (us|me) know|tell (us|me)|indicate) your availability (for|to)|your availability for (an?|the|your) ([\w-]+ ){0,2}(interview|call|chat|conversation|meeting)'}
+      - {id: int.confirmed, re: '(?<!hirevue )(?<!demand )(?<!digital )(?<!video )interview (confirmation|(is|has been|was) (confirmed|scheduled|rescheduled|booked|moved)|rescheduled|reschedul(e|ing)( request)?)'}
+      - {id: int.offer_interview, re: 'offer you (an?|the) (?!([\w-]+ ){0,3}(on[- ]demand|one[- ]way|digital|pre[- ]?recorded|recorded|asynchronous|async|hirevue)[ -])(([\w-]+ ){0,2}interview|(opportunity|chance) to (attend |participate in |take part in )?((an?|the) )?([\w-]+ ){0,2}interview)'}
+      - {id: int.live, re: 'live ((hirevue|video|virtual|online|zoom|teams) ){0,2}interview'}
+      - {id: int.shortlisted, re: '(?<!if )(?<!when )(you have been|you.ve been|you are|you.re|you were) (shortlisted|selected|invited|chosen) (for|to|to attend|to proceed to|to progress to) (an?|the|your) (?!([\w-]+ ){0,3}(on[- ]demand|one[- ]way|digital|pre[- ]?recorded|recorded|asynchronous|async|hirevue)[ -])([\w-]+ ){0,3}interviews?'}
+      - {id: int.assessment_centre, re: '(?<!will )(?<!may )(?<!then )(invite|invited|inviting) you to (attend |join |participate in )?(an?|the|our) ([\w-]+ ){0,3}(assessment (centre|center|day)|superday|super day)|(assessment (centre|center|day)|superday|super day) invitation|invitation to (attend )?(an?|the|our) ([\w-]+ ){0,3}(assessment (centre|center|day)|superday|super day)'}
+      - {id: int.calendar, re: 'interview|phone screen|screening call|superday|super day|hiring manager|assessment (centre|center)', calendar: true}
+    weak: ["interview", "hiring manager", "schedule a call", "availability"]
+
+  offer:
+    phrases:
+      - {id: off.pleased_offer, re: '(pleased|delighted|thrilled|excited) to (offer you|extend (to )?you an offer|make you an offer)(?!\s+(an?\s+|the\s+|your\s+|some\s+)?([\w-]+\s+){0,3}(interview|assessment|invitation|slot|call|chat|conversation|meeting|session|feedback|advice|support|guidance|tips|adjustments|accommodations?|opportunity\s+to\s+(attend|complete|take|sit|interview|participate|proceed|progress|move|speak|meet|discuss)))'}
+      - {id: off.extend_offer, re: '(?<!not )(?<!not to )(?<!not be )(?<!able to )(?<!cannot )(?<!can )(?<!if we )(extend|extending|make|making) (you )?an? (formal |verbal |written |conditional |official |job |employment )?offer(?! to (an?other|other|the successful|a different|someone))'}
+      - {id: off.offer_letter, re: '(?<!receive an )(?<!receive a )(?<!receive the )(?<!any )(offer letter|letter of offer|letter of appointment|offer of employment|offer package)'}
+      - {id: off.accept_offer, re: '(accept|accepting|sign and return|countersign) (this|the|our|your) (formal |written |conditional |job |employment )?(offer|contract|letter of offer|offer letter)'}
+      - {id: off.contract, re: '(?<!receive an )(?<!receive the )(?<!receive your )(?<!any )(employment contract|contract of employment)'}
+      - {id: off.congratulations, re: 'congratulations( on| for)? (your|the|receiving an?|being offered (an?|the)) (job |employment |conditional |formal )?offer'}
+    weak: ["congratulations", "compensation", "start date", "salary"]
+
+  rejected:
+    phrases:
+      - {id: rej.decided_not, re: '(decided|chosen|elected|opted|made the (difficult )?decision) not to (move|go|proceed|progress|continue|take)( your application| your candidacy| you)? (forward|ahead|further)|(decided|chosen|elected|opted|made the (difficult )?decision) not to (proceed|continue|progress) with (your|you)'}
+      - {id: rej.will_not_move, re: '(?<!if we )(will|would|shall|are) not (be )?(moving|going|proceeding|progressing|taking (your application|you|this)) (forward|ahead|further)|(?<!if )we.re not (moving|going|proceeding|progressing) (forward|ahead|further)|(?<!if we )won.t be (moving|going|proceeding|progressing|taking (your application|you)) (forward|ahead|further)'}
+      - {id: rej.not_progressing, re: '(?<!if we )(will|shall|would) not be (progressing|proceeding with|taking forward|moving forward with|considering) your (job )?(application|candidacy)|(?<!if )we( are|.re)? (unable|not able) to (progress|proceed with|move forward with|take forward|consider) your (job )?(application|candidacy)|(?<!if we )won.t be (progressing|proceeding with|taking forward|moving forward with) your (job )?(application|candidacy)'}
+      - {id: rej.other_candidates, re: '(move|moving|proceed|proceeding|progress|progressing|go|going|continue|continuing) (forward )?with (other|another|a different) (candidates?|applicants?|individuals?)|(pursue|pursuing) (other|another) (candidates?|applicants?)'}
+      - {id: rej.other_selected, re: '(selected|chosen|chose|decided on|hired|offered the (position|role) to|filled the (position|role) with) (another|other|a different|a more suitable|an? (internal|more qualified|more experienced)) (candidates?|applicants?|individuals?|persons?)|other (candidates|applicants) whose (qualifications|experience|skills|backgrounds?|profiles?)'}
+      - {id: rej.unsuccessful, re: '(?<!if )(?<!assume )(?<!assume that )(?<!take it that )(?<!then )(?<!days, )(?<!weeks, )(?<!date, )(your (job )?application|your candidacy|you) (has|have|was|were|is|are) (not been successful|been unsuccessful|unsuccessful|not successful)'}
+      - {id: rej.not_selected, re: '(?<!if )(?<!when )(?<!assume )(?<!assume that )(?<!then )(?<!days, )(?<!weeks, )(?<!date, )(you|your (job )?application|your candidacy|your profile) (have|has|was|were|are|is) not (been )?(selected|shortlisted|chosen|progressed)'}
+      - {id: rej.regret, re: '(regret|sorry) to (inform|advise|tell|let) you(?!( know)?,? that ((the|this|our|your) (position|role|vacancy|requisition|interview|assessment|hiring|recruitment|job|opening|test|meeting|call)|(we|i) (need|have|must|will need|will have) to))|(it is|it.s) with (great |much )?regret (that|we)'}
+      - {id: rej.position_filled, re: '(position|role|vacancy|job|opening|post) (you applied for |that you applied for )?(has been|was|have been|is|is now|has now been|has already been) (successfully )?filled'}
+      - {id: rej.unable_offer, re: '(unable|not able|not in a position) to (offer you (an? |the )?(position|role|job|place|interview|employment|opportunity)|make you an offer|extend (you )?an offer)|(will not|won.t|cannot|can.t) be (able to )?(offering|extending|making) (you )?(an? )?(offer|position)'}
+      - {id: rej.no_longer_considered, re: '(?<!if you are )(no longer|not) (being )?(considered|under consideration) for (this|the) (position|role|vacancy)'}
+    weak: ["unfortunately", "after careful consideration", "other candidates", "we regret", "not to proceed"]
+
+  withdrawn:
+    phrases:
+      - {id: wd.application_withdrawn, re: '(?<!if )your (job )?(application|candidacy) (for [^.\n]{1,80}? )?(has been|was|is now|is) (successfully )?withdrawn'}
+      - {id: wd.you_withdrew, re: '(?<!if )(?<!should )((you have|you.ve) (successfully )?withdrawn (your )?(job )?(application|candidacy|interest)|you (withdrew|have chosen to withdraw|have decided to withdraw|have requested to withdraw|requested to withdraw|asked to withdraw) (your|from))'}
+      - {id: wd.confirmation, re: '(application |candidacy )?withdrawal (confirmation|confirmed|successful|complete|processed)|(confirm|confirming|confirmation of) (your |the )?withdrawal'}
+      - {id: wd.request_received, re: '(received|processed|actioned|completed) your (request to withdraw|withdrawal( request)?)'}
+      - {id: wd.removed, re: '(?<!be )(?<!if )(?<!may )(have |has |been )?(withdrawn|removed) (you |your application |your candidacy )?from (consideration|the (recruitment|hiring|selection|application) process)'}
+    weak: ["withdraw", "withdrawn", "withdrawal"]
+
+  posting_closed:   # "position has been filled" is a rejected phrase (MS s6.4)
+    phrases:
+      - {id: pc.has_been_closed, re: '(position|role|vacancy|job|requisition|posting|opening|opportunity) (you applied (for|to) |that you applied (for|to) |for which you applied )?(has|have|had) (now )?been (closed|cancell?ed|withdrawn|put on hold|placed on hold|suspended|paused|frozen|removed|discontinued)'}
+      - {id: pc.is_closed, re: '(position|role|vacancy|requisition|posting|opening) (you applied (for|to) )?(is|was|are|is currently) (now )?(closed|cancell?ed|on hold|suspended|paused|frozen|no longer (available|open|active))'}
+      - {id: pc.on_hold, re: '(hiring|recruitment|recruiting|selection) (process )?(for (this|the) (position|role|vacancy) )?(is|has been|was|have been|are) (currently |temporarily )?(on hold|paused|frozen|suspended|put on hold|placed on hold|cancell?ed)|(put|placed|putting|placing) (the |this |our )?(position|role|vacancy|requisition|hiring|recruitment|search)( process)? on hold|(hiring|headcount) freeze'}
+      - {id: pc.no_longer_accepting, re: 'no longer (accepting|taking|receiving|reviewing) (applications|applicants|candidates|new applications)|applications (for this (position|role|vacancy) )?(are|have) (now )?closed'}
+      - {id: pc.not_fill, re: '(decided|chosen|elected) not to (fill|hire for|recruit for|proceed with) (the|this) (position|role|vacancy|opening|requisition)'}
+    weak: ["closed", "on hold", "cancelled", "canceled"]
+
+  kept_on_file:     # a retention notice with a fixed period ("on file for 12 months") is a privacy footer, not this
+    phrases:
+      - {id: kof.on_file, re: '(keep|retain|hold|kept|retained|held|store|stored|save|saved) your (resume|cv|details|profile|application|contact details|particulars) (on (file|record)|in our ([\w-]+ ){0,2}talent (pool|community|database|pipeline))(?! for (up to |a period of |a maximum of )?(\d+|one|two|three|six|twelve) )'}
+      - {id: kof.talent_pool, re: '(added|add|include|included|placed|place|keep|kept|retain|retained) (you|your (profile|details|cv|resume|application)) (to|in|into|within) our ([\w-]+ ){0,2}talent (pool|community|network|pipeline|database)'}
+      - {id: kof.future, re: '(?<!may )(?<!might )(?<!also )(consider|considering|contact|contacting|reach out to) (you|your (application|profile|details|cv|resume)) (for|about|regarding) (future|other|upcoming|suitable|similar|relevant) ([\w-]+ )?(opportunities|roles|openings|positions|vacancies)|(should|if|when|once) (a|an|another|any) (suitable|relevant|similar|other|future|new|appropriate) ([\w-]+ )?(role|position|opportunity|vacancy|opening)s? (arise|arises|become available|becomes available|come up|comes up|open up|opens up|be available)'}
+    weak: ["on file", "talent pool", "future opportunities"]
+
+  portal_update:    # "log in to view": polarity unknown; drops out when any other category hits (MS s6.3)
+    phrases:
+      - {id: pu.log_in_to_view, re: '(log|sign)[ -]?(in|on|into)( to)? ([\w-]+ ){0,6}?(to )?(view|see|check|read|access|review)'}
+      - {id: pu.status_changed, re: '(the )?status of your (job )?application (has )?(changed|been (updated|changed))|your (job )?application status (has )?(changed|been (updated|changed))'}
+      - {id: pu.new_message, re: '(you have )?(an? )?new (message|notification|document|update|correspondence)s? (in|on|waiting in|available in|available on|posted (to|in|on)) (your |the )?([\w-]+ ){0,2}(portal|account|candidate home|inbox|dashboard|profile)'}
+    weak: ["update on your application", "application status", "candidate home", "log in"]
+
+dominates:          # when several categories hit, the key beats the listed ones (MS s6.1, verbatim)
+  offer: [acknowledged, assessment, interview]
+  rejected: [acknowledged, assessment, interview, kept_on_file, posting_closed]
+  interview: [acknowledged, assessment]
+  assessment: [acknowledged]
+  withdrawn: [acknowledged]
+  posting_closed: [acknowledged, kept_on_file]
+  kept_on_file: [acknowledged]
