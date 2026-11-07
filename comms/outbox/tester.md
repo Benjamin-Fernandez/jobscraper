@@ -358,4 +358,10 @@ Expected FAIL until the next fix round:
 Passing controls keep the pins honest (`*_control_*`). R3 matrix passes (`is_local_config == is_local(build)`, 7 budgets x 4 env states).
 Gap: no vitest pin written. `web/node_modules` is absent in this worktree, so a pin could not be verified. Wanted: `privateBadge(true)` == "Private: local AI only", `privateSentence`, ApplicationDetails header with `model_sees_private: true`, QuestionsInbox + QuestionCard badge (call `setModelSeesPrivate(false)` in afterEach).
 Note: "Which ethnic group best describes you? (diversity report)" matches a profile rule (race) and is FILLED at tier 2, so the F1a pin uses "Which cultural heritage do you identify with, for our diversity report?" (no rule; reaches tier 5).
+STATUS: resolved (R1/R2 fixed at 78519a1; see the next entry)
+
+## 2026-11-07 handoff: Q-74 pins round 2 (on eng/Q-74 e9d54bb)
+TYPE: handoff
+Added: `tests/test_q74_llm_fill_hooks.py` (16: design section 4 pins a-d, flag on and off, incl. a real fill_page run on the recorded wd_b page with headless Edge: model prompt holds the private value only with the flag on, cache `inputs_hash` differs, log and cache rows hold none); D-109 pin `test_f1b_retry_instruction_may_hold_tokens_but_stored_notes_hold_kinds_only` (replaces the old retry pin); `web/tests/q74-private.test.js` (12 vitest: privateBadge/privateSentence/setModelSeesPrivate, ApplicationDetails header variant on/off/absent plus screen-reader text, QuestionsInbox + answered list + bare QuestionCard).
+Observations (no defect): `pick_option` keeps `run.sv`, so only free-text S values (phone, DOB) are redacted there; enum slugs like a race value are guarded by `deny`/`pick_refused` instead. vitest full run: 9 failures, none in Q-74 files: the 8 known lane I/J ones plus the `shell-job` visibility flake.
 STATUS: open
