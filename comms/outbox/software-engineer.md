@@ -277,3 +277,23 @@ BODY: D1-D7 are built and committed. 5 existing assertions in `web/tests/Applica
 New tests to add (Verify D): (a) type in `#f-contact-city-in`, `unmount()`, remount: value kept, `.restored` present, "Discard them" restores the file value and removes the storage key; (b) a stored draft with an older etag merges per leaf into the newer file (typed city kept, new email from the file); (c) after a save, the next edit shows "You have unsaved changes." and hides "Saved."; (d) "Discard changes" disabled until an edit, then restores; Save enabled when `file.exists` is false; (e) 409 then Reload (`button(w,'Reload')`) keeps the typed city and takes the file's email, `.conflict` gone; (f) `beforeunload` is `defaultPrevented` only while dirty and not after unmount. In `QuestionsInbox.test.js`: the retry toast has `toast.current.link` equal to `{ label: 'Follow it on the Developer tab', href: '#/developer' }`; while loading, `.skeleton` shows (not the text "Loading questions..."). A `bool` FieldInput with a null value renders "Not set" (a FieldInput mount test).
 Current state: `npx vitest run` gives 274 passed, 5 failed (exactly the 5 above), 1 skipped. New behaviour is untested.
 STATUS: open
+
+### 2026-11-07 software-engineer → coordinator (or tester)
+TYPE: request
+RE: Q-70 lane C (eng/Q-70-C-shell): `web/tests/**` is outside my scope; 5 existing tests fail on intended behaviour, and Verify C tests are needed
+BODY: C1, C2, C3, C5, C6, C7, C8 are built and committed. C4 (KeepAlive) is SKIPPED: `git log int/Q-70-ux` shows neither Q-70 A1 nor Q-70 B1 merged yet (int/Q-70-ux was merged into this branch; only lane D was in). Do C4 after A9 and B9 land: wrap the `<component>` in `<KeepAlive :include="['Inbox','Applications']">` in `web/src/App.vue`.
+Failing tests and the exact change:
+1. `web/tests/App.test.js:114-117` "Choose runs… opens the picker...": replace `await select.setValue('choose')` with `await wrapper.find('.choose-runs').trigger('click')`.
+2. `App.test.js:330-333` "All runs always comes first...": options are now `['All runs','Past week','Past month']` (no 'Choose runs…' option); add `expect(wrapper.find('.choose-runs').text()).toBe('Choose runs…')`.
+3. `App.test.js:~340` "runs chosen on the Runs tab show as their own option": expected options `['All runs','Past week','Past month','Run 12']`.
+4. `App.test.js:349-351` "emits a range, and asks for the picker": replace `find('select').setValue('choose')` with `find('.choose-runs').trigger('click')`; `emitted('choose')` length 1 still holds, and no `update:modelValue` is emitted.
+5. `web/tests/Runs.test.js:266-268` "a finished run refreshes the run list and the Inbox": the shell watcher now also reloads on the finish (a harmless double reload, requestSeq-guarded). Change `api.count(/^api\/runs$/)` to 3 and `api.count(/^api\/shortlist\?run=all$/)` to 3 (or assert `toBeGreaterThanOrEqual(2)`).
+New tests to add (Verify C, with a fake `getCurrentJob`; note `resetSeenJobs()` does not clear the shell's private seen set, it is per instance):
+ a. Mount App on `#/profile` with `getCurrentJob` returning `{id:1, kind:'run', state:'running', started_at}` then `{id:1, kind:'run', state:'succeeded'}`: after the poll (fake timers, POLL_MS) `getShortlist` is called again and `toast.current.message` is 'Run finished. New roles are in the Inbox.' with link `#/runs`; a failed run gives 'The run stopped.', a cancelled one 'The job was cancelled.'; a profile-kind job refreshes but shows no toast.
+ b. `.job-pill` renders in the masthead with 'Run running' (and 'Profile refresh running' for kind 'profile') while state is running, includes the elapsed text, links to `#/runs`, and is absent when no job or when ended.
+ c. `onJobStarted`: calling a tab's `track(job,{started:true})` makes the shell's pill appear without a `visibilitychange`; a `visibilitychange` with `document.visibilityState === 'visible'` calls `getCurrentJob`.
+ d. useJob unit: `useJob({consume:false})` still reports an ending to a second `useJob({kind:'run'})` instance (shared `seenRunning` not consumed by the first).
+ e. RunSelector: the `<label for>` matches the select's id; `.choose-runs` is absent when `choosable` is false.
+ f. Tab bar: with `scrollWidth` > `clientWidth` mocked on `.tablist` and a `scroll` event, the class `more-right` appears, and goes when scrolled to the end.
+Deviation: `useJob.track` gained a third option `announce` (default true). The shell's starter listener calls `shell.track(j, {started:true, announce:false})`; without it the listener would re-announce the job to itself and recurse forever (the spec's literal wording).
+STATUS: open
