@@ -250,6 +250,7 @@ async function track(job, status) {
 }
 
 async function undo(job) {
+  if (busy.value) return               // Undo is not held back by the 400 ms cooldown
   const hadFocus = hasFocus()
   try {
     await untrackApplication(job.id)
@@ -283,7 +284,7 @@ async function markNotInterested(job) {
     }
     showToast({
       message: `Moved to Not interested: ${job.title} at ${job.company}`,
-      action: { label: 'Undo', run: () => moveBack(job) },
+      action: { label: 'Undo', run: () => moveBack(job, { undoing: true }) },
     })
   } finally {
     busy.value = false
@@ -291,8 +292,9 @@ async function markNotInterested(job) {
   }
 }
 
-async function moveBack(job) {
-  if (!guard()) return
+// `undoing`: the toast's Undo for a dismissal - only a write in flight stops it.
+async function moveBack(job, { undoing = false } = {}) {
+  if (undoing ? busy.value : !guard()) return
   const hadFocus = hasFocus()
   writeError.value = ''
   busy.value = true
@@ -449,10 +451,15 @@ onDeactivated(() => window.removeEventListener('keydown', onShortcut))
       <p class="empty-title">You're all caught up.</p>
       <p class="muted">Every new role is triaged.<template v-if="notInterested.length"> <button type="button" class="link show-ni" @click="niOpen = true">Show Not interested ({{ notInterested.length }})</button></template><template v-else> See <a href="#/applications">Applications</a>.</template></p>
     </div>
-    <div v-else-if="!visible.length && !notInterested.length && query.trim()" class="empty">
+    <div v-else-if="!visible.length && query.trim() && !(notInterested.length && niOpen)" class="empty">
       <Icon name="search" :size="28" />
       <p class="empty-title">No roles match “{{ query.trim() }}”.</p>
-      <p><button type="button" class="link" @click="query = ''">Clear the search</button></p>
+      <p>
+        <button type="button" class="link" @click="query = ''">Clear the search</button>
+        <template v-if="notInterested.length">
+          · <button type="button" class="link show-ni" @click="niOpen = true">Show {{ notInterested.length }} in Not interested</button>
+        </template>
+      </p>
     </div>
 
     <div v-if="untracked.length && (visible.length || (notInterested.length && niOpen))" class="split" :class="{ 'show-detail': detailOpen, refreshing: loading && !quiet }">
