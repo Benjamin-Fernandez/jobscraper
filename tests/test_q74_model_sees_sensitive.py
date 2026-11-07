@@ -352,14 +352,20 @@ def test_f1b_text_volunteering_protected_values_is_ungrounded_after_one_retry():
     assert "REJECTED BECAUSE" in retry and "private value" in retry.split("REJECTED BECAUSE", 1)[1]
 
 
-def test_f1b_retry_instruction_holds_no_s_value():
-    """Handoff F1b: 'the retry prompt ends REJECTED BECAUSE: ...private value and holds no S value'.
-    DEFECT (LOW): the retry lists the raw token violations ("number 2001; number 03; month March;
-    word Zzzfaith"), which are fragments of S values the model volunteered. Only the stored note is
-    reduced to kinds (_note_for); the prompt is not. The prompt goes to the local model only."""
-    a, be, _ = resolve_one(f1b_field(), on=True, replies=[F1B_REPLY, F1B_REPLY])
+def test_f1b_retry_instruction_may_hold_tokens_but_stored_notes_hold_kinds_only():
+    """D-109: the retry prompt goes to the local model only, so it may keep the raw token violations
+    ("number 2001; month March; word Zzzfaith") to help the one retry. Only STORED text (Answer.note,
+    the audit row's note, CapturedQuestion.note) is reduced to kinds."""
+    f = f1b_field()
+    a, be, ctx = resolve_one(f, on=True, replies=[F1B_REPLY, F1B_REPLY])
     tail = be.calls[1]["user"].split("REJECTED BECAUSE", 1)[1]
-    assert_no_s(tail, "the retry instruction", S_MARKERS + ("march",))
+    assert "private value" in tail, "the retry names the reason"
+    assert any(tok in tail for tok in ("number 2001", "month March", "word Zzzfaith")), tail
+    assert a.note == "ungrounded: number; month; word; private value", a.note
+    assert_no_s(a.note, "Answer.note", S_MARKERS + ("march",))
+    caps = Q.capture([f], {f.key: a}, ctx, R.load_rules(REAL_RULES))
+    assert len(caps) == 1 and "private value" in caps[0].note
+    assert_no_s(caps[0].note, "CapturedQuestion.note", S_MARKERS + ("march",))
 
 
 def test_f1b_a_clean_retry_may_fill():
