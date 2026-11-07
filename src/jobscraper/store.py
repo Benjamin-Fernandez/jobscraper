@@ -2566,6 +2566,17 @@ class Store:
             (now, evidence_id))
         return True, "ok"
 
+    def mail_evidence(self, evidence_id: int) -> Optional[dict[str, Any]]:
+        """One evidence row plus the application's `current_status`, or None."""
+        r = self.conn.execute("SELECT * FROM mail_evidence WHERE id = ?",
+                              (evidence_id,)).fetchone()
+        if r is None:
+            return None
+        d = dict(r)
+        app = self.application(d["job_id"]) if d["job_id"] else None
+        d["current_status"] = app["status"] if app else None
+        return d
+
     def mail_evidence_for(self, job_ids: Iterable[str]) -> dict[int, dict[str, Any]]:
         """Evidence id -> the evidence of each change email made (rows with an
         `event_id`) on these applications, for the History timeline (§11.1).
