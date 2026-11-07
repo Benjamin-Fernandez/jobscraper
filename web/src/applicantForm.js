@@ -208,3 +208,142 @@ export function errorMap(errors) {
   for (const e of errors || []) map[e.path] = map[e.path] ? `${map[e.path]}; ${e.message}` : e.message
   return map
 }
+
+// ---- typed numbers (Q71-05) ----
+
+// What a number box holds, as the server stores it. "4,500", "4 500", "$4500"
+// and "S$4500" are 4500; "" is null. Text that is not a number goes out as the
+// text itself, so the server's message shows under the field: a value the
+// owner can see in the box is never silently saved as nothing. Decimals only
+// where the kind allows them (a question's `number`); a whole-number kind sends
+// "4500.50" as text and the server says it must be a whole number.
+export function parseNumberText(text, { decimals = false } = {}) {
+  const raw = String(text ?? '')
+  if (!raw.trim()) return null
+  const s = raw.trim().replace(/^(?:S\$|\$)/i, '').replace(/[\s,]/g, '')
+  if (/^\d+$/.test(s)) return Number(s)
+  if (decimals && /^-?(?:\d+\.?\d*|\.\d+)$/.test(s)) return Number(s)
+  return raw
+}
+
+// ---- filled, as applicant._filled counts it (Q71-06) ----
+
+const LIST_KINDS = new Set(['entries', 'list_text', 'list_url'])
+
+// Is this item filled in the draft? Mirrors applicant._filled, so "Needed" goes
+// as soon as the owner fills the field, not at the next save: a salary needs a
+// whole amount above 0, education an entry with school, degree and end, a list
+// at least one item, and a required yes/no (the two consents) a Yes.
+export function isFilled(item, v) {
+  if (!item) return !isEmptyValue(v)
+  if (item.kind === 'fixed') return true
+  if (item.kind === 'salary') return Number.isInteger(v?.amount) && v.amount > 0
+  if (item.path === 'education') {
+    return Array.isArray(v) && v.some(e => e && typeof e === 'object'
+      && !isEmptyValue(e.institution) && !isEmptyValue(e.degree) && !isEmptyValue(e.end))
+  }
+  if (LIST_KINDS.has(item.kind)) return Array.isArray(v) && v.length > 0
+  if (item.kind === 'bool' && item.required) return v === true
+  return !isEmptyValue(v)
+}
+
+// ---- blank entries left out of a save (Q71-04) ----
+
+export const ENTRY_LISTS = ['education', 'experience', 'languages']
+
+const blankEntry = e => !!e && typeof e === 'object' && !Array.isArray(e)
+  && !('from_resume' in e) && Object.values(e).every(isEmptyValue)
+
+// The profile to send, without the entries the owner added and left empty (an
+// abandoned "Add school" would otherwise fail the whole save), and for each
+// pruned list the draft index of every entry kept, so the server's error paths
+// can be mapped back to the rows on screen (`remapErrors`). The draft itself
+// keeps its rows until the save succeeds.
+export function pruneBlankEntries(profile) {
+  const out = clone(profile ?? {})
+  const kept = {}
+  for (const key of ENTRY_LISTS) {
+    const list = out[key]
+    if (!Array.isArray(list) || !list.some(blankEntry)) continue
+    kept[key] = []
+    out[key] = list.filter((e, i) => {
+      if (blankEntry(e)) return false
+      kept[key].push(i)
+      return true
+    })
+  }
+  return { profile: out, kept }
+}
+
+// "experience[1].title" in the pruned list -> the same entry's draft index.
+export function remapErrors(errors, kept) {
+  return (errors || []).map(e => {
+    const m = /^([a-z_]+)\[(\d+)\](.*)$/.exec(String(e.path || ''))
+    if (!m || !kept?.[m[1]]) return e
+    const i = kept[m[1]][Number(m[2])]
+    return i === undefined ? e : { ...e, path: `${m[1]}[${i}]${m[3]}` }
+  })
+}
+
+// ---- dates (Q71-09) ----
+
+// Today in Singapore as YYYY-MM-DD: the owner's dates are Singapore dates.
+export function todayIso(now = new Date()) {
+  return new Date(now.getTime() + 8 * 3600 * 1000).toISOString().slice(0, 10)
+}
+
+// ---- skills from the resume (Q71-15) ----
+
+const SKILL_CASE = {
+  sql: 'SQL', aws: 'AWS', 'c++': 'C++', 'node.js': 'Node.js', gcp: 'GCP', api: 'API',
+  css: 'CSS', html: 'HTML', 'c#': 'C#', r: 'R', excel: 'Excel', git: 'Git',
+}
+
+// A resume skill as it should read in the form: an all-lowercase token is title
+// cased ("machine learning" -> "Machine Learning"), with a few known spellings;
+// anything that already has a capital ("PyTorch") is kept as it is.
+export function skillLabel(s) {
+  const t = String(s ?? '').trim().replace(/\s+/g, ' ')
+  if (SKILL_CASE[t.toLowerCase()]) return SKILL_CASE[t.toLowerCase()]
+  if (t !== t.toLowerCase()) return t
+  return t.replace(/(^|[\s/-])([a-z])/g, (_, a, b) => a + b.toUpperCase())
+}
+
+// The derived skills the form's list doesn't hold yet (case-insensitive), as labels.
+export function newSkills(derived, current) {
+  const have = new Set((current || []).map(x => String(x).trim().toLowerCase()))
+  const out = []
+  for (const s of derived || []) {
+    const k = String(s ?? '').trim().toLowerCase()
+    if (k && !have.has(k)) {
+      have.add(k)
+      out.push(skillLabel(s))
+    }
+  }
+  return out
+}
+
+// ---- a section's state (Q71-13): the rail and the group headers say the same ----
+
+// {tone, text}: what a section still needs. Errors first: they block saving.
+export function sectionStatus({ needed = 0, toFix = 0 } = {}) {
+  if (toFix) return { tone: 'fix', text: `${toFix} to fix` }
+  if (needed) return { tone: 'needed', text: `${needed} needed` }
+  return { tone: 'done', text: 'Nothing needed' }
+}
+
+// "City", "City and Country", "A, B and C".
+export function joinAnd(words) {
+  const w = (words || []).filter(Boolean)
+  return w.length < 2 ? (w[0] ?? '') : `${w.slice(0, -1).join(', ')} and ${w[w.length - 1]}`
+}
+
+// ---- conditional fields (Q71-14) ----
+
+// Does the item's `show_when` ({path, values}) hold in the draft? No condition: yes.
+export function conditionHolds(item, profile) {
+  const w = item?.show_when
+  if (!w || !w.path || !Array.isArray(w.values)) return true
+  const v = getAt(profile, w.path)
+  return w.values.some(x => x === v)
+}
