@@ -2,7 +2,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils'
 import Profile from '../src/tabs/Profile.vue'
 import { POLL_MS, resetSeenJobs } from '../src/composables/useJob.js'
-import { DOCX, MB, fakeApi } from './helpers.js'
+import { DOCX, MB, fakeApi, pinZone } from './helpers.js'
+
+pinZone()   // Q-75 G18: local-zone times; pinned to UTC+8
 
 let api
 
@@ -64,7 +66,8 @@ describe('Profile tab: the current profile', () => {
     const wrapper = await mountProfile()
     expect(wrapper.find('.version').text()).toBe('2')
     expect(wrapper.find('.source').text()).toBe('resume.pdf')
-    expect(wrapper.find('.parsed').text()).toBe('24 Sep 10:05 UTC')
+    expect(wrapper.find('.parsed').text()).toBe('24 Sep 18:05')   // stored 10:05 UTC
+    expect(wrapper.find('.parsed').attributes('title')).toBe('2026-09-24 10:05 UTC')
     expect(wrapper.find('.parsed-by').text()).toBe('qwen3:14b')   // M14: Qwen reads the resume
     expect(wrapper.find('.profile .summary').text()).toContain('cloud and backend internships')
     expect(wrapper.findAll('.skills li').map(l => l.text())).toEqual(['python', 'kubernetes', 'terraform'])

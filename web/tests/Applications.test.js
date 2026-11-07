@@ -4,7 +4,9 @@ import Applications from '../src/tabs/Applications.vue'
 import App from '../src/App.vue'
 import { statusLabel } from '../src/stages.js'
 import { dismissToast } from '../src/toast.js'
-import { fakeApi, runsFrom, setHash } from './helpers.js'
+import { fakeApi, pinZone, runsFrom, setHash } from './helpers.js'
+
+pinZone()   // Q-75 G18: times show in the browser's zone; pin it (UTC+8) so the suite is machine-independent
 
 let api
 
@@ -121,7 +123,9 @@ describe('Applications tab', () => {
     expect(moved.find('.history summary').text()).toContain('2')
     const steps = moved.findAll('.timeline li .to').map(s => s.text())
     expect(steps).toEqual(['Applied', 'Interviewing'])
-    expect(moved.find('.timeline .at').text()).toMatch(/^24 Sep \d\d:\d\d UTC$/)
+    // Stored 2026-09-24T08:10 UTC; shown in the (pinned) local zone, exact UTC original in the tooltip.
+    expect(moved.find('.timeline .at').text()).toBe('24 Sep 16:10')
+    expect(moved.find('.timeline .at').attributes('title')).toBe('2026-09-24 08:10 UTC')
     expect(moved.find('.updated').text()).toMatch(/^Interviewing · \d+ days$/)
     expect(wrapper.emitted('changed')).toHaveLength(1)
   })

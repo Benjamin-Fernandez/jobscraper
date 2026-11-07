@@ -30,7 +30,7 @@ describe('Settings tab: companies per run', () => {
   it('shows the saved value and the cadence hint', async () => {
     const wrapper = await mountSettings()
     expect(input(wrapper).element.value).toBe('10')
-    expect(hint(wrapper)).toBe('A full 14-day sweep needs 1.6 runs/day at this size (23 runs to cover 224 companies).')
+    expect(hint(wrapper)).toBe('A full 14-day sweep takes 1.6 runs a day at this size (23 runs to cover 224 companies).')
     expect(wrapper.text()).toContain('The config default is 10')
     // Nothing to save until something changes.
     expect(save(wrapper).attributes('disabled')).toBeDefined()
@@ -39,7 +39,7 @@ describe('Settings tab: companies per run', () => {
   it('the hint follows the number as you type', async () => {
     const wrapper = await mountSettings()
     await input(wrapper).setValue('25')
-    expect(hint(wrapper)).toBe('A full 14-day sweep needs 0.6 runs/day at this size (9 runs to cover 224 companies).')
+    expect(hint(wrapper)).toBe('A full 14-day sweep takes about 1 run every 2 days at this size (9 runs to cover 224 companies).')
   })
 
   it('saving calls the API and shows the saved value', async () => {

@@ -15,6 +15,16 @@ export const STATUSES = ['to_apply', 'applied', 'interviewing', 'offer', 'reject
 export const MB = 1024 * 1024
 export const DOCX = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
 
+// Pin the zone the test process formats local times in (the dev box is UTC+8,
+// CI is UTC). Node re-reads process.env.TZ on assignment, so call this at the
+// top of a test file, before any Date is formatted. Throws if it did not take.
+export function pinZone(tz = 'Asia/Singapore', expectedOffsetMin = -480) {
+  process.env.TZ = tz
+  if (new Date('2026-09-24T00:00:00Z').getTimezoneOffset() !== expectedOffsetMin) {
+    throw new Error(`could not pin the test zone to ${tz}`)
+  }
+}
+
 // jsdom keeps one URL per test file; start every test from a known hash.
 export function setHash(hash = '') {
   window.history.replaceState(null, '', `${window.location.pathname}${hash}`)
