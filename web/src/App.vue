@@ -173,6 +173,15 @@ watch(activeId, async id => {
   tabEls[id]?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' })
 })
 
+// A fade at the right edge says the tab bar scrolls (Q-70 C8, G29): on a phone
+// the later tabs are off screen with nothing to hint at them.
+const tablistEl = ref(null)
+const moreRight = ref(false)
+function measureTabs() {
+  const el = tablistEl.value
+  if (el) moreRight.value = el.scrollLeft + el.clientWidth < el.scrollWidth - 1
+}
+
 // "/" jumps to the open tab's search box, as on GitHub or Gmail - unless the
 // user is already typing somewhere.
 function onSlash(event) {
@@ -213,6 +222,8 @@ async function boot() {
 onMounted(() => {
   window.addEventListener('hashchange', onHashChange)
   window.addEventListener('keydown', onSlash)
+  window.addEventListener('resize', measureTabs)
+  measureTabs()
   document.addEventListener('visibilitychange', onVisible)
   stopStarters = onJobStarted(j => shell.track(j, { started: true, announce: false }))
   shell.refresh()
@@ -221,6 +232,7 @@ onMounted(() => {
 onBeforeUnmount(() => {
   window.removeEventListener('hashchange', onHashChange)
   window.removeEventListener('keydown', onSlash)
+  window.removeEventListener('resize', measureTabs)
   document.removeEventListener('visibilitychange', onVisible)
   stopStarters()
 })
@@ -238,7 +250,14 @@ onBeforeUnmount(() => {
             </svg>JobScraper</a>
         </h1>
         <div class="tabbar">
-          <div class="tablist" role="tablist" aria-label="Sections">
+          <div
+            ref="tablistEl"
+            class="tablist"
+            :class="{ 'more-right': moreRight }"
+            role="tablist"
+            aria-label="Sections"
+            @scroll="measureTabs"
+          >
             <button
               v-for="(tab, i) in tabs"
               :id="`tab-${tab.id}`"
@@ -346,6 +365,7 @@ onBeforeUnmount(() => {
   overscroll-behavior-x: contain;
 }
 .tablist::-webkit-scrollbar { display: none; }
+.tablist.more-right { mask-image: linear-gradient(to right, #000 calc(100% - 2rem), transparent); }
 .tab {
   position: relative;
   gap: var(--space-2);
