@@ -359,7 +359,7 @@ def user_prompt(chunk: Chunk, facts: Sequence[Fact], rctx: ResolveContext, *, st
         elif k in lk:
             views.append(field_view(pf, s_values=s_values, cfg=cfg, is_locked=True,
                                     locked=(locked or {}).get(k)))
-    parts = ["FACTS:", F.facts_text(facts), ""]
+    parts = ["FACTS:", F.facts_text(facts, show_private=bool(getattr(rctx, "model_sees_sensitive", False))), ""]
     if chunk.entry:
         b = (blocks if blocks is not None else F.entry_blocks(rctx)).get(chunk.entry, "")
         parts += [f"RESUME ENTRY {chunk.entry}:", b or "(none)", ""]

@@ -95,6 +95,8 @@ class _Run:
     sections: list = dc_field(default_factory=list)
     facts: list = dc_field(default_factory=list)
     sv: list = dc_field(default_factory=list)               # S values: never in a prompt (§6.5)
+    sv_prompt: list = dc_field(default_factory=list)        # what prompts redact: [] when sees (D-105)
+    sees: bool = False                                      # effective model_sees_sensitive (D-105)
     deny: list = dc_field(default_factory=list)             # enum S values: refused in pick prompts
     hkey: bytes = b""                                       # facts.hash_key(rctx): keyed field_sig (D-86)
     blocks: dict = dc_field(default_factory=dict)
@@ -132,10 +134,16 @@ def fill_page(page: Any, nav: Any, ctx: AttemptContext, rctx: ResolveContext, se
     run.facts = F.fact_catalogue(rctx.profile, rctx, today=run.today)
     F.check_entries(run.sections, rctx)
     run.sv = F.s_values(rctx.profile, rctx.account_email)
+    # D-105 (Q-74 §4): with the effective switch on, a local model reads S values, so the
+    # prompts and schemas are redacted with nothing; G7, `pick_option` (which keeps its
+    # full redaction: it picks among site options) and any debug dump keep `run.sv`.
+    run.sees = bool(getattr(rctx, "model_sees_sensitive", False))
+    run.sv_prompt = [] if run.sees else run.sv
     run.deny = F.enum_s_values(rctx.profile)
     run.hkey = F.hash_key(rctx)
     run.blocks = F.entry_blocks(rctx)
-    run.inputs_hash = F.inputs_hash(L.redact(rctx.resume_text or "", run.sv), rctx.jd_text or "")
+    run.inputs_hash = F.inputs_hash(L.redact(rctx.resume_text or "", run.sv_prompt), rctx.jd_text or "",
+                                    sees_private=run.sees)
     try:
         # 3-6
         decision = _decide(run, fields, run.sections, {})
@@ -232,7 +240,7 @@ def _decide(run: _Run, fields: Sequence[PageField], sections: Sequence[EntrySect
             continue
         _time_left(run)
         got = L.ask(run.services.backend, ch, run.facts, run.rctx, step_title=run.step,
-                    s_values=run.sv, cfg=run.cfg, locked=locked, stats=run.stats)
+                    s_values=run.sv_prompt, cfg=run.cfg, locked=locked, stats=run.stats)
         decisions += got
         run.fresh += got
     decisions += _long_list_picks(run, fields, decisions)
@@ -243,7 +251,7 @@ def _decide(run: _Run, fields: Sequence[PageField], sections: Sequence[EntrySect
             continue
         _time_left(run)                                   # review F3: one way to time out
         d = L.recheck_entry(run.services.backend, pf, run.blocks.get(matches.get(pf.group) or "", ""),
-                            s_values=run.sv, cfg=run.cfg, stats=run.stats)
+                            s_values=run.sv_prompt, cfg=run.cfg, stats=run.stats)
         decisions.append(d)
         run.fresh.append(d)
     for d in decisions:
@@ -275,7 +283,7 @@ def _long_list_picks(run: _Run, fields: Sequence[PageField], decisions: list) ->
             continue
         _time_left(run)
         choice = L.pick_option(run.services.backend, pf, d.value, [o.label for o in pf.field.options],
-                               s_values=run.sv, cfg=run.cfg, stats=run.stats,
+                               s_values=run.sv, cfg=run.cfg, stats=run.stats,   # D-105: pick keeps the full redaction
                                sensitive=G.sensitive_label(pf), deny=run.deny)
         pick = ModelDecision(key, d.source, d.ref, choice or "", d.evidence, via="pick")
         out.append(pick)
@@ -294,7 +302,7 @@ def _second(run: _Run, pf: PageField, matches: dict) -> ModelDecision:
         return ModelDecision(key, FillSource.UNKNOWN, via="second")
     ch = run.chunk_of.get(key) or L.Chunk(f"one:{key}", matches.get(pf.group) if pf.group else None, (pf,))
     return L.second_opinion(run.services.backend, pf, ch, run.facts, run.rctx, step_title=run.step,
-                            s_values=run.sv, cfg=run.cfg, stats=run.stats)
+                            s_values=run.sv_prompt, cfg=run.cfg, stats=run.stats)
 
 
 def _followup_ok(run: _Run) -> bool:
@@ -551,7 +559,7 @@ def _corrective(run: _Run) -> None:
     if open_:
         _time_left(run)
         got = L.ask(run.services.backend, L.Chunk("corrective", None, tuple(open_)), run.facts, run.rctx,
-                    step_title=run.step, s_values=run.sv, cfg=run.cfg, locked=locked, stats=run.stats)
+                    step_title=run.step, s_values=run.sv_prompt, cfg=run.cfg, locked=locked, stats=run.stats)
         decisions += got
     matches = dict(F.match_entries(run.sections, fields, run.rctx))
     decision = G.decide(fields, locked, decisions, run.facts, run.rctx, matches=matches,

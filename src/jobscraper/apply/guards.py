@@ -38,6 +38,7 @@ import unicodedata
 from dataclasses import dataclass, field as dc_field, replace
 from typing import Any, Callable, Iterable, Mapping, Optional, Sequence, Union
 
+from .. import applicant
 from . import declarations, facts as F, resolve
 from .contracts import (
     CHOICE_TYPES, EMPLOYER_SPECIFIC_DECLARATIONS, TRUSTED_ORIGINS, Answer, AnswerStatus,
@@ -418,13 +419,18 @@ class _Ctx:
         self.by_ref = F.by_ref(facts)
         self.others = F.other_employers(rctx)
         self.others_composed = F.other_employers(rctx, composed=True)
-        # The model saw the redacted resume, so a quote can't carry an S value; the corpus
-        # is the plain text (a "[private]" quote never matches it).
+        # Switch off: the model saw the redacted resume, so a quote can't carry an S value;
+        # the corpus is the plain text (a "[private]" quote never matches it). Switch on
+        # (D-105) the model reads the plain resume, so a quote could carry one: G3 then
+        # rejects a quote holding a protected value that the posting and the non-private
+        # facts do not also hold (`quote_private`; Q-74 §4 hook 7).
         self.resume_corpus = cnorm(rctx.resume_text or "")
         self.job_corpus = cnorm("\n".join([rctx.employer_name or "",
                                            getattr(rctx, "job_title", "") or "",
                                            rctx.jd_text or ""]))
         self.facts_corpus = cnorm(F.facts_text([f for f in facts if not f.private]))
+        self.sees = bool(getattr(rctx, "model_sees_sensitive", False))
+        self.protected = applicant.protected_terms(rctx.profile) if self.sees else []
         self.names = _group_names(fields)
         self.own = F.own_details(rctx)
 
@@ -598,6 +604,9 @@ def _grounded(c: _Ctx, pf: PageField, value: Any, d: ModelDecision) -> Optional[
     ev = cnorm(d.evidence)
     if len(ev) < MIN_EVIDENCE:
         return "G3: no quote"
+    if c.sees and applicant.terms_hit(c.protected, [], d.evidence,
+                                      corpus=c.job_corpus + " " + c.facts_corpus):
+        return "G3: quote holds a private value"
     if ev not in corpus:
         return "G6: quote outside the entry" if pf.group else "G3: quote not in the source"
     if is_choice(pf):
@@ -690,6 +699,12 @@ def _model_field(c: _Ctx, pf: PageField, d: ModelDecision) -> Answer:
         return _answer_unknown(pf, "G1: empty value")
     if "[private]" in _text_of(value):
         return _answer_unknown(pf, "G3: value carries a withheld value", ungrounded=True)
+    if c.sees and applicant.terms_hit(
+            c.protected, [value] if not isinstance(value, (list, tuple)) else list(value),
+            corpus=" ".join((c.resume_corpus, c.job_corpus, c.facts_corpus))):
+        # D-105 / ADR-0008 Option C (F1 on the llm_fill side): the model may read a protected
+        # value but not write it, unless the resume, posting or facts also hold it.
+        return _answer_unknown(pf, "G3: value carries a private value", ungrounded=True)
     if _own_detail_for_other(c, pf, value):
         return _answer_unknown(pf, R4_NOTE)
     if sensitive_label(pf):
