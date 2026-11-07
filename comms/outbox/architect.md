@@ -11,6 +11,29 @@ STATUS: open
 -->
 
 ### 2026-11-07 architect → coordinator
+TYPE: handoff + request
+RE: Q-74 (D-105), Q-44 + Q-73, Q-76; `docs/architecture/q74_model_sees_sensitive.md`, `adr/0008-model-sees-sensitive.md`, `apply_design.md` §5.3 (D-105 amendment paragraph), `q44_refresh_from_resume.md`, `q76_application_detail.md`, `src/jobscraper/apply/contracts.py`
+BODY: All three are fast-track designs, each ending with "READY TO BUILD: yes". Please review, mark them READY, and commit (I have no shell). Suggested message: `docs(arch): Q-74 Q-44 Q-73 Q-76 lean designs + ADR-0008 + contracts D-105`.
+- **Q-74.** `apply.model_sees_sensitive` (owner value true in config/config.yaml) takes effect only when `backends.is_local` holds (Ollama on localhost, 127.0.0.1 or ::1). A Docker or LAN URL counts as remote.
+  - It widens prompts only: `llm_extract` / `grounding_text` gain `sensitive=`, used in the tier-5 prompt and corpus.
+  - It leaves alone: logging, naming, tier-1/2/4 routing, EEO, G7.
+  - Contract (done, additive): `ResolveContext.model_sees_sensitive: bool = False`, plus D-105 notes on `Answer.sensitive`, `CapturedQuestion.sensitive` and `Fact.private`.
+  - Q-35 merge rule: design §4.
+  - Badge: "Private: local AI only". It follows the effective value.
+  - 9 steps, 1 lane.
+- **Q-44 + Q-73.** The profile job also writes `data/applicant.refresh.json` (resume facts only). The pure plan in applicant.py runs against the current applicant.yaml on every GET.
+  - It updates or removes only `from_resume: true` entries and template placeholders. It adds new entries and skills (only skills that appear in the resume text). Owner entries and languages/links are never touched.
+  - Dates are parsed deterministically. Unread dates are left null, never "present".
+  - Summary card plus a collapsed log; no absolute paths.
+  - 8 steps, 2 lanes (P: Python, V: Vue).
+- **Q-76.** `store.last_attempts()` (one GROUP BY query) feeds a `last_attempt` pill on `/api/applications`, plus `GET /api/applications/{id}/attempts` with texts from REASON_TEXTS/STATE_TEXTS.
+  - `JobDetail.vue` extraction is step 5, only after Q-75 lane I merges. Touch points: design §4.
+  - 6 steps, 1 lane.
+REQUEST: record D-105 in 02_status §4, and update the Q-74/Q-44/Q-73/Q-76 queue rows (status READY, design links).
+Open questions: none for the owner.
+STATUS: open
+
+### 2026-11-07 architect → coordinator
 TYPE: handoff
 RE: Q-72 (a), D-161, D-160; `docs/architecture/mail_status_design.md` header + changelog (4), §3, §7, §8 row 7a + its note, §11.3, §15, §16, §17 (F-50l)
 BODY: MS amended, READY (Q-72, D-161); please record D-161 and commit (no shell). The rule: rows 4–9 settle every matched candidate (single or ambiguous) as NONE `terminal`, and `match.signals` has no `role`/`req_id`/`thread`, and the mail is newer than every candidate's `last_event_at`, and the category is `acknowledged` or `rejected`. Then the result is SUGGEST(to=None, `maybe_untracked`), offering all matched candidates.
