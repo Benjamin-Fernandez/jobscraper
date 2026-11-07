@@ -8,6 +8,9 @@ submitted exactly once (the page's own submit counter); the three after-submit o
 closed / bot pages; a 404 schema; MyGreenhouse signed in (prefill kept, email and resume ours) and
 signed out (dialog closed, nothing typed, full fill).
 
+The old per-adapter path is pinned with `fill="rules"` (edge_acfg; it stays until WP-C1); the LLM
+loop (`fill="llm"`, the default) has its own e2e at the end, with a scripted model.
+
 Skips cleanly (one note on stdout) if Edge or Playwright is unavailable. A temp Edge profile, temp
 DB, temp evidence dir, synthetic applicant. The model is off: the one question no tier answers is
 seeded in the answer memory (tier 3), like a saved answer from the owner.
@@ -61,10 +64,10 @@ class Run:
 
 
 def run_local(*, page="form.html", query="", dry_run=True, schema_status=200, extra_postings=(),
-              backend=None, **over):
+              backend=None, profile=None, **over):
     """Apply to the Dataiku posting served as `page` (+`?query`). `extra_postings` =
     [(posting_id, page, query)] are applied after it, in the same run."""
-    w = make_world()
+    w = make_world(profile=profile)
     w.store.answer_memory_put(HOWHEARD, "dropdown", json.dumps("LinkedIn"))
     cid, jid = add_job(w.store, external_id=POSTING)
     jids = [jid]
@@ -287,3 +290,89 @@ def test_with_mygreenhouse_switched_off_the_autofill_button_is_never_pressed():
     run = run_local(page="form_mygreenhouse_signed_in.html", dry_run=True, mygreenhouse=False)
     assert run.r.state is S.READY_TO_SUBMIT, (run.r.reason_detail, run.say.text)
     assert run.snap["values"]["phone"] == "91234567" and "prefill:" not in run.say.text
+
+
+# ================================================================== fill: llm (WP-N6a)
+
+def _scripted_gh_model():
+    """A scripted model for form.html under the LLM loop: every reply cites a fact (the program
+    writes the value from the fact), two owner answers sit in `extra:` (saved from the Questions
+    inbox in real use). Keys are `group|question`; the section heading is not a group."""
+    from llm_fill_support import FakeFillBackend
+
+    def d(source, ref="", value=""):
+        return {"source": source, "ref": ref, "value": value, "evidence": ""}
+    page = {
+        "|First Name": d("profile", "profile:identity.legal_first_name", "Alex"),
+        "|Last Name": d("profile", "profile:identity.legal_last_name", "Testcase"),
+        "|Phone": d("profile", "profile:contact.phone_number"),
+        "|Location (City)": d("profile", "profile:contact.city", "Singapore"),
+        "|What are your salary expectations?": d("profile", "profile:pay.expected_salary"),
+        "|Are you located in or willing to relocate to this job posting's city?":
+            d("extra", "extra:located_or_relocate", "Yes"),
+        "|Where did you see or hear about this job?": d("standing", "standing:how_heard"),
+        "|I consent to Dataiku keeping my data for 720 days for future roles.":
+            d("extra", "extra:retention_consent", "true"),
+    }
+    return FakeFillBackend(replies=[
+        {"kind": "page", "repeat": True, "reply": page},
+        {"kind": "pick", "repeat": True, "match": "Location (City)", "raw": {"choice": "Singapore, Singapore"}},
+        {"kind": "pick", "repeat": True, "match": "Where did you see", "raw": {"choice": "Dataiku Career Site"}},
+        {"kind": "second", "repeat": True, "reply": page},
+        {"kind": "corrective", "repeat": True, "reply": page},
+    ], strict=False)
+
+
+def _gh_profile_with_owner_answers():
+    from apply_flow_support import sample_profile
+    p = sample_profile()
+    p["extra"] = {
+        "located_or_relocate": {"title": "Located or relocating", "description": "", "kind": "text",
+                                "sensitive": False, "value": "Yes",
+                                "labels": ["are you located in or willing to relocate to this job posting's city"]},
+        "retention_consent": {"title": "Data retention consent", "description": "", "kind": "yes_no",
+                              "sensitive": False, "value": True,
+                              "labels": ["i consent to dataiku keeping my data for 720 days for future roles"]},
+    }
+    return p
+
+
+def test_fill_llm_dry_run_fills_the_greenhouse_form_with_a_scripted_model_and_stops_at_review():
+    """The default path (`apply.fill: llm`): the real flow, the real Greenhouse navigator, the real
+    page reader and `fill_page` in headless Edge, a scripted model (no Ollama). Dry run -> review:
+    every required field filled from its fact, the resume attached, nothing submitted, no S value
+    in any prompt (NF-02). Pins DEFECTS D1 (a react-select/combobox choice is a TYPEAHEAD, which
+    the deterministic option fits do not accept: Gender stops "no offered option fits") and D2 (the
+    hidden resume file input is not read as a field, so no resume is attached)."""
+    if not edge_available():
+        return
+    from llm_fill_support import sample_secrets
+    fb = _scripted_gh_model()
+    run = run_local(dry_run=True, fill="llm", backend=fb, profile=_gh_profile_with_owner_answers())
+    r = run.r
+    assert r.state is S.READY_TO_SUBMIT, (r.state, r.reason, r.reason_detail, run.say.text[-1500:].encode("ascii", "replace").decode())
+    row = run.row()
+    assert (row["state"], row["ats"], row["plan_source"], row["mode"]) ==         ("ready_to_submit", "greenhouse", "page", "dry_run")
+    assert row["submit_clicked_at"] is None
+    s = run.snap
+    assert s["submitCount"] == "0" and s["submitted"] is None, "a dry run never presses Submit"
+    assert s["values"]["first_name"] == "Alex" and s["values"]["last_name"] == "Testcase"
+    assert s["values"]["email"] == EMAIL and s["values"]["phone"] == "91234567"
+    assert s["values"]["question_20424895004"] == "5000", "salary expectation from the profile fact"
+    assert s["values"]["question_20424896004"] == "Yes", "the owner's saved answer (extra)"
+    assert s["selects"]["candidate-location"] == "Singapore, Singapore"
+    assert s["selects"]["question_20424893004"] == "No", "employee at Dataiku: declaration says No"
+    assert s["selects"]["question_20424894004"] == "No", "no sponsorship needed"
+    assert s["selects"]["question_20424897004"] == "Dataiku Career Site", "the standing how-heard fact"
+    assert s["selects"]["4000563004"] == "I don't wish to answer", "D1: gender 'decline' fits the offered option"
+    assert s["checks"]["gdpr_processing_consent_given_1"] is True
+    assert s["checks"]["gdpr_retention_consent_given_1"] is True
+    assert s["files"]["resume"] == "resume.pdf", "D2: the hidden resume input is attached"
+    rows = run.answers()
+    assert not [a for a in rows.values() if a["status"] in ("unknown", "ungrounded", "fill_failed")]
+    assert rows["first_name"]["source"] == "llm" or rows["first_name"]["status"] == "filled"
+    assert {c.kind for c in fb.calls} <= {"page", "pick", "second", "corrective"}
+    fb.assert_no_secrets(sample_secrets())
+    assert run.fx.only_local(), run.fx.requests
+    assert EMAIL not in run.say.text
+
