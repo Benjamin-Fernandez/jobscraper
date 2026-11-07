@@ -128,7 +128,8 @@ class Reason(str, enum.Enum):          # mail_messages.reason, mail_evidence.rea
 
 SKIP_REASONS = frozenset({Reason.TOO_OLD, Reason.OWN_MAIL, Reason.AUTO_REPLY,
                           Reason.JOB_BOARD, Reason.NOT_JOB_MAIL, Reason.BULK,
-                          Reason.ACCOUNT_MAIL, Reason.JOB_ALERT, Reason.OUTREACH})
+                          Reason.ACCOUNT_MAIL, Reason.JOB_ALERT, Reason.OUTREACH,
+                          Reason.INTERNAL})
 SUGGEST_REASONS = frozenset({Reason.MODEL_TIER, Reason.WEAK_MATCH,
                              Reason.SEVERAL_APPLICATIONS, Reason.REOPEN,
                              Reason.CLOSED_ROLE, Reason.KEPT_ON_FILE, Reason.SUGGEST_ONLY,
