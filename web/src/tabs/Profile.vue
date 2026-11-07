@@ -12,6 +12,11 @@
 // "Application details" (the applicant form and the questions employers asked).
 // The view last chosen is remembered; a first visit opens Application details
 // when something there needs the owner, and its label carries that count.
+//
+// Q-73: what the resume gave is a readable card ("What we read from your
+// resume"), not the job's log; the log sits under a collapsed Details (open
+// when the job failed). Q-44: below the card, "Update your application details"
+// offers the resume's entries and skills for the applicant profile.
 import { computed, nextTick, onActivated, onMounted, ref } from 'vue'
 import {
   ApiError, RESUME_TYPES, describeError, failureText, getApplicant, getProfile, getQuestions,
@@ -23,6 +28,7 @@ import { PROFILE_VIEW_KEY } from '../profileView.js'
 import { tabEmits, tabProps } from '../shell.js'
 import ApplicationDetails from '../components/ApplicationDetails.vue'
 import JobStatus from '../components/JobStatus.vue'
+import ResumeRefresh from '../components/ResumeRefresh.vue'
 import TitleEditor from '../components/TitleEditor.vue'
 import TabLoading from '../components/TabLoading.vue'
 
@@ -40,15 +46,44 @@ const uploading = ref(false)
 const refreshing = ref(false)
 const problem = ref('')
 const note = ref('')
+const refreshRound = ref(0)       // ResumeRefresh looks again after each profile job
 
 const { job, error: jobError, running, refresh, track } = useJob({
   kind: 'profile',
-  onFinish: finished => {
-    if (finished.state === 'succeeded') note.value = 'Profile refreshed.'
-    else problem.value = failureText(finished, 'The profile refresh failed - its log is below.')
-    loadProfile()
+  onFinish: async finished => {
+    if (finished.state !== 'succeeded') {
+      problem.value = failureText(finished, 'The profile refresh failed - its log is below.')
+    }
+    await loadProfile()
+    if (finished.state === 'succeeded') note.value = readNote()
+    refreshRound.value++
   },
 })
+
+// ---- the summary card (Q-73) ----
+const SKILL_CHIPS = 12
+const allSkills = ref(false)
+const shownSkills = computed(() => {
+  const s = profile.value?.skills ?? []
+  return allSkills.value ? s : s.slice(0, SKILL_CHIPS)
+})
+const moreSkills = computed(() => Math.max(0, (profile.value?.skills?.length ?? 0) - SKILL_CHIPS))
+const count = (n, one, many) => `${n} ${n === 1 ? one : many}`
+const experienceText = computed(() => {
+  const y = profile.value?.years_experience
+  if (y === null || y === undefined) return ''
+  return y === 0 ? 'Less than a year' : count(y, 'year', 'years')
+})
+const graduationYear = computed(() => (/^(\d{4})/.exec(String(profile.value?.graduation ?? '')) || [])[1] || '')
+function readNote() {
+  const p = profile.value
+  if (!p?.present) return 'Profile refreshed.'
+  return `Resume read: ${count(p.skills?.length ?? 0, 'skill', 'skills')}, ${count(p.target_titles?.length ?? 0, 'job title', 'job titles')}.`
+}
+// The profile job could not reach the model for the application-details check
+// (cli.SKIP_MODEL_DOWN): the panel says so instead of offering nothing.
+const modelDown = computed(() => (job.value?.log ?? []).some(l => String(l).includes("application details check skipped: the AI model isn't running")))
+const jobFailed = computed(() => !!job.value && job.value.state === 'failed')
 
 // ---- which view: Resume and titles, or Application details ----
 const VIEW_KEY = PROFILE_VIEW_KEY
@@ -273,15 +308,14 @@ onMounted(() => Promise.all([loadProfile(), refresh(), ...(view.value === 'resum
       <p v-if="problem" class="notice error" role="alert">{{ problem }}</p>
       <p v-if="note" class="notice ok" role="status">{{ note }}</p>
 
-      <div v-if="showJob" class="job">
+      <p v-if="running" class="muted reading" role="status">Reading your resume…</p>
+      <details v-if="showJob" class="job job-details" :open="jobFailed">
+        <summary>Details</summary>
         <JobStatus :job="job" title="Profile refresh log" />
-      </div>
+      </details>
       <p v-else-if="jobError" class="notice error" role="alert">Could not read the current job: {{ jobError }}</p>
 
-      <h2 class="section-title">Job titles</h2>
-      <TitleEditor />
-
-      <h2 class="section-title">Current profile</h2>
+      <h2 class="section-title">What we read from your resume</h2>
       <TabLoading v-if="loadingProfile" :rows="2" />
       <div v-else-if="profileError" class="notice error" role="alert">
         <p>Could not load the profile: {{ profileError }}</p>
@@ -291,33 +325,35 @@ onMounted(() => Promise.all([loadProfile(), refresh(), ...(view.value === 'resum
         <p class="empty-title">No profile yet.</p>
         <p class="muted">Upload your resume above and the profile is derived from it.</p>
       </div>
-      <article v-else class="profile">
-        <dl class="facts">
-          <div><dt>Version</dt><dd class="version">{{ profile.profile_version }}</dd></div>
-          <div><dt>Source</dt><dd class="source">{{ profile.source_file || '—' }}</dd></div>
-          <div><dt>Derived</dt><dd class="parsed" :title="exactTime(profile.parsed_at)">{{ when(profile.parsed_at) || '—' }}</dd></div>
-          <div v-if="profile.parsed_by"><dt>Read by</dt><dd class="parsed-by">{{ profile.parsed_by }}</dd></div>
-        </dl>
-        <p v-if="profile.summary" class="summary">{{ profile.summary }}</p>
-
-        <h3>Skills</h3>
-        <ul v-if="profile.skills?.length" class="chips skills">
-          <li v-for="s in profile.skills" :key="s">{{ s }}</li>
+      <article v-else class="profile resume-card">
+        <ul class="card-lines">
+          <li class="read-line"><span class="source">{{ profile.source_file || 'Your resume' }}</span><template v-if="when(profile.parsed_at)"> · read <span class="parsed" :title="exactTime(profile.parsed_at)">{{ when(profile.parsed_at) }}</span></template></li>
+          <li v-if="experienceText" class="experience">Experience: {{ experienceText }}</li>
+          <li v-if="graduationYear" class="graduation">Graduation: {{ graduationYear }}</li>
+          <li class="skill-count">{{ count(profile.skills?.length ?? 0, 'skill', 'skills') }}</li>
         </ul>
-        <p v-else class="muted">None found.</p>
-
-        <h3>Titles found in your resume</h3>
+        <ul v-if="profile.skills?.length" class="chips skills">
+          <li v-for="s in shownSkills" :key="s">{{ s }}</li>
+        </ul>
+        <button v-if="moreSkills && !allSkills" type="button" class="link more-skills" @click="allSkills = true">and {{ moreSkills }} more</button>
+        <p class="title-count">{{ count(profile.target_titles?.length ?? 0, 'job title', 'job titles') }}</p>
         <ul v-if="profile.target_titles?.length" class="titles">
           <li v-for="t in profile.target_titles" :key="t">{{ t }}</li>
         </ul>
-        <p v-else class="muted">None found.</p>
+        <p v-if="profile.summary" class="summary">{{ profile.summary }}</p>
 
         <h3>Interests</h3>
         <ul v-if="profile.interests?.length" class="chips interests">
           <li v-for="i in profile.interests" :key="i">{{ i }}</li>
         </ul>
         <p v-else class="muted">None set. They live in config.yaml under judge.interests.</p>
+        <p class="muted fine-print">Profile version <span class="version">{{ profile.profile_version }}</span><template v-if="profile.parsed_by"> · read by <span class="parsed-by">{{ profile.parsed_by }}</span></template></p>
       </article>
+
+      <ResumeRefresh :reload="refreshRound" :unavailable="modelDown" @go-view="goView" />
+
+      <h2 class="section-title">Job titles</h2>
+      <TitleEditor />
     </div>
     <div
       v-else
@@ -360,13 +396,18 @@ onMounted(() => Promise.all([loadProfile(), refresh(), ...(view.value === 'resum
 .drop .muted { font-size: var(--text-sm); }
 .buttons { margin: var(--space-3) 0 var(--space-4); }
 .job { margin-bottom: var(--space-4); }
-.facts {
-  display: flex; flex-wrap: wrap; gap: var(--space-2) var(--space-6);
-  margin: 0 0 var(--space-4); padding-bottom: var(--space-3); border-bottom: 1px solid var(--border);
+.job-details > summary { cursor: pointer; font-size: var(--text-sm); color: var(--text-2); margin-bottom: var(--space-2); }
+.reading { margin: 0 0 var(--space-2); }
+.resume-card {
+  padding: var(--space-4); border: 1px solid var(--border); border-radius: var(--radius-lg);
+  background: var(--surface); overflow-wrap: anywhere; min-width: 0;
 }
-.facts dt { font-size: var(--text-xs); color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; }
-.facts dd { margin: 0; font-family: var(--mono); font-size: var(--text-sm); }
-.summary { margin: 0 0 var(--space-4); max-width: 68ch; }
+.card-lines { list-style: none; margin: 0 0 var(--space-2); padding: 0; display: grid; gap: var(--space-1); }
+.read-line .source { font-weight: 600; }
+.more-skills { margin-top: var(--space-1); padding: 0; font-size: var(--text-sm); }
+.title-count { margin: var(--space-3) 0 var(--space-1); }
+.fine-print { font-size: var(--text-xs); margin: var(--space-4) 0 0; }
+.summary { margin: var(--space-4) 0 0; max-width: 68ch; }
 h3 { font-size: var(--text-sm); margin: var(--space-5) 0 var(--space-2); font-weight: 600; }
 .chips { list-style: none; padding: 0; margin: 0; display: flex; flex-wrap: wrap; gap: var(--space-1); }
 .chips li {

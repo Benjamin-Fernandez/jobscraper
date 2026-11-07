@@ -89,6 +89,7 @@ def profile_view(cfg: Config) -> dict[str, Any]:
     """
     out: dict[str, Any] = {"present": False, **{k: None for k in PROFILE_FIELDS},
                            "skills": [], "target_titles": [],
+                           "years_experience": None, "graduation": None,
                            "interests": interests(cfg)}
     try:
         doc = yaml.safe_load(cfg.profile_path.read_text(encoding="utf-8"))
@@ -108,6 +109,11 @@ def profile_view(cfg: Config) -> dict[str, Any]:
     for key in ("skills", "target_titles"):
         items = doc.get(key)
         out[key] = [str(i) for i in items] if isinstance(items, list) else []
+    # Q-73: the summary card's "Experience: n years" and "Graduation: year".
+    years = doc.get("years_experience")
+    out["years_experience"] = years if isinstance(years, int) and not isinstance(years, bool)         and years >= 0 else None
+    grad = doc.get("graduation")
+    out["graduation"] = str(grad) if isinstance(grad, (str, int)) and str(grad).strip() else None
     return out
 
 

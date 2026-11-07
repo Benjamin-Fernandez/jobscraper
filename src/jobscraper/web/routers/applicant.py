@@ -27,6 +27,13 @@ the profile and its etag from one read of the file (Q-30 F6).
 and writes nothing, so the form can flag a field when it loses focus. GET also
 carries `documents_status` (the resume and transcript in use: name, size,
 modified; never a path).
+
+`GET/POST /api/applicant/refresh` (Q-44, q44_refresh_from_resume.md §4): the
+"Update your application details" panel. The profile job leaves the resume-side
+facts in `applicant.refresh.json` beside the profile; GET computes the plan
+against the current file on every call (so a form edit never leaves it stale),
+POST applies the ticked change ids under the same etag guard and lock as PUT.
+Entries and skills are shown in the UI only and never logged.
 """
 from __future__ import annotations
 
@@ -58,6 +65,13 @@ class ApplicantCheck(BaseModel):
     """Body of `POST /api/applicant/check`: a profile to validate, nothing else
     (no etag: it is never written)."""
     profile: dict[str, Any]
+
+
+class RefreshSave(BaseModel):
+    """Body of `POST /api/applicant/refresh`: the change ids the owner ticked and
+    the etag of the profile the plan was shown against."""
+    etag: str = ""
+    accept: list[str] = []
 
 
 def _from_resume(profile: dict) -> list[str]:
@@ -173,3 +187,55 @@ def check_applicant(body: ApplicantCheck) -> dict[str, Any]:
     from or written to the file; `{errors: [{path, message}]}`, empty when valid."""
     profile = with_version(dict(body.profile))
     return {"errors": errors_json(applicant.validate(profile))}
+
+
+def _proposals_state(cfg: Config) -> tuple[str, dict | None]:
+    """("ready", proposals) or (no_profile | none | stale, None)."""
+    if not cfg.applicant_path.is_file():
+        return "no_profile", None
+    props = applicant.load_proposals(applicant.proposals_path(cfg.applicant_path))
+    if props is None:
+        return "none", None
+    if props.get("resume_hash") != applicant.original_resume_hash(cfg.resume_dir):
+        return "stale", None
+    return "ready", props
+
+
+@router.get("/applicant/refresh")
+def get_refresh(cfg: Config = Depends(get_config)) -> dict[str, Any]:
+    """The plan: `{state: "ready", source_name, created_at, resume_hash, etag,
+    changes, skills}`, or `{state}` for no_profile | none | stale | unreadable."""
+    state, props = _proposals_state(cfg)
+    if props is None:
+        return {"state": state}
+    try:
+        profile, etag = applicant.load_with_etag(cfg.applicant_path)
+    except applicant.ApplicantError:
+        return {"state": "unreadable"}
+    plan = applicant.refresh_plan(profile, props, applicant.load_template())
+    return {"state": "ready", "source_name": str(props.get("source_name") or ""),
+            "created_at": props.get("created_at"), "resume_hash": props.get("resume_hash"),
+            "etag": etag, "changes": applicant.json_safe(plan["changes"]),
+            "skills": plan["skills"]}
+
+
+@router.post("/applicant/refresh")
+def save_refresh(body: RefreshSave, cfg: Config = Depends(get_config)) -> Any:
+    """Apply the ticked changes: 409 on a stale etag, an unreadable file, or
+    proposals that are gone or older than the resume (`detail` says which);
+    422 naming each invalid path; nothing is written on any of them. Ids the
+    plan does not offer now are not applied and come back in `ignored`."""
+    with PROFILE_WRITE_LOCK:
+        state, props = _proposals_state(cfg)
+        if props is None:
+            raise HTTPException(status_code=409, detail=state)
+        current = load_for_write(cfg, body.etag)
+        new, ignored = applicant.apply_refresh(current, props, body.accept,
+                                               applicant.load_template())
+        saved = len([a for a in dict.fromkeys(body.accept) if a not in ignored])
+        if saved:
+            try:
+                applicant.save(cfg.applicant_path, with_version(new))
+            except applicant.ApplicantError as exc:
+                return invalid(exc.errors)
+    return {**applicant_view(cfg), "saved": saved, "ignored": ignored}
