@@ -163,6 +163,12 @@ const elapsed = computed(() => {
 
 const lastRun = computed(() => props.runs.find(r => r.finished_at) ?? null)
 
+// The failed count is red only when the run itself broke.
+const HARD = ['failed', 'aborted_unhealthy']
+const failedTone = r => (HARD.includes(r.status) ? 'hard' : 'partial')
+const failedText = r =>
+  `${plural(Number(r.stats.companies_failed), 'company', 'companies')} could not be read. See which on the Companies tab.`
+
 // "N failed" in the history: the Companies tab's Failed list says which and why.
 function showFailed() {
   requestCompanyFilter('failed')
@@ -344,8 +350,9 @@ onMounted(async () => {
                 <button
                   v-if="Number(r.stats?.companies_failed) > 0"
                   type="button"
-                  class="link failed-link"
-                  :title="`Companies that could not be fetched in run ${r.run_no} - see why on the Companies tab`"
+                  :class="['link', 'failed-link', failedTone(r)]"
+                  :title="failedText(r)"
+                  :aria-label="failedText(r)"
                   @click="showFailed"
                 >{{ r.stats.companies_failed }}</button>
                 <template v-else>{{ r.stats?.companies_failed ?? '—' }}</template>
@@ -382,8 +389,12 @@ onMounted(async () => {
   animation: spin 0.8s linear infinite;
 }
 @keyframes spin { to { transform: rotate(360deg); } }
-.failed-link { color: var(--danger); font-family: var(--mono); }
-.failed-link:hover:not(:disabled) { color: var(--danger); }
+/* A run that broke is red; a good run with a few unreadable companies is not
+   an outage, so its count is quiet (Q-70 E4, G27). */
+.failed-link { font-family: var(--mono); }
+.failed-link.hard, .failed-link.hard:hover:not(:disabled) { color: var(--danger); }
+.failed-link.partial { color: var(--muted); text-decoration: underline dotted; }
+.failed-link.partial:hover:not(:disabled) { color: var(--text); }
 .table-wrap { overflow-x: auto; border-top: 1px solid var(--border); }
 .history { width: 100%; border-collapse: collapse; font-size: var(--text-sm); }
 .history th {

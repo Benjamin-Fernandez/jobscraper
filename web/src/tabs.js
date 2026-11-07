@@ -12,6 +12,8 @@
 import { activeApplicationCount, newRoleCount } from './badges.js'
 
 export const TABS = [
+  // The home page, and so the default route (`tabFromHash` falls back to the first tab).
+  { id: 'overview', label: 'Overview', component: () => import('./tabs/Overview.vue') },
   {
     id: 'inbox', label: 'Inbox', component: () => import('./tabs/Inbox.vue'),
     badge: ({ jobs }) => newRoleCount(jobs), badgeLabel: 'new roles',
