@@ -509,13 +509,18 @@ onMounted(() => Promise.all([loadList(), loadHealth(), refresh()]))
 </template>
 
 <style scoped>
+/* The segments wrap onto a second line when the column is narrower than both
+   (Q-71: at 390px they were 389px in a 341px column and widened the page). Both
+   stay in view, so the selected one is always visible. */
 .views {
-  display: inline-flex; gap: 2px; padding: 2px;
+  display: inline-flex; flex-wrap: wrap; gap: 2px; padding: 2px;
+  max-width: 100%; min-width: 0;
   background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius);
 }
 .view-tab {
   border: 1px solid transparent; background: transparent; box-shadow: none; color: var(--text-2);
   border-radius: calc(var(--radius) - 2px);
+  max-width: 100%; white-space: normal; text-align: left;
 }
 .view-tab:hover:not(:disabled) { background: var(--surface); color: var(--text); }
 .view-tab.active, .view-tab.active:hover:not(:disabled) {
