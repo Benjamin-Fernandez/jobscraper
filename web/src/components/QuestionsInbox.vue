@@ -15,6 +15,7 @@ import {
 } from '../api.js'
 import { findItem } from '../applicantForm.js'
 import { plural } from '../format.js'
+import { privateBadge, privateSentence, setModelSeesPrivate } from '../privacy.js'
 import { showToast } from '../toast.js'
 import QuestionCard from './QuestionCard.vue'
 import TabLoading from './TabLoading.vue'
@@ -46,6 +47,8 @@ const groups = computed(() => (open.value?.groups ?? []).filter(g => !g.status |
 const ready = computed(() => open.value?.ready ?? [])
 const mode = computed(() => open.value?.mode ?? 'dry_run')
 const busy = computed(() => !!open.value?.busy)
+// D-105: the Private tag's words follow the server's effective switch.
+const seesPrivate = computed(() => !!open.value?.model_sees_private)
 const form = computed(() => props.form ?? fetched.value?.form ?? null)
 const sending = computed(() => ready.value.slice(0, MAX_RETRY))
 
@@ -59,6 +62,7 @@ async function load() {
       getQuestions('answered').catch(() => null),   // the open list matters more
     ])
     open.value = o
+    setModelSeesPrivate(o?.model_sees_private)   // the cards read it from privacy.js
     answered.value = (a?.groups ?? []).filter(g => g.status === 'answered')
     emit('loaded', { open: groups.value.length, answered: answered.value.length })
   } catch (e) {
@@ -245,7 +249,7 @@ defineExpose({ load })
               <div class="answered-text">
                 <span class="answered-title">{{ g.title }}</span>
                 <span v-if="g.target_path" class="muted"> · in your profile: {{ profileLabel(g) }}</span>
-                <span v-if="g.sensitive" class="tag private">Private: never sent to the AI</span>
+                <span v-if="g.sensitive" class="tag private" :title="privateSentence(seesPrivate)">{{ privateBadge(seesPrivate) }}</span>
                 <span class="muted answer"> {{ g.sensitive ? '•••' : answerText(g) }}</span>
               </div>
               <button type="button" class="ghost change" :aria-label="`Change answer: ${g.title}`" @click="changing = g.key">Change answer</button>

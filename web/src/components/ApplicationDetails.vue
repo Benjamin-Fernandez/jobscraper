@@ -26,6 +26,7 @@ import {
   mergeEdits, newSkills, otherKeys, pruneBlankEntries, remapErrors, sectionStatus, setAt, showValue,
   todayIso, within,
 } from '../applicantForm.js'
+import { privateBadge, privateSentence } from '../privacy.js'
 import FieldInput from './FieldInput.vue'
 import Icon from './Icon.vue'
 import QuestionsInbox from './QuestionsInbox.vue'
@@ -34,7 +35,12 @@ import TabLoading from './TabLoading.vue'
 
 const emit = defineEmits(['counts', 'go-view'])
 
-const PRIVATE = 'Private: never sent to the AI'
+// D-105: the Private tag's words follow the server's effective switch (q74 design §5).
+const seesPrivate = computed(() => !!data.value?.model_sees_private)
+const PRIVATE = computed(() => privateBadge(seesPrivate.value))
+const PRIVATE_SENTENCE = computed(() => privateSentence(seesPrivate.value))
+// What a screen reader hears on each private field: the sentence, ending in a stop.
+const PRIVATE_SPOKEN = computed(() => (PRIVATE_SENTENCE.value.endsWith('.') ? PRIVATE_SENTENCE.value : `${PRIVATE_SENTENCE.value}.`))
 // The unsaved form survives a visit to another tab (Q-70 D1, D-100). sessionStorage
 // only: it is this browser's, goes when the tab closes, and the same data already
 // sits in data/applicant.yaml on this machine. Never localStorage.
@@ -239,8 +245,8 @@ function privacyOf(g) {
   const items = g.items || []
   const open = items.filter(i => !i.sensitive)
   if (open.length === items.length) return { header: '', perItem: false }
-  if (g.sensitive || !open.length) return { header: PRIVATE, perItem: false }
-  if (open.length < items.length - open.length) return { header: `${PRIVATE}, except ${joinAnd(open.map(i => i.label))}`, perItem: false }
+  if (g.sensitive || !open.length) return { header: PRIVATE.value, perItem: false }
+  if (open.length < items.length - open.length) return { header: `${PRIVATE.value}, except ${joinAnd(open.map(i => i.label))}`, perItem: false }
   return { header: '', perItem: true }
 }
 
@@ -647,7 +653,7 @@ defineExpose({ load })
             <header class="group-head">
               <h3 :id="`g-${g.id}`" tabindex="-1">{{ g.title }}</h3>
               <span v-if="sectionStatus(sectionOf(g.id)).tone !== 'done'" class="tag section-tag" :class="sectionStatus(sectionOf(g.id)).tone">{{ sectionStatus(sectionOf(g.id)).text }}</span>
-              <span v-if="privacyOf(g).header" class="tag private">{{ privacyOf(g).header }}</span>
+              <span v-if="privacyOf(g).header" class="tag private" :title="PRIVATE_SENTENCE">{{ privacyOf(g).header }}</span>
             </header>
             <p v-if="g.note" class="muted note">{{ g.note }}</p>
 
@@ -670,9 +676,9 @@ defineExpose({ load })
                   >{{ item.label }}</component>
                   <span v-if="needed(item)" class="tag needed">Needed</span>
                   <span v-else-if="item.required" class="tag required">{{ requiredText(item) }}</span>
-                  <span v-if="item.sensitive && privacyOf(g).perItem" class="tag private" :title="PRIVATE">Private</span>
+                  <span v-if="item.sensitive && privacyOf(g).perItem" class="tag private" :title="PRIVATE_SENTENCE">Private</span>
                   <span v-if="fromResume(item) && item.kind !== 'entries'" class="tag resume">From your resume, please check</span>
-                  <span v-if="item.sensitive" :id="`${fieldId(item.path)}-private`" class="visually-hidden">{{ PRIVATE }}.</span>
+                  <span v-if="item.sensitive" :id="`${fieldId(item.path)}-private`" class="visually-hidden">{{ PRIVATE_SPOKEN }}</span>
                 </div>
 
                 <!-- Files: the resume in use and where to upload one; the path box is the exception -->
@@ -750,7 +756,7 @@ defineExpose({ load })
             <div v-for="[key, entry] in extra" :id="fieldId(`extra.${key}`)" :key="key" class="field extra-row" :data-path="`extra.${key}`">
               <div class="field-head">
                 <span :id="`${fieldId(`extra.${key}`)}-label`" class="field-label">{{ entry.title || key }}</span>
-                <span v-if="entry.sensitive" class="tag private">{{ PRIVATE }}</span>
+                <span v-if="entry.sensitive" class="tag private" :title="PRIVATE_SENTENCE">{{ PRIVATE }}</span>
               </div>
               <p v-if="entry.description" class="hint">{{ entry.description }}</p>
               <FieldInput

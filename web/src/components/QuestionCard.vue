@@ -12,6 +12,7 @@
 import { computed, reactive, ref } from 'vue'
 import { fieldId, findItem, isEmptyValue, optionList } from '../applicantForm.js'
 import { plural } from '../format.js'
+import { privateBadge } from '../privacy.js'
 import FieldInput from './FieldInput.vue'
 
 const props = defineProps({
@@ -24,7 +25,7 @@ const props = defineProps({
 })
 const emit = defineEmits(['save', 'dismiss', 'reload', 'cancel'])
 
-const PRIVATE = 'Private: never sent to the AI'
+const PRIVATE = computed(() => privateBadge())
 const REASONS = {
   no_rule: 'Not in your profile',
   ungrounded: "The AI's answer couldn't be checked against your details",
