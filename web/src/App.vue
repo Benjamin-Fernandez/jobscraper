@@ -315,7 +315,6 @@ onBeforeUnmount(() => {
               :aria-controls="tab.id === activeId ? `panel-${tab.id}` : undefined"
               :tabindex="tab.id === activeId ? 0 : -1"
               :data-tab="tab.id"
-              :aria-keyshortcuts="tab.goKey ? `g ${tab.goKey}` : undefined"
               @click="open(tab.id)"
               @keydown="onTabKey($event, i)"
             >

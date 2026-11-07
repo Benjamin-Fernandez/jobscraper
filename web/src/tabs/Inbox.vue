@@ -465,7 +465,7 @@ onDeactivated(() => window.removeEventListener('keydown', onShortcut))
 
     <div v-if="writeError" class="notice error write-error" role="alert">
       <p>{{ writeError }}</p>
-      <button type="button" class="ghost write-error-close" @click="writeError = ''">Dismiss</button>
+      <button type="button" class="ghost write-error-close" aria-label="Dismiss this error" @click="writeError = ''">Dismiss</button>
     </div>
 
     <div v-if="error" class="notice error" role="alert">
@@ -741,6 +741,7 @@ onDeactivated(() => window.removeEventListener('keydown', onShortcut))
   max-height: calc(100dvh - var(--header-h) - var(--space-4) * 2);
   overflow-y: auto;
   overscroll-behavior: contain;
+  scroll-padding-top: 5rem; /* a focused control is not left under the pinned action bar */
 }
 .back { display: none; margin: calc(-1 * var(--space-2)) 0 var(--space-3) calc(-1 * var(--space-2)); }
 .detail-head { display: flex; align-items: center; gap: var(--space-4); }
