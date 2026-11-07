@@ -134,7 +134,7 @@ def cmd_doctor(args) -> int:
         private = "Private fields: kept from the AI (model backend is not on this computer)"
     print(f"privacy        {private}")
 
-    print(f"budget        llm={'on' if cfg.budget.get('enable_llm') else 'off'}, "
+    print(f"budget         llm={'on' if cfg.budget.get('enable_llm') else 'off'}, "
           f"{int(cfg.budget.get('decide_batch', 20))} postings per decide call")
     print(f"batch          {_batch_size(cfg, store)} companies per run, "
           f"{_cycle_days(cfg, store)}-day cycle (plan: {cfg.plan.name})")

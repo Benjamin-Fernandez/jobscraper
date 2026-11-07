@@ -96,10 +96,11 @@ def errors_json(errors: list[applicant.FieldError]) -> list[dict[str, str]]:
 def model_sees_private(cfg: Config) -> bool:
     """D-105 (q74_model_sees_sensitive.md §1, §5): the effective switch, which the
     Private badges follow - config `apply.model_sees_sensitive` and a local model
-    backend. `backends.build` makes no network call."""
+    backend. Resolved from the config without building a backend (no HTTP client
+    per GET)."""
     if not bool(getattr(getattr(cfg, "apply", None), "model_sees_sensitive", False)):
         return False
-    return backends.is_local(backends.build(getattr(cfg, "budget", None) or {}))
+    return backends.is_local_config(getattr(cfg, "budget", None) or {})
 
 
 def applicant_view(cfg: Config) -> dict[str, Any]:
