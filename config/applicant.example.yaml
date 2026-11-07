@@ -112,5 +112,6 @@ declarations:                        # D-55 standing answers. S. Change any that
   regulatory_disciplinary: false
   non_compete: false                 # D-87: any agreement that limits the work you can do: non-compete, non-solicitation, NDA or confidentiality, stock option or restricted stock terms
   government_employment: false       # D-87: ever worked for the government, public sector, a statutory board or the military, not counting National Service
+  willing_to_sign_nda: null          # D-91: true | false | null. Willing to sign an employer's NDA or confidentiality agreement? Unset (null) = you are asked. Used for NDA willingness questions only, never a non-compete
   health_disclosure: decline         # decline only; a required health question fails the attempt
   # D-87: us_self_id.disability_status answers every disability question, in any country (no separate key)

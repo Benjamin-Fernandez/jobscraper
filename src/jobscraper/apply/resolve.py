@@ -1058,8 +1058,7 @@ def _extra_answer(f: FormField, label_norm: str,
     if not label_norm or not isinstance(extra, dict) or not extra:
         return None, ""
     base = label_norm.split(" | ", 1)[0]
-    if declarations.classify(base, norm_label(f.description)) \
-            in EMPLOYER_SPECIFIC_DECLARATIONS:
+    if declarations.classify_field(f, ctx) in EMPLOYER_SPECIFIC_DECLARATIONS:
         return None, ""
     generic = is_generic(base)
     matches, invalid = [], []
@@ -1170,8 +1169,7 @@ def _memory_answer(f: FormField, label_norm: str, ctx: ResolveContext,
 def _tier4(f: FormField, label_norm: str, ctx: ResolveContext):
     """Declarations (§7.5). Returns (Answer or None, is_attestation). A
     classified field always gets its final Answer here (never tier 5)."""
-    label = declarations.classify(label_norm, norm_label(f.description),
-                                  (ctx.employer_name, *ctx.employer_aliases))
+    label = declarations.classify_field(f, ctx)
     if label is None:
         return None, False
     return declarations.answer(label, f, ctx), True

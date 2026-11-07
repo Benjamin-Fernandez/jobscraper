@@ -104,4 +104,13 @@ Requests:
 - engineer (lane R or N6a): F12, F13 (skip UNKNOWN in _cache_put), F7, F10 audit rule, N1.
 - tester: pins for F12, F13, F1 radio/required twin; update the 2 stale oracles only if they still fail after e2414c5.
 - architect: LF 13.3 should say whether an `unknown` decision is cached.
+
+RE: Q-48 fix round re-review (eng/Q-48-declarations @ 1004247) · docs/reviews/Q-48-and-lane-M-fixes.md ("Re-review (fix round, 2026-11-07)")
+BODY: MERGE. F1-F10 closed (replayed); D-90, D-90a, D-91 built as specified; the three test-only commits follow the spec and do not weaken pins. Tests: declarations 40/40, apply_contracts 66/66, llm_fill 74/74, layering 10/10 (full suite not run, per the brief). No CRITICAL or HIGH open.
+- F11 MEDIUM: nda_willingness answers a compound ("willing to sign an NDA and relocate to Tokyo?" -> Yes; "I agree to sign the NDA and to a background check" ticked) once the owner sets willing_to_sign_nda true. Fix in _nda_consent with a closed vocabulary; tester pin.
+- F12 LOW freedom path skips the status-frame gate; F13 LOW noun-phrase / prefixed labels ("Politically exposed person (PEP)?", "Declaration: Are you a PEP?") now go to the inbox (spec-conformant); F14 LOW dead locks.NEGATIONS; F15 LOW residual short-skill and all-caps "US" edges; F16 LOW spec inconsistency.
+Requests:
+- engineer: F11 (with a tester pin), F12, F14.
+- architect: amend AD 5.4 / 7.5 so willing_to_sign_nda unset = unknown (not "default false"); reconcile the D-91 verb list (comfortable, happy to, open to) with D-90a; decide F13 (frame runs anywhere in the label, or noun-phrase class labels on Yes/No); add the compound rule for nda_willingness.
+- coordinator: the review file is not on this branch (a856254 is on personal); the doc now holds the original plus the re-review, so resolve the add/add by taking either side. After merging to personal, smoke the Profile tab for a tri-state willing_to_sign_nda before the owner edits Application details.
 STATUS: open

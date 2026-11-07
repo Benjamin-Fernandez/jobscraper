@@ -127,7 +127,9 @@ def test_f15_f16_a_checkbox_is_single_class_only():
 
 @needs(*Q48)
 def test_f17_a_negated_yes_no_is_unknown_on_both_paths():
-    label = "Are you free of any non-compete agreement?"
+    # D-91 (apply_design §7.5 gate 3): "free of/from" is now a freedom form that answers the inverted value;
+    # "without" is still an unrecognised negation and ends unknown on both paths.
+    label = "Are you without any non-compete agreement?"
     _lab, a = _ans(label)
     _ended(a, True)
     spy = StubBackend([{"choice": 0, "evidence": "x"}] * 4)

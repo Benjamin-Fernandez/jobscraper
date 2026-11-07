@@ -430,7 +430,11 @@ def test_prior_employment_is_deduced_from_experience_including_internships():
     q = _yn("q", "Have you previously worked for Example Logistics?")
     assert _chosen(_one(q, employer="Example Logistics")) == ("Yes",)
     assert _chosen(_one(q, employer="ELX", aliases=("Example Logistics",))) == ("Yes",)
-    assert _chosen(_one(q, employer="Dataiku")) == ("No",)
+    # D-90 gate 4 (apply_design §7.5): a prior-employment class answers only when the label
+    # names THIS employer, so each question below names the employer being applied to.
+    assert _chosen(_one(_yn("q", "Have you previously worked for Dataiku?"), employer="Dataiku")) == ("No",)
+    assert _one(q, employer="Dataiku").status is not AnswerStatus.FILLED   # names another company: unsure, never "No"
+    q = _yn("q", "Have you previously worked for Sample Analytics?")
     a = _one(q, employer="Sample Analytics Pte Ltd")      # the 2025 internship
     assert _chosen(a) == ("Yes",) and a.source == "declaration:prior_employment_at_company"
 
