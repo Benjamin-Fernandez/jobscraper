@@ -1454,6 +1454,49 @@ def _under(path: str, paths: Iterable[str]) -> bool:
     return any(p == path or p.startswith(path + ".") for p in paths)
 
 
+# Q-71 G2: rendering hints that live beside FORM, not in its tuples, so the
+# declarations group (edited on other branches) stays free of merge conflicts.
+# Each is optional in the item JSON: a client that ignores them still works.
+#
+# YES_NO_CONTROL: a bool item whose path starts with one of these (a trailing
+# "." = a prefix) or equals one is drawn as Yes / No radios (`control:
+# "yes_no"`), not as a switch: the label is a question, and a switch reads as a
+# setting. Consents keep the switch (their labels are statements).
+YES_NO_CONTROL: tuple[str, ...] = ("declarations.", "availability.willing_to_relocate")
+# NULLABLE_BOOL: Yes/No items where "not set" is a real answer (D-91: null =
+# "ask me"), so the form offers a Clear link (`nullable_bool: true`).
+NULLABLE_BOOL: frozenset[str] = frozenset({"declarations.willing_to_sign_nda"})
+# SHOW_WHEN: a follow-up field matters only when another has one of `values`.
+# Emitted as `show_when: {path, values}`; the form hides the item only when the
+# condition is false and the item is empty and has no error (never wipes data).
+SHOW_WHEN: dict[str, dict[str, Any]] = {
+    "singapore_status.race_other": {"path": "singapore_status.race", "values": ["other"]},
+    "declarations.holdings": {"path": "declarations.shareholding_in_company",
+                              "values": [True]},
+    "declarations.relatives_employers": {"path": "declarations.relatives_at_company",
+                                         "values": [True]},
+    "singapore_status.ord_date": {"path": "singapore_status.ns_status",
+                                  "values": ["completed", "serving"]},
+}
+# AUTOCOMPLETE: HTML autocomplete tokens (WCAG 1.3.5). Absent = the client's
+# default ("off"). The backup email is "off" on purpose: browsers would fill the
+# main address into it.
+AUTOCOMPLETE: dict[str, str] = {
+    "identity.legal_first_name": "given-name", "identity.legal_last_name": "family-name",
+    "identity.preferred_name": "nickname", "identity.date_of_birth": "bday",
+    "contact.email": "email", "contact.backup_email": "off",
+    "contact.phone_country_code": "tel-country-code", "contact.phone_number": "tel-national",
+    "contact.address_line1": "address-line1", "contact.address_line2": "address-line2",
+    "contact.postal_code": "postal-code", "contact.city": "address-level2",
+    "contact.country": "country",
+    "links.linkedin": "url", "links.github": "url", "links.portfolio": "url",
+}
+
+
+def _yes_no(path: str) -> bool:
+    return any(path == p or (p.endswith(".") and path.startswith(p)) for p in YES_NO_CONTROL)
+
+
 def country_options() -> list[dict]:
     """The country pick-list: Singapore first (the owner's home market), then
     every ISO country by name. Label "Singapore (SG)": the code stays visible
@@ -1478,6 +1521,15 @@ def _item_json(item: FormItem, parent: str = "") -> dict:
     }
     if item.kind == "country_bool_map":
         out["country_options"] = country_options()
+    if not parent:                       # entry sub-fields have no such hints
+        if item.kind == "bool" and _yes_no(item.path):
+            out["control"] = "yes_no"
+            if item.path in NULLABLE_BOOL:
+                out["nullable_bool"] = True
+        if item.path in SHOW_WHEN:
+            out["show_when"] = copy.deepcopy(SHOW_WHEN[item.path])
+        if item.path in AUTOCOMPLETE:
+            out["autocomplete"] = AUTOCOMPLETE[item.path]
     return out
 
 
