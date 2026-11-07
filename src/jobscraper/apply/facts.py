@@ -494,7 +494,7 @@ def _leaf_fit(ref: str, field: FieldLike, rctx: ResolveContext, rules: Any, *,
     """`fact_value` against the leaves of a "Category > Leaf" option list; a leaf that
     occurs under two categories is ambiguous (None)."""
     f = _ff(field)
-    if f.type not in CHOICE_TYPES or not any(" > " in o.label for o in f.options):
+    if f.fit_type not in CHOICE_TYPES or not any(" > " in o.label for o in f.options):
         return None
     by_leaf: dict[str, list[str]] = {}
     for o in f.options:
@@ -1064,4 +1064,4 @@ def facts_used_hash(refs: Iterable[str], rctx: ResolveContext, *, today: str = "
 
 
 def is_choice(field: FieldLike) -> bool:
-    return _ff(field).type in CHOICE_TYPES
+    return _ff(field).fit_type in CHOICE_TYPES

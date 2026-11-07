@@ -82,7 +82,7 @@ def kind_for(f: FormField) -> QuestionKind:
     anything typed -> text."""
     if f.type is FieldType.CHECKBOX or resolve.bool_shaped(f):
         return QuestionKind.YES_NO
-    if f.type in (FieldType.DROPDOWN, FieldType.RADIO):
+    if f.fit_type in (FieldType.DROPDOWN, FieldType.RADIO):
         return QuestionKind.CHOICE
     if f.type is FieldType.MULTI_CHOICE:
         return QuestionKind.MULTI

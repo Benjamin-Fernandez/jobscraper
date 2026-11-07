@@ -381,7 +381,7 @@ def _shown_form(f: FormField, a: Answer) -> Any:
     """How our answer reads back on the page (option labels, a file name)."""
     if f.type is FieldType.FILE:
         return Path(str(a.value)).name
-    if f.type in CHOICE_TYPES and a.option_labels:
+    if f.fit_type in CHOICE_TYPES and a.option_labels:
         return list(a.option_labels) if f.type is FieldType.MULTI_CHOICE else a.option_labels[0]
     if f.type is FieldType.CHECKBOX:
         return str(a.value).strip().lower()
