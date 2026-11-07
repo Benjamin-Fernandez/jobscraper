@@ -350,7 +350,16 @@ def test_f1b_text_volunteering_protected_values_is_ungrounded_after_one_retry():
     assert len(be.calls) == 2
     retry = be.calls[1]["user"]
     assert "REJECTED BECAUSE" in retry and "private value" in retry.split("REJECTED BECAUSE", 1)[1]
-    assert_no_s(retry.split("REJECTED BECAUSE", 1)[1], "the retry instruction")
+
+
+def test_f1b_retry_instruction_holds_no_s_value():
+    """Handoff F1b: 'the retry prompt ends REJECTED BECAUSE: ...private value and holds no S value'.
+    DEFECT (LOW): the retry lists the raw token violations ("number 2001; number 03; month March;
+    word Zzzfaith"), which are fragments of S values the model volunteered. Only the stored note is
+    reduced to kinds (_note_for); the prompt is not. The prompt goes to the local model only."""
+    a, be, _ = resolve_one(f1b_field(), on=True, replies=[F1B_REPLY, F1B_REPLY])
+    tail = be.calls[1]["user"].split("REJECTED BECAUSE", 1)[1]
+    assert_no_s(tail, "the retry instruction", S_MARKERS + ("march",))
 
 
 def test_f1b_a_clean_retry_may_fill():
@@ -410,9 +419,10 @@ def test_f1d_evidence_only_an_s_line_supports_is_not_found():
 def test_f1_non_local_equivalent_flag_off_behaves_like_before():
     """A remote backend means resolve_ctx hands model_sees_sensitive=False (T6): the resolver then
     shows the model no S value and tags nothing, whatever the config key says."""
-    f = f1a_field()
+    f = field("a", F1A_LABEL, FieldType.DROPDOWN, ("Other", "Prefer not to say"))
     a, be, ctx = resolve_one(f, on=False, replies=[{"choice": 0, "evidence": "x"}] * 2)
     assert ctx.model_sees_sensitive is False
+    assert be.calls, "the model was asked"
     for c in be.calls:
         assert_no_s(c["user"], "prompt to a non-local backend")
     assert a.sensitive is False
@@ -633,6 +643,9 @@ def test_f3_a_get_builds_no_http_client():
 
 def _doctor(apply_on: bool, backend) -> str:
     w = make_world(apply_block={"model_sees_sensitive": apply_on})
+    (w.tmp / "watchlist.yaml").write_text(
+        "version: 1\ncompanies:\n  - name: Acme\n    careers_url: https://acme.example/careers\n"
+        "    provider: greenhouse\n    slug: acme\n", encoding="utf-8")
     out = io.StringIO()
     real = cli.backends.build
     cli.backends.build = lambda _b: backend
