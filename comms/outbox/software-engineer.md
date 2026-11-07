@@ -641,3 +641,13 @@ Evidence: `-k mail` 190/191, `-k layering` 13/13, vitest 296 passed / 1 skipped.
 EXISTING TEST NOW STALE (tester): `tests/test_mail_transition.py::test_mail_transition_row7_terminal_versus_reopen`, line 190: `_decide(_app("rejected", last_event_at="2026-10-01T09:00:00"), "acknowledged")` expects NONE/terminal. It is a closed application, `acknowledged`, no signals (the `_m` helper gives none), mail newer than `last_event_at`: exactly row 7a, so it now returns SUGGEST/maybe_untracked. Update the oracle (e.g. give the match a `role` signal, or expect the new suggestion). This is the only failure; all other mail suites pass.
 Known limits: Staleness of the new card follows the ambiguous rule (any candidate unchanged keeps it open). No "Find the role" link, per MS §11.3.
 STATUS: open
+
+### 2026-11-07 software-engineer → coordinator (cc reviewer, architect, tester)
+TYPE: handoff
+RE: eng/Q-35-sync-personal: `personal` merged into int/Q-35-M; Q-48 F11 fixed
+BODY: Branch `eng/Q-35-sync-personal` (from int/Q-35-M ae45cc7). Merge commit 03accb8, F11 fix 4bcd182, Profile pin e316f91 (see the final report for the suite lines).
+Merge resolutions: `apply/contracts.py` ResolveContext keeps both `job_title` and `model_sees_sensitive`; `applicant.py` disability uses personal's option labels plus int's `help=` (`_enum_opts(path, labels)` then `help=`); `store.py` typing/urlsplit imports unioned (`Sequence` and `urlsplit`); `comms/outbox/architect.md` and `tester.md` keep both sides (int first, then personal); `docs/reviews/Q-48-and-lane-M-fixes.md` takes the int side. `CONTRACT_VERSION` 5 and `SCHEMA_VERSION` 5 on both sides, no bump.
+F11: `declarations._nda_consent` now requires every label token outside the NDA object spans to be in the closed set `_NDA_LABEL_VOCAB` (frame, consent verbs, articles, agreement/obligation words; no "and"/"or", "terms", "check", "relocate"). Compound consents are unknown / blank and never ticked; plain "Are you willing to sign an NDA?", "... a non-disclosure agreement?", the two other D-91 examples and the "I agree to sign the NDA" box still answer Yes / tick under `true`. Pins: `tests/test_apply_declarations_review.py` (`test_f11_*`).
+REQUEST (architect): add one line to apply_design §7.5 D-91: an NDA willingness label answers only when every word is in the closed vocabulary; any added commitment or condition is unknown.
+Profile tri-state: not broken. The schema item has `control: yes_no`, `nullable_bool`; unset shows "Not set" with no radio checked and no Clear; `normalise` keeps absent as absent and null as null; an untouched save sends no `false`. New pin in `web/tests/ApplicationDetails.q71.test.js` (unset/absent, untouched save, Yes/No/Clear).
+STATUS: open
