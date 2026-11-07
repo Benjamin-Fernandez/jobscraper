@@ -76,19 +76,10 @@ check_attempt_table()
 # ---------------------------------------------------------------- log (§17)
 
 def redact(line: str, values: Sequence[str]) -> str:
-    """`line` with every value replaced by "[redacted]", case-insensitive,
-    longest first (a full address before one of its words). A purely
-    alphabetic value matches only as a whole word, so a short profile value
-    such as a grade type does not eat the word "captcha"; a value with a digit
-    or any other character (a phone, a postal code, an email) matches anywhere,
-    so 91234567 is caught inside +6591234567 (review F6)."""
-    for v in sorted({str(v).strip() for v in values if v and len(str(v).strip()) >= 3},
-                    key=lambda s: (-len(s), s)):
-        pat = re.escape(v)
-        if re.fullmatch(r"[A-Za-z ]+", v):
-            pat = r"(?<![A-Za-z])" + pat + r"(?![A-Za-z])"
-        line = re.sub(pat, REDACTED, line, flags=re.I)
-    return line
+    """`line` with every value replaced by "[redacted]" (the scrubber lives in
+    `applicant.scrub`, so the resolver can share it; see there for the matching
+    rules, review F6)."""
+    return applicant.scrub(line, values, REDACTED)
 
 
 class _Log:

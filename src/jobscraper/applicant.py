@@ -38,7 +38,7 @@ import tempfile
 from dataclasses import dataclass
 from fractions import Fraction
 from pathlib import Path
-from typing import Any, Iterable, Optional
+from typing import Any, Iterable, Optional, Sequence
 
 import yaml
 
@@ -128,6 +128,9 @@ LLM_ALLOW_SENSITIVE: tuple[str, ...] = (
     "identity.date_of_birth", "identity.gender", "singapore_status", "us_self_id",
     "declarations", "contact",
 )
+# The part of that addition that may also ground an answer (ADR-0008 Option C):
+# contact details are the applicant's own, typed by code into a form anyway.
+LLM_ALLOW_CONTACT: tuple[str, ...] = ("contact",)
 
 
 def is_sensitive(path: str) -> bool:
@@ -1683,14 +1686,20 @@ def json_safe(value: Any) -> Any:
 # What a model may see, the grounding corpus, log redaction (§5.3, §7.7)
 # --------------------------------------------------------------------------
 
-def llm_extract(profile: dict, *, sensitive: bool = False) -> dict:
+def llm_extract(profile: dict, *, sensitive: bool = False, protected: bool = True) -> dict:
     """The non-sensitive allow-list (§5.3) as a nested dict, in the profile's
     shape. Nothing else from the profile ever reaches a prompt.
 
     `sensitive=True` (D-105: only when ResolveContext.model_sees_sensitive) adds
-    LLM_ALLOW_SENSITIVE, so S values may be in the prompt. Never `extra`."""
+    LLM_ALLOW_SENSITIVE, so S values may be in the prompt. Never `extra`.
+    `protected=False` keeps only the contact details of that addition (the
+    grounding corpus, ADR-0008 Option C: the model may read a protected value,
+    but cannot ground an answer on it)."""
     out: dict = {}
-    for path in LLM_ALLOW + (LLM_ALLOW_SENSITIVE if sensitive else ()):
+    extra_paths = LLM_ALLOW_SENSITIVE if sensitive else ()
+    if sensitive and not protected:
+        extra_paths = LLM_ALLOW_CONTACT
+    for path in LLM_ALLOW + extra_paths:
         v = _get(profile or {}, path)
         if v is None:
             continue
@@ -1773,21 +1782,22 @@ def work_rights_text(profile: dict) -> str:
 
 
 def grounding_text(profile: dict, today: Optional[_dt.date] = None, *,
-                   sensitive: bool = False) -> str:
+                   sensitive: bool = False, protected: bool = True) -> str:
     """The profile part of the tier-5 grounding corpus (§7.7): every
     non-sensitive value one per line (the legal and preferred names, then the
     llm_extract allow-list), then the computed facts as sentences, then the
     work-rights sentence (D-75).
 
-    `sensitive=True` (D-105) passes through to `llm_extract`: the corpus is what
-    the model saw, so S values it was shown may ground its answer."""
+    `sensitive=True` (D-105) passes through to `llm_extract`. `protected=False`
+    leaves the protected S values (everything but contact details) out of the
+    corpus even though the model saw them: reading, not deciding (ADR-0008)."""
     lines: list[str] = []
     for path in ("identity.legal_first_name", "identity.legal_last_name",
                  "identity.preferred_name"):
         v = _get(profile or {}, path)
         if not _empty(v):
             lines.append(str(v))
-    for _path, v in _walk(llm_extract(profile, sensitive=sensitive)):
+    for _path, v in _walk(llm_extract(profile, sensitive=sensitive, protected=protected)):
         if v is None or isinstance(v, bool) or (isinstance(v, str) and not v.strip()):
             continue
         lines.append(str(v))
@@ -1815,6 +1825,41 @@ def sensitive_strings(profile: dict) -> list[str]:
         if isinstance(v, str) and len(v.strip()) >= 3:
             vals.add(v.strip())
     return sorted(vals, key=lambda s: (-len(s), s))
+
+
+def protected_strings(profile: dict) -> list[str]:
+    """`sensitive_strings` without the contact details: the S values the model may
+    read under D-105 but must never decide on or repeat to an employer (ADR-0008
+    Option C: race, religion, date of birth, gender, residency, NS, declarations,
+    US self-ID). A date also yields its year, since "born 2001" gives it away.
+    Longest first. For matching only; never log the result."""
+    vals: set[str] = set()
+    for path, v in _walk(profile or {}):
+        if not is_sensitive(path) or re.sub(r"\[\d+\]", "", path).split(".")[0] == "contact":
+            continue
+        v = _date_text(v)
+        if isinstance(v, str) and len(v.strip()) >= 3:
+            vals.add(v.strip())
+            m = re.match(r"(\d{4})-\d\d-\d\d$", v.strip())
+            if m:
+                vals.add(m.group(1))
+    return sorted(vals, key=lambda s: (-len(s), s))
+
+
+def scrub(line: str, values: Sequence[str], mark: str) -> str:
+    """`line` with every value replaced by `mark`, case-insensitive, longest
+    first (a full address before one of its words). A purely alphabetic value
+    matches only as a whole word, so a short profile value such as a grade type
+    does not eat the word "captcha"; a value with a digit or any other character
+    (a phone, a postal code, an email) matches anywhere, so 91234567 is caught
+    inside +6591234567 (review F6). Values under 3 characters are ignored."""
+    for v in sorted({str(v).strip() for v in values if v and len(str(v).strip()) >= 3},
+                    key=lambda s: (-len(s), s)):
+        pat = re.escape(v)
+        if re.fullmatch(r"[A-Za-z ]+", v):
+            pat = r"(?<![A-Za-z])" + pat + r"(?![A-Za-z])"
+        line = re.sub(pat, mark, line, flags=re.I)
+    return line
 
 
 _EXTRA_PATH = re.compile(r"^extra\.[^.\[]+\.(?:by_employer\.[^.\[]+\.)?([^.\[]+)")
