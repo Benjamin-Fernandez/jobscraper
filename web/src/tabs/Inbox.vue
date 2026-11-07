@@ -12,16 +12,17 @@
 // posting on the company's site asks afterwards whether you applied, the way
 // LinkedIn does, so the record is one click away.
 import { computed, nextTick, onActivated, onBeforeUnmount, onDeactivated, onMounted, ref, watch } from 'vue'
-import { describeError, getPosting, setApplicationStatus, untrackApplication } from '../api.js'
+import { describeError, setApplicationStatus, untrackApplication } from '../api.js'
 import { dismiss, dismissedAt, isDismissed, migrateSessionDismissals, restore } from '../dismissed.js'
 import { cleanLocation, exactTime, plural, safeUrl, shortDate } from '../format.js'
-import { parseDescription, previewBlocks } from '../jd.js'
+import { loadPosting, postingEntry } from '../postingCache.js'
 import { tabEmits, tabProps } from '../shell.js'
 import { showToast } from '../toast.js'
 import { requestPicker, runLabel } from '../runs.js'
 import { SHORTCUTS_EVENT } from '../shortcuts.js'
 import CompanyMark from '../components/CompanyMark.vue'
 import Icon from '../components/Icon.vue'
+import JobDetail from '../components/JobDetail.vue'
 import RunSelector from '../components/RunSelector.vue'
 import SetupChecklist from '../components/SetupChecklist.vue'
 import TabLoading from '../components/TabLoading.vue'
@@ -108,11 +109,6 @@ const listed = computed(() => groups.value.filter(g => g.open).flatMap(g => g.jo
 const companies = computed(() => new Set(visible.value.map(j => j.company)).size)
 const selected = computed(() => listed.value.find(j => j.id === selectedId.value) ?? listed.value[0] ?? null)
 
-function years(job) {
-  if (job.yoe_min === null || job.yoe_min === undefined) return null
-  return job.yoe_min === 0 ? 'No experience required' : `${plural(job.yoe_min, 'year')} experience`
-}
-
 function shortYears(job) {
   if (job.yoe_min === null || job.yoe_min === undefined) return null
   return job.yoe_min === 0 ? 'Entry level' : `${job.yoe_min}+ yrs`
@@ -123,30 +119,10 @@ function cardMeta(job) {
 }
 
 // ---- the job description (M16): fetched when a role is opened, kept per role ----
-
-const PREVIEW_CHARS = 1400
-const descriptions = ref({})       // job id -> { state: 'loading' | 'ok' | 'error', text, error }
-const expanded = ref(false)
-
-async function loadDescription(id) {
-  descriptions.value = { ...descriptions.value, [id]: { state: 'loading', text: '' } }
-  try {
-    const posting = await getPosting(id)
-    descriptions.value = { ...descriptions.value, [id]: { state: 'ok', text: posting.description || '' } }
-  } catch (e) {
-    descriptions.value = { ...descriptions.value, [id]: { state: 'error', text: '', error: describeError(e) } }
-  }
-}
-
-const description = computed(() => (selected.value ? descriptions.value[selected.value.id] ?? null : null))
-// Headings, lists and paragraphs, cut to a preview at a block boundary until Show more.
-const descriptionBlocks = computed(() => parseDescription(description.value?.text))
-const descriptionPreview = computed(() => previewBlocks(descriptionBlocks.value, PREVIEW_CHARS))
-const descriptionShown = computed(() => (expanded.value ? descriptionBlocks.value : descriptionPreview.value.blocks))
-
+// JobDetail shows it; the Inbox starts the fetch as soon as a role is selected
+// (postingCache is shared with the Applications tab).
 watch(() => selected.value?.id, id => {
-  expanded.value = false
-  if (id && !descriptions.value[id]) loadDescription(id)
+  if (id && !postingEntry(id)) loadPosting(id)
 }, { immediate: true })
 
 // ---- selection and the keyboard ----
@@ -548,112 +524,57 @@ onDeactivated(() => window.removeEventListener('keydown', onShortcut))
           <Icon name="back" /> All roles
         </button>
 
-        <header class="detail-head">
-          <CompanyMark :name="selected.company" size="lg" />
-          <div class="detail-names">
-            <h3 id="detail-title" class="detail-title" tabindex="-1">{{ selected.title }}</h3>
-            <p class="detail-company">{{ selected.company }}</p>
-          </div>
-        </header>
-
-        <ul class="facts">
-          <li v-if="selected.location"><Icon name="pin" /> {{ cleanLocation(selected.location) }}</li>
-          <li v-if="years(selected)"><Icon name="briefcase" /> {{ years(selected) }}</li>
-          <li v-if="selected.decided_at"><Icon name="clock" /> Found {{ shortDate(selected.decided_at) }}</li>
-        </ul>
-
-        <p v-if="selected.closed" class="notice warn stale-note">
-          This posting has been taken down on the company's site.
-        </p>
-
-        <div class="action-bar">
-        <div class="actions">
-          <a
-            v-if="safeUrl(selected.url)"
-            class="button primary open"
-            :href="safeUrl(selected.url)"
-            target="_blank"
-            rel="noopener noreferrer"
-            :aria-keyshortcuts="keyOf('O')"
-            @click="markOpened(selected)"
-          >Apply on company site <Icon name="external" /><span class="visually-hidden"> (opens {{ selected.company }} in a new tab)</span></a>
-          <button type="button" class="apply" :disabled="busy" :aria-keyshortcuts="keyOf('A')" @click="track(selected, 'applied')">
-            <Icon name="check" /> Mark applied
-          </button>
-          <button type="button" class="save" :disabled="busy" :aria-keyshortcuts="keyOf('S')" @click="track(selected, 'to_apply')">
-            <Icon name="bookmark" /> Save
-          </button>
-          <button v-if="isDismissed(selected)" type="button" class="ghost undismiss" :disabled="busy" :aria-keyshortcuts="keyOf('X')" @click="moveBack(selected)">
-            <Icon name="undo" /> Move back to new roles
-          </button>
-          <button v-else type="button" class="ghost dismiss" :disabled="busy" :aria-keyshortcuts="keyOf('X')" @click="markNotInterested(selected)">
-            <Icon name="x" /> Not interested
-          </button>
-        </div>
-        <p class="shortcuts muted">
-          <template v-if="shortcutsOn">
-            Keys: <kbd>S</kbd> save · <kbd>A</kbd> applied · <kbd>X</kbd> not interested · <kbd>O</kbd> open ·
-            <kbd>J</kbd> <kbd>K</kbd> next, previous · <kbd>Z</kbd> undo · <kbd>?</kbd> all keys ·
-          </template>
-          <button
-            type="button"
-            class="link shortcuts-toggle"
-            :aria-label="shortcutsOn ? 'Turn off keyboard shortcuts' : undefined"
-            @click="shortcutsOn = !shortcutsOn"
-          >
-            {{ shortcutsOn ? 'Turn off' : 'Turn on keyboard shortcuts' }}
-          </button>
-        </p>
-        </div>
-        <p v-if="isDismissed(selected)" class="muted small ni-note">
-          You marked this Not interested{{ dismissedAt(selected) ? ` on ${shortDate(dismissedAt(selected))}` : '' }}.
-        </p>
-
-        <div v-if="opened.has(selected.id)" class="did-apply" role="status">
-          <span>Did you apply at {{ selected.company }}?</span>
-          <button type="button" class="primary did-apply-yes" :disabled="busy" @click="track(selected, 'applied')">Yes, mark applied</button>
-        </div>
-
-        <section v-if="selected.reason" class="why">
-          <h4><Icon name="target" /> Why it matches</h4>
-          <p class="reason">{{ selected.reason }}</p>
-        </section>
-
-        <section v-if="selected.matched_skills && selected.matched_skills.length" class="why">
-          <h4>Matched skills</h4>
-          <ul class="skills" aria-label="Matched skills">
-            <li v-for="skill in selected.matched_skills" :key="skill" class="chip">{{ skill }}</li>
-          </ul>
-        </section>
-
-        <section class="why jd">
-          <h4><Icon name="briefcase" /> About the job</h4>
-          <p class="visually-hidden" role="status">{{ description?.state === 'error' ? 'Could not load the description.' : '' }}</p>
-          <p v-if="!description || description.state === 'loading'" class="muted jd-status">Loading the description…</p>
-          <p v-else-if="description.state === 'error'" class="muted jd-status">
-            Could not load the description ({{ description.error }}). It is on the company site.
-          </p>
-          <p v-else-if="!description.text" class="muted jd-status">
-            The job board gave no description for this role - read it on the company site.
-          </p>
-          <template v-else>
-            <div class="jd-text">
-              <template v-for="(block, i) in descriptionShown" :key="i">
-                <h5 v-if="block.type === 'heading'" class="jd-h">{{ block.text }}</h5>
-                <ul v-else-if="block.type === 'list'" class="jd-list">
-                  <li v-for="(item, k) in block.items" :key="k">{{ item }}</li>
-                </ul>
-                <p v-else class="jd-p">{{ block.text }}</p>
-              </template>
+        <JobDetail :job="selected">
+          <template #actions>
+            <div class="action-bar">
+            <div class="actions">
+              <a
+                v-if="safeUrl(selected.url)"
+                class="button primary open"
+                :href="safeUrl(selected.url)"
+                target="_blank"
+                rel="noopener noreferrer"
+                :aria-keyshortcuts="keyOf('O')"
+                @click="markOpened(selected)"
+              >Apply on company site <Icon name="external" /><span class="visually-hidden"> (opens {{ selected.company }} in a new tab)</span></a>
+              <button type="button" class="apply" :disabled="busy" :aria-keyshortcuts="keyOf('A')" @click="track(selected, 'applied')">
+                <Icon name="check" /> Mark applied
+              </button>
+              <button type="button" class="save" :disabled="busy" :aria-keyshortcuts="keyOf('S')" @click="track(selected, 'to_apply')">
+                <Icon name="bookmark" /> Save
+              </button>
+              <button v-if="isDismissed(selected)" type="button" class="ghost undismiss" :disabled="busy" :aria-keyshortcuts="keyOf('X')" @click="moveBack(selected)">
+                <Icon name="undo" /> Move back to new roles
+              </button>
+              <button v-else type="button" class="ghost dismiss" :disabled="busy" :aria-keyshortcuts="keyOf('X')" @click="markNotInterested(selected)">
+                <Icon name="x" /> Not interested
+              </button>
             </div>
-            <button
-              v-if="descriptionPreview.cut"
-              type="button"
-              class="link jd-more"
-              @click="expanded = !expanded"
-            >{{ expanded ? 'Show less' : 'Show more' }}</button>
+            <p class="shortcuts muted">
+              <template v-if="shortcutsOn">
+                Keys: <kbd>S</kbd> save · <kbd>A</kbd> applied · <kbd>X</kbd> not interested · <kbd>O</kbd> open ·
+                <kbd>J</kbd> <kbd>K</kbd> next, previous · <kbd>Z</kbd> undo · <kbd>?</kbd> all keys ·
+              </template>
+              <button
+                type="button"
+                class="link shortcuts-toggle"
+                :aria-label="shortcutsOn ? 'Turn off keyboard shortcuts' : undefined"
+                @click="shortcutsOn = !shortcutsOn"
+              >
+                {{ shortcutsOn ? 'Turn off' : 'Turn on keyboard shortcuts' }}
+              </button>
+            </p>
+            </div>
+            <p v-if="isDismissed(selected)" class="muted small ni-note">
+              You marked this Not interested{{ dismissedAt(selected) ? ` on ${shortDate(dismissedAt(selected))}` : '' }}.
+            </p>
+
+            <div v-if="opened.has(selected.id)" class="did-apply" role="status">
+              <span>Did you apply at {{ selected.company }}?</span>
+              <button type="button" class="primary did-apply-yes" :disabled="busy" @click="track(selected, 'applied')">Yes, mark applied</button>
+            </div>
           </template>
-        </section>
+        </JobDetail>
       </article>
     </div>
   </section>
@@ -744,25 +665,6 @@ onDeactivated(() => window.removeEventListener('keydown', onShortcut))
   scroll-padding-top: 5rem; /* a focused control is not left under the pinned action bar */
 }
 .back { display: none; margin: calc(-1 * var(--space-2)) 0 var(--space-3) calc(-1 * var(--space-2)); }
-.detail-head { display: flex; align-items: center; gap: var(--space-4); }
-.detail-names { min-width: 0; }
-.detail-title { margin: 0; font-size: var(--text-xl); font-weight: 650; letter-spacing: -0.01em; }
-.detail-company { margin: var(--space-1) 0 0; color: var(--text-2); font-weight: 500; }
-
-.facts {
-  list-style: none;
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-2) var(--space-5);
-  margin: var(--space-4) 0 0;
-  padding: 0;
-  color: var(--text-2);
-  font-size: var(--text-sm);
-}
-.facts li { display: inline-flex; align-items: center; gap: var(--space-2); }
-.facts .icon { color: var(--muted); }
-.stale-note { margin: var(--space-4) 0 0; }
-
 .actions {
   display: flex;
   flex-wrap: wrap;
@@ -803,32 +705,6 @@ onDeactivated(() => window.removeEventListener('keydown', onShortcut))
   font-weight: 500;
 }
 
-.why { margin-top: var(--space-5); }
-.why h4 {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  margin: 0 0 var(--space-2);
-  font-size: var(--text-xs);
-  font-weight: 650;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: var(--muted);
-}
-.reason { margin: 0; max-width: 68ch; color: var(--text); }
-.skills { list-style: none; padding: 0; margin: 0; display: flex; flex-wrap: wrap; gap: var(--space-1); }
-/* The description as the employer wrote it: its own line breaks, readable width. */
-.jd { padding-top: var(--space-4); border-top: 1px solid var(--border); }
-.jd-text {
-  overflow-wrap: anywhere; max-width: 72ch;
-  font-size: var(--text-sm); line-height: 1.65; color: var(--text);
-}
-.jd-text > :first-child { margin-top: 0; }
-.jd-h { margin: var(--space-4) 0 var(--space-1); font-size: var(--text-sm); font-weight: 650; text-wrap: balance; }
-.jd-p { margin: 0 0 var(--space-2); white-space: pre-line; text-wrap: pretty; }
-.jd-list { margin: 0 0 var(--space-2); padding-left: 1.25rem; }
-.jd-list li + li { margin-top: 2px; }
-.jd-list li::marker { color: var(--muted); }
 /* Keyboard hints: for a keyboard, not a touch screen. */
 .shortcuts { margin: var(--space-2) 0 0; font-size: var(--text-xs); }
 .shortcuts kbd {
@@ -840,8 +716,6 @@ onDeactivated(() => window.removeEventListener('keydown', onShortcut))
 .shortcuts-toggle { font-size: inherit; color: var(--muted); }
 .shortcuts-toggle:hover:not(:disabled) { color: var(--accent); }
 @media (hover: none) { .shortcuts { display: none; } }
-.jd-status { margin: 0; font-size: var(--text-sm); }
-.jd-more { margin-top: var(--space-2); font-size: var(--text-sm); }
 
 .empty .icon { display: block; margin: 0 auto var(--space-2); }
 
