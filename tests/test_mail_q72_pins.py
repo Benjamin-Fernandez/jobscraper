@@ -128,8 +128,10 @@ def test_q72_contract_has_the_reason_its_text_and_is_a_suggestion():
 def test_q72_o1_the_d160_acknowledgement_over_three_closed_applications_asks_a_question():
     apps = _closed(3)
     _untracked(_decide(apps, "acknowledged", at=ACK_AT, kind="ambiguous"))
-    # All three candidates are offered (a Change has no field for them; the flow stores the matcher's).
-    assert [a.job_id for a in apps] == ["acme-1", "acme-2", "acme-3"]
+    # MS 8 7a note: `remaining_candidates` still returns () for it (row 4 offers none; the flow
+    # stores the matcher's candidates, pinned in test_q72_o1_flow_*).
+    assert _offered(apps, "acknowledged", kind="ambiguous") == []
+    assert _offered(apps, "rejected", at=REJ_AT, kind="ambiguous") == []
 
 
 # ------------------------------------------------------------------ 2
@@ -173,6 +175,64 @@ def test_q72_o2_flow_stores_a_suggestion_with_no_target_and_leaves_the_message_u
         assert rep2.accounts[0].counts["suggested"] == 1, rep2.accounts[0].counts
         again = rows(w.st, "SELECT reason, job_id FROM mail_evidence WHERE gm_msgid=?", "1800000000000007202")
         assert again == [("maybe_untracked", None)], again
+
+
+_ACK = ("Hi Alex, thank you for applying for the Graduate Platform Engineer role at Northwind Traders. "
+        "Our team will review your application and contact you if your experience matches our needs.")
+
+
+def _ack_mail(srv, gm="1800000000000007301"):
+    srv.deliver(make_eml(NW_NEWS[0], "Thank you for applying to Northwind Traders", _ACK,
+                         date="Mon, 02 Nov 2026 09:00:00 +0800"), gm_msgid=gm, gm_thrid=gm)
+    return gm
+
+
+@needs(FLOW)
+def test_q72_o1_flow_three_closed_applications_store_one_suggestion_offering_all_three():
+    with _World(three=True) as w:
+        assert statuses(w.st) == {"nw-dataeng": "rejected", "nw-analyst": "rejected", "nw-cloud": "rejected"}
+        gm = _ack_mail(w.srv)
+        rep = run(w.cfg, w.srv, backend=FakeBackend(), now=w.now)
+        counts = rep.accounts[0].counts
+        assert counts["suggested"] == 1 and counts["applied"] == 0, counts
+        msg = rows(w.st, "SELECT job_id, outcome, reason, match_json FROM mail_messages WHERE gm_msgid=?", gm)
+        assert len(msg) == 1 and msg[0][:3] == (None, "suggested", "maybe_untracked"), msg
+        mj = json.loads(msg[0][3])
+        assert mj["kind"] == "ambiguous" and "role" not in mj["signals"] and "req_id" not in mj["signals"], mj
+        ev = rows(w.st, "SELECT job_id, from_status, to_status, kind, state, reason, candidates_json "
+                        "FROM mail_evidence WHERE gm_msgid=?", gm)
+        assert len(ev) == 1 and ev[0][:6] == (None, None, None, "suggestion", "open", "maybe_untracked"), ev
+        cands = json.loads(ev[0][6])
+        assert sorted((x["job_id"], x["status"]) for x in cands) == \
+            [("nw-analyst", "rejected"), ("nw-cloud", "rejected"), ("nw-dataeng", "rejected")], cands
+        sugg = w.st.mail_suggestions(w.now)
+        assert len(sugg) == 1 and sorted(x["job_id"] for x in sugg[0]["candidates"]) == \
+            ["nw-analyst", "nw-cloud", "nw-dataeng"], sugg
+
+
+def _snapshot(st):
+    return (rows(st, "SELECT job_id, status FROM applications ORDER BY job_id"),
+            rows(st, "SELECT job_id, from_status, to_status, by, at FROM app_events ORDER BY id"))
+
+
+@needs(FLOW)
+def test_q72_f2_flow_a_maybe_untracked_suggestion_cannot_be_accepted_only_dismissed():
+    with _World(three=True) as w:
+        gm = _ack_mail(w.srv)
+        run(w.cfg, w.srv, backend=FakeBackend(), now=w.now)
+        eid = rows(w.st, "SELECT id FROM mail_evidence WHERE gm_msgid=?", gm)[0][0]
+        before = _snapshot(w.st)
+        ranks = {"to_apply": 0, "applied": 1, "assessment": 2, "interviewing": 3, "offer": 4}
+        terminal = ("rejected", "withdrawn")
+        for job in (None, "nw-dataeng", "nw-cloud"):         # with or without a candidate picked
+            assert w.st.mail_accept(eid, job, w.now, ranks=ranks, terminal=terminal) == (False, "not_open"), job
+        assert rows(w.st, "SELECT state FROM mail_evidence WHERE id=?", eid) == [("open",)]
+        assert _snapshot(w.st) == before, "a refused accept must change nothing"
+        assert w.st.mail_dismiss(eid, w.now) == (True, "ok")
+        assert rows(w.st, "SELECT state FROM mail_evidence WHERE id=?", eid) == [("dismissed",)]
+        assert not w.st.mail_suggestions(w.now)
+        assert _snapshot(w.st) == before, "Got it changes no application and writes no event"
+        assert rows(w.st, "SELECT job_id FROM mail_messages WHERE gm_msgid=?", gm) == [(None,)]
 
 
 # ------------------------------------------------------------------ 3, 4
@@ -280,8 +340,8 @@ def test_q72_o9_adding_the_application_afterwards_is_unchanged():
 
 class _World:
     """The Northwind world with ONE closed application (stands in for Acme), or the golden pair."""
-    def __init__(self, *, golden_pair=False):
-        self.golden_pair, self.now = golden_pair, "2026-11-02T12:00:00"
+    def __init__(self, *, golden_pair=False, three=False):
+        self.golden_pair, self.three, self.now = golden_pair, three, "2026-11-02T12:00:00"
 
     def __enter__(self):
         from jobscraper.store import Store
@@ -294,7 +354,19 @@ class _World:
         res, self.aid = connect(self.cfg, self.srv)
         assert res == "ok", res
         self.st.mail_account_set(self.aid, first_sync_from="2026-09-14T00:00:00")
-        if not self.golden_pair:
+        if self.three:                       # the D-160 shape: three applications at one employer, all closed
+            cid = self.st.conn.execute("SELECT id FROM companies WHERE key='northwind'").fetchone()[0]
+            self.st.conn.execute("INSERT INTO jobs (job_id, company_id, title, url) VALUES (?,?,?,?)",
+                                 ("nw-cloud", cid, "Graduate Cloud Analyst",
+                                  "https://boards.greenhouse.io/northwind/jobs/3333"))
+            self.st.conn.commit()
+            self.st.set_application_status("nw-cloud", "to_apply", company="Northwind Traders Pte Ltd",
+                                           role="Graduate Cloud Analyst")
+            for j in ("nw-dataeng", "nw-analyst", "nw-cloud"):
+                self.st.set_application_status(j, "rejected")
+            self.st.conn.execute("UPDATE app_events SET at=?", (OWNER,))
+            self.st.conn.commit()
+        elif not self.golden_pair:
             self.st.conn.execute("DELETE FROM app_events WHERE job_id='nw-analyst'")
             self.st.conn.execute("DELETE FROM applications WHERE job_id='nw-analyst'")
             self.st.set_application_status("nw-dataeng", "rejected")
