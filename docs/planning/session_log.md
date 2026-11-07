@@ -34,3 +34,8 @@ One entry per session. Older handover notes end up here, so `handover.md` stays 
 - Stage A brief (researcher; IMAP app password recommended over Gmail API OAuth: 7-day Testing-mode token expiry), stage B design + BP + ADR-0007 (architect), stage E by the Coordinator (READY; amendment E1 Oleeo `tal.net` tenants), R2 header-only scan of the application mailbox with owner consent (special-use folders present; ATS mail dkim/spf/dmarc pass; Oleeo found), rules v1 (researcher), S0 + T0 merged into int.
 - Decisions D-90, D-91, D-92. Owner answers: application Gmail first; header scan yes.
 - Paused mid-build: lanes S, I, F and the tester stopped on the owner's word; state in the handover Q-60 block.
+
+## 2026-11-07 · Q-60 session (resumed; merged)
+- Lane F review fixes (D-157, D-158, D-159), tester T5/T6 and pins merged on int; IDs renamed into D-150..D-169 (D-155). int e0e97e4: 1106/1106.
+- X1 dev check on a DB copy (8769). Owner dry run on a fresh copy: 19 read, 0 changes (D-160; untracked tenant B application → Q-71).
+- Live DB backed up; merged into personal c20332a; suite 1106/1106, vitest 296/1 skipped, bundle rebuilt, smoke OK; pushed.
