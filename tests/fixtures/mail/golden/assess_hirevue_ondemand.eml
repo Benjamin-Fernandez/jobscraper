@@ -1,0 +1,20 @@
+Authentication-Results: mx.google.com;
+       dkim=pass header.i=@hirevue.com header.s=s1 header.b=Zm9vYmFy;
+       spf=pass (google.com: domain of noreply@hirevue.com designates 192.0.2.10 as permitted sender) smtp.mailfrom=noreply@hirevue.com;
+       dmarc=pass (p=REJECT sp=REJECT dis=NONE) header.from=hirevue.com
+From: Contoso Bank via HireVue <noreply@hirevue.com>
+To: Alex Applicant <alex.applicant@inbox.example>
+Subject: Contoso Bank has invited you to an on-demand video interview
+Date: Mon, 26 Oct 2026 02:00:00 +0000
+Message-ID: <golden-07@synthetic.test>
+MIME-Version: 1.0
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: 7bit
+
+Hi Alex,
+
+Contoso Bank has invited you to complete an on-demand video interview for the Technology Graduate Programme. You will record your answers to a set of questions; no interviewer will be present.
+
+Please complete it within 5 days.
+
+The HireVue Team

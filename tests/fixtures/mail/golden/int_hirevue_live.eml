@@ -1,0 +1,18 @@
+Authentication-Results: mx.google.com;
+       dkim=pass header.i=@hirevue.com header.s=s1 header.b=Zm9vYmFy;
+       spf=pass (google.com: domain of noreply@hirevue.com designates 192.0.2.10 as permitted sender) smtp.mailfrom=noreply@hirevue.com;
+       dmarc=pass (p=REJECT sp=REJECT dis=NONE) header.from=hirevue.com
+From: Example Corp via HireVue <noreply@hirevue.com>
+To: Alex Applicant <alex.applicant@inbox.example>
+Subject: Example Corp: live video interview scheduled
+Date: Wed, 28 Oct 2026 02:30:00 +0000
+Message-ID: <golden-12@synthetic.test>
+MIME-Version: 1.0
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: 7bit
+
+Hi Alex,
+
+Your live video interview with the Example Corp hiring team for the Graduate Software Engineer role has been scheduled. Interview confirmation: Thursday 12 November 2026, 10:00 SGT.
+
+HireVue

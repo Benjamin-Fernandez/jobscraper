@@ -19,6 +19,7 @@ from pydantic import BaseModel, Field, field_validator
 from jobscraper.config import Config
 from jobscraper.web.data import load_shortlist
 from jobscraper.web.deps import get_config, open_store
+from jobscraper.web.mailsync import gmail_url
 
 router = APIRouter(tags=["applications"])
 
@@ -65,6 +66,14 @@ def list_applications(request: Request,
         rows = [dict(r) for r in store.applications()]
         for row in rows:
             row["events"] = [dict(e) for e in store.application_events(row["job_id"])]
+        # F-50 (mail_status_design §11.1): an event an email made carries its
+        # evidence, so the History timeline can quote it and offer Undo.
+        evidence_for = getattr(store, "mail_evidence_for", None)
+        evidence = evidence_for([r["job_id"] for r in rows]) if callable(evidence_for) else {}
+    for row in rows:
+        for event in row["events"]:
+            event.setdefault("by", None)
+            event["mail"] = _mail_view(evidence.get(event.get("evidence_id")))
     for row in rows:
         job = by_id.get(str(row["job_id"]), {})
         row["company"] = row.get("company") or job.get("company")
@@ -72,6 +81,17 @@ def list_applications(request: Request,
         row["url"] = row.get("url") or job.get("url")
         row["run_no"] = job.get("run_no")
     return rows
+
+
+def _mail_view(ev: Optional[dict[str, Any]]) -> Optional[dict[str, Any]]:
+    """The evidence behind an email-made event (MS §11.1), or None."""
+    if not ev:
+        return None
+    return {"evidence_id": ev["id"], "kind": "auto" if ev["kind"] == "auto" else "accepted",
+            "state": ev["state"], "quote": ev["quote"], "subject": ev["subject"],
+            "sender_domain": ev["sender_domain"], "received_at": ev["received_at"],
+            "gmail_url": gmail_url(ev.get("account_address"), ev["gm_msgid"]),
+            "undoable": bool(ev.get("undoable"))}
 
 
 @router.post("/applications/{job_id}")

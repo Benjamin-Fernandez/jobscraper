@@ -27,6 +27,7 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 from jobscraper.config import Config, load_config
 from jobscraper.web import routers
 from jobscraper.web.jobs import CommandBuilder, JobManager, cli_command
+from jobscraper.web.mailsync import MailCommand, MailSyncRunner, cli_mail_command
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 
@@ -221,7 +222,9 @@ def create_app(cfg: Optional[Config] = None,
                static_dir: Path = STATIC_DIR,
                allowed_hosts: Optional[list[str]] = None,
                job_command: Optional[CommandBuilder] = None,
-               config_path: Optional[str | os.PathLike] = None) -> FastAPI:
+               config_path: Optional[str | os.PathLike] = None,
+               mail_timer: bool = False,
+               mail_command: Optional[MailCommand] = None) -> FastAPI:
     """Build the app. Every argument has a production default.
 
     `allowed_hosts` defaults to `web.allowed_hosts` in config.yaml, else the
@@ -232,6 +235,12 @@ def create_app(cfg: Optional[Config] = None,
     the child finds its config as this process did (`JOBSCRAPER_CONFIG`, which
     it inherits, else `config/config.yaml`). Jobs log under `data/jobs/`, beside
     the database.
+
+    `app.state.mail` is the F-50 `MailSyncRunner` (mail_status_design §10.1).
+    Its timer runs only with `mail_timer=True`, which `cmd_web` passes unless
+    `JOBSCRAPER_MAIL_SYNC=0`: tests and dev instances never read a mailbox by
+    themselves. `mail_command` builds the sync / connect children (default: the
+    `mail` CLI verbs), so tests stub them.
     """
     cfg = cfg or load_config()
     app = FastAPI(title="JobScraper", version="2")
@@ -246,6 +255,12 @@ def create_app(cfg: Optional[Config] = None,
     app.state.jobs = JobManager(cfg.db_path.parent / "jobs",
                                 job_command or cli_command(config_path),
                                 store_factory=app.state.store_factory)
+    app.state.mail = MailSyncRunner(cfg, cfg.db_path.parent, app.state.store_factory,
+                                    app.state.jobs,
+                                    mail_command or cli_mail_command(config_path))
+    if mail_timer:
+        app.router.add_event_handler("startup", app.state.mail.start_timer)
+    app.router.add_event_handler("shutdown", app.state.mail.stop)
 
     # API first: the static mount below catches every path it is given, so
     # anything registered after it would be unreachable.

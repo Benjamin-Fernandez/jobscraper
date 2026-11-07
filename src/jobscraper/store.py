@@ -20,10 +20,12 @@ import sqlite3
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Iterable, Optional
+from urllib.parse import urlsplit
 
 from .models import RawJob, WatchedCompany, posting_key
 
-SCHEMA_VERSION = 4   # 4: D-78 fill_cache + apply_answers evidence/shown_json/shown_origin/entry
+SCHEMA_VERSION = 5   # 4: D-78 fill_cache + apply_answers evidence/shown_json/shown_origin/entry
+                     # 5: F-50 mail_* tables (mail_status_design §9)
 
 # A posting closes after this many successful fetches in a row leave it out (H1-1).
 CLOSE_AFTER_MISSES = 2
@@ -318,6 +320,84 @@ FILL_CACHE_DDL = (
 )
 SCHEMA += "".join(stmt + ";\n" for stmt in FILL_CACHE_DDL)
 
+# F-50 application status from email (mail_status_design §9). Additive: every table
+# comes from CREATE TABLE IF NOT EXISTS, so `_migrate` needs no ALTER for them.
+SCHEMA += """
+-- F-50 mail status (mail_status_design §9). No bodies, no links, no passwords, no
+-- addresses except the owner's own mailbox address in mail_accounts.
+CREATE TABLE IF NOT EXISTS mail_accounts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    address TEXT NOT NULL UNIQUE,              -- lower-case Gmail address = IMAP user = vault user
+    host TEXT NOT NULL DEFAULT 'imap.gmail.com',
+    port INTEGER NOT NULL DEFAULT 993,
+    vault_service TEXT NOT NULL,               -- jobscraper:imap:<host>; never the password
+    shared_with_apply INTEGER NOT NULL DEFAULT 0,  -- 1 = the D-72 mailbox: disconnect keeps the vault entry
+    enabled INTEGER NOT NULL DEFAULT 1,        -- the owner's switch
+    consent_at TEXT NOT NULL, consent_version TEXT NOT NULL,
+    state TEXT NOT NULL DEFAULT 'ok',          -- AccountState
+    state_code TEXT,                           -- SyncCode of the last failure, NULL when ok
+    notes TEXT,                                -- comma list of NOTE_CODES
+    fail_count INTEGER NOT NULL DEFAULT 0, retry_after TEXT,
+    first_sync_from TEXT NOT NULL,             -- §5.3 window start, fixed at connect
+    last_sync_at TEXT, last_ok_at TEXT,
+    last_counts_json TEXT,                     -- COUNT_KEYS -> int
+    created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS mail_cursors (
+    account_id INTEGER NOT NULL,
+    role TEXT NOT NULL,                        -- MailboxRole
+    mailbox TEXT NOT NULL, uidvalidity INTEGER NOT NULL,
+    last_uid INTEGER NOT NULL,                 -- highest UID whose outcome is stored
+    last_scan_at TEXT NOT NULL,
+    PRIMARY KEY (account_id, role)
+);
+CREATE TABLE IF NOT EXISTS mail_messages (     -- one row per processed message: dedupe + audit
+    account_id INTEGER NOT NULL,
+    gm_msgid TEXT NOT NULL, gm_thrid TEXT,
+    role TEXT NOT NULL, uidvalidity INTEGER NOT NULL, uid INTEGER NOT NULL,
+    received_at TEXT NOT NULL,
+    sender_domain TEXT NOT NULL DEFAULT '',    -- "" for not_job_mail / own_mail / too_old
+    outcome TEXT NOT NULL, reason TEXT NOT NULL,
+    category TEXT, tier TEXT, rule_id TEXT,
+    job_id TEXT,                               -- the matched application
+    match_json TEXT,                           -- {"kind","signals":[...],"candidates":[...]}; no text
+    retries INTEGER NOT NULL DEFAULT 0,
+    processed_at TEXT NOT NULL,
+    PRIMARY KEY (account_id, gm_msgid)
+);
+CREATE INDEX IF NOT EXISTS idx_mail_messages_thread ON mail_messages(gm_thrid);
+CREATE INDEX IF NOT EXISTS idx_mail_messages_job ON mail_messages(job_id);
+CREATE INDEX IF NOT EXISTS idx_mail_messages_outcome ON mail_messages(outcome, processed_at);
+CREATE TABLE IF NOT EXISTS mail_evidence (     -- automatic changes and suggestions
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    account_id INTEGER,                        -- NULL after the mailbox is disconnected (no Gmail link then)
+    gm_msgid TEXT NOT NULL,
+    job_id TEXT,                               -- NULL for an ambiguous suggestion
+    candidates_json TEXT,                      -- [{"job_id","status"}] when ambiguous
+    kind TEXT NOT NULL CHECK (kind IN ('auto', 'suggestion')),
+    state TEXT NOT NULL,                       -- auto: applied | undone; suggestion: open | accepted | dismissed | superseded
+    event_id INTEGER,                          -- app_events.id once a change is made
+    from_status TEXT, to_status TEXT,          -- to_status NULL: check the email or portal
+    category TEXT NOT NULL, tier TEXT NOT NULL, rule_id TEXT, model TEXT,
+    reason TEXT NOT NULL,
+    received_at TEXT NOT NULL, sender_domain TEXT NOT NULL,
+    subject TEXT NOT NULL,                     -- <= SUBJECT_MAX
+    quote TEXT NOT NULL,                       -- <= QUOTE_MAX, verified present
+    prev_applied_at TEXT,
+    created_at TEXT NOT NULL, decided_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_mail_evidence_job ON mail_evidence(job_id);
+CREATE INDEX IF NOT EXISTS idx_mail_evidence_open ON mail_evidence(kind, state);
+CREATE INDEX IF NOT EXISTS idx_mail_evidence_event ON mail_evidence(event_id);
+CREATE TABLE IF NOT EXISTS mail_sync_runs (    -- the lease and the last result
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    trigger TEXT NOT NULL,                     -- startup | timer | manual | connect | cli
+    state TEXT NOT NULL,                       -- running | ok | partial | failed | abandoned
+    started_at TEXT NOT NULL, heartbeat_at TEXT NOT NULL, finished_at TEXT,
+    pid INTEGER, code TEXT, counts_json TEXT
+);
+"""
+
 # The one status that does not mean "an application went out". Moving to any
 # other status stamps `applied_at` the first time, and it is never re-stamped:
 # the date you applied does not change because you later got an interview.
@@ -454,7 +534,7 @@ class Store:
         `entries` are watchlist entries (anything with key, name, careers_url,
         provider, slug, feed_url, enabled). Identity is `key`, never `name`:
         matching on the display name is exactly the bug this replaces - renaming
-        "Shopee" silently made a new row, reset its staleness and orphaned its
+        "Acme" silently made a new row, reset its staleness and orphaned its
         failure counters.
 
         - new key          -> insert; `last_scraped_at` NULL, so due next run
@@ -978,36 +1058,48 @@ class Store:
         re-stamped afterwards. `applied_at` overrides that stamp's date - only
         for importing a record whose real date is known (M3-T3b). `by` names who
         made the change on the event row: None is the owner, 'jobscraper' is
-        auto-apply (M20, apply_design §13).
+        auto-apply (M20, apply_design §13), 'mail' is F-50's email updates.
         """
-        now = at or utcnow()
+        event_id = self._write_status(job_id, status, at=at or utcnow(), by=by,
+                                      applied_at=applied_at, notes=notes,
+                                      company=company, role=role, url=url)
+        self.conn.commit()
+        return event_id is not None
+
+    def _write_status(self, job_id: str, status: str, *, at: str,
+                      by: Optional[str] = None, applied_at: Optional[str] = None,
+                      notes: Optional[str] = None, company: Optional[str] = None,
+                      role: Optional[str] = None, url: Optional[str] = None) -> Optional[int]:
+        """`set_application_status` without the commit, so F-50's `mail_record`
+        and `mail_accept` can write the status, the event and the evidence in one
+        transaction (mail_status_design §9). Returns the new `app_events.id`, or
+        None when the status did not change (no event)."""
         prev = self.application(job_id)
         prev_status = prev["status"] if prev else None
         stamp = applied_at
         applied_at = prev["applied_at"] if prev else None
         if applied_at is None and status not in NOT_YET_APPLIED:
-            applied_at = stamp or now[:10]
+            applied_at = stamp or at[:10]
 
         if prev is None:
             self.conn.execute(
                 """INSERT INTO applications (job_id, status, applied_at, notes,
                    company, role, url, updated_at) VALUES (?,?,?,?,?,?,?,?)""",
-                (job_id, status, applied_at, notes, company, role, url, now))
+                (job_id, status, applied_at, notes, company, role, url, at))
         else:
             self.conn.execute(
                 """UPDATE applications SET status = ?, applied_at = ?,
                    notes = COALESCE(?, notes), company = COALESCE(?, company),
                    role = COALESCE(?, role), url = COALESCE(?, url),
                    updated_at = ? WHERE job_id = ?""",
-                (status, applied_at, notes, company, role, url, now, job_id))
+                (status, applied_at, notes, company, role, url, at, job_id))
 
-        changed = prev_status != status
-        if changed:
-            self.conn.execute(
-                """INSERT INTO app_events (job_id, from_status, to_status, at, by)
-                   VALUES (?,?,?,?,?)""", (job_id, prev_status, status, now, by))
-        self.conn.commit()
-        return changed
+        if prev_status == status:
+            return None
+        cur = self.conn.execute(
+            """INSERT INTO app_events (job_id, from_status, to_status, at, by)
+               VALUES (?,?,?,?,?)""", (job_id, prev_status, status, at, by))
+        return int(cur.lastrowid)
 
     def delete_application(self, job_id: str) -> bool:
         """Forget an application and its history: the role is untracked again.
@@ -1018,6 +1110,10 @@ class Store:
         """
         cur = self.conn.execute("DELETE FROM applications WHERE job_id = ?", (job_id,))
         self.conn.execute("DELETE FROM app_events WHERE job_id = ?", (job_id,))
+        # F-50 (mail_status_design §9): the email evidence goes with the history;
+        # the message rows stay for dedupe but no longer point at the role.
+        self.conn.execute("DELETE FROM mail_evidence WHERE job_id = ?", (job_id,))
+        self.conn.execute("UPDATE mail_messages SET job_id = NULL WHERE job_id = ?", (job_id,))
         self.conn.commit()
         return cur.rowcount > 0
 
@@ -1044,6 +1140,10 @@ class Store:
                               (job["job_id"], o["job_id"]))
             self.conn.execute("UPDATE app_events SET job_id = ? WHERE job_id = ?",
                               (job["job_id"], o["job_id"]))
+            # F-50: the email evidence and the thread signal move with it (§9).
+            for table in ("mail_evidence", "mail_messages"):
+                self.conn.execute(f"UPDATE {table} SET job_id = ? WHERE job_id = ?",
+                                  (job["job_id"], o["job_id"]))
             moved += 1
         self.conn.commit()
         return moved
@@ -1108,9 +1208,16 @@ class Store:
             "SELECT job_id, status FROM applications")}
 
     def application_events(self, job_id: str) -> list[dict[str, Any]]:
+        """A job's history, oldest first. `by` says who made each change (None =
+        the owner); `evidence_id` is the F-50 email evidence behind it, if any
+        (mail_status_design §9). A subquery, not a join, so an event can never
+        be listed twice."""
         return [dict(r) for r in self.conn.execute(
-            """SELECT id, job_id, from_status, to_status, at FROM app_events
-               WHERE job_id = ? ORDER BY id""", (job_id,))]
+            """SELECT e.id, e.job_id, e.from_status, e.to_status, e.at, e.by,
+                      (SELECT MIN(m.id) FROM mail_evidence m WHERE m.event_id = e.id)
+                          AS evidence_id
+                 FROM app_events e
+                WHERE e.job_id = ? ORDER BY e.id""", (job_id,))]
 
     # ---------------- settings ----------------
 
@@ -1911,6 +2018,800 @@ class Store:
                 (note, attempt_id, step or "", key))
             n += cur.rowcount
         return n
+
+    # ---------------- F-50 application status from email (mail_status_design §9) ----------------
+    #
+    # Plain values in, dicts out: this module never imports mailstatus.contracts
+    # (layering rule 1). Where a value is stored, an enum member is taken by its
+    # `.value` (`_state`), and a frozen dataclass (contracts.Cursor) is read field
+    # by field, so the flow may pass contract values as they are. Every method
+    # commits, except the private helpers that `mail_record` and friends call
+    # inside their one transaction.
+
+    def mail_accounts(self, enabled_only: bool = False) -> list[dict[str, Any]]:
+        """Every connected mailbox, oldest first (raw rows)."""
+        where = " WHERE enabled = 1" if enabled_only else ""
+        return [dict(r) for r in self.conn.execute(
+            f"SELECT * FROM mail_accounts{where} ORDER BY id")]
+
+    def mail_account(self, account_id: int) -> Optional[dict[str, Any]]:
+        r = self.conn.execute("SELECT * FROM mail_accounts WHERE id = ?",
+                              (account_id,)).fetchone()
+        return dict(r) if r else None
+
+    def mail_account_add(self, address: str, *, host: str = "imap.gmail.com",
+                         port: int = 993, vault_service: str,
+                         shared_with_apply: bool = False, consent_version: str,
+                         first_sync_from: str, now: str) -> int:
+        """Record a mailbox the owner connected (F-50a, §4), consent time = `now`.
+        Raises ValueError when the address is already connected; the message
+        never holds the address (§13). Commits; returns the new id."""
+        addr = _text(address).strip().lower()
+        if self.conn.execute("SELECT 1 FROM mail_accounts WHERE address = ?",
+                             (addr,)).fetchone():
+            raise ValueError("this mailbox is already connected")
+        try:
+            cur = self.conn.execute(
+                """INSERT INTO mail_accounts (address, host, port, vault_service,
+                       shared_with_apply, enabled, consent_at, consent_version, state,
+                       first_sync_from, created_at, updated_at)
+                   VALUES (?,?,?,?,?,1,?,?,'ok',?,?,?)""",
+                (addr, host.strip().lower(), int(port), vault_service,
+                 int(bool(shared_with_apply)), now, consent_version, first_sync_from,
+                 now, now))
+        except sqlite3.IntegrityError:
+            self.conn.rollback()
+            raise ValueError("this mailbox is already connected") from None
+        self.conn.commit()
+        return int(cur.lastrowid)
+
+    def mail_account_set(self, account_id: int, **fields: Any) -> None:
+        """Set columns of one mailbox row (the switch, the state after a sync).
+        Names are checked against the table; `updated_at` defaults to now. A list
+        for `notes` is stored as the comma list, a dict for `last_counts_json` as
+        JSON, a bool as 0/1. Commits."""
+        bad = [k for k in fields if k not in _MAIL_ACCOUNT_COLUMNS]
+        if bad:
+            raise ValueError(f"cannot set {bad} on mail_accounts")
+        sets = {k: _mail_value(k, v) for k, v in fields.items()}
+        sets.setdefault("updated_at", utcnow())
+        self.conn.execute(
+            f"UPDATE mail_accounts SET {', '.join(f'{k} = ?' for k in sets)} WHERE id = ?",
+            [*sets.values(), account_id])
+        self.conn.commit()
+
+    def mail_account_delete(self, account_id: int) -> bool:
+        """Disconnect (F-50c, §4): the cursors, the processed-message log, the
+        suggestions not accepted and the account row go. The evidence of changes
+        already made (auto rows, accepted suggestions) stays in each application's
+        history, with its account link dropped. One transaction; commits; returns
+        whether the account existed. The vault entry is the caller's (web/CLI)."""
+        try:
+            self.conn.execute("DELETE FROM mail_cursors WHERE account_id = ?", (account_id,))
+            self.conn.execute("DELETE FROM mail_messages WHERE account_id = ?", (account_id,))
+            self.conn.execute(
+                "DELETE FROM mail_evidence WHERE account_id = ? AND kind = 'suggestion' "
+                "AND state <> 'accepted'", (account_id,))
+            self.conn.execute("UPDATE mail_evidence SET account_id = NULL WHERE account_id = ?",
+                              (account_id,))
+            cur = self.conn.execute("DELETE FROM mail_accounts WHERE id = ?", (account_id,))
+        except BaseException:
+            self.conn.rollback()
+            raise
+        self.conn.commit()
+        return cur.rowcount > 0
+
+    def mail_cursor(self, account_id: int, role: Any) -> Optional[dict[str, Any]]:
+        """The stored position in one folder role, or None before its first scan.
+        The row's columns plus `validity` (= `uidvalidity`), the contracts.Cursor
+        field name, so the flow can rebuild a Cursor from it."""
+        r = self.conn.execute(
+            "SELECT * FROM mail_cursors WHERE account_id = ? AND role = ?",
+            (account_id, _state(role))).fetchone()
+        if r is None:
+            return None
+        d = dict(r)
+        d["validity"] = d["uidvalidity"]
+        return d
+
+    def mail_cursor_set(self, cursor: Any) -> bool:
+        """Upsert a cursor (a dict, or a contracts.Cursor; `validity` or
+        `uidvalidity`). Commits. False (nothing written) when the account no
+        longer exists (disconnected during a sync, D-158 4), else True."""
+        try:
+            self.begin_immediate()
+            if not self._mail_account_exists(_as_dict(cursor).get("account_id")):
+                self.conn.commit()
+                return False
+            self._mail_cursor_upsert(cursor)
+            self.conn.commit()
+        except BaseException:
+            self.conn.rollback()
+            raise
+        return True
+
+    def _mail_cursor_upsert(self, cursor: Any) -> None:
+        """The cursor write without a commit: `mail_record` calls it inside its
+        transaction, so a failure here leaves no message row behind (F-50s)."""
+        c = _as_dict(cursor)
+        validity = c["uidvalidity"] if "uidvalidity" in c else c["validity"]
+        self.conn.execute(
+            """INSERT INTO mail_cursors (account_id, role, mailbox, uidvalidity, last_uid,
+                   last_scan_at) VALUES (?,?,?,?,?,?)
+               ON CONFLICT (account_id, role) DO UPDATE SET mailbox = excluded.mailbox,
+                   uidvalidity = excluded.uidvalidity, last_uid = excluded.last_uid,
+                   last_scan_at = excluded.last_scan_at""",
+            (int(c["account_id"]), _state(c["role"]), _text(c["mailbox"]), int(validity),
+             int(c["last_uid"]), _text(c["last_scan_at"])))
+
+    def mail_seen_many(self, account_id: int, gm_msgids: Iterable[str]) -> set[str]:
+        """The X-GM-MSGIDs among `gm_msgids` already processed for this account."""
+        ids = [_text(g) for g in gm_msgids]
+        seen: set[str] = set()
+        for i in range(0, len(ids), 500):
+            chunk = ids[i:i + 500]
+            marks = ",".join("?" * len(chunk))
+            seen.update(r[0] for r in self.conn.execute(
+                f"SELECT gm_msgid FROM mail_messages WHERE account_id = ? AND gm_msgid IN ({marks})",
+                [account_id, *chunk]))
+        return seen
+
+    def mail_match_context(self) -> list[dict[str, Any]]:
+        """Every application as the matcher needs it (§7; contracts.AppCandidate).
+
+        Raw values the flow finishes with rule knowledge the store does not have:
+        `tenant_hosts` (E1) are the attempts' `tenant_host` values plus the hosts of
+        `jobs.url`, `applications.url` and `companies.careers_url`, for
+        `match.tenants_from_hosts`; `employer_hosts` are those last three alone,
+        which the flow turns into registrable `employer_domains` (dropping ATS
+        hosts). Also `applied_at` and `first_event_at` for the first-sync window
+        (§5.3). Three queries in all, not one per application.
+        """
+        rows = self.conn.execute(
+            """SELECT a.job_id, a.status, a.applied_at, a.company AS app_company,
+                      co.name AS company_name, COALESCE(a.role, j.title) AS role,
+                      a.url AS app_url, j.url AS job_url, co.careers_url,
+                      co.provider, co.slug, j.external_id,
+                      (SELECT MAX(e.at) FROM app_events e
+                        WHERE e.job_id = a.job_id AND e.by IS NULL) AS owner_changed_at,
+                      (SELECT MAX(e.at) FROM app_events e
+                        WHERE e.job_id = a.job_id) AS last_event_at,
+                      (SELECT MIN(e.at) FROM app_events e
+                        WHERE e.job_id = a.job_id) AS first_event_at
+                 FROM applications a
+                 LEFT JOIN jobs j       ON j.job_id = a.job_id
+                 LEFT JOIN companies co ON co.id = j.company_id
+                ORDER BY a.job_id""").fetchall()
+        attempt_hosts: dict[str, set[str]] = {}
+        for r in self.conn.execute(
+                """SELECT DISTINCT job_id, tenant_host FROM apply_attempts
+                    WHERE tenant_host IS NOT NULL AND tenant_host <> ''"""):
+            attempt_hosts.setdefault(r[0], set()).add(str(r[1]).strip().lower())
+        threads: dict[str, set[str]] = {}
+        for r in self.conn.execute(
+                """SELECT DISTINCT job_id, gm_thrid FROM mail_messages
+                    WHERE job_id IS NOT NULL AND gm_thrid IS NOT NULL AND gm_thrid <> ''"""):
+            threads.setdefault(r[0], set()).add(str(r[1]))
+        out = []
+        for r in rows:
+            names = []
+            for n in (r["app_company"], r["company_name"]):
+                if n and str(n).strip() and str(n).strip() not in names:
+                    names.append(str(n).strip())
+            employer = sorted({h for h in (_host_of(r["careers_url"]), _host_of(r["job_url"]),
+                                           _host_of(r["app_url"])) if h})
+            ext = str(r["external_id"] or "").strip()
+            out.append({
+                "job_id": r["job_id"],
+                "status": r["status"],
+                "applied_at": r["applied_at"],
+                "company_names": tuple(names),
+                "role": str(r["role"] or ""),
+                "employer_hosts": tuple(employer),
+                "tenant_hosts": tuple(sorted(attempt_hosts.get(r["job_id"], set()) | set(employer))),
+                "board_slugs": ((str(r["slug"]),) if r["slug"] and r["provider"] in _BOARD_PROVIDERS
+                                else ()),
+                "req_ids": (ext,) if len(ext) >= 5 and any(ch.isdigit() for ch in ext) else (),
+                "threads": tuple(sorted(threads.get(r["job_id"], set()))),
+                "owner_changed_at": r["owner_changed_at"],
+                "last_event_at": r["last_event_at"],
+                "first_event_at": r["first_event_at"],
+            })
+        return out
+
+    def mail_record(self, *, account_id: int, message: Any, cursor: Any,
+                    change: Any = None, evidence: Any = None, now: str) -> dict[str, Any]:
+        """Store one message's outcome and advance the cursor in ONE transaction
+        (F-50s, §5.4 step 8): the message row; for an AUTO change the status, its
+        event (`by='mail'`) and the evidence; for a suggestion its evidence row;
+        then the cursor upsert. Any failure rolls all of it back, so the cursor
+        never passes a message whose outcome is not stored.
+
+        `message`: the `mail_messages` columns (`gm_msgid`, `gm_thrid`, `role`,
+        `uidvalidity` or `validity`, `uid`, `received_at`, `sender_domain`,
+        `outcome`, `reason`, `category`, `tier`, `rule_id`, `job_id`,
+        `match_json` (dict or text)). `change`: `{kind: auto|suggest|none,
+        job_id, from_status, to_status, applied_at?}` (applied_at defaults to the
+        email's date). `evidence`: the `mail_evidence` columns the flow knows
+        (`subject`, `quote`, `category`, `tier`, `rule_id`, `model`, `reason`,
+        `candidates_json`, `from_status`, `to_status`, ...); the rest default from
+        `message` and `change`. An account that no longer exists (disconnected
+        during the sync, review FL-3) gets nothing written: outcome `gone`.
+        The AUTO re-check runs inside the transaction: if
+        the status is no longer `change.from_status`, the row is stored as
+        `no_change / owner_newer` and nothing else is written. A message already
+        stored only moves the cursor. Returns `{outcome, event_id, evidence_id}`.
+        """
+        msg = _as_dict(message)
+        try:
+            self.begin_immediate()
+            if not self._mail_account_exists(account_id):
+                self.conn.commit()                  # FL-3: disconnected mid-sync
+                return {"outcome": "gone", "event_id": None, "evidence_id": None}
+            row = self.conn.execute(
+                "SELECT outcome FROM mail_messages WHERE account_id = ? AND gm_msgid = ?",
+                (account_id, _text(msg["gm_msgid"]))).fetchone()
+            if row is not None:
+                if cursor is not None:
+                    self._mail_cursor_upsert(cursor)
+                self.conn.commit()
+                return {"outcome": row["outcome"], "event_id": None, "evidence_id": None}
+            outcome, reason, event_id, evidence_id = self._mail_apply(
+                account_id, msg, change, evidence, now)
+            validity = msg["uidvalidity"] if "uidvalidity" in msg else msg["validity"]
+            self.conn.execute(
+                """INSERT INTO mail_messages (account_id, gm_msgid, gm_thrid, role,
+                       uidvalidity, uid, received_at, sender_domain, outcome, reason,
+                       category, tier, rule_id, job_id, match_json, retries, processed_at)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                (account_id, _text(msg["gm_msgid"]), _opt_text(msg.get("gm_thrid")),
+                 _state(msg["role"]), int(validity), int(msg["uid"]), _text(msg["received_at"]),
+                 _text(msg.get("sender_domain") or ""), outcome, reason,
+                 _opt_state(msg.get("category")), _opt_state(msg.get("tier")),
+                 _opt_text(msg.get("rule_id")), _opt_text(msg.get("job_id")),
+                 _json_text(msg.get("match_json")), int(msg.get("retries") or 0), now))
+            if cursor is not None:
+                self._mail_cursor_upsert(cursor)
+            self.conn.commit()
+        except BaseException:
+            self.conn.rollback()
+            raise
+        return {"outcome": outcome, "event_id": event_id, "evidence_id": evidence_id}
+
+    def _mail_account_exists(self, account_id: Any) -> bool:
+        return self.conn.execute("SELECT 1 FROM mail_accounts WHERE id = ?",
+                                 (account_id,)).fetchone() is not None
+
+    def _mail_apply(self, account_id: Optional[int], msg: dict[str, Any], change: Any,
+                    evidence: Any, now: str) -> tuple[str, str, Optional[int], Optional[int]]:
+        """The status write and the evidence row for one message, inside the
+        caller's transaction. Returns (outcome, reason, event_id, evidence_id);
+        an AUTO change whose status moved meanwhile becomes no_change/owner_newer."""
+        outcome, reason = _state(msg["outcome"]), _state(msg["reason"])
+        ch = _as_dict(change) if change else {}
+        ev = _as_dict(evidence) if evidence else None
+        kind = _state(ch.get("kind") or "none")
+        if kind == "auto":
+            job_id = ch.get("job_id") or msg.get("job_id")
+            app = self.application(job_id) if job_id else None
+            if app is None or app["status"] != _opt_state(ch.get("from_status")):
+                return "no_change", "owner_newer", None, None
+            to_status = _state(ch["to_status"])
+            stamp = ch.get("applied_at") or str(msg["received_at"])[:10]
+            event_id = self._write_status(job_id, to_status, at=now, by="mail",
+                                          applied_at=stamp)
+            if event_id is None:
+                return "no_change", "same_status", None, None
+            evidence_id = None
+            if ev is not None:
+                evidence_id = self._mail_evidence_insert(
+                    account_id, msg, ev, kind="auto", state="applied", job_id=job_id,
+                    event_id=event_id, from_status=app["status"], to_status=to_status,
+                    prev_applied_at=app["applied_at"], now=now)
+            return outcome, reason, event_id, evidence_id
+        if ev is None:
+            return outcome, reason, None, None
+        evidence_id = self._mail_evidence_insert(
+            account_id, msg, ev, kind="suggestion", state="open",
+            job_id=ev.get("job_id", ch.get("job_id", msg.get("job_id"))), event_id=None,
+            from_status=ev.get("from_status", ch.get("from_status")),
+            to_status=ev.get("to_status", ch.get("to_status")),
+            prev_applied_at=None, now=now)
+        return outcome, reason, None, evidence_id
+
+    def _mail_evidence_insert(self, account_id: Optional[int], msg: dict[str, Any],
+                              ev: dict[str, Any], *, kind: str, state: str,
+                              job_id: Optional[str], event_id: Optional[int],
+                              from_status: Any, to_status: Any,
+                              prev_applied_at: Optional[str], now: str) -> int:
+        """One `mail_evidence` row; subject and quote cut to their §3 limits."""
+        def pick(key: str) -> Any:
+            return ev[key] if ev.get(key) is not None else msg.get(key)
+        cur = self.conn.execute(
+            """INSERT INTO mail_evidence (account_id, gm_msgid, job_id, candidates_json,
+                   kind, state, event_id, from_status, to_status, category, tier,
+                   rule_id, model, reason, received_at, sender_domain, subject, quote,
+                   prev_applied_at, created_at)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (account_id, _text(pick("gm_msgid")), _opt_text(job_id),
+             _json_text(ev.get("candidates_json", ev.get("candidates"))),
+             kind, state, event_id, _opt_state(from_status), _opt_state(to_status),
+             _state(pick("category")), _state(pick("tier")), _opt_text(pick("rule_id")),
+             _opt_text(ev.get("model")), _state(pick("reason")), _text(pick("received_at")),
+             _text(pick("sender_domain") or ""), _text(ev.get("subject") or "")[:MAIL_SUBJECT_MAX],
+             _text(ev.get("quote") or "")[:MAIL_QUOTE_MAX], prev_applied_at, now))
+        return int(cur.lastrowid)
+
+    def mail_pending(self, account_id: int, now: str, retry_days: float) -> list[dict[str, Any]]:
+        """This account's `pending_model` rows, oldest first (§5.5). Each has
+        `expired`: its retries (`MAIL_MODEL_RETRIES`) or its age (`retry_days`)
+        have run out, so the flow turns it into a model_unavailable suggestion
+        instead of asking the model again."""
+        cutoff = shift(now, days=-float(retry_days))
+        out = []
+        for r in self.conn.execute(
+                """SELECT * FROM mail_messages WHERE account_id = ? AND outcome = 'pending_model'
+                    ORDER BY processed_at, gm_msgid""", (account_id,)):
+            d = dict(r)
+            d["expired"] = d["retries"] >= MAIL_MODEL_RETRIES or d["processed_at"] <= cutoff
+            out.append(d)
+        return out
+
+    def mail_resolve_pending(self, account_id: int, gm_msgid: str, message: Any,
+                             change: Any = None, evidence: Any = None,
+                             now: Optional[str] = None) -> dict[str, Any]:
+        """Settle a `pending_model` row after a retry (§5.5): an update of the row,
+        not an insert, and no cursor. Same single transaction and AUTO re-check as
+        `mail_record`. When `message.outcome` is still `pending_model` only the
+        retry count moves (`retries` + 1 unless given) and `processed_at` stays,
+        so the row's age keeps counting. A row that is gone or no longer pending
+        is left alone; an account that is gone gives outcome `gone` (FL-3).
+        Returns `{outcome, event_id, evidence_id}`."""
+        now = now or utcnow()
+        try:
+            self.begin_immediate()
+            if not self._mail_account_exists(account_id):
+                self.conn.commit()                  # FL-3: disconnected mid-sync
+                return {"outcome": "gone", "event_id": None, "evidence_id": None}
+            row = self.conn.execute(
+                "SELECT * FROM mail_messages WHERE account_id = ? AND gm_msgid = ?",
+                (account_id, _text(gm_msgid))).fetchone()
+            if row is None or row["outcome"] != "pending_model":
+                self.conn.commit()
+                return {"outcome": row["outcome"] if row else None,
+                        "event_id": None, "evidence_id": None}
+            msg = {**dict(row), **_as_dict(message)}
+            if _state(msg["outcome"]) == "pending_model":
+                given = _as_dict(message).get("retries")
+                retries = int(given) if given is not None else int(row["retries"]) + 1
+                self.conn.execute(
+                    "UPDATE mail_messages SET retries = ?, reason = ? "
+                    "WHERE account_id = ? AND gm_msgid = ?",
+                    (retries, _state(msg["reason"]), account_id, _text(gm_msgid)))
+                self.conn.commit()
+                return {"outcome": "pending_model", "event_id": None, "evidence_id": None}
+            outcome, reason, event_id, evidence_id = self._mail_apply(
+                account_id, msg, change, evidence, now)
+            self.conn.execute(
+                """UPDATE mail_messages SET outcome = ?, reason = ?, category = ?, tier = ?,
+                       rule_id = ?, job_id = ?, match_json = ?, sender_domain = ?,
+                       retries = ?, processed_at = ?
+                   WHERE account_id = ? AND gm_msgid = ?""",
+                (outcome, reason, _opt_state(msg.get("category")), _opt_state(msg.get("tier")),
+                 _opt_text(msg.get("rule_id")), _opt_text(msg.get("job_id")),
+                 _json_text(msg.get("match_json")), _text(msg.get("sender_domain") or ""),
+                 int(msg.get("retries") or 0), now, account_id, _text(gm_msgid)))
+            self.conn.commit()
+        except BaseException:
+            self.conn.rollback()
+            raise
+        return {"outcome": outcome, "event_id": event_id, "evidence_id": evidence_id}
+
+    _NO_BRIEF = {"status": None, "company": None, "role": None}
+
+    def _mail_briefs(self, job_ids: Iterable[Any]) -> dict[str, dict[str, Any]]:
+        """Each application's current status and how it is described, in one
+        query per 500 ids (review FL-7: no query per suggestion). An id with no
+        application is absent; callers use `_NO_BRIEF`."""
+        ids = sorted({str(j) for j in job_ids if j})
+        out: dict[str, dict[str, Any]] = {}
+        for i in range(0, len(ids), 500):
+            chunk = ids[i:i + 500]
+            marks = ",".join("?" * len(chunk))
+            for r in self.conn.execute(
+                    f"""SELECT a.job_id, a.status, COALESCE(a.company, co.name) AS company,
+                               COALESCE(a.role, j.title) AS role
+                          FROM applications a
+                          LEFT JOIN jobs j       ON j.job_id = a.job_id
+                          LEFT JOIN companies co ON co.id = j.company_id
+                         WHERE a.job_id IN ({marks})""", chunk):
+                out[r["job_id"]] = {"status": r["status"], "company": r["company"],
+                                    "role": r["role"]}
+        return out
+
+    def _mail_open_suggestions(self) -> tuple[list[dict[str, Any]], list[int]]:
+        """(live open suggestions with their briefs, ids of the stale ones)."""
+        rows = [dict(r) for r in self.conn.execute(
+            """SELECT ev.*, acc.address AS account_address
+                 FROM mail_evidence ev
+                 LEFT JOIN mail_accounts acc ON acc.id = ev.account_id
+                WHERE ev.kind = 'suggestion' AND ev.state = 'open'
+                ORDER BY ev.received_at DESC, ev.id DESC""")]
+        parsed = [(d, _json_list(d.get("candidates_json"))) for d in rows]
+        briefs = self._mail_briefs([d["job_id"] for d, _ in parsed]
+                                   + [c.get("job_id") for _, cs in parsed for c in cs])
+        out, stale = [], []
+        for d, raw_cands in parsed:
+            cands = []
+            for c in raw_cands:
+                brief = briefs.get(str(c.get("job_id")), self._NO_BRIEF)
+                cands.append({"job_id": c.get("job_id"), "status": c.get("status"),
+                              "current_status": brief["status"],
+                              "company": brief["company"], "role": brief["role"]})
+            brief = briefs.get(str(d["job_id"]), self._NO_BRIEF) if d["job_id"] else self._NO_BRIEF
+            d.update(current_status=brief["status"], company=brief["company"],
+                     role=brief["role"], candidates=cands)
+            if cands:
+                live = any(c["current_status"] is not None and c["current_status"] == c["status"]
+                           for c in cands)
+            else:
+                live = brief["status"] is not None and brief["status"] == d["from_status"]
+            if live:
+                out.append(d)
+            else:
+                stale.append(d["id"])
+        return out, stale
+
+    def mail_suggestions(self, now: Optional[str] = None) -> list[dict[str, Any]]:
+        """Open suggestions, newest email first (§8, §11.1).
+
+        Each row is the `mail_evidence` row plus `account_address` (for the
+        Gmail link; None after a disconnect), the application's `current_status`,
+        `company` and `role`, and `candidates`: for an ambiguous one
+        `[{job_id, status (when suggested), current_status, company, role}]`,
+        else []. A suggestion whose application status has changed since it was
+        made (for an ambiguous one: every candidate's) is left out. Read-only
+        (review FL-7: a poll never waits for the write lock); `mail_supersede`
+        marks those rows, from the sync, accept, dismiss and undo paths. `now`
+        is kept for callers of the earlier signature and not used."""
+        return self._mail_open_suggestions()[0]
+
+    def mail_supersede(self, now: Optional[str] = None) -> int:
+        """Mark `superseded` every open suggestion whose application status has
+        changed since it was made (see `mail_suggestions`). Returns how many;
+        commits when it marks any."""
+        _live, stale = self._mail_open_suggestions()
+        if not stale:
+            return 0
+        marks = ",".join("?" * len(stale))
+        cur = self.conn.execute(
+            f"UPDATE mail_evidence SET state = 'superseded', decided_at = ? "
+            f"WHERE state = 'open' AND id IN ({marks})", [now or utcnow(), *stale])
+        self.conn.commit()
+        return cur.rowcount
+    def mail_accept(self, evidence_id: int, job_id: Optional[str] = None,
+                    now: Optional[str] = None, *, ranks: Optional[dict[str, int]] = None,
+                    terminal: Iterable[str] = ()) -> tuple[bool, str]:
+        """Accept a suggestion (F-50n, §8). For an ambiguous one `job_id` must be
+        one of its candidates; otherwise it may be omitted. The status must
+        still be the one the suggestion was made against, the owner must not
+        have changed it after the email, and the move must still be forward
+        (rows 6-9; `ranks`/`terminal` from config `mail_status`, when given).
+        Writes the status, the event (`by='mail'`), the evidence (`accepted`,
+        `event_id`) and the message's `job_id` (the thread signal) in one
+        transaction. Returns (ok, code): ok | changed | not_found | not_open
+        (also for a suggestion with no target: it can only be dismissed)."""
+        now = now or utcnow()
+        try:
+            self.begin_immediate()
+            result = self._mail_accept_tx(evidence_id, job_id, now, ranks or {},
+                                          frozenset(terminal))
+            self.conn.commit()
+        except BaseException:
+            self.conn.rollback()
+            raise
+        if result[0]:
+            self.mail_supersede(now)            # FL-7: others on this application
+        return result
+
+    def _mail_accept_tx(self, evidence_id: int, job_id: Optional[str], now: str,
+                        ranks: dict[str, int], terminal: frozenset[str]) -> tuple[bool, str]:
+        ev = self.conn.execute("SELECT * FROM mail_evidence WHERE id = ?",
+                               (evidence_id,)).fetchone()
+        if ev is None or ev["kind"] != "suggestion":
+            return False, "not_found"
+        if ev["state"] != "open" or not ev["to_status"]:
+            return False, "not_open"
+        cands = _json_list(ev["candidates_json"])
+        if cands:
+            pick = next((c for c in cands if job_id and c.get("job_id") == job_id), None)
+            if pick is None:
+                return False, "not_found"
+            target, expected = str(pick["job_id"]), pick.get("status")
+        else:
+            if job_id not in (None, "", ev["job_id"]) or not ev["job_id"]:
+                return False, "not_found"
+            target, expected = ev["job_id"], ev["from_status"]
+        app = self.application(target)
+        to = ev["to_status"]
+        if app is None or app["status"] != expected or app["status"] == to:
+            return False, "changed"
+        owner_at = self.conn.execute(
+            "SELECT MAX(at) FROM app_events WHERE job_id = ? AND by IS NULL",
+            (target,)).fetchone()[0]
+        # Row 6. A `backfilled` suggestion exists because the owner entered the
+        # application after this email (D-157 h), so the re-check would always
+        # refuse it: skipped for that reason only (D-158 6).
+        if owner_at and owner_at > ev["received_at"] and ev["reason"] != "backfilled":
+            return False, "changed"                                    # row 6
+        status = app["status"]
+        if status in terminal and to in terminal:
+            return False, "changed"                                    # row 7
+        if (to not in terminal and status in ranks and to in ranks
+                and ranks[to] < ranks[status]):
+            return False, "changed"                                    # row 9
+        event_id = self._write_status(target, to, at=now, by="mail",
+                                      applied_at=str(ev["received_at"])[:10])
+        self.conn.execute(
+            """UPDATE mail_evidence SET state = 'accepted', event_id = ?, job_id = ?,
+                   from_status = ?, prev_applied_at = ?, decided_at = ? WHERE id = ?""",
+            (event_id, target, status, app["applied_at"], now, evidence_id))
+        if ev["account_id"] is not None:
+            self.conn.execute(
+                "UPDATE mail_messages SET job_id = ? WHERE account_id = ? AND gm_msgid = ?",
+                (target, ev["account_id"], ev["gm_msgid"]))
+        return True, "ok"
+
+    def mail_dismiss(self, evidence_id: int, now: Optional[str] = None) -> tuple[bool, str]:
+        """Close a suggestion ("Dismiss", "Got it"). Returns (ok, code): ok |
+        not_found | not_open. Commits."""
+        ev = self.conn.execute("SELECT kind, state FROM mail_evidence WHERE id = ?",
+                               (evidence_id,)).fetchone()
+        if ev is None or ev["kind"] != "suggestion":
+            return False, "not_found"
+        if ev["state"] != "open":
+            return False, "not_open"
+        self.conn.execute(
+            "UPDATE mail_evidence SET state = 'dismissed', decided_at = ? "
+            "WHERE id = ? AND state = 'open'", (now or utcnow(), evidence_id))
+        self.conn.commit()
+        self.mail_supersede(now)                # FL-7
+        return True, "ok"
+
+    def mail_undo(self, evidence_id: int, now: Optional[str] = None) -> tuple[bool, str]:
+        """Undo an email-made change (F-50m, §8): only while its event is the
+        application's latest. Writes the event back (`by` NULL: the owner's act),
+        restores the status and `applied_at` (`prev_applied_at`), and marks the
+        evidence `undone`. The message row stays, so a re-sync never applies the
+        same email again. Returns (ok, code): ok | not_latest | not_found |
+        not_open. One transaction; commits."""
+        now = now or utcnow()
+        try:
+            self.begin_immediate()
+            result = self._mail_undo_tx(evidence_id, now)
+            self.conn.commit()
+        except BaseException:
+            self.conn.rollback()
+            raise
+        if result[0]:
+            self.mail_supersede(now)            # FL-7: the status moved back
+        return result
+
+    def _mail_undo_tx(self, evidence_id: int, now: str) -> tuple[bool, str]:
+        ev = self.conn.execute("SELECT * FROM mail_evidence WHERE id = ?",
+                               (evidence_id,)).fetchone()
+        if ev is None or ev["event_id"] is None or not ev["job_id"]:
+            return False, "not_found"
+        if ev["state"] not in ("applied", "accepted") or not ev["from_status"]:
+            return False, "not_open"
+        latest = self.conn.execute("SELECT MAX(id) FROM app_events WHERE job_id = ?",
+                                   (ev["job_id"],)).fetchone()[0]
+        app = self.application(ev["job_id"])
+        if app is None or latest != ev["event_id"]:
+            return False, "not_latest"
+        self.conn.execute(
+            "INSERT INTO app_events (job_id, from_status, to_status, at, by) VALUES (?,?,?,?,NULL)",
+            (ev["job_id"], app["status"], ev["from_status"], now))
+        self.conn.execute(
+            "UPDATE applications SET status = ?, applied_at = ?, updated_at = ? WHERE job_id = ?",
+            (ev["from_status"], ev["prev_applied_at"], now, ev["job_id"]))
+        self.conn.execute(
+            "UPDATE mail_evidence SET state = 'undone', decided_at = ? WHERE id = ?",
+            (now, evidence_id))
+        return True, "ok"
+
+    def mail_evidence(self, evidence_id: int) -> Optional[dict[str, Any]]:
+        """One evidence row plus the application's `current_status`, or None."""
+        r = self.conn.execute("SELECT * FROM mail_evidence WHERE id = ?",
+                              (evidence_id,)).fetchone()
+        if r is None:
+            return None
+        d = dict(r)
+        app = self.application(d["job_id"]) if d["job_id"] else None
+        d["current_status"] = app["status"] if app else None
+        return d
+
+    def mail_evidence_for(self, job_ids: Iterable[str]) -> dict[int, dict[str, Any]]:
+        """Evidence id -> the evidence of each change email made (rows with an
+        `event_id`) on these applications, for the History timeline (§11.1).
+        Each row adds `account_address` (None after a disconnect) and
+        `undoable`: applied or accepted, and its event still the latest."""
+        ids = [str(j) for j in job_ids]
+        out: dict[int, dict[str, Any]] = {}
+        for i in range(0, len(ids), 500):
+            chunk = ids[i:i + 500]
+            marks = ",".join("?" * len(chunk))
+            for r in self.conn.execute(
+                    f"""SELECT ev.*, acc.address AS account_address,
+                               (SELECT MAX(e.id) FROM app_events e WHERE e.job_id = ev.job_id)
+                                   AS latest_event_id
+                          FROM mail_evidence ev
+                          LEFT JOIN mail_accounts acc ON acc.id = ev.account_id
+                         WHERE ev.event_id IS NOT NULL AND ev.job_id IN ({marks})""", chunk):
+                d = dict(r)
+                latest = d.pop("latest_event_id")
+                d["undoable"] = d["state"] in ("applied", "accepted") and latest == d["event_id"]
+                out[int(d["id"])] = d
+        return out
+
+    def mail_run_begin(self, trigger: str, pid: Optional[int], now: str,
+                       ttl_s: float) -> Optional[int]:
+        """Take the single-flight lease (§10.2) under BEGIN IMMEDIATE, so two
+        processes can't both see it free. A `running` row whose heartbeat is
+        newer than `now - ttl_s` holds it → None. Older `running` rows are marked
+        `abandoned` (a crashed child), then a new `running` row is inserted.
+        Returns its id. Commits."""
+        try:
+            self.begin_immediate()
+            live = self.conn.execute(
+                "SELECT id FROM mail_sync_runs WHERE state = 'running' AND heartbeat_at > ?",
+                (shift(now, seconds=-float(ttl_s)),)).fetchone()
+            if live is not None:
+                self.conn.commit()
+                return None
+            self.conn.execute(
+                "UPDATE mail_sync_runs SET state = 'abandoned', finished_at = ? "
+                "WHERE state = 'running'", (now,))
+            cur = self.conn.execute(
+                """INSERT INTO mail_sync_runs (trigger, state, started_at, heartbeat_at, pid)
+                   VALUES (?, 'running', ?, ?, ?)""", (_state(trigger), now, now, pid))
+            self.conn.commit()
+        except BaseException:
+            self.conn.rollback()
+            raise
+        return int(cur.lastrowid)
+
+    def mail_run_heartbeat(self, run_id: int, now: str) -> bool:
+        """Renew the lease. False when the run is no longer `running` (another
+        process marked it abandoned): the caller should stop. Commits."""
+        cur = self.conn.execute(
+            "UPDATE mail_sync_runs SET heartbeat_at = ? WHERE id = ? AND state = 'running'",
+            (now, run_id))
+        self.conn.commit()
+        return cur.rowcount == 1
+
+    def mail_run_end(self, run_id: int, state: str, code: Any, counts_json: Any,
+                     now: str) -> None:
+        """Close a run: `ok | partial | failed`, its SyncCode and counts. Commits."""
+        self.conn.execute(
+            """UPDATE mail_sync_runs SET state = ?, code = ?, counts_json = ?,
+                   finished_at = ?, heartbeat_at = ? WHERE id = ?""",
+            (_state(state), _opt_state(code), _json_text(counts_json), now, now, run_id))
+        self.conn.commit()
+
+    def mail_last_run(self) -> Optional[dict[str, Any]]:
+        """The newest sync run row (it may still be running), or None."""
+        r = self.conn.execute(
+            "SELECT * FROM mail_sync_runs ORDER BY id DESC LIMIT 1").fetchone()
+        return dict(r) if r else None
+
+    def mail_purge(self, now: str) -> dict[str, int]:
+        """Retention (§9): unmatched and skipped message rows after 180 days,
+        dismissed and superseded suggestions after 90, and all but the newest
+        200 sync runs. Matched rows and evidence live as long as the
+        application. Commits; returns how many of each went."""
+        msgs = self.conn.execute(
+            "DELETE FROM mail_messages WHERE job_id IS NULL AND processed_at < ?",
+            (shift(now, days=-MAIL_MESSAGE_KEEP_DAYS),))
+        sugg = self.conn.execute(
+            """DELETE FROM mail_evidence WHERE kind = 'suggestion'
+                 AND state IN ('dismissed', 'superseded')
+                 AND COALESCE(decided_at, created_at) < ?""",
+            (shift(now, days=-MAIL_SUGGESTION_KEEP_DAYS),))
+        runs = self.conn.execute(
+            """DELETE FROM mail_sync_runs WHERE id NOT IN
+                 (SELECT id FROM mail_sync_runs ORDER BY id DESC LIMIT ?)""",
+            (MAIL_RUNS_KEEP,))
+        self.conn.commit()
+        return {"messages": msgs.rowcount, "suggestions": sugg.rowcount, "runs": runs.rowcount}
+
+
+# ---------------- F-50 mail status: plain-value helpers (mail_status_design §9) ----------------
+
+MAIL_SUBJECT_MAX = 120          # contracts.SUBJECT_MAX
+MAIL_QUOTE_MAX = 200            # contracts.QUOTE_MAX
+MAIL_MODEL_RETRIES = 3          # §5.5: a pending row is retried at most this often
+MAIL_MESSAGE_KEEP_DAYS = 180    # unmatched / skipped message rows (§9 retention)
+MAIL_SUGGESTION_KEEP_DAYS = 90  # dismissed / superseded suggestions
+MAIL_RUNS_KEEP = 200            # newest mail_sync_runs rows kept
+
+# Board providers whose slug names the employer (§7 variants; AppCandidate.board_slugs).
+_BOARD_PROVIDERS = frozenset({"greenhouse", "lever", "ashby"})
+
+_MAIL_ACCOUNT_COLUMNS = frozenset({
+    "host", "port", "vault_service", "shared_with_apply", "enabled", "consent_at",
+    "consent_version", "state", "state_code", "notes", "fail_count", "retry_after",
+    "first_sync_from", "last_sync_at", "last_ok_at", "last_counts_json", "updated_at"})
+
+
+def _as_dict(obj: Any) -> dict[str, Any]:
+    """A mapping, or a dataclass instance read field by field (contracts.Cursor)."""
+    if obj is None:
+        return {}
+    if isinstance(obj, dict):
+        return dict(obj)
+    fields = getattr(obj, "__dataclass_fields__", None)
+    if fields is not None:
+        return {name: getattr(obj, name) for name in fields}
+    return dict(obj)
+
+
+def _opt_state(v: Any) -> Optional[str]:
+    return None if v is None else _text(_state(v))
+
+
+def _text(v: Any) -> str:
+    """Text SQLite will take (review FL-1): a lone surrogate (an undecodable
+    header byte) becomes U+FFFD instead of failing the whole transaction."""
+    return str(v).encode("utf-8", "replace").decode("utf-8")
+
+
+def _opt_text(v: Any) -> Optional[str]:
+    return None if v is None or v == "" else _text(v)
+
+
+def _json_text(v: Any) -> Optional[str]:
+    """JSON text for a `*_json` column: text is kept as given, anything else dumped."""
+    if v is None or isinstance(v, str):
+        return None if v is None else _text(v)
+    return json.dumps(v, default=_state)        # ensure_ascii: escapes, never raw surrogates
+
+
+def _json_list(text: Any) -> list[dict[str, Any]]:
+    if not text:
+        return []
+    try:
+        v = json.loads(text)
+    except (TypeError, ValueError):
+        return []
+    return [x for x in v if isinstance(x, dict)] if isinstance(v, list) else []
+
+
+def _mail_value(column: str, v: Any) -> Any:
+    """A `mail_account_set` value as stored."""
+    if isinstance(v, bool):
+        return int(v)
+    if column == "notes" and isinstance(v, (list, tuple, set, frozenset)):
+        return ",".join(_state(x) for x in v) or None
+    if column.endswith("_json"):
+        return _json_text(v)
+    if v is None:
+        return None
+    v = _state(v) if hasattr(v, "value") else v
+    return _text(v) if isinstance(v, str) else v
+
+
+def _host_of(url: Any) -> str:
+    """The lower-case host of a URL, or ""."""
+    s = str(url or "").strip()
+    if not s:
+        return ""
+    if "//" not in s:
+        s = "//" + s
+    try:
+        return (urlsplit(s).hostname or "").lower()
+    except ValueError:
+        return ""
 
 # ---------------- apply (M20): the attempt state machine as plain strings ----------------
 #

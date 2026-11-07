@@ -9,12 +9,17 @@
 //
 // The hint does the cadence arithmetic the user would otherwise do by hand: at
 // this size, how many runs a day it takes to sweep every company once per cycle.
+//
+// Email (Q-60, F-50): the Gmail mailboxes JobScraper reads for application
+// updates. MailCard loads and saves its own data (GET /api/mail), so a server
+// without those routes still shows the rest of this tab.
 import { computed, onMounted, ref } from 'vue'
 import { ApiError, describeError, getSettings, saveSettings } from '../api.js'
 import { plural } from '../format.js'
 import { cycleLabel } from '../runs.js'
 import { tabEmits, tabProps } from '../shell.js'
 import CountPicker from '../components/CountPicker.vue'
+import MailCard from '../components/MailCard.vue'
 import TabLoading from '../components/TabLoading.vue'
 
 defineProps(tabProps)
@@ -209,6 +214,9 @@ onMounted(load)
     </form>
     <p v-if="saveError" class="notice error" role="alert">{{ saveError }}</p>
     <p v-if="saved" class="notice ok" role="status">{{ saved }}</p>
+
+    <h2 class="section-title">Email</h2>
+    <MailCard />
   </section>
 </template>
 

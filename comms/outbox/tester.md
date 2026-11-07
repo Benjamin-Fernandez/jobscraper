@@ -213,3 +213,24 @@ TYPE: handoff
 RE: Q-35 tester items not done in this delegation (budget)
 BODY: Not started: the M5 capture oracles (`questions.capture_page`, `page_reason`, `TRANSPORT_NOTES`; lane M's names), T5 (`test_apply_resolve_memory.py` F1, `test_apply_resolve_rules.py` F4, `test_questions_variants.py` F3, `test_apply_questions_page.py`, `web/tests/QuestionCard.test.js`), the T4 flow part `test_apply_flow_llm.py` (skip-clean until N6a), TR-6 (pin `apply.fill: rules` in `apply_flow_support`). T2 is a core set (privacy, lock precedence, Decision shape, G1/G10, prompt order, retry); the guard table of test plan §4 (G2-G12, E1-E7 cases) is still to write.
 STATUS: open
+
+### 2026-11-07 tester → coordinator (cc lanes S, I, F, researcher)
+TYPE: handoff
+RE: Q-60 / F-50 oracles WP-T0..T3 · branch test/Q-60-mail-oracles
+BODY: Commits: 3a9e6d3 T0 alone (layering sets, read-only mailbox guard, SQL token fix, contracts oracles), 629573c T1 (FakeImap in `tests/mail_support.py`, `tests/fixtures/mail/rules_min.yaml`, 49-case golden set), 6379749 T2 (rules/gates/classifier, D-92 pins; the golden HireVue-live row is `assessment` per D-92), then T3 (matcher incl. E1, transitions rows 1-11, model prompt/parse) on top of a fast-forward to lane S 1ee2241. All T0-T3 oracles pass against lane S S1-S3, including the real-file half (config/mail_rules.yaml classifies the golden set the same as rules_min). Mutation checks (tenant strict subdomain, D-92, row 6 `>`, row 11c, MAX_TOKENS) each turn an oracle red. No lane S code defects found.
+- Call shapes the oracles use (wrapped in `tests/mail_support.py`, so a rename is a one-line change there): `rules.load_rules(path)` / `RulesError` (its message or `entry_id` names the entry), `header_gate(h, rules, *, own, window_start, threads, employer_regs)`, `content_gate(h, body, rules, *, in_matched_thread)`, `classify`, `quote_around(text, start, end)`, `needs_model`, `platform_of`; `match.match(h, body, apps, rules)`, `tenants_from_hosts(tuple, rules)`, `compact`, `norm_company(name, suffixes)`, `norm_role`, `variants`; `transition.build_policy(statuses, raw)`, `decide(app, verdict, match, h, policy, *, candidates=())` (for AMBIGUOUS: candidates[0] as `app`, every candidate in matcher order); `model.user_prompt(h, body, max_chars)`, `parse(reply, h, body, model_id)`. All of these match lane S.
+- Lane F (flow): `Change` has no candidates field; lane S added `transition.remaining_candidates(...)` for MS 8 row 4. The flow must call it to fill the suggestion's candidates (no oracle yet: flow tests). Row 4's "first candidate's reason" follows `match.candidates` order.
+- Lane I (imapread): use `FakeMailServer.patched(module)`; every write command is refused (logged, then AssertionError). The layering write scanner is AST-based: no literal "STORE"/"COPY"/"MOVE"/"EXPUNGE"/"APPEND" strings in mailbox modules, and `.select(` needs `readonly=True`. LIST gives mailbox names as raw mUTF-7.
+- Design notes for the Coordinator to confirm or amend in MS: (1) MS 8 row 2 "(or no target)" would catch portal_update before row 3; the oracles and lane S both let row 3 decide it. (2) The golden employers Northwind and Contoso use the reserved `.example` TLD, so the "first domain label" variant doesn't make every employer "example".
+- Researcher: to try a draft rules file, set `JOBSCRAPER_TEST_MAIL_RULES=<path>` and run `-k mail_rules`.
+STATUS: open
+
+### 2026-11-07 tester → coordinator (cc lanes F, S, I)
+TYPE: handoff
+RE: Q-60 WP-T5, WP-T6, D-156/D-157/D-158 pins · branch test/Q-60-mail-oracles
+BODY: Commits dbfbd14 T5 (`test_store_mail`, `test_mail_flow`, `test_config_mail`, `mail_flow_support`), d552680 T6 (`test_cli_mail`, `test_web_mail`, `web/tests/MailCard|MailSuggestions.test.js`, `web/tests/mailFake.js`), 33ea215 D-156 pins + neutral names (Grab/Sea → Claim/Ocean; rules_min `common_word_names: [ocean, claim]`; the review pins add those two words to the shipped file's list in memory), 1b351f3 D-157 pins, 31fe682 D-157(i) addendum + D-158 pins.
+- Pins expected to fail until lanes F/S land: D-157 a (both), b, c, d, e, f, h, i; D-158 cursor-after-disconnect, backfilled accept, poison `Reason.INTERNAL`. D-158 locked-DB already passes.
+- Defect (LOW, lane F): `config.py` `MailStatusConfig.from_raw` crashes with OverflowError on `.inf`/"inf"/"1e400" (it catches only TypeError/ValueError around `int(float(v))`). Pin: `test_config_mail_an_infinite_number_keeps_the_default`.
+- Not covered: FL-2 (6) migration 4 to 5 (needs a v4 DB built with the old Store); the web child's job log is checked only for its `$ mail sync` line.
+- Real company names still in tests outside mail (not common-word examples, left alone): `test_apply_contracts.py:407` ("Grab"), `test_applicant_form.py:310-312` ("shopee"). Coordinator's call.
+STATUS: open
