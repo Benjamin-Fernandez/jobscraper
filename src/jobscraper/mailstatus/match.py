@@ -21,18 +21,15 @@ import unicodedata
 from typing import Iterable, Optional, Sequence
 from urllib.parse import urlsplit
 
-from .contracts import AppCandidate, MailBody, MailHeader, MatchKind, MatchResult, Signal
-from .rules import Rules, platform_of, sender_platform
+from .contracts import (AppCandidate, AuthResult, MailBody, MailHeader, MatchKind, MatchResult,
+                        Signal)
+from .rules import Rules, is_shared_domain, platform_of, sender_platform
 
 _PUNCT = re.compile(r"[^\w\s]|_")
 _WS = re.compile(r"\s+")
 _BRACKET_TAIL = re.compile(r"\s*[(\[{][^()\[\]{}]*[)\]}]\s*$")
 ROLE_SHARE = 0.8        # MS 7: >= 80% of a role's tokens (at least 2) in one line
 SHORT_NAME = 5          # a one-token variant under 5 characters counts in the body only as written
-
-_STRONG = frozenset({Signal.EMPLOYER_DOMAIN, Signal.TENANT, Signal.NAME_IN_SENDER,
-                     Signal.NAME_IN_SUBJECT})
-_WEAK = frozenset({Signal.NAME_IN_BODY})
 
 
 # ---------------------------------------------------------------------------
@@ -86,12 +83,28 @@ def variants(app: AppCandidate, rules: Rules) -> tuple[str, ...]:
     employer domain. De-duplicated, in that order, never ""."""
     suf = rules.company_suffixes
     raw = [*app.company_names, *(s.replace("-", " ") for s in app.board_slugs),
-           *app.tenants, *(d.split(".")[0] for d in app.employer_domains)]
+           *app.tenants, *(d.split(".")[0] for d in employer_domains(app.employer_domains, rules))]
     out: list[str] = []
     for r in raw:
         v = norm_company(r, suf)
         if v and v not in out:
             out.append(v)
+    return tuple(out)
+
+
+def employer_domains(hosts: Iterable[Optional[str]], rules: Rules) -> tuple[str, ...]:
+    """D-104 (a), review F1: the employer domains among `hosts` (registrable
+    domains, hosts or full URLs), lower-case, de-duplicated, in order. A host that
+    is, or sits under, a rules platform domain, a `tenant_sites` suffix or a job
+    board is dropped: "acmebank.tal.net" or "tal.net" is Oleeo's, not Acme Bank's
+    (the tenant signal covers it). The flow passes `AppCandidate.employer_domains`
+    through this; the matcher and the header gate apply the same rule again, so
+    the stage fails closed whatever it is given."""
+    out: list[str] = []
+    for raw in hosts:
+        host = _host(raw)
+        if host and not is_shared_domain(host, rules) and host not in out:
+            out.append(host)
     return tuple(out)
 
 
@@ -143,10 +156,17 @@ class _Mail:
         self.sender = norm(h.from_name)
         self.subject = norm(self.subject_raw)
         self.text = norm(self.text_raw)
-        self.text_folded = _fold(self.text_raw)        # for names that count only as written
+        # For names that count only as written (D-104 c): accents dropped, case kept.
+        self.sender_folded = _fold(h.from_name or "")
+        self.subject_folded = _fold(self.subject_raw)
+        self.text_folded = _fold(self.text_raw)
         self.lines = [set(norm(line).split())
                       for line in (self.subject_raw, *self.text_raw.splitlines()) if line.strip()]
-        self.regs = {r for r in (h.from_reg, *h.reply_to_regs) if r}
+        # D-104 (b), review F2: Gmail authenticates From only, so Reply-To names the
+        # employer only on authenticated platform mail (an ATS relaying for it).
+        from_platform = sender_platform(h, rules) is not None
+        reply_to = h.reply_to_regs if from_platform and h.auth == AuthResult.PASS else ()
+        self.regs = {r for r in (h.from_reg, *reply_to) if r}
         self.tenant = _sender_tenant(h, rules)
 
 
@@ -221,43 +241,60 @@ def _req_hit(req_ids: Sequence[str], mail: _Mail) -> bool:
 
 def signals(app: AppCandidate, mail: _Mail) -> tuple[Signal, ...]:
     """Every MS 7 signal that holds for `app`, in `Signal` order."""
+    return _evaluate(app, mail)[0]
+
+
+def _evaluate(app: AppCandidate, mail: _Mail) -> tuple[tuple[Signal, ...], int, bool]:
+    """(signals in `Signal` order, employer strength: 2 strong, 1 weak, 0 none,
+    capped: the only employer evidence is a restricted name).
+
+    D-104 (c), review F3: a variant listed in `common_word_names`, or a single
+    token under 5 characters, matches only as written (capitalisation kept) and
+    is never strong, in the sender name, the subject or the body: "Grab your
+    spot" or "Acme Analytics" on shared-platform mail names someone else. Alone
+    it gives WEAK (a suggestion); it can only confirm another strong signal."""
     h, rules = mail.h, mail.rules
     found: set[Signal] = set()
+    strong = False
     if h.gm_thrid and h.gm_thrid in app.threads:
         found.add(Signal.THREAD)
-    if mail.regs & set(app.employer_domains):
+    if mail.regs & set(employer_domains(app.employer_domains, rules)):
         found.add(Signal.EMPLOYER_DOMAIN)
+        strong = True
     vs = variants(app, rules)
     if mail.tenant:
         names = {compact(t, rules.company_suffixes) for t in app.tenants}
         names |= {v.replace(" ", "") for v in vs}
         if mail.tenant in names:
             found.add(Signal.TENANT)
-    if any(_has(mail.sender, v) for v in vs):
-        found.add(Signal.NAME_IN_SENDER)
-    if any(_has(mail.subject, v) for v in vs):
-        found.add(Signal.NAME_IN_SUBJECT)
-    written = None
-    for v in vs:
-        if _restricted(v, rules):
-            written = _written_forms(app, rules) if written is None else written
-            if any(_written_in(mail.text_folded, f) for f in written.get(v, ())):
-                found.add(Signal.NAME_IN_BODY)
-                break
-        elif _has(mail.text, v):
-            found.add(Signal.NAME_IN_BODY)
-            break
+            strong = True
+    written: Optional[dict[str, set[str]]] = None
+    plain_body = restricted_hit = False
+    for signal, normed, raw in ((Signal.NAME_IN_SENDER, mail.sender, mail.sender_folded),
+                                (Signal.NAME_IN_SUBJECT, mail.subject, mail.subject_folded),
+                                (Signal.NAME_IN_BODY, mail.text, mail.text_folded)):
+        for v in vs:
+            if _restricted(v, rules):
+                written = _written_forms(app, rules) if written is None else written
+                hit = any(_written_in(raw, f) for f in written.get(v, ()))
+                restricted_hit = restricted_hit or hit
+                is_strong = False
+            else:
+                hit = _has(normed, v)
+                is_strong = signal is not Signal.NAME_IN_BODY
+                plain_body = plain_body or (hit and not is_strong)
+            if hit:
+                found.add(signal)
+                strong = strong or is_strong
+                if strong or signal is Signal.NAME_IN_BODY:
+                    break
     if _role_hit(app.role, mail):
         found.add(Signal.ROLE)
     if _req_hit(app.req_ids, mail):
         found.add(Signal.REQ_ID)
-    return tuple(s for s in Signal if s in found)
-
-
-def _tier(sigs: tuple[Signal, ...]) -> int:
-    """Employer signal strength: 2 strong, 1 weak (body only), 0 none."""
-    s = set(sigs)
-    return 2 if s & _STRONG else 1 if s & _WEAK else 0
+    tier = 2 if strong else 1 if (plain_body or restricted_hit) else 0
+    capped = tier == 1 and not plain_body
+    return tuple(s for s in Signal if s in found), tier, capped
 
 
 # ---------------------------------------------------------------------------
@@ -270,7 +307,10 @@ def match(h: MailHeader, body: Optional[MailBody], apps: Sequence[AppCandidate],
     for AMBIGUOUS the union over the candidates, in `Signal` order."""
     mail = _Mail(h, body, rules)
     platform = platform_of(h, rules)
-    sig = {a.job_id: signals(a, mail) for a in apps}
+    ev = {a.job_id: _evaluate(a, mail) for a in apps}
+    sig = {j: e[0] for j, e in ev.items()}
+    tier = {j: e[1] for j, e in ev.items()}
+    capped = {j: e[2] for j, e in ev.items()}
 
     def one(app: AppCandidate, kind: MatchKind) -> MatchResult:
         return MatchResult(kind, app.job_id, (), sig[app.job_id], platform)
@@ -287,24 +327,26 @@ def match(h: MailHeader, body: Optional[MailBody], apps: Sequence[AppCandidate],
     if not pool:
         pool = list(apps)
     # 2. Applications with an employer signal.
-    emp = [a for a in pool if _tier(sig[a.job_id])]
+    emp = [a for a in pool if tier[a.job_id]]
     if not emp:
         return MatchResult(MatchKind.NONE, platform=platform)
     # 3. Across several companies, the strongest employer tier; a tie stays ambiguous.
     if _company_count(emp, rules) > 1:
-        best = max(_tier(sig[a.job_id]) for a in emp)
-        emp = [a for a in emp if _tier(sig[a.job_id]) == best]
+        best = max(tier[a.job_id] for a in emp)
+        emp = [a for a in emp if tier[a.job_id] == best]
         if _company_count(emp, rules) > 1:
             return several(emp)
-    # 4. Role or requisition id separates applications at one employer.
+    # 4. Role or requisition id separates applications at one employer. When the
+    # only employer evidence is a restricted name (D-104 c), the role can't make it
+    # strong: "Grab" in a subject plus a common title still names someone else.
     roles = [a for a in emp if {Signal.ROLE, Signal.REQ_ID} & set(sig[a.job_id])]
     if len(roles) == 1:
-        return one(roles[0], MatchKind.STRONG)
+        return one(roles[0], MatchKind.WEAK if capped[roles[0].job_id] else MatchKind.STRONG)
     if len(roles) > 1:
         return several(roles)
     # 5-6. No role signal.
     if len(emp) == 1:
-        strong = _tier(sig[emp[0].job_id]) == 2
+        strong = tier[emp[0].job_id] == 2
         return one(emp[0], MatchKind.STRONG if strong else MatchKind.WEAK)
     return several(emp)
 

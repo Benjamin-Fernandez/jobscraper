@@ -43,6 +43,8 @@ SCHEMA = {"type": "object",
 MAX_TOKENS = 200
 SEED = 7
 TEMPERATURE = 0
+QUOTE_MIN_CHARS = 15     # D-104 (d): a model quote shorter than this, or
+QUOTE_MIN_WORDS = 3      # with fewer words, proves nothing
 ELLIPSIS = "…"
 
 # imapread replaces every URL before the text leaves it (MS 5.6); this is the
@@ -110,6 +112,10 @@ def parse(reply: Any, h: MailHeader, body: Optional[MailBody], model_id: str = "
     needle = norm_quote(raw_quote)
     if not needle:
         return unusable("empty_quote")
+    # D-104 (d), review F6: one letter "occurs" in any email; the owner judges by
+    # the quote, so it must be a real phrase.
+    if len(needle) < QUOTE_MIN_CHARS or len(needle.split()) < QUOTE_MIN_WORDS:
+        return unusable("short_quote")
     subject, text = _parts(h, body)
     if needle not in norm_quote(f"{subject}\n{text}"):
         return unusable("quote_not_found")
