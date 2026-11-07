@@ -265,3 +265,16 @@ TYPE: question
 RE: `test_apply_flow_accounts::test_the_greenhouse_code_pattern_reads_the_code_not_a_word` (tester failing pin); AD §4.2 / §9.1 table `otp_pattern` "pending S-4"
 BODY: Greenhouse `otp_pattern = r"\b([A-Za-z0-9]{8})\b"` is the design's value; on "...into the security code field..." `find_code` returns "security". Fixing it picks the code format, which S-4 was to confirm, so I left it. Two one-line options (both pass the pin): (a) a code has a digit: `r"\b(?=[A-Za-z]*\d)([A-Za-z0-9]{8})\b"`; (b) the code is alone on its line: `r"(?m)^\s*([A-Za-z0-9]{8})\s*$"`. Say which (or the architect's choice) and I apply it in `apply/ats/greenhouse.py`.
 STATUS: open
+
+### 2026-11-07 software-engineer → coordinator (tester to act)
+TYPE: handoff
+RE: Q-70 lane B · branch `eng/Q-70-B-applications` · web/src/tabs/Applications.vue, web/src/applications.js, web/src/components/StatusSelect.vue
+BODY: B1-B9 built in web/src only. `cd web; npx vitest run` = 4 failed | 275 passed | 1 skipped; the 4 failures are intended-behaviour changes in web/tests/Applications.test.js. (I had edited that file earlier; reverted in the last commit once the scope was clarified.) Tester: change these assertions, and add the Verify B tests.
+Existing tests to change (web/tests/Applications.test.js):
+1. "groups applications by company, A to Z": the default chip is now Active (hides rejected). After mountTab add `await stageButton(wrapper, 'all').trigger('click')` before the groupNames assertion. Also add `beforeEach(() => { window.localStorage.clear() })` (the chip is persisted under `jobscraper.applications.stage`).
+2. "the stage strip counts each stage...": expected strip gains a first entry: `['Active','3'], ['All','4'], ['Saved','1'], ...`; the initial pressed chip is `active`, not `all`.
+3. "a status added to config (on_hold)..." and 4. "advancing applied -> interviewing...": replace `.find('select').setValue(x)` with `const s = ...find('select'); await s.trigger('pointerdown'); await s.setValue(x)` (without pointerdown the change is held until blur/Enter).
+4. (same test as 4) `.updated` text is now `Interviewing · N days` (age from now), not `Interviewing 24 Sep`: use `toMatch(/^Interviewing · \d+ days$/)` or fake Date.
+Other tests (ux1 notes/sort, App.test 'marking applied...') pass unchanged.
+New tests (Verify B): (a) keydown ArrowDown + change without pointerdown -> no POST until `blur`; Enter commits; Escape drops it; (b) pointerdown + change commits once, toast.current.message "Moved to X: role", `toast.current.action.run()` restores the status (one more POST); (c) default chip Active, excludes rejected, persists after remount (localStorage key above), unknown stored stage falls back to Active; (d) `vi.useFakeTimers({toFake:['Date']})` + setSystemTime 15 days after 2026-09-24 -> `.follow-up` "Follow up?" and `.updated` "Applied · 15 days"; 1 day -> no pill; (e) `.row-remove` only on single-event rows; click -> DELETE, toast "Removed ...", Undo POSTs the status back (fakeApi supports DELETE); (f) `.clear-filters` resets stage=all, run=all, query=''; (g) Esc in search clears then blurs; (h) unit tests of applications.js (daysSince, ageLabel, needsFollowUp, isActive, secondLine).
+STATUS: open
