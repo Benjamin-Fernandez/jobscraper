@@ -203,7 +203,264 @@ EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[A-Za-z]{2,}$")
 COUNTRY_CODE_RE = re.compile(r"^\+\d{1,3}$")
 CURRENCY_RE = re.compile(r"^[A-Z]{3}$")
 ISO2_RE = re.compile(r"^[A-Z]{2}$")
+COUNTRY_PICK_MESSAGE = "is not a country code. Pick a country from the list"
 URL_RE = re.compile(r"^https?://\S+$")
+
+# Q-71 G1: every ISO 3166-1 alpha-2 code with its English short name. Static data
+# (no dependency, nothing to install): the form's country pick-list and the
+# check that contact.country, nationality and the work-rights map keys are real
+# countries. A free-text box let "Singapore" be cut to "SI" (Slovenia) and saved.
+COUNTRY_NAMES: dict[str, str] = {
+    "AD": "Andorra",
+    "AE": "United Arab Emirates",
+    "AF": "Afghanistan",
+    "AG": "Antigua and Barbuda",
+    "AI": "Anguilla",
+    "AL": "Albania",
+    "AM": "Armenia",
+    "AO": "Angola",
+    "AQ": "Antarctica",
+    "AR": "Argentina",
+    "AS": "American Samoa",
+    "AT": "Austria",
+    "AU": "Australia",
+    "AW": "Aruba",
+    "AX": "Åland Islands",
+    "AZ": "Azerbaijan",
+    "BA": "Bosnia and Herzegovina",
+    "BB": "Barbados",
+    "BD": "Bangladesh",
+    "BE": "Belgium",
+    "BF": "Burkina Faso",
+    "BG": "Bulgaria",
+    "BH": "Bahrain",
+    "BI": "Burundi",
+    "BJ": "Benin",
+    "BL": "Saint Barthélemy",
+    "BM": "Bermuda",
+    "BN": "Brunei",
+    "BO": "Bolivia",
+    "BQ": "Caribbean Netherlands",
+    "BR": "Brazil",
+    "BS": "Bahamas",
+    "BT": "Bhutan",
+    "BV": "Bouvet Island",
+    "BW": "Botswana",
+    "BY": "Belarus",
+    "BZ": "Belize",
+    "CA": "Canada",
+    "CC": "Cocos (Keeling) Islands",
+    "CD": "Congo (Democratic Republic)",
+    "CF": "Central African Republic",
+    "CG": "Congo (Republic)",
+    "CH": "Switzerland",
+    "CI": "Côte d'Ivoire",
+    "CK": "Cook Islands",
+    "CL": "Chile",
+    "CM": "Cameroon",
+    "CN": "China",
+    "CO": "Colombia",
+    "CR": "Costa Rica",
+    "CU": "Cuba",
+    "CV": "Cape Verde",
+    "CW": "Curaçao",
+    "CX": "Christmas Island",
+    "CY": "Cyprus",
+    "CZ": "Czechia",
+    "DE": "Germany",
+    "DJ": "Djibouti",
+    "DK": "Denmark",
+    "DM": "Dominica",
+    "DO": "Dominican Republic",
+    "DZ": "Algeria",
+    "EC": "Ecuador",
+    "EE": "Estonia",
+    "EG": "Egypt",
+    "EH": "Western Sahara",
+    "ER": "Eritrea",
+    "ES": "Spain",
+    "ET": "Ethiopia",
+    "FI": "Finland",
+    "FJ": "Fiji",
+    "FK": "Falkland Islands",
+    "FM": "Micronesia",
+    "FO": "Faroe Islands",
+    "FR": "France",
+    "GA": "Gabon",
+    "GB": "United Kingdom",
+    "GD": "Grenada",
+    "GE": "Georgia",
+    "GF": "French Guiana",
+    "GG": "Guernsey",
+    "GH": "Ghana",
+    "GI": "Gibraltar",
+    "GL": "Greenland",
+    "GM": "Gambia",
+    "GN": "Guinea",
+    "GP": "Guadeloupe",
+    "GQ": "Equatorial Guinea",
+    "GR": "Greece",
+    "GS": "South Georgia and the South Sandwich Islands",
+    "GT": "Guatemala",
+    "GU": "Guam",
+    "GW": "Guinea-Bissau",
+    "GY": "Guyana",
+    "HK": "Hong Kong",
+    "HM": "Heard Island and McDonald Islands",
+    "HN": "Honduras",
+    "HR": "Croatia",
+    "HT": "Haiti",
+    "HU": "Hungary",
+    "ID": "Indonesia",
+    "IE": "Ireland",
+    "IL": "Israel",
+    "IM": "Isle of Man",
+    "IN": "India",
+    "IO": "British Indian Ocean Territory",
+    "IQ": "Iraq",
+    "IR": "Iran",
+    "IS": "Iceland",
+    "IT": "Italy",
+    "JE": "Jersey",
+    "JM": "Jamaica",
+    "JO": "Jordan",
+    "JP": "Japan",
+    "KE": "Kenya",
+    "KG": "Kyrgyzstan",
+    "KH": "Cambodia",
+    "KI": "Kiribati",
+    "KM": "Comoros",
+    "KN": "Saint Kitts and Nevis",
+    "KP": "North Korea",
+    "KR": "South Korea",
+    "KW": "Kuwait",
+    "KY": "Cayman Islands",
+    "KZ": "Kazakhstan",
+    "LA": "Laos",
+    "LB": "Lebanon",
+    "LC": "Saint Lucia",
+    "LI": "Liechtenstein",
+    "LK": "Sri Lanka",
+    "LR": "Liberia",
+    "LS": "Lesotho",
+    "LT": "Lithuania",
+    "LU": "Luxembourg",
+    "LV": "Latvia",
+    "LY": "Libya",
+    "MA": "Morocco",
+    "MC": "Monaco",
+    "MD": "Moldova",
+    "ME": "Montenegro",
+    "MF": "Saint Martin (French part)",
+    "MG": "Madagascar",
+    "MH": "Marshall Islands",
+    "MK": "North Macedonia",
+    "ML": "Mali",
+    "MM": "Myanmar",
+    "MN": "Mongolia",
+    "MO": "Macao",
+    "MP": "Northern Mariana Islands",
+    "MQ": "Martinique",
+    "MR": "Mauritania",
+    "MS": "Montserrat",
+    "MT": "Malta",
+    "MU": "Mauritius",
+    "MV": "Maldives",
+    "MW": "Malawi",
+    "MX": "Mexico",
+    "MY": "Malaysia",
+    "MZ": "Mozambique",
+    "NA": "Namibia",
+    "NC": "New Caledonia",
+    "NE": "Niger",
+    "NF": "Norfolk Island",
+    "NG": "Nigeria",
+    "NI": "Nicaragua",
+    "NL": "Netherlands",
+    "NO": "Norway",
+    "NP": "Nepal",
+    "NR": "Nauru",
+    "NU": "Niue",
+    "NZ": "New Zealand",
+    "OM": "Oman",
+    "PA": "Panama",
+    "PE": "Peru",
+    "PF": "French Polynesia",
+    "PG": "Papua New Guinea",
+    "PH": "Philippines",
+    "PK": "Pakistan",
+    "PL": "Poland",
+    "PM": "Saint Pierre and Miquelon",
+    "PN": "Pitcairn Islands",
+    "PR": "Puerto Rico",
+    "PS": "Palestine",
+    "PT": "Portugal",
+    "PW": "Palau",
+    "PY": "Paraguay",
+    "QA": "Qatar",
+    "RE": "Réunion",
+    "RO": "Romania",
+    "RS": "Serbia",
+    "RU": "Russia",
+    "RW": "Rwanda",
+    "SA": "Saudi Arabia",
+    "SB": "Solomon Islands",
+    "SC": "Seychelles",
+    "SD": "Sudan",
+    "SE": "Sweden",
+    "SG": "Singapore",
+    "SH": "Saint Helena",
+    "SI": "Slovenia",
+    "SJ": "Svalbard and Jan Mayen",
+    "SK": "Slovakia",
+    "SL": "Sierra Leone",
+    "SM": "San Marino",
+    "SN": "Senegal",
+    "SO": "Somalia",
+    "SR": "Suriname",
+    "SS": "South Sudan",
+    "ST": "São Tomé and Príncipe",
+    "SV": "El Salvador",
+    "SX": "Sint Maarten",
+    "SY": "Syria",
+    "SZ": "Eswatini",
+    "TC": "Turks and Caicos Islands",
+    "TD": "Chad",
+    "TF": "French Southern Territories",
+    "TG": "Togo",
+    "TH": "Thailand",
+    "TJ": "Tajikistan",
+    "TK": "Tokelau",
+    "TL": "Timor-Leste",
+    "TM": "Turkmenistan",
+    "TN": "Tunisia",
+    "TO": "Tonga",
+    "TR": "Türkiye",
+    "TT": "Trinidad and Tobago",
+    "TV": "Tuvalu",
+    "TW": "Taiwan",
+    "TZ": "Tanzania",
+    "UA": "Ukraine",
+    "UG": "Uganda",
+    "UM": "US Minor Outlying Islands",
+    "US": "United States",
+    "UY": "Uruguay",
+    "UZ": "Uzbekistan",
+    "VA": "Vatican City",
+    "VC": "Saint Vincent and the Grenadines",
+    "VE": "Venezuela",
+    "VG": "British Virgin Islands",
+    "VI": "US Virgin Islands",
+    "VN": "Vietnam",
+    "VU": "Vanuatu",
+    "WF": "Wallis and Futuna",
+    "WS": "Samoa",
+    "YE": "Yemen",
+    "YT": "Mayotte",
+    "ZA": "South Africa",
+    "ZM": "Zambia",
+    "ZW": "Zimbabwe",
+}
 NRIC_LAST4_RE = re.compile(r"^\d{3}[A-Z]$")
 # A full NRIC/FIN anywhere in the file is refused (§5.2): letter, 7 digits, letter.
 NRIC_ANYWHERE_RE = re.compile(r"(?<![A-Za-z0-9])[STFGMstfgm]\d{7}[A-Za-z](?![A-Za-z0-9])")
@@ -644,8 +901,8 @@ def validate(profile: dict) -> list[FieldError]:
         elif isinstance(email, str) and backup.strip().lower() == email.strip().lower():
             err("contact.backup_email", "must differ from contact.email")
     country = _get(profile, "contact.country")
-    if not _empty(country) and not (isinstance(country, str) and ISO2_RE.match(country)):
-        err("contact.country", "must be a 2-letter ISO country code, e.g. SG")
+    if not _empty(country) and country not in COUNTRY_NAMES:
+        err("contact.country", COUNTRY_PICK_MESSAGE)
     postal = _get(profile, "contact.postal_code")
     if not _empty(postal) and country == "SG":
         if not re.fullmatch(r"\d{6}", str(postal).strip()):
@@ -662,8 +919,8 @@ def validate(profile: dict) -> list[FieldError]:
             err("contact.phone_number",
                 "a Singapore (+65) number has 8 digits starting with 3, 6, 8 or 9")
     nat = _get(profile, "singapore_status.nationality")
-    if not _empty(nat) and not (isinstance(nat, str) and ISO2_RE.match(nat)):
-        err("singapore_status.nationality", "must be a 2-letter ISO country code, e.g. SG")
+    if not _empty(nat) and nat not in COUNTRY_NAMES:
+        err("singapore_status.nationality", COUNTRY_PICK_MESSAGE)
 
     # enums
     for path, allowed in ENUMS.items():
@@ -693,6 +950,8 @@ def validate(profile: dict) -> list[FieldError]:
             if not (isinstance(k, str) and (ISO2_RE.match(k) or k == WORK_RIGHTS_DEFAULT)):
                 err(f"singapore_status.{block}",
                     "keys must be 2-letter ISO country codes or default")
+            elif k != WORK_RIGHTS_DEFAULT and k not in COUNTRY_NAMES:
+                err(f"singapore_status.{block}", COUNTRY_PICK_MESSAGE)
             elif v is not None and not isinstance(v, bool):
                 err(f"singapore_status.{block}.{k}", "must be true or false")
 
@@ -1195,11 +1454,20 @@ def _under(path: str, paths: Iterable[str]) -> bool:
     return any(p == path or p.startswith(path + ".") for p in paths)
 
 
+def country_options() -> list[dict]:
+    """The country pick-list: Singapore first (the owner's home market), then
+    every ISO country by name. Label "Singapore (SG)": the code stays visible
+    where a form asks for it, and typing a name in a native <select> jumps to it."""
+    rest = sorted((n, c) for c, n in COUNTRY_NAMES.items() if c != "SG")
+    return [{"value": "SG", "label": f"{COUNTRY_NAMES['SG']} (SG)"}] +         [{"value": c, "label": f"{n} ({c})"} for n, c in rest]
+
+
 def _item_json(item: FormItem, parent: str = "") -> dict:
     full = f"{parent}[0].{item.path}" if parent else item.path
-    return {
+    out = {
         "path": item.path, "label": item.label, "kind": item.kind,
-        "options": [{"value": v, "label": lab} for v, lab in item.options],
+        "options": (country_options() if item.kind == "country"
+                    else [{"value": v, "label": lab} for v, lab in item.options]),
         "help": item.help,
         "required": not parent and _under(item.path, REQUIRED_PATHS),
         "recommended": not parent and _under(item.path, RECOMMENDED_PATHS),
@@ -1208,6 +1476,9 @@ def _item_json(item: FormItem, parent: str = "") -> dict:
         "nullable": item.nullable, "multiline": item.multiline,
         "entry_label": item.entry_label, "fixed_text": item.fixed_text,
     }
+    if item.kind == "country_bool_map":
+        out["country_options"] = country_options()
+    return out
 
 
 def form_json() -> list[dict]:
