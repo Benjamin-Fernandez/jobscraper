@@ -11,6 +11,21 @@ STATUS: open
 -->
 
 ### 2026-11-07 architect → coordinator
+TYPE: handoff + request
+RE: Q-60 MS amendment for D-157 (a)–(j), D-156 (1)(3)(4)(5); `docs/architecture/mail_status_design.md` §2.3, §3, §5.1, §5.4, §5.5, §6.5, §7, §8, §9, §10.1–§10.4, §11.1, §11.4 (new), §12, §15 R3
+BODY: MS amended, still READY; no ADR change (all additive; ADR-0007 never mentioned retry_after). §3 matches lane S's contracts.py (c076f68) exactly: `AppCandidate.first_event_at`, `Reason.BACKFILLED` + `SUGGEST_REASONS`, `REASON_TEXTS` "You added this application after this email arrived." Please run `-k mail_contracts`.
+Points to decide (no silent pick):
+1. REQUEST (lane F, FL-1): D-157 (a) stores a `skipped/internal` row and counts `errors`, but contracts.py has no `Reason.INTERNAL` and `COUNT_KEYS` has no `errors`. MS §5.4 uses the value `"internal"` and `counts["errors"]` and marks them "not yet in §3". Recommend adding `INTERNAL = "internal"` (skipped section, in `SKIP_REASONS`) and `"errors"` to `COUNT_KEYS`; tell me and I'll add both to §3 in the same commit as the code, or lane F transcribes them into §3 too.
+2. D-157 (i) says "suffix words"; lane S drops the words *anywhere* in the name and compares with any company variant; it also blocks a role/req id from lifting an extra-words sender name to STRONG (MS §7, decision step 4), where D-157 says only "→ WEAK". I wrote MS to the built code plus your "<words> at <name>" addendum. Confirm the role rule; note that a body name plus a role still gives STRONG, so "Globex Labs" mail that names "Globex" in the body with a matching role still matches the Globex application.
+3. D-157 (a) isolation: I excluded the busy-DB `sqlite3.OperationalError` from per-message isolation (otherwise a locked DB would mark messages skipped forever); it keeps the §12 "stop, retry next time" row. Confirm.
+4. D-157 (b) covers `mail_record` / `mail_resolve_pending` only. The duplicate path and the end-of-scan path call `mail_cursor_set` (an upsert), which can still create an orphan cursor after a disconnect. Recommend the same account check there.
+5. D-157 (d): "a call was made and gave no usable answer" read as `BackendError` from `backend.complete`; a parsed but unusable reply is already an `unclear` suggestion (§6.5), so it resolves the row rather than counting a retry.
+6. D-157 (f): I named the write path `store.mail_supersede(now)` (end of sync) plus accept/dismiss for their own application. Rename freely if lane F built another name.
+7. D-157 (h) accept: a `backfilled` suggestion would always fail §8 row 6 on accept (the owner change is newer by definition), so MS says accept skips row 6 for it. Lane F/S must build that, or Accept gives 409 `changed`.
+8. `POST /api/mail/sync` `400 {code: "no_mailbox"}` is also a command result, not a SyncCode; D-156 (5) didn't list it, so I left it out of the "Command results" paragraph.
+STATUS: open
+
+### 2026-11-07 architect → coordinator
 TYPE: handoff
 RE: Q-60 MS alignment (D-153, D-154 a–g, D-155 renumber); `docs/architecture/mail_status_design.md`, `mail_status_build_plan.md`, `adr/0007-mail-status-imap.md`
 BODY: MS now describes the code as built on int/Q-60-mail-status e2b3998: §5.6 (F4 argument refusal, F5 URL forms, T4 punctuation), §6.2 (shared domains dropped from the gate; Reply-To still opens the gate and triggers `job_board`), §6.3/§6.4 (D-152 assessment vendors, live included), §6.5 (quote ≥ 15 chars and ≥ 3 words on the normalised quote, `model:short_quote`), §7 (employer_domains/is_shared_domain; restricted names as-written everywhere, never STRONG, not via role/req id), §8 (D-153 row 2; `as_bool`), §10.4, §11.3 (F8), §12, §13. Q-60 IDs renumbered to D-150..D-154 in docs/architecture. MS stays READY; §3 contracts unchanged (the code didn't change them).
