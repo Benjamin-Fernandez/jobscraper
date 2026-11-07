@@ -318,6 +318,25 @@ def platform_of(h: MailHeader, rules: Rules) -> str:
     return p.id if p else ""
 
 
+def is_shared_domain(domain: str, rules: Rules) -> bool:
+    """D-104 (a), review F1: a domain that is, or sits under, a platform domain, a
+    `tenant_sites` suffix or a job board carries mail for many employers, so it is
+    never one employer's domain ("tal.net" from acmebank.tal.net would otherwise
+    match every other Oleeo tenant's mail). On those hosts the employer comes only
+    from the tenant signal (E1)."""
+    d = (domain or "").strip().lower().rstrip(".")
+    if not d:
+        return True
+    bases = [*rules.job_boards, *(x for p in rules.platforms for x in (*p.domains, *p.tenant_sites))]
+    return any(domain_matches(d, b) for b in bases)
+
+
+def employer_regs_only(domains, rules: Rules) -> frozenset[str]:
+    """The given registrable domains minus the shared ones (`is_shared_domain`)."""
+    return frozenset(d.strip().lower() for d in domains
+                     if d and not is_shared_domain(d, rules))
+
+
 def _sender_domains(h: MailHeader) -> tuple[str, ...]:
     return tuple(d for d in (h.from_domain, h.from_reg, *h.reply_to_regs) if d)
 
@@ -348,7 +367,9 @@ def header_gate(h: MailHeader, rules: Rules, *, own: frozenset[str], window_star
     in_thread = bool(h.gm_thrid) and h.gm_thrid in threads
     platform_mail = any(domain_matches(d, b) for d in senders
                         for p in rules.platforms for b in p.domains)
-    employer_mail = any(r in employer_regs for r in (h.from_reg, *h.reply_to_regs) if r)
+    # D-104 (a): a platform, careers-site or job-board domain is never an employer's.
+    regs = employer_regs_only(employer_regs, rules)
+    employer_mail = any(r in regs for r in (h.from_reg, *h.reply_to_regs) if r)
     if not (platform_mail or employer_mail or in_thread):
         return Reason.NOT_JOB_MAIL
     if not in_thread and ((rules.bulk_list_id and h.list_id)

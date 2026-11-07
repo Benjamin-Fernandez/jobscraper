@@ -203,11 +203,15 @@ async function useApp() {
 }
 
 async function connect() {
+  // Without consent (or while a login is being checked) nothing is attempted, so
+  // the typed password stays in the field (review F8: an implicit submit by
+  // Enter must not lose it). Past this check it is read once and cleared at
+  // once, whatever the attempt's outcome.
+  if (!consented.value || connecting.value) return
   const el = pwInput.value
   const password = el ? el.value : ''
   if (el) el.value = ''
   connectError.value = ''
-  if (!consented.value || connecting.value) return
   const addr = address.value.trim()
   if (!addr || !password) {
     connectError.value = BAD_INPUT

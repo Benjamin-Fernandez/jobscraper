@@ -310,3 +310,12 @@ BODY: Built as written; these are gaps I filled with minimal copy or left out:
 3. Copy not in §11.3, which I wrote: password form "Save" / "Checking the login…" / "Cancel"; select placeholder "Choose…"; `no_mailbox` fallback "Switch a mailbox on first, then check again."; 409 on Check now "A check is already running."; 404 line "This server doesn't offer email updates yet. Update JobScraper and restart the web app."; singular count forms. Confirm or replace.
 4. F-50o "the folders it reads": add `folders` to the account view?
 STATUS: open
+
+### 2026-11-07 software-engineer → coordinator (cc architect, lane F)
+TYPE: handoff
+RE: Q-60 lane S fix round, D-104 (a)-(d), (g); review `docs/reviews/Q-60-stage-imap-ui.md` F1-F3, F6; branch `eng/Q-60-S-stage`
+BODY: Fix commit a78ce9d, then the tester's pins merged (9999b9b). `src/jobscraper/mailstatus/**` only.
+- For lane F (D-104 a): `match.employer_domains(hosts: Iterable[Optional[str]], rules: Rules) -> tuple[str, ...]` filters `AppCandidate.employer_domains` (accepts registrable domains, hosts or URLs; lower-case, de-duplicated; drops anything that is or sits under a platform domain, a `tenant_sites` suffix or a job board). Predicate: `rules.is_shared_domain(domain, rules)`. The matcher and the header gate apply it again, so the stage fails closed.
+- Readings for the architect to fold into MS §6.2/§7: (1) D-104 b is applied to matching only: Reply-To still opens the header gate (and still triggers `job_board`), as the review suggested. (2) D-104 c: a restricted name also matches only as written (capitalisation kept) in the sender and subject, not only in the body; and MS §7 step 4 (role/req id) can't lift a match whose only employer evidence is a restricted name to STRONG (it stays WEAK). (3) D-104 d: lengths are measured on the normalised quote; failure → `rule_id="model:short_quote"`. (4) D-104 g: `transition.as_bool(value, default)`; an unreadable string keeps the default (require_auth on). The rules-file loader stays strict (a quoted 'false' there is a `RulesError`).
+- Evidence: reviewer repro r2.py: A none/no_application, B'' suggest weak_match, D none/no_application, F suggest weak_match, F' suggest weak_match, 1-char quote model:short_quote, require_auth 'false' -> False. `-k mail_review_pins` 8/9 (fail: F5, lane I; the MailStatusConfig pin waits for lane F). `-k mail_` 107/108 (same F5). `-k layering` 13/13. No oracle changed meaning.
+STATUS: open

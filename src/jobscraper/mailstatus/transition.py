@@ -68,7 +68,28 @@ def build_policy(statuses: Iterable[str], raw: Any = None) -> Policy:
                   category_status=MappingProxyType(category_status),
                   suggest_only=_categories(_get(raw, "suggest_only", DEFAULT_SUGGEST_ONLY)),
                   junk_auto=_categories(_get(raw, "junk_auto", DEFAULT_JUNK_AUTO)),
-                  require_auth=bool(_get(raw, "require_auth", True)))
+                  require_auth=as_bool(_get(raw, "require_auth", True), True))
+
+
+_FALSE = frozenset({"false", "no", "0", "off", "n", "f"})
+_TRUE = frozenset({"true", "yes", "1", "on", "y", "t"})
+
+
+def as_bool(value: Any, default: bool) -> bool:
+    """D-104 (g): a config boolean. `bool("false")` is True, so a quoted YAML
+    'false' / 'no' / '0' would otherwise turn a safety switch on or off by
+    accident. Anything unreadable keeps `default` (for require_auth: on)."""
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return value != 0
+    if isinstance(value, str):
+        s = value.strip().lower()
+        if s in _FALSE:
+            return False
+        if s in _TRUE:
+            return True
+    return default
 
 
 def _get(raw: Any, key: str, default: Any) -> Any:

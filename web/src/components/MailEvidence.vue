@@ -6,7 +6,8 @@
 //
 // The event carries `mail: {evidence_id, kind, state, quote, subject,
 // sender_domain, received_at, gmail_url, undoable}` (MS section 11.1).
-// Emits `undone` ({status}) after a successful Undo, so the tab reloads.
+// Emits `undone` ({status}) after a successful Undo, and `stale` after a 409 on
+// Undo, so the tab reloads either way.
 import { computed, ref } from 'vue'
 import { describeError, mailProblem, undoMailChange } from '../api.js'
 import { shortDate } from '../format.js'
@@ -16,7 +17,7 @@ import { showToast } from '../toast.js'
 const props = defineProps({
   event: { type: Object, required: true },
 })
-const emit = defineEmits(['undone'])
+const emit = defineEmits(['undone', 'stale'])
 
 const UNDO_CONFLICT = "Can't undo: the status changed after this email. Set it by hand."
 
@@ -41,6 +42,10 @@ async function undo() {
   } catch (e) {
     const p = mailProblem(e)
     error.value = p.status === 409 ? UNDO_CONFLICT : `Could not undo it: ${p.detail || describeError(e)}`
+    // The status moved on (review F8): the tab reloads, so the History and its
+    // Undo button show what is true now. This badge keeps its message: the
+    // timeline is keyed by event id, so it survives the reload.
+    if (p.status === 409) emit('stale')
   } finally {
     undoing.value = false
   }
