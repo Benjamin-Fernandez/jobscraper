@@ -1,0 +1,1 @@
+const t={run:{type:[Number,String,Array],default:"all"},runs:{type:Array,default:()=>[]},jobs:{type:Array,default:()=>[]},loading:{type:Boolean,default:!1},error:{type:String,default:""},runsError:{type:String,default:""}},r=["changed","select-run"];export{t as a,r as t};
