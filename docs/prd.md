@@ -221,14 +221,41 @@ Priority: P0 = the milestone can't ship without it, P1 = important, P2 = nice to
 | ID | Requirement (measurable) | Pri |
 |---|---|---|
 | NF-01 | Privacy: `data/applicant.yaml`, `data/master_resume.json`, `data/tailored/`, `data/apply/` and the apply browser profile are never committed; a test runs `git check-ignore` on each | P0 |
-| NF-02 | Secrets: passwords and the IMAP app password live only in Windows Credential Manager; never in SQLite, YAML, logs, screenshots' file names, or LLM prompts | P0 |
+| NF-02 | Secrets: passwords, the IMAP app password and mail-status account passwords live only in Windows Credential Manager; never in SQLite, YAML, logs, screenshots' file names, or LLM prompts | P0 |
 | NF-03 | Local only: no cloud LLM; the web app still binds to 127.0.0.1 and answers only loopback Host headers | P0 |
-| NF-04 | Layering: `tailor/` and `apply/` are stage packages; `apply_flow.py` is the orchestrator; only `store.py` has SQL and only `backends.py` talks to the model; `tests/test_layering.py` enforces it | P0 |
+| NF-04 | Layering: `tailor/` and `apply/` are stage packages; `apply_flow.py` is the orchestrator; `mailstatus/` is a stage package, `mailstatus_flow.py` is its orchestrator, and `imapread.py` is the foundation module that speaks IMAP; `web/` may not import it; only `store.py` has SQL and only `backends.py` talks to the model; `tests/test_layering.py` enforces it | P0 |
 | NF-05 | Pace: one attempt at a time; actions at human pace (no artificial jitter for evasion); caps per D-61 | P0 |
 | NF-06 | Idempotency: a posting is never submitted twice by the app (attempt state + Applications + twins) | P0 |
 | NF-07 | Time: tailoring finishes in ≤ 90 s per job on the owner's PC; an auto-apply attempt (no account) in ≤ 4 min | P1 |
 | NF-08 | The live app (port 8765, `data/jobscraper.db`) is never used for development; dev instances use a copied DB on port 8768 | P0 |
 | NF-09 | Logs: the Developer tab shows the apply job's step-by-step log (no personal values, no passwords) | P1 |
+
+### 5.6 Application status from email (key area KA-3). Design: `docs/architecture/mail_status_design.md` (MS), from `docs/research/mail_status_brief.md`; ADR `docs/architecture/adr/0007-mail-status-imap.md`
+
+With the owner's opt-in per mailbox, JobScraper reads Gmail over IMAP, read-only, and updates tracked applications from employers' emails. Every change keeps a short quote from the email as evidence and can be undone. Owner request: D-150 (queue Q-60); design decisions D-151..D-154, D-156. A new status, `assessment` (tests, coding challenges, one-way video), sits between `applied` and `interviewing`. Section numbers in the table (§7, §14) refer to MS.
+
+| ID | Requirement |
+|---|---|
+| F-50a | WHEN the owner gives a Gmail address and app password in Settings or with `mail accounts add`, and ticks the consent box, THE SYSTEM SHALL test a read-only login first. Only if the login succeeds SHALL it store the password in Credential Manager (`jobscraper:imap:imap.gmail.com`, user = address) and record the account with the consent time and consent-text version. IF the login fails THE SYSTEM SHALL store nothing and SHALL say why in plain words. |
+| F-50b | WHERE the application mailbox (`apply.mail`, D-72) is set up THE SYSTEM SHALL offer it first, as "Use this mailbox", without asking for its password again. |
+| F-50c | THE SYSTEM SHALL read a mailbox only while its switch is on. WHEN the owner disconnects it THE SYSTEM SHALL delete its cursor, its processed-message log, its open suggestions and its account row, and its vault entry too unless email verification (`apply.mail`) also uses it. |
+| F-50d | WHILE the web app runs THE SYSTEM SHALL sync every mailbox that is switched on, at start-up and every `mail_status.interval_min` minutes, without taking the JobManager slot. A sync SHALL process every message after the cursor up to the newest, in UID order, in the mailboxes Gmail flags `\All` and `\Junk`. |
+| F-50e | WHEN the app starts after being closed THE SYSTEM SHALL continue from the stored cursor. No message SHALL be skipped, and none SHALL be processed twice: X-GM-MSGID dedupes across mailboxes, Spam moves and UIDVALIDITY changes. |
+| F-50f | WHEN a mailbox has no cursor yet THE SYSTEM SHALL start from the earliest open application's date minus 1 day, but no earlier than `first_sync_max_days` (180) before now. |
+| F-50g | THE SYSTEM SHALL open mailboxes only with EXAMINE and fetch only with BODY.PEEK or header items. It SHALL never send STORE, COPY, MOVE, EXPUNGE, APPEND or SMTP, never mark mail read, never open a link from mail and never load remote content. |
+| F-50h | THE SYSTEM SHALL fetch a message body only after the header gate passes: the sender is a hiring platform or a tracked employer, or the message is in a thread already matched to an application, and it is not bulk mail or job-board mail. |
+| F-50i | THE SYSTEM SHALL never treat the owner's own sent mail, auto-replies, verification, security-code, account or password mail (D-85), job alerts, talent-community newsletters, job-board mail or recruiter outreach as a status. |
+| F-50j | THE SYSTEM SHALL match a message to an application only through the signals in MS §7. WHEN several applications fit THE SYSTEM SHALL not choose one: it SHALL leave a suggestion listing them. |
+| F-50k | THE SYSTEM SHALL classify with the deterministic phrase rules in `config/mail_rules.yaml` first. Only for gated, matched messages the rules can't decide SHALL it ask the local model. The model SHALL choose one fixed category, or `unknown`, and give a quote that code checks appears in the message. |
+| F-50l | WHEN a confident, unique match points to a *forward* status THE SYSTEM SHALL apply it automatically, offer and rejected included, with `app_events.by = 'mail'` and an evidence row. It SHALL never move a status backwards and never override an owner change newer than the email. A forward move that isn't confident or unique SHALL become a suggestion. |
+| F-50m | WHEN the owner clicks Undo on an email-made change that is still the application's latest event THE SYSTEM SHALL restore the previous status and its `applied_at`. The same message SHALL never apply again. |
+| F-50n | WHEN the owner accepts a suggestion THE SYSTEM SHALL apply it, if the application's status hasn't changed since the suggestion was made. WHEN the owner dismisses it THE SYSTEM SHALL close it. |
+| F-50o | THE SYSTEM SHALL show, per mailbox, when it was last checked, the result counts, the folders it reads, and any failure in plain words. It SHALL offer "Check now" and the CLI verb `mail sync`. |
+| F-50p | IF Gmail refuses the login THEN THE SYSTEM SHALL pause that mailbox, SHALL not retry on the timer, and SHALL say how to fix it. IF the network is down or Gmail throttles THEN THE SYSTEM SHALL back off and try again later. |
+| F-50q | IF All Mail is hidden from IMAP THEN THE SYSTEM SHALL read INBOX and Spam instead and SHALL say so. IF the model is unavailable or busy THEN THE SYSTEM SHALL keep using the rules and SHALL retry the undecided messages later. |
+| F-50r | THE SYSTEM SHALL log only counts, codes, account ids and platform domains: never an address, display name, subject, body, quote or password. It SHALL store no bodies or links, and SHALL store a subject (≤ 120 characters) and a quote (≤ 200 characters) only on evidence rows. |
+| F-50s | THE SYSTEM SHALL store a message's outcome and the cursor advance in the same transaction. |
+| F-50t | THE SYSTEM SHALL take sender platforms, gates and phrases from `config/mail_rules.yaml`, so that a new sender or phrase needs no code change (MS §14). |
 
 ## 6. Key areas (these get the full design dossier)
 
@@ -236,7 +263,7 @@ Priority: P0 = the milestone can't ship without it, P1 = important, P2 = nice to
 |---|---|---|
 | **KA-1 Auto-apply engine** (browser driver, adapters, attempt state machine, submit and confirmation) | Invisible failure modes (a half-filled submission, a double submission), terms-of-service and bot-control exposure, and everything else plugs into it | F-30, F-31, F-34, F-37, F-38, NF-05, NF-06 |
 | **KA-2 Answer resolution and declarations** | Wrong answers are legal attestations to an employer; an LLM is involved; mistakes are invisible without the audit | F-32, F-33, F-39, F-12 |
-| **KA-3 Accounts, vault and mailbox** | Credentials, mailbox access, and account creation on third-party sites | F-35, F-36, NF-02 |
+| **KA-3 Accounts, vault and mailbox** | Credentials, mailbox access, and account creation on third-party sites; reading the owner's Gmail to update applications (F-50) | F-35, F-36, F-50, NF-02 |
 | **KA-4 Resume tailor truthfulness** | A fabricated claim on a resume is costly and invisible; LLM rewriting | F-20 to F-24 |
 
 All other parts (the cloud port, the profile form, settings, UI panels) use the fast track (`instructions/05_workflow.md` §3.2). The cloud port's design is `docs/research/cloud_port_report.md`.
@@ -269,6 +296,7 @@ foundation: store.py (+ tables tailored, apply_attempts, apply_answers, ats_acco
 - **Attempt state machine:** `queued → tailoring → planning → opening → [signing_in | signing_up → verifying_email] → filling(step n) → submitting → submitted | submitted_unconfirmed | ready_to_submit (dry run) | failed(reason)`.
 - **Reason codes:** `captcha`, `bot_challenge`, `sms_or_2fa`, `login_failed`, `email_verification_timeout`, `mail_not_set_up`, `unanswerable_required`, `validation_error`, `page_unrecognised`, `posting_closed`, `unsupported_ats`, `cap_reached`, `duplicate`, `profile_incomplete`, `cancelled`, `error` (`cancelled` and `mail_not_set_up` added by D-65).
 - **Layering notes (D-65):** `vault.py` sits in the foundation, not in `apply/`, because the web app needs it directly (Copy password, the IMAP password, the Edge export) and web/ may not import a stage. `apply_flow` may import `tailor_flow`: the one allowed orchestrator-to-orchestrator edge (for `tailor_for_apply`). `tests/test_layering.py` encodes both.
+- **Layering notes (F-50, MS §2):** `mailstatus/` is a stage package, `mailstatus_flow.py` is its orchestrator, and `imapread.py` is the foundation module that speaks IMAP; `web/` may not import it. `apply/mail.py` uses `imapread.py` too. The web app's timer (`web/mailsync.py`) starts `python -m jobscraper mail sync` as a separate process instead of reading mail itself. `mailstatus_flow` adds no orchestrator-to-orchestrator edge.
 - **New dependencies:** `playwright` (drives the installed Edge; no browser download), `keyring` (Windows Credential Manager), `pywin32` (Word → PDF, optional). IMAP uses the standard library.
 - **Config:** `config/config.yaml` gains an `apply:` block (mode, caps, headed, captcha wait, profile dir) and a `tailor:` block (temperature, page ceiling, retention days). `config/questions.yaml` (question synonyms → profile keys) and `config/aliases.yaml` (term variants) are public, generic data. Personal values live only in `data/`.
 

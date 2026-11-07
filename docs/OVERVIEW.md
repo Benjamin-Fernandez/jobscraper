@@ -43,7 +43,7 @@ only the few hundred that fit ever reach you.
    - **Not interested** — the role moves to a section at the bottom of the Inbox
      and stays there, even after you restart.
 5. **Track your applications** in the Applications tab, grouped by company, from
-   saved to applied, interviewing, offer or rejected.
+   saved to applied, assessment, interviewing, offer or rejected.
 6. **Close the window** when you're done; the app shuts itself down.
 
 Every company is checked again on a cycle you choose (weekly by default), so
@@ -98,8 +98,9 @@ changes.
   posting listed under a second company name.
 
 ### Applications — everything you've acted on
-- Grouped by company, with a strip showing how many are saved, applied,
-  interviewing, offered or closed.
+- Grouped by company, with a strip showing how many are saved, applied, at the
+  assessment stage (tests, coding challenges, one-way video), interviewing,
+  offered or closed.
 - Change a status in one click; every change is kept as a timeline.
 
 ### Runs — what each run found
@@ -125,6 +126,21 @@ changes.
 
 ### Settings
 - How many companies each run checks, and how often every company is re-checked.
+- **Application updates from email** (optional, off until you connect a mailbox).
+
+**Application updates from email.** If you choose, the app reads your Gmail and
+updates your applications when employers write: received, assessment, interview,
+offer or rejection. You connect a mailbox in Settings with a Gmail app password
+(or reuse the application mailbox already set up for auto-apply) and tick the
+consent box; the password is kept in Windows Credential Manager. While the app is
+open it checks at start-up and every 10 minutes, or when you click **Check now**.
+It only reads: it never marks mail as read, moves, deletes or sends anything, and
+never opens a link. It checks the sender first and reads an email only if it
+comes from a hiring platform or an employer you track (or continues a thread it
+already matched). When it is sure, it moves the application forward on its own; when it
+isn't, it leaves a suggestion under **From your email** in Applications. Every
+change shows in the application's history with a **From email** badge: open it
+to see the line from the email it came from, then **Open in Gmail** or **Undo**.
 
 ### Developer
 - The background job's live log, and Cancel — for when you want to see exactly
@@ -142,6 +158,9 @@ changes.
 - **It reads public pages only, politely.** It reads employers' public job
   listings, waits between requests, respects sites that ask not to be crawled,
   and never logs in anywhere. It does not scrape LinkedIn.
+- **Email is read, never changed.** If you connect Gmail, the app reads it
+  read-only, keeps no email bodies or links, and writes nothing about your mail
+  to its logs.
 - **It tidies up after itself.** Job descriptions you'll never look at are
   deleted after 7 days to keep the database small; descriptions of roles in your
   Inbox or Applications are kept.
