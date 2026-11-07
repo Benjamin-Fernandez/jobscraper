@@ -263,7 +263,11 @@ def cmd_web(args) -> int:
     print(f"JobScraper web: http://{host}:{port}  (Ctrl+C to stop)")
     # Jobs started from the web app re-invoke the CLI; they must use the same
     # config the web app was started with (`--config X web`).
-    uvicorn.run(create_app(cfg, config_path=getattr(args, "config", None)),
+    # F-50 (mail_status_design §10.1): the mail timer runs in the real app;
+    # JOBSCRAPER_MAIL_SYNC=0 turns it off (a dev instance on a copied DB).
+    mail_timer = os.environ.get("JOBSCRAPER_MAIL_SYNC", "1").strip() != "0"
+    uvicorn.run(create_app(cfg, config_path=getattr(args, "config", None),
+                           mail_timer=mail_timer),
                 host=host, port=port, log_level="warning")
     return 0
 
@@ -714,6 +718,8 @@ def cmd_mail(args) -> int:
     message from that domain. Neither prints the username, the password, a
     subject or a body: the web `mailtest` job's log shows this output.
     """
+    if args.mail_cmd in ("sync", "accounts"):
+        return cmd_mail_status(args)
     import getpass
     from . import vault
     from .apply import mail
@@ -782,11 +788,148 @@ def cmd_mail(args) -> int:
         store.close()
 
 
+def _read_password(args, prompt: str):
+    """The app password as a `Secret`: one line from stdin with
+    `--password-stdin` (the web app's child, MS §4: never argv or env), else
+    getpass. Spaces are dropped by the flow (Gmail shows groups of 4)."""
+    import getpass
+    from .apply.contracts import Secret
+    if getattr(args, "password_stdin", False):
+        line = sys.stdin.readline()
+        return Secret(line.rstrip("\r\n"))
+    return Secret(getpass.getpass(prompt))
+
+
+def _mail_result(args, result: str, account_id=None, text: str = "") -> int:
+    """`--json`: one line `{"result": code[, "account_id": N]}` (what the web
+    runner parses); else a sentence. Exit 0 only for "ok"."""
+    if getattr(args, "json", False):
+        out = {"result": result}
+        if account_id is not None:
+            out["account_id"] = int(account_id)
+        print(json.dumps(out))
+    elif text:
+        print(text, file=sys.stdout if result == "ok" else sys.stderr)
+    return 0 if result == "ok" else 1
+
+
+def cmd_mail_status(args) -> int:
+    """F-50 (mail_status_design §10.3): read Gmail for application updates.
+
+    `mail sync [--trigger cli] [--account N] [--defer-model]` prints one line
+    per account (ids and counts only, MS §13) and exits 0 for ok or partial.
+    `mail accounts list|add|set-password|on|off|remove` manage the connected
+    mailboxes; `add` and `set-password` test a read-only login before storing
+    anything, and with `--password-stdin` read the app password from stdin.
+    """
+    from . import mailstatus_flow as flow
+    from .mailstatus.contracts import (CONSENT_TEXT, CONSENT_VERSION, SYNC_TEXTS,
+                                       SyncCode)
+
+    def text(code: str) -> str:
+        try:
+            return SYNC_TEXTS.get(SyncCode(code)) or code
+        except ValueError:
+            return code
+
+    cfg = load_config(getattr(args, "config", None))
+    if args.mail_cmd == "sync":
+        rep = flow.sync(cfg, trigger=args.trigger, account_id=args.account,
+                        defer_model=args.defer_model)
+        if rep.code in (SyncCode.DISABLED, SyncCode.BUSY):
+            print(f"mail sync: {text(rep.code.value)}", file=sys.stderr)
+            return 1
+        if not rep.accounts:
+            print("mail sync: no mailbox to read now (none connected, switched on and due)")
+        for a in rep.accounts:
+            print(flow.summary_line(a))
+        if rep.code is SyncCode.RULES_INVALID:
+            print(f"mail sync: {text(rep.code.value)}", file=sys.stderr)
+        return 0 if rep.code in (SyncCode.OK, SyncCode.PARTIAL) else 1
+
+    sub = args.mail_accounts_cmd
+    if sub == "add":
+        consent = args.consent
+        if consent is None:
+            if args.json or args.password_stdin:
+                return _mail_result(args, "bad_input", text="--consent VERSION is required "
+                                    "with --json or --password-stdin")
+            print(CONSENT_TEXT)
+            if input("Read this mailbox as described? [y/N] ").strip().lower() not in ("y", "yes"):
+                return _mail_result(args, "bad_input", text="not connected: consent not given")
+            consent = CONSENT_VERSION
+        if consent != CONSENT_VERSION:
+            return _mail_result(args, "bad_input", text="the consent text has changed; "
+                                "read it again (run without --consent)")
+        try:
+            if args.use_application:
+                result, aid = flow.connect(cfg, use_application=True, consent_version=consent)
+            else:
+                pw = _read_password(args, "Gmail app password (16 letters): ")
+                result, aid = flow.connect(cfg, address=args.address, password=pw,
+                                           consent_version=consent)
+        except ValueError as exc:
+            return _mail_result(args, "bad_input", text=f"mail accounts add: {exc}")
+        msg = (f"connected as mailbox {aid}; the first check runs with the web app or "
+               "`python -m jobscraper mail sync`" if result == "ok" else
+               "this mailbox is already connected" if result == "exists" else text(result))
+        return _mail_result(args, result, aid, msg)
+
+    from .store import Store
+    store = Store(cfg.db_path)
+    try:
+        if sub == "list":
+            rows = store.mail_accounts()
+            if not rows:
+                print("no mailbox connected (mail accounts add --address A)")
+            for r in rows:
+                state = r["state"] + (f" ({r['state_code']})" if r.get("state_code") else "")
+                print(f"{r['id']:>3}  {r['address']:<40} {'on ' if r['enabled'] else 'off'}  "
+                      f"{state:<24} last check {r.get('last_sync_at') or 'never'}")
+            return 0
+        row = store.mail_account(args.id)
+        if row is None:
+            return _mail_result(args, "not_found", text=f"no mailbox {args.id}")
+        if sub == "set-password":
+            try:
+                code = flow.set_password(cfg, args.id, _read_password(
+                    args, "New Gmail app password (16 letters): "), store=store)
+            except ValueError as exc:
+                return _mail_result(args, "bad_input", text=f"mail accounts set-password: {exc}")
+            return _mail_result(args, code.value, args.id,
+                                "stored; the next check uses it" if code is SyncCode.OK
+                                else text(code.value))
+        if sub in ("on", "off"):
+            store.mail_account_set(args.id, enabled=(sub == "on"))
+            print(f"mailbox {args.id} switched {sub}")
+            return 0
+        # remove: the vault entry stays when auto-apply verification reads the same mailbox
+        from . import vault
+        ac = cfg.apply.with_settings(store.get_setting)
+        backup = store.get_setting("apply.mail_backup.username") or ac.mail_backup.username
+        used = {u.strip().lower() for u in (ac.mail.username, backup) if u}
+        keep = bool(row["shared_with_apply"]) or row["address"] in used
+        if not keep:
+            try:
+                vault.delete(row["vault_service"], row["address"])
+            except vault.VaultError as exc:
+                print(f"mail accounts remove: {exc}", file=sys.stderr)
+                return 1
+        store.mail_account_delete(args.id)
+        print(f"mailbox {args.id} disconnected" + ("; its password stays (auto-apply "
+              "email verification uses it)" if keep else ""))
+        return 0
+    finally:
+        store.close()
+
+
 EDGE_IMPORT_STEPS = ("Import it into Edge: Settings > Profiles > Import browser data > "
                      "Import from other password managers > Passwords (CSV file).")
 EDGE_FIRST_NOTE = "Check with one account first: import, then look for it in Edge's passwords."
 EDGE_CONFIRM_HINT = ("When it is imported, run `python -m jobscraper accounts export-edge "
                      "--confirm` to delete the file (it holds passwords).")
+# mailstatus_flow.TRIGGERS, kept here so building the parser imports no mail code.
+MAIL_TRIGGERS = ("startup", "timer", "manual", "connect", "cli")
 _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 
@@ -1155,6 +1298,36 @@ def build_parser() -> argparse.ArgumentParser:
                      help="test the backup mailbox (apply.mail_backup)")
     mlt.add_argument("--find-from", metavar="DOMAIN",
                      help="also print the time of the newest message from DOMAIN")
+    # F-50 (mail_status_design §10.3): application status from email
+    mly = ml_sub.add_parser("sync", help="read the connected mailboxes for application "
+                                         "updates (read-only)")
+    mly.add_argument("--trigger", choices=MAIL_TRIGGERS, default="cli",
+                     help="who asked (the web app passes its own; default cli)")
+    mly.add_argument("--account", type=int, metavar="N", help="only mailbox N")
+    mly.add_argument("--defer-model", action="store_true",
+                     help="leave emails that need the local model for the next sync")
+    mla = ml_sub.add_parser("accounts", help="the mailboxes read for application updates")
+    mla_sub = mla.add_subparsers(dest="mail_accounts_cmd", required=True)
+    mla_sub.add_parser("list", help="id, address, on/off, state, last check")
+    mlaa = mla_sub.add_parser("add", help="connect a Gmail mailbox (tests the login first)")
+    who = mlaa.add_mutually_exclusive_group(required=True)
+    who.add_argument("--address", help="the Gmail address")
+    who.add_argument("--use-application", action="store_true",
+                     help="the auto-apply verification mailbox (apply.mail), its stored password")
+    mlaa.add_argument("--password-stdin", action="store_true",
+                      help="read the app password from one line of stdin (no prompt)")
+    mlaa.add_argument("--consent", metavar="VERSION",
+                      help="the consent text version agreed to (else shown and asked)")
+    mlaa.add_argument("--json", action="store_true", help='print {"result": ...} only')
+    mlap = mla_sub.add_parser("set-password", help="change a mailbox's app password "
+                                                   "(tests the login first)")
+    mlap.add_argument("--id", type=int, required=True)
+    mlap.add_argument("--password-stdin", action="store_true",
+                      help="read the app password from one line of stdin (no prompt)")
+    mlap.add_argument("--json", action="store_true", help='print {"result": ...} only')
+    for verb, what in (("on", "switch reading on"), ("off", "switch reading off"),
+                       ("remove", "disconnect: forget the cursor and open suggestions")):
+        mla_sub.add_parser(verb, help=what).add_argument("--id", type=int, required=True)
     ml.set_defaults(fn=cmd_mail)
     # --- accounts (M20 lane V, D-78 lane N WP-N1)
     ac = sub.add_parser("accounts", help="ATS accounts: list, add one you have, export to Edge")

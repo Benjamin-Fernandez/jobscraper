@@ -33,6 +33,7 @@ paths:
   aliases: config/aliases.yaml                # tailor: term variants (true synonyms only)
   master_resume: data/master_resume.json      # tailor: your resume, parsed once (gitignored)
   tailored_dir: data/tailored                 # tailor: per-job resumes, deleted after a while (gitignored)
+  mail_rules: config/mail_rules.yaml          # email updates: sender platforms, gates, phrases (F-50)
 
 run:
   # Companies per run. PRD R-7: at 295 companies this needs ~4.2 runs/day to
@@ -107,8 +108,10 @@ applications:
   # restart `web` and it is in the Applications dropdown (served by /api/stats).
   # Keep `to_apply` and `applied` - the Inbox's "Mark applied" button writes
   # `applied`. This list is not in rules.yaml, so editing it never
-  # invalidates stored prefilter verdicts.
-  statuses: [to_apply, applied, interviewing, offer, rejected, withdrawn]
+  # invalidates stored prefilter verdicts. `assessment` (tests, coding
+  # challenges, one-way video) is what email updates set between applied and
+  # interviewing (F-50); remove it and such emails become suggestions instead.
+  statuses: [to_apply, applied, assessment, interviewing, offer, rejected, withdrawn]
 
 judge:
   # The kinds of role you are open to. The model marks a posting as a fit when
@@ -200,3 +203,27 @@ question_capture:              # questions_design.md (D-74)
   llm_naming: true             # let the local model name and group non-sensitive questions (never answer)
   naming_timeout_s: 20
   naming_max_per_attempt: 10
+
+mail_status:                   # F-50: application status from email (docs/architecture/mail_status_design.md)
+  enabled: true                # master switch; each mailbox has its own switch in Settings
+  interval_min: 10             # 5-120
+  startup_delay_s: 60
+  catchup_delay_s: 60
+  first_sync_max_days: 180
+  max_headers_per_sync: 2000
+  max_bodies_per_sync: 200
+  max_body_bytes: 5000000      # larger: classified from the subject
+  sync_timeout_s: 600
+  model: true
+  model_max_calls: 20
+  model_max_chars: 6000
+  model_timeout_s: 60
+  retry_model_days: 3
+  require_auth: true           # automatic changes need Gmail DKIM/DMARC pass
+  ranks: {to_apply: 0, applied: 1, assessment: 2, interviewing: 3, offer: 4}
+  terminal: [rejected, withdrawn]
+  category_status: {acknowledged: applied, assessment: assessment, interview: interviewing,
+                    offer: offer, rejected: rejected, withdrawn: withdrawn,
+                    posting_closed: rejected, kept_on_file: rejected}
+  suggest_only: [posting_closed, kept_on_file]
+  junk_auto: [acknowledged]
