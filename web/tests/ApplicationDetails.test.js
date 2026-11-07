@@ -183,7 +183,8 @@ suite('saving', () => {
     await button(w, 'Save details').trigger('click')
     await flushPromises()
     const text = w.text()
-    expect(text).toContain("Some details need fixing. They're marked below.")
+    expect(text).toContain('1 detail needs fixing before you can save')
+    expect(text).toContain('Postal code: must be 6 digits')
     expect(text).toContain('must be 6 digits')
     expect(text).not.toContain('Saved.')
     // the inline message is tied to its input for screen readers (QD 10.3)
@@ -217,7 +218,7 @@ suite('saving', () => {
   })
 
   it('shows the comments note only when the file has comments', async () => {
-    const note = 'Saving rewrites applicant.yaml without its comments. A copy with the comments is kept as applicant.commented-backup.yaml.'
+    const note = 'Saving tidies your details file and removes its notes. A copy with your notes is kept.'
     const withComments = await mountDetails({ applicant: payload({ file: { exists: true, has_comments: true, error: '' } }) })
     expect(withComments.text()).toContain(note)
     const without = await mountDetails()

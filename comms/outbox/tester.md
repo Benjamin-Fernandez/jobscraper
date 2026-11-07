@@ -265,3 +265,10 @@ BODY: Commits dbfbd14 T5 (`test_store_mail`, `test_mail_flow`, `test_config_mail
 - Not covered: FL-2 (6) migration 4 to 5 (needs a v4 DB built with the old Store); the web child's job log is checked only for its `$ mail sync` line.
 - Real company names still in tests outside mail (not common-word examples, left alone): `test_apply_contracts.py:407` ("Grab"), `test_applicant_form.py:310-312` ("shopee"). Coordinator's call.
 STATUS: open
+
+### 2026-11-07 tester -> coordinator
+TYPE: handoff
+RE: Q-71 lanes F+G pins and fixes (test/Q-71-FG-pins on int/Q-70-ux incl. 7772b5b)
+BODY: Fixed: FieldInput salary Amount text/inputmode, error-summary wording, comments-note copy (ApplicationDetails.test.js), test_apply_flow_accounts consent case (PROFILE_INCOMPLETE + "consents.privacy_consent"; added a direct test of the sign-up "account terms" guard), test_filter CLI tests now use a temp config/profile (hermetic, no data/ read). New: tests/test_applicant_q71_pins.py (15: country validation/options, control/show_when/autocomplete JSON, consents only when True, documents_status names only, POST /check writes nothing), web/tests/ApplicationDetails.q71.test.js (41: Q71-02/03/04/05/06/07/09/11/12/13/14/15/16/17/18/20 plus the narrow minmax(0,1fr) layout check, which reads the SFC style text because jsdom has no layout). Mutations: 24 frontend source breaks all red (list in the report); 4 python breaks red.
+SOURCE DEFECTS: none. Note: a profile with an empty section dict (e.g. `pay: {}`) shows as "Other keys in your file" with a rail entry; the server's real profiles carry null leaves, so it only appears for hand-edited files.
+STATUS: open
