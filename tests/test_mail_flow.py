@@ -162,6 +162,8 @@ def test_mail_flow_model_down_pending_retried_then_expired():
             run(cfg, srv, backend=FakeBackend(fail=True), now=f"2026-11-02T1{3 + i}:00:00")
             if rows(st, "SELECT outcome FROM mail_messages WHERE gm_msgid=?", gm)[0][0] != "pending_model":
                 break
+        else:                               # D-157 (d): a failed call may not count; age expires it
+            run(cfg, srv, backend=FakeBackend(fail=True), now="2026-11-06T13:00:00")
         assert rows(st, "SELECT outcome, reason FROM mail_messages WHERE gm_msgid=?", gm) == \
             [("suggested", "model_unavailable")]
         sugg = [s for s in st.mail_suggestions(LATER) if s["gm_msgid"] == gm]
