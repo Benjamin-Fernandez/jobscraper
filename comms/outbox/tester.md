@@ -387,3 +387,9 @@ Commits `test(apply): Q-35 N6a ...` 8c14bfd..e924d86 (tests/** only). The 19 fai
 - D2 HIGH: Greenhouse's resume `<input type=file style=display:none>` behind an "Attach" button is not read as a FILE field (page.py candidate loop: `vis(el) || vis(cont)`), so the resume is never attached under `fill: llm` (no audit row, `files.resume` empty; the form marks it required). Repro: `-k apply_n6a_defect_pins`. Expected: a required FILE field "Resume/CV". N6b's pre-Submit scan would catch the empty field, but the upload itself is missing.
 - Observation (low, N6b): `cache_get`/`cache_put` are no-ops, as the engineer said; the job-row key `job["id"]` vs `job_id` note stands.
 STATUS: open
+
+## 2026-11-07 handoff: Q-35 N6a D-167 pins and the llm e2e audit keys
+- Audit key: llm_fill_design §3.1 "Key" says `<step>:<automation id or html id or slug(label)>`, so `form:first_name` is the specified key and the old bare-name assertion was wrong. Fixed in test_apply_e2e (asserts form:first_name/last_name/email/phone/resume filled). `-k apply_e2e` 13/13.
+- `tests/test_apply_fit_type.py` (9 tests, 6 of the architect's 7 groups; 9/9): g1 parity with DROPDOWN (fit_decline, fit_enum decline/male, fit_bool both ways, fit_text, fit_country, fit_number, bool_shaped, _extra_fit choice, kind_for CHOICE and YES_NO, memory tier), g2 search typeahead unchanged, g3 declaration gate + disability, g4 Workday Category > Leaf, g5 memory key stays "typeahead", g6 fit_type not a dataclass field, follows options, CHOICE_TYPES unchanged.
+- Group 7 mutation checks run by hand without touching src (scratch patch): fit_decline reading f.type -> g1 red ("Gender: TYPEAHEAD with options gives None"); fit_type ignoring options -> g2 red. Both red, control green.
+STATUS: open
