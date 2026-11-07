@@ -1886,3 +1886,100 @@ def computed_facts(profile: dict, today: _dt.date) -> dict:
                 grad = d[0]
     return {"experience_months": months, "experience_years": months // 12,
             "graduation_year": grad}
+
+
+# --------------------------------------------------------------------------
+# Refresh from the resume (Q-44, q44_refresh_from_resume.md §3). Pure helpers:
+# the orchestrator (tailor_flow.profile_proposals) reads the resume and hands
+# plain dicts here; nothing below imports the tailor stage or calls a model.
+# KA-4: facts are copied, never guessed. A date that cannot be read stays empty.
+# --------------------------------------------------------------------------
+
+_MONTHS = {name: i for i, name in enumerate(
+    ("january", "february", "march", "april", "may", "june", "july", "august",
+     "september", "october", "november", "december"), start=1)}
+_MONTHS.update({name[:3]: i for name, i in list(_MONTHS.items())})
+_MONTHS["sept"] = 9
+
+# One date token (§3.2): "Mon YYYY" / "Month YYYY", "MM/YYYY" or "YYYY-MM".
+_RESUME_TOKEN = r"(?:[A-Za-z]{3,9}\.?\s+\d{4}|\d{1,2}/\d{4}|\d{4}-\d{2})"
+_RESUME_OPEN = r"(?:present|current|now|ongoing)"
+_RESUME_RANGE_RE = re.compile(
+    rf"^(?P<a>{_RESUME_TOKEN})\s*(?:–|—|-|\bto\b)\s*(?P<b>{_RESUME_TOKEN}|{_RESUME_OPEN})$",
+    re.IGNORECASE)
+_RESUME_SINGLE_RE = re.compile(
+    rf"^(?:(?P<exp>expected|exp\.?)\s*)?(?P<a>{_RESUME_TOKEN})$", re.IGNORECASE)
+
+
+def _resume_token(tok: str) -> Optional[str]:
+    """One accepted token as YYYY-MM, or None (an unknown month name, month 13)."""
+    t = tok.strip()
+    m = re.match(r"^([A-Za-z]{3,9})\.?\s+(\d{4})$", t)
+    if m:
+        mo = _MONTHS.get(m.group(1).lower())
+        y = int(m.group(2))
+    else:
+        m = re.match(r"^(\d{1,2})/(\d{4})$", t)
+        if m:
+            mo, y = int(m.group(1)), int(m.group(2))
+        else:
+            m = re.match(r"^(\d{4})-(\d{2})$", t)
+            if not m:
+                return None
+            y, mo = int(m.group(1)), int(m.group(2))
+    if not mo or not 1 <= mo <= 12:
+        return None
+    return f"{y:04d}-{mo:02d}"
+
+
+def parse_resume_dates(text: Any) -> tuple[Optional[str], Optional[str], bool]:
+    """(start, end, ok) for a resume's verbatim dates line (§3.2).
+
+    "May 2024 – Aug 2024" -> ("2024-05", "2024-08", True); an open end
+    (Present / Current / Now / Ongoing) is `end None`; one token is both start
+    and end, except after "Expected" / "Exp.", where it is the end only. A year
+    with no month ("2021 – 2025") and anything else is (None, None, False): no
+    month is invented. A range that ends before it starts is not understood
+    either (it would not save)."""
+    t = re.sub(r"\s+", " ", str(text or "")).strip()
+    fail: tuple[Optional[str], Optional[str], bool] = (None, None, False)
+    if not t:
+        return fail
+    m = _RESUME_RANGE_RE.match(t)
+    if m:
+        start = _resume_token(m.group("a"))
+        is_open = re.fullmatch(_RESUME_OPEN, m.group("b"), re.IGNORECASE) is not None
+        end = None if is_open else _resume_token(m.group("b"))
+        if start is None or (end is None and not is_open):
+            return fail
+        if end is not None and end < start:
+            return fail
+        return start, end, True
+    m = _RESUME_SINGLE_RE.match(t)
+    if m:
+        tok = _resume_token(m.group("a"))
+        if tok is None:
+            return fail
+        return (None, tok, True) if m.group("exp") else (tok, tok, True)
+    return fail
+
+
+_SKILL_CASE = {
+    "sql": "SQL", "aws": "AWS", "c++": "C++", "node.js": "Node.js", "gcp": "GCP", "api": "API",
+    "css": "CSS", "html": "HTML", "c#": "C#", "r": "R", "excel": "Excel", "git": "Git",
+}
+
+
+def skill_label(s: Any) -> str:
+    """A resume skill as the form shows it: the Python twin of
+    `web/src/applicantForm.js skillLabel` (the same cases pin both). An
+    all-lowercase token is title cased ("machine learning" -> "Machine
+    Learning"), a few known spellings are fixed ("sql" -> "SQL"), and anything
+    that already has a capital ("PyTorch") is kept as it is."""
+    t = re.sub(r"\s+", " ", str("" if s is None else s).strip())
+    fixed = _SKILL_CASE.get(t.lower())
+    if fixed:
+        return fixed
+    if t != t.lower():
+        return t
+    return re.sub(r"(^|[\s/-])([a-z])", lambda m: m.group(1) + m.group(2).upper(), t)
