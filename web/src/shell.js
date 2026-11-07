@@ -11,6 +11,8 @@
 //   jobs     that run's shortlist, each job carrying its application `status`
 //   loading  the shortlist is being fetched
 //   error    why the shortlist could not be fetched, or ''
+//   runsError  why the run list could not be fetched, or '' (kept apart from `error`:
+//            the shortlist load that follows must not clear it)
 // Events:
 //   changed      reload the dataset; `{ runs: true }` reloads the run list too
 //                (a run just finished) and follows the newest run
@@ -21,6 +23,7 @@ export const tabProps = {
   jobs: { type: Array, default: () => [] },
   loading: { type: Boolean, default: false },
   error: { type: String, default: '' },
+  runsError: { type: String, default: '' },
 }
 
 export const tabEmits = ['changed', 'select-run']

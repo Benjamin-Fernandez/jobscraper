@@ -1,23 +1,48 @@
-// Date and number formatting shared by the tabs. Dates are parsed by hand so a
-// label never depends on the browser's locale or time zone; the store writes
-// UTC, and the page says so where it shows a time.
+// Date and number formatting shared by the tabs. The store writes UTC stamps
+// without a zone; the page shows them in the browser's own zone (Q-75 G18) so
+// "10:05" on screen is the owner's 10:05. The month names stay hand-written so
+// a label never depends on the browser's locale. Where the exact stamp matters,
+// `exactTime` gives the UTC original for a tooltip.
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
   'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
 
 const ISO = /^(\d{4})-(\d{2})-(\d{2})(?:[T ](\d{2}):(\d{2}))?/
+const HAS_ZONE = /(?:[zZ]|[+-]\d{2}:?\d{2})$/
 
-// "2026-09-23T14:30:00" -> "23 Sep"; '' when there is no date.
+// The instant a stamp names, or null for a date with no time (or no date). A
+// stamp with no zone is UTC, as the store writes it; one that carries a zone
+// keeps it.
+function instant(iso) {
+  const s = String(iso || '').trim()
+  const m = ISO.exec(s)
+  if (!m || !m[4]) return null
+  const d = new Date(HAS_ZONE.test(s) ? s.replace(' ', 'T') : `${s.slice(0, 16).replace(' ', 'T')}:00Z`)
+  return Number.isNaN(d.getTime()) ? null : d
+}
+
+const pad = n => String(n).padStart(2, '0')
+
+// "2026-09-23T14:30:00" -> "23 Sep" (the day in the browser's zone); a stamp
+// that is only a date is shown as written; '' when there is no date.
 export function shortDate(iso) {
+  const d = instant(iso)
+  if (d) return `${d.getDate()} ${MONTHS[d.getMonth()]}`
   const m = ISO.exec(iso || '')
   return m ? `${Number(m[3])} ${MONTHS[Number(m[2]) - 1]}` : ''
 }
 
-// "2026-09-24T08:50:05" -> "24 Sep 08:50 UTC".
+// "2026-09-24T08:50:05" -> "24 Sep 16:50" in the browser's zone.
 export function when(iso) {
-  const m = ISO.exec(iso || '')
-  if (!m) return ''
-  const day = `${Number(m[3])} ${MONTHS[Number(m[2]) - 1]}`
-  return m[4] ? `${day} ${m[4]}:${m[5]} UTC` : day
+  const d = instant(iso)
+  if (d) return `${d.getDate()} ${MONTHS[d.getMonth()]} ${pad(d.getHours())}:${pad(d.getMinutes())}`
+  return shortDate(iso)
+}
+
+// The stamp as stored, for a tooltip: "2026-09-24 08:50 UTC"; '' when unreadable.
+export function exactTime(iso) {
+  const d = instant(iso)
+  if (!d) return ''
+  return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())} ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())} UTC`
 }
 
 // plural(3, 'role') -> "3 roles"; plural(2, 'company', 'companies').

@@ -14,11 +14,12 @@
 import { computed, nextTick, onActivated, onBeforeUnmount, onDeactivated, onMounted, ref, watch } from 'vue'
 import { describeError, getPosting, setApplicationStatus, untrackApplication } from '../api.js'
 import { dismiss, dismissedAt, isDismissed, migrateSessionDismissals, restore } from '../dismissed.js'
-import { cleanLocation, plural, safeUrl, shortDate } from '../format.js'
+import { cleanLocation, exactTime, plural, safeUrl, shortDate } from '../format.js'
 import { parseDescription, previewBlocks } from '../jd.js'
 import { tabEmits, tabProps } from '../shell.js'
 import { showToast } from '../toast.js'
 import { requestPicker, runLabel } from '../runs.js'
+import { SHORTCUTS_EVENT } from '../shortcuts.js'
 import CompanyMark from '../components/CompanyMark.vue'
 import Icon from '../components/Icon.vue'
 import RunSelector from '../components/RunSelector.vue'
@@ -220,6 +221,19 @@ function unpend(id) {
   pending.value = next
 }
 
+// The last Save, Applied or Not interested can be taken back with Z for a minute
+// (G3r), the same Undo the toast offers; whichever is used first spends it.
+const UNDO_WINDOW_MS = 60000
+let lastUndo = null
+function rememberUndo(run) { lastUndo = { run, at: Date.now() } }
+function spendUndo(run) { lastUndo = null; return run() }
+function undoLast() {
+  const u = lastUndo
+  lastUndo = null
+  if (!u || Date.now() - u.at > UNDO_WINDOW_MS) return
+  return u.run()
+}
+
 const VERB = { applied: 'Marked applied', to_apply: 'Saved' }
 
 async function track(job, status) {
@@ -234,9 +248,10 @@ async function track(job, status) {
     await setApplicationStatus(job.id, status, { company: job.company, role: job.title, url: job.url })
     quiet.value = true
     emit('changed')
+    rememberUndo(() => undo(job))
     showToast({
       message: `${VERB[status]}: ${job.title} at ${job.company}`,
-      action: { label: 'Undo', run: () => undo(job) },
+      action: { label: 'Undo', run: () => spendUndo(() => undo(job)) },
       link: { label: 'View in Applications', href: '#/applications' },
     })
   } catch (e) {
@@ -284,8 +299,9 @@ async function markNotInterested(job) {
     }
     showToast({
       message: `Moved to Not interested: ${job.title} at ${job.company}`,
-      action: { label: 'Undo', run: () => moveBack(job, { undoing: true }) },
+      action: { label: 'Undo', run: () => spendUndo(() => moveBack(job, { undoing: true })) },
     })
+    rememberUndo(() => moveBack(job, { undoing: true }))
   } finally {
     busy.value = false
     if (hadFocus) refocus()
@@ -362,6 +378,12 @@ async function step(by) {
 
 function onShortcut(event) {
   if (!shortcutsOn.value || event.defaultPrevented || event.ctrlKey || event.metaKey || event.altKey || typing(event.target)) return
+  if (String(event.key).toLowerCase() === 'z') {
+    if (!lastUndo || busy.value) return
+    event.preventDefault()
+    undoLast()
+    return
+  }
   const job = selected.value
   const act = {
     s: () => track(job, 'to_apply'),
@@ -376,8 +398,17 @@ function onShortcut(event) {
   act()
 }
 
-onMounted(() => window.addEventListener('keydown', onShortcut))
-onBeforeUnmount(() => window.removeEventListener('keydown', onShortcut))
+// The "?" sheet's switch reaches an open Inbox through this event.
+function onShortcutsSwitch(event) { shortcutsOn.value = Boolean(event.detail?.on) }
+
+onMounted(() => {
+  window.addEventListener('keydown', onShortcut)
+  window.addEventListener(SHORTCUTS_EVENT, onShortcutsSwitch)
+})
+onBeforeUnmount(() => {
+  window.removeEventListener('keydown', onShortcut)
+  window.removeEventListener(SHORTCUTS_EVENT, onShortcutsSwitch)
+})
 // A kept-alive Inbox must not keep its keys while another tab is showing
 // (duplicate adds of the same listener are dropped by the browser).
 onActivated(() => window.addEventListener('keydown', onShortcut))
@@ -432,7 +463,10 @@ onDeactivated(() => window.removeEventListener('keydown', onShortcut))
       </div>
     </header>
 
-    <p v-if="writeError" class="notice error" role="alert">{{ writeError }}</p>
+    <div v-if="writeError" class="notice error write-error" role="alert">
+      <p>{{ writeError }}</p>
+      <button type="button" class="ghost write-error-close" aria-label="Dismiss this error" @click="writeError = ''">Dismiss</button>
+    </div>
 
     <div v-if="error" class="notice error" role="alert">
       <p>{{ jobs.length ? 'Could not refresh the shortlist: ' + error + '. Showing the last list loaded.' : 'Could not load the shortlist: ' + error }}</p>
@@ -501,7 +535,7 @@ onDeactivated(() => window.removeEventListener('keydown', onShortcut))
             </span>
             <span class="card-side">
               <span v-if="job.closed" class="pill stale" data-status="closed">closed</span>
-              <span class="seen">{{ shortDate(job.decided_at) }}</span>
+              <span class="seen" :title="exactTime(job.decided_at)">{{ shortDate(job.decided_at) }}</span>
             </span>
           </button>
         </li>
@@ -559,7 +593,7 @@ onDeactivated(() => window.removeEventListener('keydown', onShortcut))
         <p class="shortcuts muted">
           <template v-if="shortcutsOn">
             Keys: <kbd>S</kbd> save · <kbd>A</kbd> applied · <kbd>X</kbd> not interested · <kbd>O</kbd> open ·
-            <kbd>J</kbd> <kbd>K</kbd> next, previous ·
+            <kbd>J</kbd> <kbd>K</kbd> next, previous · <kbd>Z</kbd> undo · <kbd>?</kbd> all keys ·
           </template>
           <button
             type="button"
@@ -701,6 +735,13 @@ onDeactivated(() => window.removeEventListener('keydown', onShortcut))
   position: sticky;
   top: calc(var(--header-h) + var(--space-4));
   padding: var(--space-5);
+  /* A long posting scrolls inside the detail, not past the screen, so the
+     actions below stay in reach (G17). */
+  max-height: calc(100vh - var(--header-h) - var(--space-4) * 2);
+  max-height: calc(100dvh - var(--header-h) - var(--space-4) * 2);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scroll-padding-top: 5rem; /* a focused control is not left under the pinned action bar */
 }
 .back { display: none; margin: calc(-1 * var(--space-2)) 0 var(--space-3) calc(-1 * var(--space-2)); }
 .detail-head { display: flex; align-items: center; gap: var(--space-4); }
@@ -734,6 +775,20 @@ onDeactivated(() => window.removeEventListener('keydown', onShortcut))
   padding-bottom: var(--space-5);
   border-bottom: 1px solid var(--border);
 }
+/* In the detail's own scroll box the bar pins to the top edge, as wide as the
+   box so the text scrolling under it is hidden behind it, not beside it (G17). */
+.detail .action-bar {
+  position: sticky;
+  top: calc(-1 * var(--space-5)); /* the detail's own padding sits above the content box */
+  z-index: 1;
+  margin: 0 calc(-1 * var(--space-5));
+  padding: var(--space-5) var(--space-5) var(--space-3);
+  background: var(--surface);
+}
+/* Dismissable write error (N20): the message wraps, the button stays in reach. */
+.write-error { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--space-3); }
+.write-error p { min-width: 0; overflow-wrap: anywhere; }
+.write-error-close { flex: none; min-height: 1.75rem; padding-block: 0.1rem; color: inherit; }
 .did-apply {
   display: flex;
   flex-wrap: wrap;
@@ -794,7 +849,11 @@ onDeactivated(() => window.removeEventListener('keydown', onShortcut))
 @media (max-width: 900px) {
   .split { grid-template-columns: minmax(0, 1fr); }
   .job-list { max-height: none; }
-  .detail { position: static; display: none; }
+  .detail { position: static; display: none; max-height: none; overflow: visible; }
+  .detail .action-bar { position: static; margin-inline: 0; padding: 0 0 var(--space-5); margin-top: var(--space-5); background: none; }
+  /* Nothing is chosen on a phone's list until a role is opened (G38). */
+  .split:not(.show-detail) .card.selected .card-hit { background: transparent; box-shadow: none; }
+  .split:not(.show-detail) .card.selected .card-hit:hover:not(:disabled) { background: var(--surface-2); }
   .split.show-detail .job-list { display: none; }
   .split.show-detail .detail { display: block; }
   .back { display: inline-flex; }

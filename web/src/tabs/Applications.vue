@@ -17,7 +17,7 @@
 import { computed, onActivated, onMounted, ref, watch } from 'vue'
 import { describeError, getApplications, getStats, setApplicationStatus, untrackApplication } from '../api.js'
 import { ageLabel, isActive, lastAt, needsFollowUp, secondLine, STAGE_KEY } from '../applications.js'
-import { plural, safeUrl, shortDate, when } from '../format.js'
+import { exactTime, plural, safeUrl, shortDate, when } from '../format.js'
 import { tabEmits, tabProps } from '../shell.js'
 import { statusLabel } from '../stages.js'
 import { showToast } from '../toast.js'
@@ -358,7 +358,7 @@ onActivated(() => { if (shownOnce) load(); shownOnce = true })
                   </button>
                 </template>
               </div>
-              <span class="updated" :title="when(lastAt(row))">{{ ageLabel(row) }}</span>
+              <span class="updated" :title="exactTime(lastAt(row))">{{ ageLabel(row) }}</span>
               <StatusSelect
                 :model-value="row.status"
                 :options="optionsFor(row)"
@@ -371,7 +371,7 @@ onActivated(() => { if (shownOnce) load(); shownOnce = true })
                 <ol class="timeline">
                   <li v-for="e in row.events" :key="e.id" :data-by="e.by ?? null">
                     <span class="to pill" :data-status="e.to_status">{{ statusLabel(e.to_status) }}</span>
-                    <span class="at">{{ when(e.at) }}</span>
+                    <span class="at" :title="exactTime(e.at)">{{ when(e.at) }}</span>
                     <MailEvidence v-if="e.by === 'mail' && e.mail" :event="e" @undone="afterMail" @stale="afterMail" />
                   </li>
                 </ol>
