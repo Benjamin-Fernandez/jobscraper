@@ -5,8 +5,8 @@
  * scannable rather than decorative, the way LinkedIn's and Indeed's job
  * trackers are: white work surfaces on a soft neutral page, one ink-blue for
  * actions, and a small palette that gives each application stage its own
- * colour (saved violet, applied blue, interviewing amber, offer green, closed
- * grey/red) so a list of statuses reads at a glance.
+ * colour (saved violet, applied blue, assessment teal, interviewing amber,
+ * offer green, closed grey/red) so a list of statuses reads at a glance.
  *
  * The one signature: every company gets a monogram tile (CompanyMark.vue) in
  * a colour derived from its name - the same colour wherever that company
@@ -46,6 +46,9 @@
   --stage-saved-soft: #efeafb;
   --stage-applied: var(--accent);
   --stage-applied-soft: var(--accent-soft);
+  /* Q-60: a teal between applied blue and interviewing amber (5.2:1 on its soft) */
+  --stage-assessment: #0b6e79;
+  --stage-assessment-soft: #e1f3f3;
   --stage-interview: var(--warn);
   --stage-interview-soft: var(--warn-soft);
   --stage-offer: var(--ok);
@@ -129,6 +132,8 @@
 
     --stage-saved: #b69cff;
     --stage-saved-soft: #2a2144;
+    --stage-assessment: #5ccfd0;
+    --stage-assessment-soft: #11302f;
     --stage-closed: #a1a0a9;
     --stage-closed-soft: #26262b;
 
@@ -365,6 +370,7 @@ input:disabled, select:disabled { opacity: 0.6; }
 }
 .pill[data-status='to_apply'] { color: var(--stage-saved); background: var(--stage-saved-soft); }
 .pill[data-status='applied'] { color: var(--stage-applied); background: var(--stage-applied-soft); }
+.pill[data-status='assessment'] { color: var(--stage-assessment); background: var(--stage-assessment-soft); }
 .pill[data-status='interviewing'] { color: var(--stage-interview); background: var(--stage-interview-soft); }
 .pill[data-status='offer'], .pill[data-status='ok'], .pill[data-status='succeeded'] { color: var(--stage-offer); background: var(--stage-offer-soft); }
 .pill[data-status='rejected'], .pill[data-status='failed'], .pill[data-status='aborted_unhealthy'] { color: var(--stage-rejected); background: var(--stage-rejected-soft); }

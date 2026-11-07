@@ -9,6 +9,11 @@
 // a status is a config change (M8-T2); stages.js only says how one is written.
 // The run selector here is this tab's own filter and starts on "all runs": an
 // application outlives the run that found it (M12-T1).
+//
+// Email updates (Q-60, F-50l-n): suggestions an email raised sit above the stage
+// strip (MailSuggestions, hidden when there are none), and an event an email
+// made wears a "From email" badge in History (MailEvidence) with its quote and
+// Undo. Either action reloads the rows and the suggestions.
 import { computed, onMounted, ref } from 'vue'
 import { describeError, getApplications, getStats, setApplicationStatus } from '../api.js'
 import { plural, safeUrl, shortDate, when } from '../format.js'
@@ -17,6 +22,8 @@ import { statusLabel } from '../stages.js'
 import { runsInRange } from '../runs.js'
 import CompanyMark from '../components/CompanyMark.vue'
 import Icon from '../components/Icon.vue'
+import MailEvidence from '../components/MailEvidence.vue'
+import MailSuggestions from '../components/MailSuggestions.vue'
 import RunSelector from '../components/RunSelector.vue'
 import TabLoading from '../components/TabLoading.vue'
 
@@ -124,6 +131,17 @@ function retry() {
   load()
 }
 
+// ---- email updates ----
+
+const suggestions = ref(null)
+
+// A suggestion was accepted or an email-made change undone: the status moved.
+async function afterMail() {
+  await load()
+  emit('changed')
+  await suggestions.value?.load()
+}
+
 async function change(row, status) {
   if (status === row.status) return
   saving.value = row.job_id
@@ -132,6 +150,8 @@ async function change(row, status) {
     await setApplicationStatus(row.job_id, status)
     await load()
     emit('changed')
+    // A suggestion about this application may no longer apply (superseded).
+    suggestions.value?.load()
   } catch (e) {
     error.value = `Could not change ${row.company ?? row.job_id}: ${describeError(e)}`
   } finally {
@@ -213,6 +233,8 @@ onMounted(load)
     </div>
 
     <template v-else-if="rows.length">
+      <MailSuggestions ref="suggestions" @changed="afterMail" />
+
       <div class="stages" role="group" aria-label="Filter by stage">
         <button
           v-for="s in stages"
@@ -299,9 +321,10 @@ onMounted(load)
               <details v-if="row.events && row.events.length > 1" class="history">
                 <summary>History <span class="num">{{ row.events.length }}</span></summary>
                 <ol class="timeline">
-                  <li v-for="e in row.events" :key="e.id">
+                  <li v-for="e in row.events" :key="e.id" :data-by="e.by ?? null">
                     <span class="to pill" :data-status="e.to_status">{{ statusLabel(e.to_status) }}</span>
                     <span class="at">{{ when(e.at) }}</span>
+                    <MailEvidence v-if="e.by === 'mail' && e.mail" :event="e" @undone="afterMail" />
                   </li>
                 </ol>
               </details>
@@ -356,6 +379,7 @@ onMounted(load)
 }
 .stage.active[data-status='to_apply']::after { background: var(--stage-saved); }
 .stage.active[data-status='applied']::after { background: var(--stage-applied); }
+.stage.active[data-status='assessment']::after { background: var(--stage-assessment); }
 .stage.active[data-status='interviewing']::after { background: var(--stage-interview); }
 .stage.active[data-status='offer']::after { background: var(--stage-offer); }
 .stage.active[data-status='rejected']::after { background: var(--stage-rejected); }
@@ -412,6 +436,7 @@ a.role-title .icon { color: var(--muted); }
 }
 .status-select[data-status='to_apply'] { color: var(--stage-saved); background-color: var(--stage-saved-soft); }
 .status-select[data-status='applied'] { color: var(--stage-applied); background-color: var(--stage-applied-soft); }
+.status-select[data-status='assessment'] { color: var(--stage-assessment); background-color: var(--stage-assessment-soft); }
 .status-select[data-status='interviewing'] { color: var(--stage-interview); background-color: var(--stage-interview-soft); }
 .status-select[data-status='offer'] { color: var(--stage-offer); background-color: var(--stage-offer-soft); }
 .status-select[data-status='rejected'] { color: var(--stage-rejected); background-color: var(--stage-rejected-soft); }
@@ -421,7 +446,7 @@ a.role-title .icon { color: var(--muted); }
 .history summary { cursor: pointer; color: var(--muted); width: max-content; }
 .history summary .num { font-size: var(--text-xs); }
 .timeline { list-style: none; margin: var(--space-2) 0 0; padding: 0 0 0 var(--space-3); border-left: 2px solid var(--border); }
-.timeline li { display: flex; align-items: center; gap: var(--space-3); padding: 2px 0; }
+.timeline li { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-1) var(--space-3); padding: 2px 0; }
 .at { color: var(--muted); font-family: var(--mono); font-size: var(--text-xs); white-space: nowrap; }
 
 @media (max-width: 640px) {
