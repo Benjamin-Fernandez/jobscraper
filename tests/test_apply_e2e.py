@@ -61,7 +61,7 @@ class Run:
 
 
 def run_local(*, page="form.html", query="", dry_run=True, schema_status=200, extra_postings=(),
-              **over):
+              backend=None, **over):
     """Apply to the Dataiku posting served as `page` (+`?query`). `extra_postings` =
     [(posting_id, page, query)] are applied after it, in the same run."""
     w = make_world()
@@ -84,7 +84,7 @@ def run_local(*, page="form.html", query="", dry_run=True, schema_status=200, ex
             return s
         say = Say()
         acfg = edge_acfg(w.cfg.apply, edge_dir, **over)
-        results = apply_flow.run(w.cfg, w.store, jids, dry_run=dry_run, backend=NoModel(),
+        results = apply_flow.run(w.cfg, w.store, jids, dry_run=dry_run, backend=backend or NoModel(),
                                  http=local_http(), browser_factory=factory, apply_cfg=acfg,
                                  say=say, evidence_dir=w.tmp / "evidence")
         assert fx.only_local(), fx.requests
