@@ -52,7 +52,11 @@ const emit = defineEmits(['go'])
 
 /* Narrow: one row of chips that scrolls sideways inside the nav. The nav never
    takes its width from the chips (min-width: 0), so the page doesn't scroll. */
-.rail { min-width: 0; max-width: 100%; }
+/* position: relative makes the rail the containing block of the chips'
+   visually-hidden (absolute) text, so the scroller clips it too; otherwise it
+   escaped and widened the page at 390px. Wide screens replace it with sticky,
+   which is a containing block as well. */
+.rail { position: relative; min-width: 0; max-width: 100%; }
 @media (max-width: 899px) {
   .rail { overflow-x: auto; overscroll-behavior-x: contain; scroll-snap-type: x proximity; padding-bottom: var(--space-1); }
   .rail ul { display: flex; flex-wrap: nowrap; gap: var(--space-1); width: max-content; }
