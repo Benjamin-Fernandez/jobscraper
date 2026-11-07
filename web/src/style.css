@@ -109,7 +109,7 @@
 }
 
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme='light']) {
     --bg: #111113;
     --surface: #19191c;
     --surface-2: #212125;
@@ -149,6 +149,51 @@
     --shadow-lg: 0 10px 30px rgba(0, 0, 0, 0.55);
   }
 }
+
+/* Theme switch (Q-75 G40): Settings -> Appearance sets data-theme on <html>; with none set
+   the system's preference above decides. The values repeat the dark block: CSS cannot share them
+   between a media query and an attribute. Keep the two in step. */
+:root[data-theme='dark'] {
+  color-scheme: dark;
+  --bg: #111113;
+  --surface: #19191c;
+  --surface-2: #212125;
+  --surface-3: #2a2a2f;
+  --text: #ececef;
+  --text-2: #cfcfd4;
+  --muted: #a1a0a9;
+  --border: #2d2d33;
+  --border-strong: #42424a;
+  --control-border: #75757e;
+  --accent: #8aa6ff;
+  --accent-hover: #a8bdff;
+  --accent-text: #0c1330;
+  --accent-soft: #1d2745;
+  --ok: #6fd097;
+  --ok-soft: #15301f;
+  --warn: #ebb461;
+  --warn-soft: #362611;
+  --danger: #ff8d82;
+  --danger-soft: #3b1815;
+  --focus: #a8bdff;
+
+  --stage-saved: #b69cff;
+  --stage-saved-soft: #2a2144;
+  --stage-assessment: #5ccfd0;
+  --stage-assessment-soft: #11302f;
+  --stage-closed: #a1a0a9;
+  --stage-closed-soft: #26262b;
+
+  --mark-bg-l: 24%;
+  --mark-bg-c: 35%;
+  --mark-fg-l: 80%;
+  --mark-fg-c: 70%;
+
+  --shadow-sm: 0 1px 0 rgba(0, 0, 0, 0.35);
+  --shadow: 0 1px 0 rgba(0, 0, 0, 0.35), 0 2px 8px rgba(0, 0, 0, 0.25);
+  --shadow-lg: 0 10px 30px rgba(0, 0, 0, 0.55);
+}
+:root[data-theme='light'] { color-scheme: light; }
 
 /* The phone header is two rows (brand, then tabs). */
 @media (max-width: 640px) {

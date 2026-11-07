@@ -10,14 +10,21 @@
 // The hint does the cadence arithmetic the user would otherwise do by hand: at
 // this size, how many runs a day it takes to sweep every company once per cycle.
 //
+// Cycle by keyboard (Q-75 N17): an arrow key moves the radio but does not save;
+// Enter or leaving the group does, Escape drops it (the status select's rule,
+// Q-70 B3). A click or Space saves at once. Notices clear on the next edit.
+//
+// Appearance (Q-75 G40): Light, Dark or System, kept in this browser (theme.js).
+//
 // Email (Q-60, F-50): the Gmail mailboxes JobScraper reads for application
 // updates. MailCard loads and saves its own data (GET /api/mail), so a server
 // without those routes still shows the rest of this tab.
 import { computed, onMounted, ref } from 'vue'
 import { ApiError, describeError, getSettings, saveSettings } from '../api.js'
 import { plural } from '../format.js'
-import { cycleLabel } from '../runs.js'
+import { cycleLabel, num, runsPerDayLabel } from '../runs.js'
 import { tabEmits, tabProps } from '../shell.js'
+import { THEMES, setTheme, storedTheme } from '../theme.js'
 import CountPicker from '../components/CountPicker.vue'
 import MailCard from '../components/MailCard.vue'
 import TabLoading from '../components/TabLoading.vue'
@@ -43,7 +50,7 @@ const invalid = computed(() => {
   if (n === '' || n === null) return 'Enter how many companies a run should take.'
   if (!Number.isInteger(n)) return 'Enter a whole number.'
   if (n < 1) return 'A run needs at least 1 company.'
-  if (!noneEnabled.value && n > max.value) return `At most ${max.value} - that is every enabled company.`
+  if (!noneEnabled.value && n > max.value) return `At most ${num(max.value)} - that is every enabled company.`
   return ''
 })
 
@@ -62,7 +69,7 @@ const cadence = computed(() => {
   const perDay = unchanged.value && s.runs_per_day_needed !== undefined
     ? s.runs_per_day_needed
     : oneDecimal(runsPerCycle / s.cycle_days)
-  return `A full ${s.cycle_days}-day sweep needs ${perDay} runs/day at this size `
+  return `A full ${s.cycle_days}-day sweep takes ${runsPerDayLabel(perDay)} at this size `
     + `(${plural(runsPerCycle, 'run')} to cover ${plural(s.enabled_companies, 'company', 'companies')}).`
 })
 
@@ -114,9 +121,47 @@ const cycleHint = computed(() => {
   if (!s) return ''
   const every = `Every company is checked again ${s.cycle_days === 1 ? 'every day' : `every ${plural(s.cycle_days, 'day')}`}.`
   if (!s.enabled_companies) return every
-  return `${every} At ${plural(s.batch_size, 'company', 'companies')} per run that takes `
-    + `${s.runs_per_day_needed} runs a day.`
+  return `${every} At ${plural(s.batch_size, 'company', 'companies')} per run that is `
+    + `${runsPerDayLabel(s.runs_per_day_needed)}.`
 })
+
+const cyclePending = ref(null)           // an arrow-key choice waiting for Enter or blur
+let arrowed = false
+const shownCycle = computed(() => cyclePending.value ?? settings.value?.cycle_days)
+
+function onCycleKey(e) {
+  if (e.key === 'Enter') {
+    e.preventDefault()
+    commitCycle()
+  } else if (e.key === 'Escape') {
+    cyclePending.value = null
+    arrowed = false
+  } else {
+    arrowed = e.key.startsWith('Arrow')
+  }
+}
+
+function onCycleChange(days) {
+  cycleSaved.value = ''
+  cycleError.value = ''
+  if (arrowed) {
+    arrowed = false
+    cyclePending.value = days === settings.value.cycle_days ? null : days
+  } else {
+    cyclePending.value = null
+    chooseCycle(days)
+  }
+}
+
+function commitCycle() {
+  const days = cyclePending.value
+  cyclePending.value = null
+  if (days !== null) chooseCycle(days)
+}
+
+function onCycleFocusout(e) {
+  if (!e.currentTarget.contains(e.relatedTarget)) commitCycle()
+}
 
 async function chooseCycle(days) {
   if (!settings.value || days === settings.value.cycle_days || savingCycle.value) return
@@ -135,6 +180,13 @@ async function chooseCycle(days) {
   }
 }
 
+// ---- appearance (G40) ----
+const theme = ref(storedTheme())
+function chooseTheme(id) {
+  theme.value = id
+  setTheme(id)
+}
+
 onMounted(load)
 </script>
 
@@ -147,16 +199,23 @@ onMounted(load)
       </div>
     </header>
 
-    <h2 class="section-title">Cycle</h2>
+    <h3 class="section-title">Cycle</h3>
     <TabLoading v-if="loading" :rows="1" />
     <div v-else-if="settings" class="panel-box cycle">
       <p id="cycle-label" class="question">How often every company is checked again</p>
-      <div class="cycle-options" role="radiogroup" aria-labelledby="cycle-label">
+      <div
+        class="cycle-options"
+        role="radiogroup"
+        aria-labelledby="cycle-label"
+        @keydown="onCycleKey"
+        @pointerdown="arrowed = false"
+        @focusout="onCycleFocusout"
+      >
         <label
           v-for="d in settings.cycle_day_options"
           :key="d"
           class="cycle-option"
-          :class="{ active: d === settings.cycle_days }"
+          :class="{ active: d === shownCycle }"
           :data-days="d"
         >
           <input
@@ -164,14 +223,17 @@ onMounted(load)
             name="cycle"
             class="visually-hidden"
             :value="d"
-            :checked="d === settings.cycle_days"
+            :checked="d === shownCycle"
             :disabled="savingCycle"
-            @change="chooseCycle(d)"
+            @change="onCycleChange(d)"
           >
           <span class="cycle-name">{{ cycleLabel(d) }}</span>
           <span class="cycle-days">{{ plural(d, 'day') }}</span>
         </label>
       </div>
+      <p v-if="cyclePending !== null" class="hint cycle-pending" role="status">
+        {{ cycleLabel(cyclePending) }} is selected but not saved. Press Enter to save, or Esc to keep {{ cycleLabel(settings.cycle_days).toLowerCase() }}.
+      </p>
       <p class="hint cycle-hint">{{ cycleHint }}</p>
       <p class="muted small">
         The choices come from your plan ({{ settings.plan }}). The config default is
@@ -181,7 +243,7 @@ onMounted(load)
     <p v-if="cycleError" class="notice error" role="alert">{{ cycleError }}</p>
     <p v-if="cycleSaved" class="notice ok cycle-saved" role="status">{{ cycleSaved }}</p>
 
-    <h2 class="section-title">Companies per run</h2>
+    <h3 class="section-title">Companies per run</h3>
     <TabLoading v-if="loading" :rows="1" />
     <div v-else-if="loadError" class="notice error" role="alert">
       <p>Could not load settings: {{ loadError }}</p>
@@ -197,7 +259,7 @@ onMounted(load)
           :max="noneEnabled ? null : max"
           :invalid="Boolean(invalid)"
           describedby="batch-size-hint"
-          @update:model-value="saved = ''"
+          @update:model-value="saved = ''; saveError = ''"
         />
         <button type="submit" class="primary save" :disabled="Boolean(invalid) || unchanged || saving">
           {{ saving ? 'Saving…' : 'Save' }}
@@ -208,14 +270,39 @@ onMounted(load)
         <template v-else>{{ cadence }}</template>
       </p>
       <p class="muted small">
-        <template v-if="!noneEnabled">Between 1 and {{ max }}. </template>The config default is {{ settings.batch_size_default }}.
+        <template v-if="!noneEnabled">Between 1 and {{ num(max) }}. </template>The config default is {{ settings.batch_size_default }}.
         A run started with its own count (Runs tab) uses that instead.
       </p>
     </form>
     <p v-if="saveError" class="notice error" role="alert">{{ saveError }}</p>
     <p v-if="saved" class="notice ok" role="status">{{ saved }}</p>
 
-    <h2 class="section-title">Email</h2>
+    <h3 class="section-title">Appearance</h3>
+    <div class="panel-box appearance">
+      <p id="theme-label" class="question">Colour theme</p>
+      <div class="cycle-options" role="radiogroup" aria-labelledby="theme-label">
+        <label
+          v-for="t in THEMES"
+          :key="t.id"
+          class="theme-option"
+          :class="{ active: t.id === theme }"
+          :data-choice="t.id"
+        >
+          <input
+            type="radio"
+            name="theme"
+            class="visually-hidden"
+            :value="t.id"
+            :checked="t.id === theme"
+            @change="chooseTheme(t.id)"
+          >
+          <span class="cycle-name">{{ t.label }}</span>
+        </label>
+      </div>
+      <p class="muted small">Saved in this browser only. System follows your device's light or dark setting.</p>
+    </div>
+
+    <h3 class="section-title">Email</h3>
     <MailCard />
   </section>
 </template>
@@ -236,18 +323,19 @@ onMounted(load)
   display: flex; flex-wrap: wrap; gap: var(--space-1); padding: var(--space-1);
   background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius-lg);
 }
-.cycle-option {
+.cycle-option, .theme-option {
   flex: 1 1 6.5rem; display: flex; flex-direction: column; align-items: center;
   padding: var(--space-2) var(--space-3); border-radius: var(--radius); cursor: pointer;
   border: 1px solid transparent; color: var(--text-2);
 }
-.cycle-option:hover { background: var(--surface); }
-.cycle-option.active {
+.cycle-option:hover, .theme-option:hover { background: var(--surface); }
+.cycle-option.active, .theme-option.active {
   background: var(--surface); border-color: var(--border); box-shadow: var(--shadow);
   color: var(--text);
 }
-.cycle-option:has(input:focus-visible) { outline: 2px solid var(--focus); outline-offset: 2px; }
+.cycle-option:has(input:focus-visible), .theme-option:has(input:focus-visible) { outline: 2px solid var(--focus); outline-offset: 2px; }
 .cycle-name { font-weight: 600; font-size: var(--text-sm); }
+.theme-option { flex-basis: 5rem; }
 .cycle-days { font-size: var(--text-xs); color: var(--muted); }
 .notice { margin-top: var(--space-4); max-width: 34rem; }
 </style>
