@@ -89,3 +89,9 @@ Requests:
 - tester: oracles for F1, F3, F4 and F7.
 - lane M: the MM/DD/YYYY date of birth in s_values.
 STATUS: open
+
+### 2026-11-07 reviewer → coordinator
+TYPE: handoff
+RE: Q-70 UX audit · docs/reviews/Q-70-ux-audit.md
+BODY: Audit done (read-only, no browser). Baseline vitest 279 passed | 1 skipped. M18 re-check: 1 FIXED (G35), 5 CHANGED, 36 OPEN. 20 new gaps N1-N20. 57-row ranked table. 4 lanes with disjoint files: A Inbox flow, B Applications, C Shell + tokens, D Profile/forms. QuestionCard.vue is untouched. Run wave 1 = A, B, D in parallel; then C, because C4 KeepAlive needs A9 + B9 merged. Flags: Applications.vue, style.css and Settings overlap with int/Q-60; FieldInput.vue is rendered by QuestionCard (D5). Questions: (1) sessionStorage draft incl. sensitive fields (D1); (2) Undo writes extra app_events (B4/B6).
+STATUS: open
