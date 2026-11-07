@@ -291,8 +291,8 @@ class MailStatusConfig:
                 continue
             try:
                 n = int(float(v))
-            except (TypeError, ValueError):
-                continue                           # unreadable: keep the default
+            except (TypeError, ValueError, OverflowError):
+                continue                           # unreadable, .nan or .inf (FL-10): the default
             lo, hi = _MAIL_CLAMPS.get(name, (None, None))
             n = max(n, int(lo)) if lo is not None else n
             out[name] = min(n, int(hi)) if hi is not None else n

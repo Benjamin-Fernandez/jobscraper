@@ -220,8 +220,8 @@ def domain_matches(host: str, domains: Iterable[str]) -> bool:
 
 
 def registrable_domain(host: str) -> str:
-    """The registrable domain of a host (or URL): `careers.dbs.com` -> `dbs.com`,
-    `mail.dbs.com.sg` -> `dbs.com.sg`; "" for a single label. A short list of
+    """The registrable domain of a host (or URL): `careers.acme.com` -> `acme.com`,
+    `mail.acme.com.sg` -> `acme.com.sg`; "" for a single label. A short list of
     second-level labels under a two-letter country code stands in for the public
     suffix list (enough for the employers and platforms F-36 and F-50 meet)."""
     h = host_of(host)
@@ -236,8 +236,8 @@ def registrable_domain(host: str) -> str:
 
 def employer_domain(careers_url: str) -> str:
     """The employer's registrable domain from its careers URL (apply_design §11.3);
-    "" for an ATS host or an unparsable URL. `careers.dbs.com` -> `dbs.com`;
-    `www.dbs.com.sg` -> `dbs.com.sg`."""
+    "" for an ATS host or an unparsable URL. `careers.acme.com` -> `acme.com`;
+    `www.acme.com.sg` -> `acme.com.sg`."""
     host = host_of(careers_url)
     if not host or domain_matches(host, ATS_DOMAINS):
         return ""
@@ -602,11 +602,38 @@ def auth_result(headers: Any, from_reg: str) -> AuthResult:
     return AuthResult.PASS if dkim_aligned else AuthResult.NONE
 
 
+def _no_surrogates(s: str) -> str:
+    """`s` with no lone surrogate (review FL-1). Header bytes that aren't valid in
+    their charset come back from `email` as surrogate escapes, and SQLite (and
+    any UTF-8 encode) refuses those: one such email used to wedge a mailbox.
+    Escaped UTF-8 bytes are decoded back where they form text; the rest become
+    U+FFFD."""
+    try:
+        return s.encode("utf-8", "surrogateescape").decode("utf-8", "replace")
+    except UnicodeEncodeError:
+        return s.encode("utf-8", "replace").decode("utf-8")
+
+
+def _ascii_domain(domain: str) -> str:
+    """A domain as ASCII (FL-1): lower-case, IDNA punycode for a non-ASCII name,
+    "" when it can't be encoded. Domains are compared with the rules file and
+    the tracked applications, all ASCII, and are stored on message rows."""
+    d = _no_surrogates(domain or "").strip().lower().rstrip(".")
+    if d.isascii():
+        return d if d.isprintable() and " " not in d else ""
+    try:
+        return d.encode("idna").decode("ascii")
+    except UnicodeError:
+        return ""
+
+
 def parse_header(meta: Any, raw: Any, ref: MessageRef, cursor_before: Cursor) -> MailHeader:
     """One message's header fetch as a `MailHeader` (MS §3, §5.3).
 
     `meta` is the FETCH line (UID, INTERNALDATE, RFC822.SIZE, X-GM-*), `raw` the
     header block. `cursor_after` is `cursor_before` moved to this message.
+    Every text field is free of lone surrogates, and the domains are ASCII
+    (punycode, else ""; review FL-1), so no header can fail a later write.
     """
     meta_b = meta if isinstance(meta, bytes) else str(meta or "").encode("utf-8", "replace")
     raw_b = raw if isinstance(raw, bytes) else str(raw or "").encode("utf-8", "replace")
@@ -614,16 +641,19 @@ def parse_header(meta: Any, raw: Any, ref: MessageRef, cursor_before: Cursor) ->
 
     froms = _addresses(msg, "From")
     from_name, from_addr = froms[0] if froms else ("", "")
-    from_addr = from_addr.strip().strip("<>").lower()
+    from_name = _no_surrogates(from_name)
+    from_addr = _no_surrogates(from_addr).strip().strip("<>").lower()
     from_local, at, from_domain = from_addr.rpartition("@")
     if not at:
         from_local, from_domain = "", ""
-    from_domain = from_domain.rstrip(".")
+    from_domain = _ascii_domain(from_domain)
+    from_addr = f"{from_local}@{from_domain}" if at else from_addr
     from_reg = registrable_domain(from_domain) if from_domain else ""
 
     reply_to_regs: list[str] = []
     for _n, addr in _addresses(msg, "Reply-To"):
-        reg = registrable_domain(addr.rpartition("@")[2]) if "@" in addr else ""
+        dom = _ascii_domain(addr.rpartition("@")[2]) if "@" in addr else ""
+        reg = registrable_domain(dom) if dom else ""
         if reg and reg not in reply_to_regs:
             reply_to_regs += [reg]
 
@@ -648,7 +678,7 @@ def parse_header(meta: Any, raw: Any, ref: MessageRef, cursor_before: Cursor) ->
         ref=ref,
         gm_msgid=str(_meta_int(meta_b, "X-GM-MSGID") or ""),
         gm_thrid=str(_meta_int(meta_b, "X-GM-THRID") or ""),
-        labels=_meta_labels(meta_b),
+        labels=tuple(_no_surrogates(t) for t in _meta_labels(meta_b)),
         received_at=received_at,
         size=int(_meta_int(meta_b, "RFC822.SIZE") or 0),
         from_addr=from_addr,
@@ -657,10 +687,10 @@ def parse_header(meta: Any, raw: Any, ref: MessageRef, cursor_before: Cursor) ->
         from_reg=from_reg,
         from_local=from_local,
         reply_to_regs=tuple(reply_to_regs),
-        subject=_header(msg, "Subject"),
+        subject=_no_surrogates(_header(msg, "Subject")),
         list_id=present("List-ID"),
-        precedence=_header(msg, "Precedence").lower(),
-        auto_submitted=_header(msg, "Auto-Submitted").lower(),
+        precedence=_no_surrogates(_header(msg, "Precedence")).lower(),
+        auto_submitted=_no_surrogates(_header(msg, "Auto-Submitted")).lower(),
         autoreply_header=present("X-Autoreply") or present("X-Autorespond"),
         auth=auth_result(msg, from_reg),
         cursor_after=cursor_after,
@@ -724,12 +754,16 @@ _URL_BODY = r"""(?:[^\s<>"'()\[\]{}]|\([^\s<>"'()\[\]{}]*\))"""
 _COMMON_TLDS = ("com|org|net|io|co|ai|app|dev|me|info|biz|jobs|careers|edu|gov|"
                 "sg|my|hk|cn|jp|kr|in|id|ph|th|vn|tw|au|nz|uk|us|ca|de|fr|nl|eu|ch|ie|"
                 "ly|gl|to|xyz|site|online|link|page|cloud|tech")
+# The path of a scheme-less host may start on the next line (a hard wrap right
+# after the host, re-review F5 NIT): a break is joined only before `/` or `?`
+# followed by more address, never before `#` (a hashtag line) or text.
+_PATH_START = r"""(?:[/?#]|[ \t]?\r?\n[ \t]*[/?](?=[^\s<>"'()\[\]{}]))"""
 _ANY_URL_RE = re.compile(
     r"\b[a-z][a-z0-9+.\-]{1,15}://" + _URL_BODY + "*"              # any scheme: https, ftp, hxxps
     r"|(?<![\w:/.])//[\w-]+(?:\.[\w-]+)+" + _URL_BODY + "*"         # //host/... (scheme-relative)
     r"|\bwww\.[\w-]+" + _URL_BODY + "*"                              # www.host...
-    r"|(?<![\w@.\-/])(?:[\w-]+\.){2,}[a-z]{2,}(?::\d+)?[/?#]" + _URL_BODY + "*"
-    r"|(?<![\w@.\-/])[\w-]+\.(?:" + _COMMON_TLDS + r")(?::\d+)?[/?#]" + _URL_BODY + "*",
+    r"|(?<![\w@.\-/])(?:[\w-]+\.){2,}[a-z]{2,}(?::\d+)?" + _PATH_START + _URL_BODY + "*"
+    r"|(?<![\w@.\-/])[\w-]+\.(?:" + _COMMON_TLDS + r")(?::\d+)?" + _PATH_START + _URL_BODY + "*",
     re.I)
 # A URL cut by a line break: a quoted-printable soft break left in the text
 # (`...=` then the break) joins whatever follows; another break (a hard wrap, or

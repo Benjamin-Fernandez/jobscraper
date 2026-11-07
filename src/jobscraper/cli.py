@@ -243,6 +243,19 @@ def cmd_reresolve(args) -> int:
         store.close()
 
 
+def mail_timer_wanted(env) -> bool:
+    """F-50 (mail_status_design §10.1, D-157 c): does `web` run the mail timer?
+
+    `JOBSCRAPER_MAIL_SYNC=1` on, `=0` off. Unset: on for the real app, off when
+    `JOBSCRAPER_DB` is set. That variable marks a dev instance on a copied
+    database (CLAUDE.md), which must not read the owner's real Gmail with its
+    own cursors and lease (review FL-4)."""
+    flag = str(env.get("JOBSCRAPER_MAIL_SYNC", "")).strip()
+    if flag in ("0", "1"):
+        return flag == "1"
+    return not str(env.get("JOBSCRAPER_DB", "")).strip()
+
+
 def cmd_web(args) -> int:
     """Serve the one-page web app (PRD 8.5) on `web.host`:`web.port`.
 
@@ -263,9 +276,7 @@ def cmd_web(args) -> int:
     print(f"JobScraper web: http://{host}:{port}  (Ctrl+C to stop)")
     # Jobs started from the web app re-invoke the CLI; they must use the same
     # config the web app was started with (`--config X web`).
-    # F-50 (mail_status_design §10.1): the mail timer runs in the real app;
-    # JOBSCRAPER_MAIL_SYNC=0 turns it off (a dev instance on a copied DB).
-    mail_timer = os.environ.get("JOBSCRAPER_MAIL_SYNC", "1").strip() != "0"
+    mail_timer = mail_timer_wanted(os.environ)
     uvicorn.run(create_app(cfg, config_path=getattr(args, "config", None),
                            mail_timer=mail_timer),
                 host=host, port=port, log_level="warning")

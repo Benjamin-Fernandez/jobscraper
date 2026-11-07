@@ -42,6 +42,7 @@ MailCommand = Callable[[str, dict[str, Any]], list[str]]
 
 TRIGGERS = ("startup", "timer", "manual", "connect", "cli")
 CHILD_TIMEOUT_S = 45            # the connect / set-password child (MS §4)
+STOP_WAIT_S = 5                 # stop(): how long a sync child gets after terminate / kill
 KEEP_LOGS = 20                  # newest sync logs kept in data/jobs/mail/ (MS §10.1)
 
 
@@ -109,12 +110,29 @@ class MailSyncRunner:
         self._thread.start()
 
     def stop(self) -> None:
-        """Stop the timer (the app's shutdown). A running child finishes on its own."""
+        """Stop the timer and end a running sync child (the app's shutdown;
+        review FL-10): terminate, a short wait, then kill. The child stops
+        between transactions or mid-one; either way SQLite rolls back what it
+        had not committed, and the next sync continues from the stored cursor."""
         self._stop.set()
         thread, self._thread = self._thread, None
         if thread is not None and thread is not threading.current_thread():
             thread.join(timeout=5)
         self._next_at = None
+        with self._lock:
+            proc = self._proc
+        if proc is not None and proc.poll() is None:
+            try:
+                proc.terminate()
+                proc.wait(timeout=STOP_WAIT_S)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                try:
+                    proc.wait(timeout=STOP_WAIT_S)
+                except subprocess.TimeoutExpired:
+                    logger.warning("mail sync child %s did not exit", proc.pid)
+            except OSError:
+                pass
 
     @property
     def timer_running(self) -> bool:
@@ -129,11 +147,29 @@ class MailSyncRunner:
             if self.clock() < (self._next_at or 0):
                 continue
             try:
-                self.tick("startup" if first else "timer")
+                spawned = self.tick("startup" if first else "timer")
             except Exception:                       # noqa: BLE001 - the timer must survive
                 logger.exception("mail sync tick failed")
+                spawned = False
             first = False
+            if spawned and not self._wait_child():
+                return                              # stopping
+            # Read after the child exited (review FL-10), so a `partial` run
+            # gets its catch-up delay now, not one cycle later.
             self._next_at = self.clock() + self._next_delay()
+
+    def _wait_child(self) -> bool:
+        """Wait for our sync child to exit, at most its own deadline plus a
+        minute. False when the runner is being stopped."""
+        limit = self.clock() + float(self.cfg.mail_status.sync_timeout_s) + 60.0
+        while self.clock() < limit:
+            with self._lock:
+                proc = self._proc
+            if proc is None or proc.poll() is not None:
+                return True
+            if self._stop.wait(1.0):
+                return False
+        return True
 
     def _next_delay(self) -> float:
         ms = self.cfg.mail_status
