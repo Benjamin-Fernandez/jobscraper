@@ -16,7 +16,9 @@
 // Undo. Either action reloads the rows and the suggestions.
 import { computed, onActivated, onMounted, ref, watch } from 'vue'
 import { describeError, getApplications, getStats, setApplicationStatus, untrackApplication } from '../api.js'
+import { attemptLabel } from '../attempts.js'
 import { ageLabel, isActive, lastAt, needsFollowUp, secondLine, STAGE_KEY } from '../applications.js'
+import { openProfile } from '../profileView.js'
 import { exactTime, plural, safeUrl, shortDate, when } from '../format.js'
 import { tabEmits, tabProps } from '../shell.js'
 import { statusLabel } from '../stages.js'
@@ -314,6 +316,21 @@ onActivated(() => { if (shownOnce) load(); shownOnce = true })
                 </a>
                 <span v-else class="role-title">{{ row.role ?? row.job_id }}</span>
                 <span v-if="needsFollowUp(row)" class="pill follow-up">Follow up?</span>
+                <!-- The latest auto-apply attempt (Q-76 N11); "Needs your input" leads to the answers. -->
+                <button
+                  v-if="row.last_attempt?.kind === 'needs_input'"
+                  type="button"
+                  class="pill attempt attempt-link"
+                  data-kind="needs_input"
+                  :title="row.last_attempt.text"
+                  @click="openProfile('details')"
+                >{{ attemptLabel('needs_input', row.last_attempt.mode) }}</button>
+                <span
+                  v-else-if="row.last_attempt"
+                  class="pill attempt"
+                  :data-kind="row.last_attempt.kind"
+                  :title="row.last_attempt.text || undefined"
+                >{{ attemptLabel(row.last_attempt.kind, row.last_attempt.mode) }}</span>
                 <p v-if="secondLine(row)" class="row-meta">{{ secondLine(row) }}</p>
                 <form
                   v-if="noteFor === row.job_id"
@@ -476,6 +493,13 @@ a.role-title .icon { color: var(--muted); }
 /* StatusSelect renders its own label root; place it in the row's status area. */
 .app-row > :deep(.status-field) { grid-area: status; }
 .follow-up { color: var(--warn); background: var(--warn-soft); margin-left: var(--space-2); }
+/* The auto-apply pill: green when sent, amber when it waits for you, red when it stopped. */
+.attempt { margin-left: var(--space-2); color: var(--text-2); background: var(--surface-3); }
+.attempt[data-kind='sent'] { color: var(--ok); background: var(--ok-soft); }
+.attempt[data-kind='dry_run'], .attempt[data-kind='unconfirmed'], .attempt[data-kind='needs_input'] { color: var(--warn); background: var(--warn-soft); }
+.attempt[data-kind='stopped'] { color: var(--danger); background: var(--danger-soft); }
+button.attempt-link { border: 0; cursor: pointer; font: inherit; font-size: inherit; min-height: 0; box-shadow: none; }
+button.attempt-link:hover { text-decoration: underline; }
 .row-meta { margin: 2px 0 0; font-size: var(--text-xs); color: var(--muted); }
 .row-remove { display: flex; width: max-content; margin-top: 2px; font-size: var(--text-xs); color: var(--muted); text-decoration: none; }
 .row-remove:hover:not(:disabled) { color: var(--accent); text-decoration: underline; }
