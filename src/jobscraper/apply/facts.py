@@ -143,17 +143,7 @@ def _template_entry(lst: str, e: Any) -> bool:
 
 def _form_item(path: str) -> tuple[Optional[applicant.FormItem], Optional[applicant.FormItem]]:
     """(FORM item, its entries sub-item or None) for a bare path."""
-    b = bare(path)
-    for g in applicant.FORM:
-        for it in g.items:
-            if it.kind == "entries" and b.startswith(it.path + "."):
-                rest = b[len(it.path) + 1:]
-                for s in it.sub:
-                    if s.path == rest:
-                        return it, s
-            elif it.path == b or b.startswith(it.path + "."):
-                return it, None
-    return None, None
+    return applicant.form_item(path)
 
 
 def _title(path: str) -> str:
@@ -914,28 +904,8 @@ def check_entries(sections: Sequence[EntrySection], rctx: ResolveContext) -> Non
 # Privacy (§6.5), clock and cache keys (§13.3)
 # --------------------------------------------------------------------------
 
-_MONTHS = ("January", "February", "March", "April", "May", "June", "July", "August",
-           "September", "October", "November", "December")
-
-
 def _date_forms(iso: str) -> list[str]:
-    m = re.match(r"^(\d{4})-(\d{2})-(\d{2})$", iso or "")
-    if not m:
-        m2 = re.match(r"^(\d{4})-(\d{2})$", iso or "")
-        if not m2:
-            return [iso] if iso else []
-        y, mo = m2.groups()
-        return [iso, f"{mo}/{y}", f"{int(mo)}/{y}", f"{_MONTHS[int(mo) - 1]} {y}"]
-    y, mo, d = m.groups()
-    name, mon = _MONTHS[int(mo) - 1], _MONTHS[int(mo) - 1][:3]
-    out = [iso, f"{d}/{mo}/{y}", f"{int(d)}/{int(mo)}/{y}", f"{mo}/{d}/{y}",
-           f"{int(mo)}/{int(d)}/{y}", f"{d}-{mo}-{y}", f"{d}.{mo}.{y}",
-           f"{y}/{mo}/{d}", f"{y}.{mo}.{d}", f"{y}{mo}{d}"]
-    for dd in dict.fromkeys((str(int(d)), d)):       # "5" and "05"
-        for mm in (name, mon):                         # "March" and "Mar"
-            out += [f"{dd} {mm} {y}", f"{mm} {dd}, {y}", f"{mm} {dd} {y}",
-                    f"{dd}-{mm}-{y}"]
-    return list(dict.fromkeys(out))
+    return applicant.date_forms(iso)           # moved to applicant (Q-74 R2), one copy
 
 
 def s_values(profile: dict, account_email: str) -> list[str]:
