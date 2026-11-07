@@ -257,17 +257,91 @@ def test_mail_d157i_a_display_name_with_extra_words_is_not_strong():
                              employer_domains=(), tenants=(), owner_changed_at=None, last_event_at=None))
     for path in [RULES_MIN] + ([REAL_RULES] if REAL_RULES.exists() else []):
         rules_obj = load(path)
+        # D-157 (i) and its addendum: recruiting words before or after the name still name the
+        # employer; any other extra word ("Labs", "at Night", a bare "At") is only WEAK.
         for name, strong in (("Globex Labs", False), ("Globex Careers", True), ("Globex", True),
-                             ("Globex Talent Acquisition", True)):
-            h, b = unit_header(f"{name} <no-reply@us.greenhouse-mail.io>", "Your application", REJ)
+                             ("Globex Talent Acquisition", True), ("Careers at Globex", True),
+                             ("Recruiting at Globex", True), ("Jobs at Globex", True),
+                             ("Talent Acquisition at Globex", True), ("Globex at Night", False),
+                             ("At Globex", False)):
+            h, b = unit_header(f"{name} <no-reply@us.greenhouse-mail.io>", "Your application", REJ,
+                               auth="pass")
             g = R.header_gate(h, rules_obj, own=golden_own(), window_start="2026-08-01T00:00:00",
                               threads=frozenset(), employer_regs=frozenset())
             assert g is None, (path.name, name, g)
             m = M.match(h, b, (app,), rules_obj)
             assert (m.kind == c.MatchKind.STRONG) is strong, (path.name, name, m)
             if not strong:
+                assert m.kind == c.MatchKind.WEAK, (path.name, name, m)
+            if not strong:
                 ch = decide(app, R.classify(h, b, rules_obj), m, h, build_policy())
                 assert ch is None or ch.kind != c.ChangeKind.AUTO, (path.name, name, ch)
+
+
+# ------------------------------------------------------------------ D-158
+@needs(FLOW)
+def test_mail_d158_a_locked_db_during_record_skips_no_message():
+    with _World() as w:
+        golden_mail(w.srv)
+        real, n = w.st.mail_record, []
+
+        def locked(**kw):
+            n.append(kw["message"].get("gm_msgid"))
+            if len(n) == 2:
+                raise sqlite3.OperationalError("database is locked")
+            return real(**kw)
+        w.st.mail_record = locked
+        run(w.cfg, w.srv, backend=FakeBackend(), store=w.st)
+        w.st.mail_record = real
+        assert rows(w.st, "SELECT COUNT(*) FROM mail_messages WHERE gm_msgid=?", REJ_ID) == [(0,)]
+        assert statuses(w.st)["nw-analyst"] == "interviewing"
+        run(w.cfg, w.srv, backend=FakeBackend(), now="2026-11-02T13:00:00")
+        assert statuses(w.st)["nw-analyst"] == "rejected", "the next run processes the message"
+        assert rows(w.st, "SELECT COUNT(*) FROM mail_messages")[0][0] == 2
+
+
+@needs(FLOW)
+def test_mail_d158_a_cursor_write_after_a_disconnect_makes_no_orphan():
+    from jobscraper import mailstatus_flow as flow
+    with _World() as w:
+        golden_mail(w.srv)
+        run(w.cfg, w.srv, backend=FakeBackend())
+        cur = w.st.mail_cursor(w.aid, "all")
+        assert w.st.mail_account_delete(w.aid)
+        w.st.mail_cursor_set(flow.Cursor(w.aid, "all", cur["mailbox"], int(cur["uidvalidity"]),
+                                         int(cur["last_uid"]) + 5, NOW))
+        assert rows(w.st, "SELECT COUNT(*) FROM mail_cursors WHERE account_id=?", w.aid) == [(0,)]
+
+
+@needs(FLOW)
+def test_mail_d158_accepting_a_backfilled_suggestion_applies_it():
+    with _World(seeded_at="2026-11-02T11:00:00") as w:
+        golden_mail(w.srv)
+        run(w.cfg, w.srv, backend=FakeBackend())
+        sugg = [s for s in w.st.mail_suggestions(NOW) if s["gm_msgid"] == REJ_ID]
+        assert len(sugg) == 1 and sugg[0]["reason"] == "backfilled", sugg
+        ms = w.cfg.mail_status
+        assert w.st.mail_accept(sugg[0]["id"], None, NOW, ranks=dict(ms.ranks), terminal=ms.terminal) == \
+            (True, "ok"), "a backfilled suggestion is the owner's call, not a 409"
+        assert statuses(w.st)["nw-analyst"] == "rejected"
+
+
+@needs(FLOW)
+def test_mail_d158_a_poison_message_is_skipped_internal_and_counted():
+    from jobscraper.mailstatus.contracts import Reason
+    with _World() as w:
+        gm = news(w.srv, "1800000000000005001")
+        golden_mail(w.srv)
+        undo = _failing({gm})
+        try:
+            rep = run(w.cfg, w.srv, backend=FakeBackend())
+        finally:
+            undo()
+        assert rows(w.st, "SELECT outcome, reason FROM mail_messages WHERE gm_msgid=?", gm) == \
+            [("skipped", Reason.INTERNAL.value)]
+        assert Reason.INTERNAL.value == "internal"
+        assert rep.accounts[0].counts["errors"] == 1, rep.accounts[0].counts
+        assert statuses(w.st)["nw-analyst"] == "rejected"
 
 
 # ------------------------------------------------------------------ FL-2 (8): the runner
