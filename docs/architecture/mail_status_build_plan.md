@@ -3,7 +3,7 @@
 Architect, 2026-11-02. Design: `mail_status_design.md` (**MS §n**); ADR-0007. Conventions as `docs/planning/apply_build_plan.md` §0:
 - A WP is ≤ ~1 day, ≤ ~8 files, one lane, one `Verify:` command.
 - Engineers don't write `tests/**`; the tester's files are skip-clean until their module exists.
-- Every branch starts from `int/Q-60-mail-status` (`git switch -c <branch> int/Q-60-mail-status`) and merges back into it. The Coordinator merges the integration branch into `personal` only with the owner's go-ahead (D-90).
+- Every branch starts from `int/Q-60-mail-status` (`git switch -c <branch> int/Q-60-mail-status`) and merges back into it. The Coordinator merges the integration branch into `personal` only with the owner's go-ahead (D-150).
 - NF-08: a copied database, port 8768, **`JOBSCRAPER_MAIL_SYNC=0`**. No real mailbox is read before the owner's go-ahead (MS §15 owner item 4).
 - No WP needs a design decision: if one seems to, the engineer logs a `question` in their outbox and builds what MS states.
 
@@ -191,7 +191,7 @@ Architect, 2026-11-02. Design: `mail_status_design.md` (**MS §n**); ADR-0007. C
 - **STATUS:** READY. **Files:** `src/jobscraper/apply/mail.py`. **Inputs:** MS §5.7. **Depends on:** I1.
 - **Do:** aliases (`_body = imapread.body_text`, and so on) so the names stay importable; `_scan`/`newest_from` read `INBOX` plus the `\Junk` folder found by `special_use_folders`, falling back to `FOLDERS[1]`; the module docstring updated. No F-36 behaviour change.
 - **Verify:** `python tests/run_tests.py -k apply_mail`
-- **Done when:** the existing cases and T4's appended ones are green. **Requirements:** MB §7 item 8, D-91 e.
+- **Done when:** the existing cases and T4's appended ones are green. **Requirements:** MB §7 item 8, D-151 e.
 
 #### WP-U1 · Settings: the email card
 - **STATUS:** READY. **Files:** `web/src/components/MailCard.vue`, `web/src/tabs/Settings.vue`, `web/src/api.js`. **Inputs:** MS §4, §11.1–§11.3. **Depends on:** — (mocked API).
