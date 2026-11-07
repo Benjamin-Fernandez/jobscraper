@@ -14,7 +14,8 @@
     is never logged; D-85 (failing pins until lane N applies it): the code is the only line of
     6-12 letters/digits after the sentence, "security" is never the code, a letters-only code
     is valid, zero or two candidates -> no code;
-  - F7 (skip-clean until N6a): on Workday `choose_entry` runs before the account wall.
+  - F7 (gated on what N6a built): `choose_entry` runs before the account wall, and again after an
+    email-check reopen.
 Fakes: tests/apply_flow_support.py (adapter, browser), tests/vault_support.py (keyring), a fake
 `imaplib.IMAP4_SSL` serving tests/fixtures/mail/greenhouse_code.eml re-dated to now.
 Verify: python tests/run_tests.py -k apply_flow_accounts
@@ -427,11 +428,83 @@ def test_d85_the_code_is_the_only_short_alphanumeric_line_after_the_sentence():
 
 # ------------------------------------------------------------------ F7 (N6a)
 
-@needs("jobscraper.apply.pagefill:fill_page", "jobscraper.apply.ats.workday:NAVIGATOR.read_step")
+# Gated on what WP-N6a built (the LLM loop's `fill_page` and the navigator dispatch), not on a
+# `read_step` the SiteNavigator contract never had (the old gate could never open).
+@needs("jobscraper.apply.pagefill:fill_page", "jobscraper.apply_flow:_fill_services",
+       "jobscraper.apply_flow:_Run.body_llm")
 def test_on_workday_choose_entry_runs_before_the_account_wall():
-    """Review F7 (N6a "Done when"): open -> choose_entry -> account wall; after an email-check
-    reopen, choose_entry again. Waits for WP-N6a; the flow oracle is written against it then."""
-    raise AssertionError("N6a landed: write the F7 flow oracle (choose_entry before account())")
+    """Review F7 (N6a "Done when"; llm_fill_design §9.1 order): open -> choose_entry -> account
+    wall; after an email-check reopen (the verification sent the browser to candidate home, so
+    the flow reopens the posting), choose_entry again BEFORE the first page is filled. Scripted
+    navigator (account wall: sign-up -> emailed code -> reopen), scripted `fill_page`, fake IMAP."""
+    from jobscraper import vault
+    from jobscraper.apply.contracts import Secret
+    from test_apply_flow_n6a import FakeModel, FakeNav, outcome, pf, scripted
+
+    class WallNav(FakeNav):
+        needs_account = True
+        mail_domains = ("greenhouse.io", "greenhouse-mail.io")
+        otp_pattern = GH_OTP
+
+        def __init__(self):
+            super().__init__(steps=("one", "review"))
+            self.walls = ["sign_up"]
+            self.home = False                        # True after the code: candidate home, no step
+
+        def account_wall(self, page):
+            self.calls.append("account_wall")
+            return self.walls.pop(0) if self.walls else None
+
+        def sign_up(self, page, ctx, password):
+            self.calls.append("sign_up")
+            return "verify_email"
+
+        def enter_code(self, page, ctx, code):
+            self.calls.append("enter_code")
+            self.home = True
+
+        def open(self, page, ctx):
+            self.calls.append("open")
+            self.home = False
+
+        def step_id(self, page, ctx):
+            return "" if self.home else super().step_id(page, ctx)
+
+    p = sample_profile()
+    p["consents"]["privacy_consent"] = True
+    w = make_world(profile=p)
+    try:
+        add_job(w.store, key="fakeco", name="Fake Co", provider="wallnav", slug="fakeco",
+                external_id="1", url="https://fake.example.com/jobs/1")
+        jid = w.store.conn.execute("SELECT job_id FROM jobs").fetchone()[0]
+        nav, model = WallNav(), FakeModel()
+        nav.name = "wallnav"
+        factory, say = FakeBrowserFactory(), Say()
+        acfg = dataclasses.replace(w.cfg.apply, dry_run_hold_s=0, confirm_timeout_s=0)
+        with memory_keyring():
+            vault.put(vault.imap_service(IMAP_HOST), EMAIL, Secret("synthetic-app-password"))
+            for k, v in (("host", IMAP_HOST), ("username", EMAIL), ("poll_s", "1"), ("wait_s", "5")):
+                w.store.set_setting(f"apply.mail.{k}", v)
+            w.store.commit()
+            msg = _code_mail(datetime.now(timezone.utc) + timedelta(minutes=1))
+            with _fake_imap([msg]), registered(nav), page_signals():
+                with scripted(nav, lambda n, s: outcome("one", [pf("a", "First name")])):
+                    res = apply_flow.run(w.cfg, w.store, [jid], dry_run=True, backend=model, http=object(),
+                                         browser_factory=factory, apply_cfg=acfg, say=say,
+                                         evidence_dir=w.tmp / "evidence")
+        r = res[0]
+        assert r.state is S.READY_TO_SUBMIT, (r.state, r.reason, r.reason_detail, say.text[-800:])
+        c = nav.calls
+        assert c[:4] == ["precheck", "open", "choose_entry", "account_wall"], c
+        assert c.index("choose_entry") < c.index("account_wall") < c.index("sign_up") < c.index("enter_code"), c
+        assert c.count("open") == 2, "the email check reopened the posting"
+        assert c.count("choose_entry") == 2, c
+        second_open = [i for i, x in enumerate(c) if x == "open"][1]
+        assert c[second_open:].index("choose_entry") > 0 and c.index("next") >             [i for i, x in enumerate(c) if x == "choose_entry"][1], "the second choose_entry precedes the first Next"
+        assert say.text.count("prefill: resume_import") == 2
+        assert CODE not in say.text
+    finally:
+        w.close()
 
 
 if WAITING[_W0:]:
