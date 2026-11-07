@@ -10,7 +10,7 @@
 // server refuses a stale etag (409) and a profile that fails validation (422,
 // with a message per path); both are said in words. Keys the form does not
 // know round-trip untouched and are listed read-only in the last group.
-import { computed, nextTick, onMounted, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { describeError, getApplicant, problemOf, saveApplicant } from '../api.js'
 import {
   clone, entryPart, errorMap, fieldId, findItem, getAt, mergeEdits, otherKeys, setAt, showValue,
@@ -23,6 +23,10 @@ import TabLoading from './TabLoading.vue'
 const emit = defineEmits(['counts'])
 
 const PRIVATE = 'Private: never sent to the AI'
+// The unsaved form survives a visit to another tab (Q-70 D1, D-100). sessionStorage
+// only: it is this browser's, goes when the tab closes, and the same data already
+// sits in data/applicant.yaml on this machine. Never localStorage.
+const DRAFT_KEY = 'jobscraper.applicant.draft'
 // A group's own control: a label for one input, a name for a set of them.
 const GROUPED = new Set(['entries', 'salary', 'country_bool_map', 'yes_no', 'multi', 'fixed'])
 
@@ -37,6 +41,7 @@ const note = ref('')
 const problem = ref('')         // a save that failed for a reason that is not 409 or 422
 const openQuestions = ref(null)
 const removing = ref('')        // the `extra` key whose Remove is being confirmed
+const restored = ref(false)     // the draft came back from sessionStorage
 const banner = ref(null)
 const inbox = ref(null)
 
@@ -61,6 +66,31 @@ function onInboxLoaded(n) {
   report()
 }
 
+// Keep the draft while it differs from the file; drop it as soon as it doesn't.
+watch(draft, v => {
+  if (!data.value) return
+  try {
+    if (dirty.value) {
+      sessionStorage.setItem(DRAFT_KEY, JSON.stringify({ etag: data.value.etag, base: data.value.profile ?? {}, draft: v }))
+    } else {
+      sessionStorage.removeItem(DRAFT_KEY)
+    }
+  } catch { /* storage full or blocked: the form still works, it just won't survive */ }
+}, { deep: true })
+
+function restoreDraft() {
+  let s = null
+  try {
+    const raw = sessionStorage.getItem(DRAFT_KEY)
+    s = raw ? JSON.parse(raw) : null
+  } catch { s = null }
+  if (!s || typeof s.draft !== 'object' || s.draft === null) return
+  // Same file version: take the draft as it was. The file moved on: keep only the leaves
+  // the owner changed (`mergeEdits`), the rest comes from the file.
+  draft.value = s.etag === data.value.etag ? s.draft : mergeEdits(s.base ?? {}, s.draft, data.value.profile ?? {})
+  restored.value = true
+}
+
 function adopt(res) {
   data.value = res
   draft.value = clone(res.profile ?? {})
@@ -74,6 +104,7 @@ async function load() {
   note.value = ''
   try {
     adopt(await getApplicant())
+    restoreDraft()
   } catch (e) {
     loadError.value = describeError(e)
   } finally {
@@ -104,6 +135,23 @@ async function reloadKeepingEdits() {
   errors.value = res.errors ?? []
   conflict.value = ''
   report()
+}
+
+// Throw away what was typed and go back to what the file holds.
+function discard() {
+  draft.value = clone(data.value.profile ?? {})
+  errors.value = data.value.errors ?? []
+  restored.value = false
+  try { sessionStorage.removeItem(DRAFT_KEY) } catch { /* nothing to remove */ }
+}
+
+// Closing the tab or reloading the page would lose the draft's unsaved state in the
+// owner's mind (it is restored, but only within this tab): ask first.
+const guard = e => {
+  if (dirty.value) {
+    e.preventDefault()
+    e.returnValue = ''
+  }
 }
 
 // ---- labels, tags, ids ----
@@ -205,7 +253,11 @@ async function removeAnswer(key) {
   await save()
 }
 
-onMounted(load)
+onMounted(() => {
+  window.addEventListener('beforeunload', guard)
+  load()
+})
+onBeforeUnmount(() => window.removeEventListener('beforeunload', guard))
 defineExpose({ load })
 </script>
 
@@ -224,12 +276,12 @@ defineExpose({ load })
       </div>
       <div v-else-if="conflict" ref="banner" class="notice error banner conflict" role="alert" tabindex="-1">
         <p v-if="conflict === 'changed'">
-          This file changed since you opened it, in another tab or by hand. Reload to get the latest, then make your change again.
+          This file changed since you opened it, in another tab or by hand. Reload to take in the latest. What you typed here is kept.
         </p>
         <p v-else>
           JobScraper can't read data/applicant.yaml. Fix the file by hand. Nothing will be saved over it until then.
         </p>
-        <button type="button" class="reload" @click="load">Reload</button>
+        <button type="button" class="reload" @click="conflict === 'changed' ? reloadKeepingEdits() : load()">Reload</button>
       </div>
       <div v-else-if="problem" ref="banner" class="notice error banner" role="alert" tabindex="-1">
         <p>{{ problem }}</p>
@@ -265,6 +317,9 @@ defineExpose({ load })
       />
 
       <template v-if="!fileError">
+        <p v-if="restored && dirty" class="notice warn restored" role="status">
+          Your unsaved changes are back. <button type="button" class="link" @click="discard">Discard them</button>
+        </p>
         <h2 class="section-title">Your details</h2>
         <p v-if="!data.file?.exists" class="muted lead">There is no data/applicant.yaml yet. Saving creates it.</p>
         <div v-if="meter" class="meter-row">
@@ -393,9 +448,10 @@ defineExpose({ load })
           </section>
 
           <div class="save-bar">
-            <span v-if="dirty && !note" class="muted unsaved">You have unsaved changes.</span>
-            <p v-if="note" class="notice ok save-note" role="status">{{ note }}</p>
-            <button type="submit" class="primary save" :disabled="saving">{{ saving ? 'Saving…' : 'Save details' }}</button>
+            <span v-if="dirty" class="muted unsaved">You have unsaved changes.</span>
+            <p v-if="note && !dirty" class="notice ok save-note" role="status">{{ note }}</p>
+            <button type="button" class="ghost discard" :disabled="saving || !dirty" @click="discard">Discard changes</button>
+            <button type="submit" class="primary save" :disabled="saving || (!dirty && data.file?.exists)">{{ saving ? 'Saving…' : 'Save details' }}</button>
           </div>
         </form>
       </template>
