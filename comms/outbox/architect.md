@@ -10,6 +10,27 @@ BODY: <concise message>
 STATUS: open
 -->
 
+### 2026-11-07 architect → coordinator, software-engineer, tester (Q-81 → Q-80 addition)
+TYPE: handoff
+RE: Q-81 (closes it), Q-80; review `docs/reviews/Q-48-and-lane-M-fixes.md` re-review F11, F12, F13, F15, F16; `docs/architecture/apply_design.md` line 4 (delta), §5.4 template line 379, §7.5 (gate 2 D-164 block, D-91 bullet, D-166 bullet, gate 4 D-165 note, D-165 bullet)
+BODY: §7.5 now records the decisions below; contracts are unchanged (CONTRACT_VERSION stays). Please record D-164..D-166 in 02_status §4, mark Q-81 DONE, and commit (I have no shell). Suggested message: `docs(arch): Q-81 D-164..D-166 declaration frame shapes, NDA unset, compound consent`.
+- D-164 (F13 + F12): the STATUS frame is a closed list of label shapes. Answering is extended to prefixed, indirect and short noun-phrase labels; frame runs "anywhere in the label" are not accepted.
+- D-165 (F15, F16): `willing_to_sign_nda` unset = no answer (§5.4 template line now `null`). Consent verbs follow D-90a (comfortable / happy to / open to → unknown; sign / signing alone is not consent). F15 (a) and (b) are kept as built, each with a reason. No code change.
+- D-166 (F11): the `_NDA_LABEL_VOCAB` closed-vocabulary rule is now spec. Already built, no code change. Tester: confirm the F11 pins in `tests/test_apply_declarations_review.py` (~line 85) cover the four oracles listed in §7.5, including "Would you sign an NDA if asked?" → Yes.
+CODE DELTA (add to Q-80; one lane, `src/jobscraper/apply/declarations.py` only; tester pins = the D-164 oracle table in §7.5):
+1. Replace `_status_frame(toks)` with `question_frame(label_toks, classes, f)`, steps 1-3 of D-164:
+   - PREFIX strip: please, kindly, declaration, declarations, self declaration, note, question, important; at most 3 tokens; after the trailing ANSWER_HINTS strip.
+   - Optional LEAD: confirm, indicate, state, specify, advise, tell us, let us know; then optional if / whether / that.
+   - Shape A: today's starters and `_STATUS_RUNS`, plus the leading runs i am, i have, i hold, there is, there are.
+   - Shape B: only after a LEAD: you are, you're, you have, you've, you were, you had, you hold, you do, you did.
+   - Shape C: DROPDOWN/RADIO and `resolve.bool_shaped`; classes ⊆ NOUN_CLASSES; ≤ 6 tokens left; each token in a matched phrase span or NOUN_FILLER; no NDA object span.
+2. `_bool_answer` (non-checkbox branch): call the frame for every class except NDA_WILLINGNESS, including after `_freedom_inverts` succeeds (F12; today `:836-839` skips it). Pass the class set: `{cls}`, or the agreed classes from `answer()` (today `cls=None` on the agreement path, so it needs a new argument).
+3. Gate 1 `_starts_as_question`: use the same PREFIX strip (today only please / kindly). No LEAD, no shape C.
+4. Behaviour changes to pin: "Free from any restrictive covenants?" Yes → unknown. "Politically exposed person (PEP)?", "Criminal record", "Bankruptcy", "Disability" (Yes/No), "Declaration: Are you a politically exposed person?", "Note: Do you have a non-compete?", "Please confirm: Are you a PEP?", "Please indicate if you have ever been bankrupt": unknown → No. Unchanged (stay unknown): "Non-compete agreement?", "Confidentiality agreement", "Criminal record check", "Former employee?", any noun phrase on TEXT or a single checkbox. Unchanged (still Yes): "Confirm you are free from any restrictive covenants".
+   No existing test asserts the old unknowns (grep for "not a status question" in tests/ finds nothing). Run `-k declarations`, `-k apply_contracts`, `-k llm_fill`, `-k layering`, then the full suite.
+Open questions: none for the owner. Note: F14 (dead `locks.NEGATIONS`) stays in Q-80 as queued.
+STATUS: open
+
 ### 2026-11-02 architect → coordinator, engineer, tester (Q-48, D-87)
 TYPE: handoff
 RE: Q-48, D-87 (extends D-55), KA-2; AD §5.4, §7.5; LF §4 L3/L5/L7; QD §3 rows 4 and 14; contracts v5 (additive)
