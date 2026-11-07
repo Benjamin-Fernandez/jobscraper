@@ -68,29 +68,61 @@ def _run(w, job_ids, adapter=None, *, dry_run=True, apply_over=None, profile_fil
 
 # ------------------------------------------------------------------ F3: the Workday gate
 
-@needs("jobscraper.apply.ats.workday:NAVIGATOR")
-def test_a_workday_job_stops_unsupported_before_edge_and_before_any_account_call():
-    """Review F3: the only thing stopping live Workday runs before WP-N6a. Real REGISTRY."""
-    from jobscraper.apply.ats import REGISTRY
-    assert "workday" in REGISTRY and not hasattr(REGISTRY["workday"], "read_step"), \
-        "N6a landed: replace this pin with the Workday flow oracles (T4 flow part)"
+def _workday_world():
     w = make_world()
+    _cid, jid = add_job(w.store, key="exampleco", name="Example Employer", provider="workday",
+                        slug="exampleco", external_id="REQ-0001", url=A_URL)
+    return w, jid
+
+
+def _nothing_opened_or_created(w, mem, factory, r):
+    """The shared claim of both Workday gates: no Edge, no vault call, no account row, no answers."""
+    assert factory.started == 0, "Edge never starts"
+    row = w.store.attempt(r.attempt_id)
+    assert row["step"] == "planning" and row["submit_clicked_at"] is None
+    assert row["ats"] == "workday"
+    assert w.store.answers(r.attempt_id) == []
+    assert mem.calls == [], "no vault read or write"
+    assert w.store.accounts() == [], "no account row"
+
+
+@needs("jobscraper.apply.ats.workday:NAVIGATOR")
+def test_a_workday_job_under_fill_rules_still_stops_unsupported_before_edge_and_any_account_call():
+    """Review F3, kept under `apply.fill: rules` (the old path, until WP-C1): Workday has no
+    `read_step`, so that path cannot fill it and stops in planning, before Edge and any vault or
+    account call. The default `llm` path drives it (next test)."""
+    from jobscraper.apply.ats import REGISTRY
+    assert "workday" in REGISTRY and not hasattr(REGISTRY["workday"], "read_step")
+    w, jid = _workday_world()
     try:
-        _cid, jid = add_job(w.store, key="exampleco", name="Example Employer", provider="workday",
-                            slug="exampleco", external_id="REQ-0001", url=A_URL)
         with memory_keyring() as mem:
             for dry in (True, False):
-                res, factory, say = _run(w, [jid], dry_run=dry)
+                res, factory, _say = _run(w, [jid], dry_run=dry, apply_over={"fill": "rules"})
                 r = res[0]
                 assert r.state is S.FAILED and r.reason is R.UNSUPPORTED_ATS, (dry, r.state, r.reason)
                 assert "form filling arrives" in r.reason_detail
-                assert factory.started == 0, "Edge never starts"
-                row = w.store.attempt(r.attempt_id)
-                assert row["step"] == "planning" and row["submit_clicked_at"] is None
-                assert row["ats"] == "workday"
-                assert w.store.answers(r.attempt_id) == []
-            assert mem.calls == [], "no vault read or write"
-            assert w.store.accounts() == [], "no account row"
+                _nothing_opened_or_created(w, mem, factory, r)
+    finally:
+        w.close()
+
+
+@needs("jobscraper.apply.ats.workday:NAVIGATOR")
+def test_a_workday_job_flips_at_n6a_it_is_driven_by_fill_llm_and_a_missing_model_stops_it_first():
+    """The F3 pin flipped at WP-N6a ("flips at N6a"): under the default `apply.fill: llm` Workday is
+    no longer `unsupported_ats`; the attempt reaches the model warm-up (llm_fill_design §13.1, §11:
+    "Ollama not running -> warm-up fails before Edge opens -> model_unavailable"). With no model it
+    stops there, still before Edge and before any vault or account call: the account wall is only
+    reached after the warm-up, so an unavailable model can never leave an account behind."""
+    w, jid = _workday_world()
+    try:
+        with memory_keyring() as mem:
+            for dry in (True, False):
+                res, factory, _say = _run(w, [jid], dry_run=dry)        # NoModel; fill defaults to llm
+                r = res[0]
+                assert w.cfg.apply.fill == "llm"
+                assert r.state is S.FAILED and r.reason is R.MODEL_UNAVAILABLE, (dry, r.state, r.reason)
+                assert r.reason is not R.UNSUPPORTED_ATS
+                _nothing_opened_or_created(w, mem, factory, r)
     finally:
         w.close()
 
