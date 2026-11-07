@@ -131,6 +131,9 @@ export function fakeApi({
   m11 = true, settings = defaultSettings(), profile = defaultProfile(), job = null,
   titles = defaultTitles(), companies = [], maxCompanies = null, postings = {},
   dismissals = {}, health = defaultHealth(),
+  // Q-70 E: questions = the GET /api/questions payload ({groups, waiting, ...}), null = 404 as
+  // before; applicationRows = exact rows for GET /api/applications instead of the status log.
+  questions = null, applicationRows = null,
 } = {}) {
   const calls = []
   const apps = {}
@@ -281,6 +284,8 @@ export function fakeApi({
       for (const a of Object.values(apps)) byStatus[a.status] = (byStatus[a.status] ?? 0) + 1
       return respond({ statuses: vocabulary, by_status: byStatus, by_run: {} })
     }
+    if (url === 'api/applications' && applicationRows) return respond(applicationRows)
+    if (/^api\/questions\?status=/.test(url) && questions) return respond(questions)
     if (url === 'api/applications') {
       return respond(Object.entries(apps).map(([id, a]) => {
         const j = fixture.jobs.find(x => x.id === id) ?? {}

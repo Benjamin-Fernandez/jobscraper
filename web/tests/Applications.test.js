@@ -177,7 +177,7 @@ describe('Applications tab', () => {
   })
 
   it('marking applied in the Inbox moves the role to this tab', async () => {
-    setHash('')
+    setHash('#/inbox')
     dismissToast()
     api = fakeApi()
     vi.stubGlobal('fetch', api.fetch)
