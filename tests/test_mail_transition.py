@@ -54,16 +54,18 @@ def _v(category, tier="rule", status_words=True):
                      model="" if tier == "rule" else "local-model")
 
 
-def _m(kind="strong", job_id="a1", candidates=()):
+def _m(kind="strong", job_id="a1", candidates=(), signals=()):
     c = _c()
+    sig = tuple(c.Signal(x) for x in signals)
     if kind == "ambiguous":
-        return c.MatchResult(c.MatchKind.AMBIGUOUS, None, tuple(candidates))
-    return c.MatchResult(c.MatchKind(kind), job_id)
+        return c.MatchResult(c.MatchKind.AMBIGUOUS, None, tuple(candidates), sig)
+    return c.MatchResult(c.MatchKind(kind), job_id, (), sig)
 
 
 def _decide(app, category, *, tier="rule", status_words=True, kind="strong", role="all",
-            auth="pass", received_at=RECEIVED, policy=None):
-    return decide(app, _v(category, tier, status_words), _m(kind, app.job_id), _h(role, auth, received_at),
+            auth="pass", received_at=RECEIVED, policy=None, signals=()):
+    return decide(app, _v(category, tier, status_words), _m(kind, app.job_id, signals=signals),
+                  _h(role, auth, received_at),
                   policy or build_policy())
 
 
@@ -185,9 +187,17 @@ def test_mail_transition_row7_terminal_versus_reopen():
         _is(_decide(_app("rejected", **late), cat), "suggest", "reopen", frm="rejected")
         _is(_decide(_app("withdrawn", **late), cat), "suggest", "reopen")
     _is(_decide(_app("rejected", **late), "interview"), "suggest", "reopen", to="interviewing")
-    for cat in ("rejected", "withdrawn", "posting_closed", "kept_on_file"):        # terminal target
+    for cat in ("withdrawn", "posting_closed", "kept_on_file"):                    # terminal target
         _is(_decide(_app("rejected", **late), cat), "none", "terminal")
-    _is(_decide(_app("rejected", **late), "acknowledged"), "none", "terminal")
+    # Row 7a (D-161): an acknowledgement or rejection newer than the closed application's last event,
+    # with no role / req id / thread hit, may be about an application not added -> a question.
+    for cat in ("rejected", "acknowledged"):
+        _is(_decide(_app("rejected", **late), cat), "suggest", "maybe_untracked", to=None)
+        for sig in ("role", "req_id", "thread"):               # names a tracked closed role: silent
+            _is(_decide(_app("rejected", **late), cat, signals=(sig,)), "none", "terminal")
+    # Employer-only signals are what a 7a match carries.
+    _is(_decide(_app("rejected", **late), "rejected", signals=("employer_domain", "name_in_body")),
+        "suggest", "maybe_untracked", to=None)
     older = dict(last_event_at="2026-10-28T09:00:00", owner_changed_at="2026-09-01T09:00:00")
     _is(_decide(_app("rejected", **older), "interview"), "none", "terminal")
     _is(_decide(_app("rejected", last_event_at=RECEIVED), "offer"), "none", "terminal")

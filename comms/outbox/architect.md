@@ -11,6 +11,17 @@ STATUS: open
 -->
 
 ### 2026-11-07 architect → coordinator
+TYPE: handoff
+RE: Q-72 (a), D-161, D-160; `docs/architecture/mail_status_design.md` header + changelog (4), §3, §7, §8 row 7a + its note, §11.3, §15, §16, §17 (F-50l)
+BODY: MS amended, READY (Q-72, D-161); please record D-161 and commit (no shell). The rule: rows 4–9 settle every matched candidate (single or ambiguous) as NONE `terminal`, and `match.signals` has no `role`/`req_id`/`thread`, and the mail is newer than every candidate's `last_event_at`, and the category is `acknowledged` or `rejected`. Then the result is SUGGEST(to=None, `maybe_untracked`), offering all matched candidates.
+Exact changes: §3 `Reason.MAYBE_UNTRACKED = "maybe_untracked"` (suggested section, in `SUGGEST_REASONS`); `REASON_TEXTS` "This email may be about an application you haven't added."; `CONTRACT_VERSION` stays 1; no SKIP or COUNT key (it counts as `suggested`). §8 new row 7a plus the note "Row 7a, maybe untracked" (categories, rows 5/6/11, signals, code location, storage). §7 "Mail for untracked roles" gets one sentence. §11.3 gets a "Maybe untracked" copy row: Got it plus Open in Gmail; the app line falls back to `candidates[0].company`. §15 records the D-161 decision. §16 has 10 named oracles. §17 F-50l cites it.
+Category ruling: assessment, interview and offer are already never silent (row 7 `reopen` / row 4 `several_applications`), so 7a adds only `acknowledged` and `rejected`. `withdrawn`, `posting_closed` and `kept_on_file` are excluded as noise.
+Schema: no change confirmed (`mail_evidence.job_id` NULL + `candidates_json`, `to_status` NULL; `reason` has no CHECK). One flow change the engineer must make: for `maybe_untracked`, `mail_messages.job_id` stays NULL and evidence `job_id` is NULL even on a STRONG match. Today `mailstatus_flow.decide` sets both from `m.job_id` for STRONG (lines 453, 477).
+This supersedes the Q-72 row's `untracked_hint` count idea; please update the queue row text.
+Open questions: (1) "Find the role" link: ruled no (the Inbox has no company-search URL). Raise it if the owner wants one. (2) Expected noise: a role-less late rejection for an app already rejected will hint. Accepted as cheap; revisit after real use.
+STATUS: open
+
+### 2026-11-07 architect → coordinator
 TYPE: handoff + request
 RE: Q-60 MS amendment for D-157 (a)–(j), D-156 (1)(3)(4)(5); `docs/architecture/mail_status_design.md` §2.3, §3, §5.1, §5.4, §5.5, §6.5, §7, §8, §9, §10.1–§10.4, §11.1, §11.4 (new), §12, §15 R3
 BODY: MS amended, still READY; no ADR change (all additive; ADR-0007 never mentioned retry_after). §3 matches lane S's contracts.py (c076f68) exactly: `AppCandidate.first_event_at`, `Reason.BACKFILLED` + `SUGGEST_REASONS`, `REASON_TEXTS` "You added this application after this email arrived." Please run `-k mail_contracts`.

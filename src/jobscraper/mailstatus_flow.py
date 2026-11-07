@@ -451,6 +451,12 @@ class _Sync:
         # The thread signal (MS §7) only for a confident, unique match; a weak or
         # ambiguous one gets its job_id when the owner accepts it (MS §8).
         job_id = m.job_id if m.kind is MatchKind.STRONG else None
+        # Row 7a (D-161): a question with no target. Even a STRONG match must not
+        # attach the thread to the closed application, or a later rejection in it
+        # would match by `thread` and stay silent.
+        untracked = change.reason is Reason.MAYBE_UNTRACKED
+        if untracked:
+            job_id = None
         kind = change.kind
         if kind is ChangeKind.NONE:
             return self.row(h, Outcome.NO_CHANGE, change.reason, m=m, v=verdict,
@@ -466,7 +472,12 @@ class _Sync:
                   "to_status": change.to_status, "applied_at": h.received_at[:10]}
             return (self.row(h, Outcome.APPLIED, change.reason, m=m, v=verdict, job_id=m.job_id),
                     ch, evidence)
-        if ambiguous:
+        if untracked and not ambiguous:
+            matched = [app] if app is not None else []
+            evidence.update(job_id=None, from_status=None,
+                            candidates_json=[{"job_id": a.job_id, "status": a.status}
+                                             for a in matched])
+        elif ambiguous:
             left = mtrans.remaining_candidates(app, verdict, m, h, self.policy, candidates=cands)
             # An unclear / check-the-portal suggestion has no target, so row 4
             # settles nothing: the owner still picks among every match.

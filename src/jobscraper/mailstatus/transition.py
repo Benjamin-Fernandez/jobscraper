@@ -17,7 +17,8 @@ from types import MappingProxyType
 from typing import Any, Iterable, Optional, Sequence
 
 from .contracts import (AppCandidate, AuthResult, Category, Change, ChangeKind, MailboxRole,
-                        MailHeader, MatchKind, MatchResult, Policy, Reason, Tier, Verdict)
+                        MailHeader, MatchKind, MatchResult, Policy, Reason, Signal, Tier,
+                        Verdict)
 
 # MS 10.4 defaults, used for a key the raw config lacks.
 DEFAULT_RANKS = {"to_apply": 0, "applied": 1, "assessment": 2, "interviewing": 3, "offer": 4}
@@ -34,6 +35,11 @@ REOPEN_CATEGORIES = frozenset({Category.ASSESSMENT, Category.INTERVIEW, Category
 # Row 11 b: the reason a suggest-only category gives.
 _SUGGEST_ONLY_REASON = {Category.POSTING_CLOSED: Reason.CLOSED_ROLE,
                         Category.KEPT_ON_FILE: Reason.KEPT_ON_FILE}
+# Row 7a (D-161): the categories a late mail about a closed application may hint at an
+# application the owner never added. The reopen categories are never silent already.
+_UNTRACKED_CATEGORIES = frozenset({Category.ACKNOWLEDGED, Category.REJECTED})
+# Row 7a: a hit on any of these means the mail names a tracked, closed application.
+_NAMES_TRACKED = frozenset({Signal.ROLE, Signal.REQ_ID, Signal.THREAD})
 # Categories `category_status` can't map: decided by rows 1-3 alone.
 _NO_TARGET = frozenset({Category.NO_CHANGE, Category.UNKNOWN})
 
@@ -145,6 +151,9 @@ def decide(app: Optional[AppCandidate], verdict: Verdict, match: MatchResult, h:
         if not left:
             if settled:
                 first_app, first = settled[0]
+                if (all(ch is not None and ch.reason is Reason.TERMINAL for _, ch in settled)
+                        and _maybe_untracked(pool, verdict, match, h)):
+                    return Change(ChangeKind.SUGGEST, Reason.MAYBE_UNTRACKED, None, None)
                 return Change(ChangeKind.NONE, first.reason, first_app.status)
             return Change(ChangeKind.NONE, Reason.NO_APPLICATION)
         return Change(ChangeKind.SUGGEST, Reason.SEVERAL_APPLICATIONS, None, target)
@@ -153,6 +162,9 @@ def decide(app: Optional[AppCandidate], verdict: Verdict, match: MatchResult, h:
     # 5-9
     settled = _settle(app, cat, target, h, policy)
     if settled is not None:
+        if (settled.kind is ChangeKind.NONE and settled.reason is Reason.TERMINAL
+                and _maybe_untracked([app], verdict, match, h)):
+            return Change(ChangeKind.SUGGEST, Reason.MAYBE_UNTRACKED, None, None)
         return settled
     # 10-11: a forward move; the bar for AUTO.
     return _bar(app, verdict, match, h, policy, target)
@@ -187,6 +199,20 @@ def _pool(app: Optional[AppCandidate], match: MatchResult,
         if named:
             return named
     return cands
+
+
+def _maybe_untracked(pool: Sequence[AppCandidate], verdict: Verdict, match: MatchResult,
+                     h: MailHeader) -> bool:
+    """Row 7a (D-161): the caller has settled every candidate in `pool` as NONE
+    `terminal`. The mail is still a question when it is an acknowledgement or a
+    rejection, names none of the closed roles (no role, req id or thread signal) and is
+    newer than each candidate's last event (a missing one counts as older, as in row 7).
+    Otherwise the row 4 / row 7 result stands."""
+    if verdict.category not in _UNTRACKED_CATEGORIES or not pool:
+        return False
+    if _NAMES_TRACKED.intersection(match.signals):
+        return False
+    return all(not a.last_event_at or h.received_at > a.last_event_at for a in pool)
 
 
 def _settle(app: AppCandidate, cat: Category, target: str, h: MailHeader,
