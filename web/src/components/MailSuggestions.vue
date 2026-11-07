@@ -10,11 +10,13 @@
 //   is preselected, because the system never picks for them (MS section 8 row 4).
 //
 // Hidden when there is nothing to show, and when the server has no such route.
-// Emits `changed` after an accepted suggestion so the tab reloads its rows.
+// Emits `changed` after an accepted suggestion so the tab reloads its rows, and
+// after a 409 on Accept (`status: null`), because the row moved on meanwhile.
 import { onMounted, ref } from 'vue'
 import { acceptMailSuggestion, describeError, dismissMailSuggestion, getMailSuggestions, mailProblem } from '../api.js'
 import { shortDate } from '../format.js'
 import { statusLabel } from '../stages.js'
+import { showToast } from '../toast.js'
 
 const emit = defineEmits(['changed'])
 
@@ -62,10 +64,25 @@ async function accept(s) {
     await load()
   } catch (e) {
     const p = mailProblem(e)
-    patch(errors, s.id, p.status === 409 ? ACCEPT_CONFLICT : `Could not set it: ${p.detail || describeError(e)}`)
+    if (p.status === 409) {
+      await conflict(s, jobId)
+    } else {
+      patch(errors, s.id, `Could not set it: ${p.detail || describeError(e)}`)
+    }
   } finally {
     patch(busy, s.id, '')
   }
+}
+
+// A 409: the application moved on since the email (review F8). Reload, so a
+// superseded suggestion doesn't linger, and tell the tab to reload its rows too
+// (`status: null`: nothing was set here). The message stays on the suggestion
+// when it is still listed, else it goes to a toast.
+async function conflict(s, jobId) {
+  patch(errors, s.id, ACCEPT_CONFLICT)
+  await load()
+  if (!items.value.some(x => x.id === s.id)) showToast({ message: ACCEPT_CONFLICT })
+  emit('changed', { jobId: jobId ?? s.job_id, status: null })
 }
 
 async function dismiss(s) {

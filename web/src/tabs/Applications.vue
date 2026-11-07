@@ -324,7 +324,7 @@ onMounted(load)
                   <li v-for="e in row.events" :key="e.id" :data-by="e.by ?? null">
                     <span class="to pill" :data-status="e.to_status">{{ statusLabel(e.to_status) }}</span>
                     <span class="at">{{ when(e.at) }}</span>
-                    <MailEvidence v-if="e.by === 'mail' && e.mail" :event="e" @undone="afterMail" />
+                    <MailEvidence v-if="e.by === 'mail' && e.mail" :event="e" @undone="afterMail" @stale="afterMail" />
                   </li>
                 </ol>
               </details>
