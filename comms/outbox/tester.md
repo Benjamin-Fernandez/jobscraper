@@ -224,3 +224,10 @@ TYPE: handoff
 RE: Q-70 lane B · branch `eng/Q-70-B-applications`
 BODY: 4 failing Applications tests fixed as the engineer listed; new web/tests/applications-flow.test.js (22 tests: StatusSelect keyboard/pointer/Enter/Escape, Undo writes one more event (D-101), Active chip default + persistence + fallback, follow-up at 15 vs 13 days, Remove + Undo, Clear filters, search Escape, applications.js helpers). `cd web; npx vitest run` = 18 files, 301 passed | 1 skipped. No src defects found.
 STATUS: done
+
+### 2026-11-07 tester → coordinator
+TYPE: handoff
+RE: Q-70 lane C pins (test/Q-70-C-pins, base eng/Q-70-C-shell b511561 + C4 ea5f7d9 merged)
+BODY: Before: 2 files failed, 5 tests failed / 332 passed (exactly the 5 listed). The 5 are fixed (App.test.js x4 for the Choose runs… button; Runs.test.js counts relaxed to 2..3 for the shell's doubled reload). New: web/tests/shell-job.test.js (19 tests: Verify C a-f plus announce and consume checks) and web/tests/keepalive.test.js (4: Inbox state kept and no refetch, Applications kept and refreshes on return, Profile not kept, Inbox keys off while away). After: `npx vitest run` 21 files, all passed. Mutation checks, each red as expected then src restored: shell onFinish reload removed (2 fail), toast removed (4), JobPill v-if false (4), starter listener removed (2), visibility ignored (2), useJob consume ignored (1), label for broken (1), choosable ignored (1), more-right never (2), KeepAlive off (2), Profile in KeepAlive (1), Inbox onDeactivated removed (1), Applications reload on activation removed (1). No src changes committed.
+Note for the engineer: Inbox has no quiet refresh on activation (it uses the shell's data); only Applications reloads when it comes back. The App.vue comment says "Their onActivated hooks do the quiet refresh", slightly inexact for Inbox.
+STATUS: open

@@ -298,3 +298,23 @@ Existing tests to change (web/tests/Applications.test.js):
 Other tests (ux1 notes/sort, App.test 'marking applied...') pass unchanged.
 New tests (Verify B): (a) keydown ArrowDown + change without pointerdown -> no POST until `blur`; Enter commits; Escape drops it; (b) pointerdown + change commits once, toast.current.message "Moved to X: role", `toast.current.action.run()` restores the status (one more POST); (c) default chip Active, excludes rejected, persists after remount (localStorage key above), unknown stored stage falls back to Active; (d) `vi.useFakeTimers({toFake:['Date']})` + setSystemTime 15 days after 2026-09-24 -> `.follow-up` "Follow up?" and `.updated` "Applied · 15 days"; 1 day -> no pill; (e) `.row-remove` only on single-event rows; click -> DELETE, toast "Removed ...", Undo POSTs the status back (fakeApi supports DELETE); (f) `.clear-filters` resets stage=all, run=all, query=''; (g) Esc in search clears then blurs; (h) unit tests of applications.js (daysSince, ageLabel, needsFollowUp, isActive, secondLine).
 STATUS: open
+
+### 2026-11-07 software-engineer → coordinator (or tester)
+TYPE: request
+RE: Q-70 lane C (eng/Q-70-C-shell): `web/tests/**` is outside my scope; 5 existing tests fail on intended behaviour, and Verify C tests are needed
+BODY: C1, C2, C3, C5, C6, C7, C8 are built and committed. C4 (KeepAlive) is SKIPPED: `git log int/Q-70-ux` shows neither Q-70 A1 nor Q-70 B1 merged yet (int/Q-70-ux was merged into this branch; only lane D was in). Do C4 after A9 and B9 land: wrap the `<component>` in `<KeepAlive :include="['Inbox','Applications']">` in `web/src/App.vue`.
+Failing tests and the exact change:
+1. `web/tests/App.test.js:114-117` "Choose runs… opens the picker...": replace `await select.setValue('choose')` with `await wrapper.find('.choose-runs').trigger('click')`.
+2. `App.test.js:330-333` "All runs always comes first...": options are now `['All runs','Past week','Past month']` (no 'Choose runs…' option); add `expect(wrapper.find('.choose-runs').text()).toBe('Choose runs…')`.
+3. `App.test.js:~340` "runs chosen on the Runs tab show as their own option": expected options `['All runs','Past week','Past month','Run 12']`.
+4. `App.test.js:349-351` "emits a range, and asks for the picker": replace `find('select').setValue('choose')` with `find('.choose-runs').trigger('click')`; `emitted('choose')` length 1 still holds, and no `update:modelValue` is emitted.
+5. `web/tests/Runs.test.js:266-268` "a finished run refreshes the run list and the Inbox": the shell watcher now also reloads on the finish (a harmless double reload, requestSeq-guarded). Change `api.count(/^api\/runs$/)` to 3 and `api.count(/^api\/shortlist\?run=all$/)` to 3 (or assert `toBeGreaterThanOrEqual(2)`).
+New tests to add (Verify C, with a fake `getCurrentJob`; note `resetSeenJobs()` does not clear the shell's private seen set, it is per instance):
+ a. Mount App on `#/profile` with `getCurrentJob` returning `{id:1, kind:'run', state:'running', started_at}` then `{id:1, kind:'run', state:'succeeded'}`: after the poll (fake timers, POLL_MS) `getShortlist` is called again and `toast.current.message` is 'Run finished. New roles are in the Inbox.' with link `#/runs`; a failed run gives 'The run stopped.', a cancelled one 'The job was cancelled.'; a profile-kind job refreshes but shows no toast.
+ b. `.job-pill` renders in the masthead with 'Run running' (and 'Profile refresh running' for kind 'profile') while state is running, includes the elapsed text, links to `#/runs`, and is absent when no job or when ended.
+ c. `onJobStarted`: calling a tab's `track(job,{started:true})` makes the shell's pill appear without a `visibilitychange`; a `visibilitychange` with `document.visibilityState === 'visible'` calls `getCurrentJob`.
+ d. useJob unit: `useJob({consume:false})` still reports an ending to a second `useJob({kind:'run'})` instance (shared `seenRunning` not consumed by the first).
+ e. RunSelector: the `<label for>` matches the select's id; `.choose-runs` is absent when `choosable` is false.
+ f. Tab bar: with `scrollWidth` > `clientWidth` mocked on `.tablist` and a `scroll` event, the class `more-right` appears, and goes when scrolled to the end.
+Deviation: `useJob.track` gained a third option `announce` (default true). The shell's starter listener calls `shell.track(j, {started:true, announce:false})`; without it the listener would re-announce the job to itself and recurse forever (the spec's literal wording).
+STATUS: open

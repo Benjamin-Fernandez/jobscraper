@@ -114,7 +114,7 @@ describe('App shell', () => {
   it('Choose runs… opens the picker on the Runs tab, and its choice comes back to the Inbox', async () => {
     const wrapper = await mountApp({ attachTo: document.body })
     const select = wrapper.find('.inbox .run-selector select')
-    await select.setValue('choose')
+    await wrapper.find('.inbox .run-selector .choose-runs').trigger('click')
     expect(window.location.hash).toBe('#/runs')
     expect(select.element.value).toBe('all')   // the selector still says what is shown
     window.dispatchEvent(new HashChangeEvent('hashchange'))
@@ -327,17 +327,18 @@ describe('Badges', () => {
 })
 
 describe('RunSelector', () => {
-  it('All runs always comes first, then Past week, Past month and Choose runs…', () => {
+  it('All runs always comes first, then Past week and Past month; Choose runs… is a button (Q-70 C7)', () => {
     const wrapper = mount(RunSelector, { props: { runs: runsFrom(), modelValue: 'all' } })
     expect(wrapper.findAll('option').map(o => o.text()))
-      .toEqual(['All runs', 'Past week', 'Past month', 'Choose runs…'])
+      .toEqual(['All runs', 'Past week', 'Past month'])
+    expect(wrapper.find('.choose-runs').text()).toBe('Choose runs…')
     expect(wrapper.find('select').element.value).toBe('all')
   })
 
   it('runs chosen on the Runs tab show as their own option, after the ranges', () => {
     const one = mount(RunSelector, { props: { runs: runsFrom(), modelValue: [12] } })
     expect(one.findAll('option').map(o => o.text()))
-      .toEqual(['All runs', 'Past week', 'Past month', 'Run 12', 'Choose runs…'])
+      .toEqual(['All runs', 'Past week', 'Past month', 'Run 12'])
     expect(one.find('select').element.value).toBe('chosen')
     const two = mount(RunSelector, { props: { runs: runsFrom(), modelValue: [12, 11] } })
     expect(two.find('option[value="chosen"]').text()).toBe('Runs 12, 11')
@@ -346,7 +347,7 @@ describe('RunSelector', () => {
   it('emits a range, and asks for the picker instead of emitting a value', async () => {
     const wrapper = mount(RunSelector, { props: { runs: runsFrom(), modelValue: 'all' } })
     await wrapper.find('select').setValue('week')
-    await wrapper.find('select').setValue('choose')
+    await wrapper.find('.choose-runs').trigger('click')
     expect(wrapper.emitted('update:modelValue')).toEqual([['week']])
     expect(wrapper.emitted('choose')).toHaveLength(1)
   })
