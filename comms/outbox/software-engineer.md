@@ -524,3 +524,36 @@ Done: G18 local time (`when`, `shortDate` use the browser zone; new `exactTime()
 - Port 8768 was taken (lane J); I used 8769 with a DB copy in the scratchpad, stopped by PID. The copy had an empty shortlist, so the browser checks ran on Edge (Playwright) with the fixture shortlist routed in.
 - Browser checks (Edge): no horizontal scroll at 390px on inbox, applications, profile, developer, overview, runs, settings, companies (Runs was 594px wide: visually-hidden text in the table scroller had no containing block; fixed with `.table-wrap { position: relative }`, appended to style.css). Detail action bar pins at the top of the detail's scroll box. Focus trap, Esc and focus return verified.
 - Known limits: `?` and `/` are single-key shortcuts that the switch does not turn off (WCAG 2.1.4; `/` pre-existing); the `g` go-to moves focus to the new panel, which shows the panel focus ring; the pinned action bar is desktop only (phone keeps the actions in flow).
+
+## 2026-11-07 handoff: Q-74 / D-105 model sees sensitive (KA-2)
+TYPE: handoff
+Branch `eng/Q-74-model-sees-sensitive` (worktree `.claude/worktrees/eng-q74`, base int/Q-75-wave3 b3908e1). One commit per design §6 step: c7abd58 backends, b441de9 config, c064082 applicant, e0ea649 resolve, dbdb120 apply_flow, 5c30cf0 web routers, ee6e6d0 SPA, 49ce8ae cli doctor.
+What changed:
+- `backends.LOCAL_HOSTS`, `is_local(backend)` (OllamaBackend + urlparse hostname in {localhost, 127.0.0.1, ::1}; no network).
+- `ApplyConfig.model_sees_sensitive=False`; `config/config.yaml` `apply.model_sees_sensitive: true`; LlmFillConfig docstring reworded.
+- `applicant.LLM_ALLOW_SENSITIVE`, `llm_extract(profile, *, sensitive=False)` (a whole block after one of its leaves merges, e.g. contact after contact.city), `grounding_text(..., *, sensitive=False)`, new `sensitive_strings(profile)` (S-path string leaves >= 3 chars, dates ISO, longest first).
+- `resolve.user_prompt` / `corpus_text` pass `ctx.model_sees_sensitive`; new `_shows_s_value(value, ctx)` sets tier-5 `Answer.sensitive` (choice/multi: the chosen labels; text: the text; whole word via `_term_pattern`). No routing touched.
+- `apply_flow._Run.resolve_ctx(..., attempt_id=None)`: `sees_s = self.acfg.model_sees_sensitive and backends.is_local(self.backend)`; key on + not local logs `[attempt N] model_sees_sensitive ignored: model backend is not on this computer` (through the redacting `_Log`).
+- `routers/applicant.model_sees_private(cfg)` (build + is_local, only when the key is on); in GET/PUT `/api/applicant` and GET `/api/questions` as `model_sees_private`.
+- `web/src/privacy.js`: `privateBadge(on)`, `privateSentence(on)` (off sentence = the old tag text), plus a shared `modelSeesPrivate` ref + `setModelSeesPrivate(on)` that QuestionsInbox sets on load; `on` defaults to that ref. QuestionCard: import + `const PRIVATE = computed(() => privateBadge())` only. ApplicationDetails: header/per-item/extra tags from its own payload, `title` = sentence, screen-reader text = sentence (with a stop). QuestionsInbox answered list: badge + title.
+- `doctor`: `privacy        Private fields: ...` (3 texts verbatim from §6 step 8).
+Deviations / interpretations: (1) apply_flow reads `self.acfg` (= `apply_cfg or cfg.apply`), not `cfg.apply`; same value in production. (2) shared ref in privacy.js so QuestionCard needs no new prop (keeps the Q-35-M overlap to 2 lines). (3) `config/applicant.example.yaml` header NOT changed: outside my scope (request below). (4) 12 files vs the 10-file budget (the design lists 13).
+### request (coordinator/architect): `config/applicant.example.yaml` header
+Replace "S = sensitive: never sent to the AI model" with "S = sensitive: never written to logs; the AI reads it only when it runs on this computer and `apply.model_sees_sensitive` is on" (design §3 last row). Out of the engineer scope.
+### request (tester): pins T1-T8 (design §6 Tests), hook names
+- T1 `backends.is_local(OllamaBackend(url=...))`; env override: `backends.build({})` with `JOBSCRAPER_OLLAMA_URL=http://ollama:11434` -> False.
+- T2 `applicant.llm_extract(p)` / `grounding_text(p)` default no S value; `sensitive=True` has `identity.date_of_birth`, `declarations.*`, `contact.phone_number`; never `extra`.
+- T3/T5 `resolve.user_prompt(f, kind, ResolveContext(..., model_sees_sensitive=True), limit)` contains an S value, off doesn't; `resolve._tier5` with a fake backend returning an S value: `Answer.sensitive is True` and grounded (corpus_text includes S under the flag).
+- T4 flag on: tier-2 sensitive no-fit, tier-4 declaration, tier-1 SENSITIVE_CANONICAL stop, attestation -> zero backend calls.
+- T6 `_Run.resolve_ctx(job, tenant, adapter, path, attempt_id=1)`: acfg key on + local OllamaBackend -> True; + `OllamaBackend(url="http://ollama:11434")` -> False and one log line `model_sees_sensitive ignored: model backend is not on this computer`; flag-on dry run job log has no S value.
+- T7 `questions.ask_model` -> None for a sensitive question with the flag on (unchanged code).
+- T8 web: `model_sees_private` in both GETs (patch `backends.build` or set budget/env for a local/remote URL). Vitest: `privateBadge(true)` = 'Private: local AI only'; ApplicationDetails header variant 'Private: local AI only, except City and Country' with `model_sees_private: true`; QuestionsInbox + QuestionCard badge after a questions payload with `model_sees_private: true` (call `setModelSeesPrivate(false)` in afterEach: module state).
+- CLI: doctor prints the `privacy` line (3 states).
+No existing Python test fails by design: full suite `1139/1139 passed`; -k applicant 106/106, resolve 50/50, questions 44/44, layering 13/13, apply_flow 85/85, test_web 119/119, test_cli 15/15. Existing vitest fails are the 8 pending lane I/J changes (same 8 on base b3908e1).
+### note (coordinator): where design §4 hooks into llm_fill after int/Q-35-M merges
+- `apply/facts.py fact_catalogue` (~l.351-376): `value="" if private ...` -> fill the value for private facts when `rctx.model_sees_sensitive` (rctx is already a parameter).
+- `apply/facts.py facts_text` (l.385-393): private line `ref | title | private: <value>` when on (needs a flag arg or read it from the facts).
+- `apply/pagefill.py` l.134 `run.sv = F.s_values(...)`: keep `run.sv` for G7/pick_refused/debug; pass `s_values=[]` to `llm_fill.user_prompt` / `schema` redaction (llm_fill l.302-323, 342-370) when on. `pick_option` / `pick_refused` (l.539-576) keep the full s_values (decisions unchanged).
+- `llm_fill.field_view` (l.268) `_withhold(pf, s_values)`: skip withholding for site-origin values when on (never for values JobScraper typed).
+- debug_dump: no writer on int/Q-35-M yet (only the config key); when added, always redact with the full s_values.
+STATUS: open
