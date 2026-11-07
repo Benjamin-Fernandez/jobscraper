@@ -2,13 +2,13 @@
 
 **Status:** Proposed (stage-E review pending)
 **Date:** 2026-11-02
-**Deciders:** architect; Coordinator at stage E; owner for the merge (D-90)
-**Relates to:** F-50 (`mail_status_design.md` §1), D-52, D-72, D-85, D-90, D-91; ADR-0002 (vault); `docs/research/mail_status_brief.md` §1, §2; PRD NF-02, NF-04
+**Deciders:** architect; Coordinator at stage E; owner for the merge (D-150)
+**Relates to:** F-50 (`mail_status_design.md` §1), D-52, D-72, D-85, D-150, D-151; ADR-0002 (vault); `docs/research/mail_status_brief.md` §1, §2; PRD NF-02, NF-04
 **Numbering note:** if the concurrent session has taken 0007 on `personal` by merge time, renumber this file to the next free number and update the two references in `mail_status_design.md`.
 
 ## Context
 
-D-90 asks for application statuses to be updated from the owner's Gmail while the app runs, from the last processed email to the newest, with the owner's permission. D-91 fixes the outcomes of stage A: IMAP with an app password, read-only, headers first, one transport boundary, special-use folders. This ADR records three structural choices those outcomes leave open.
+D-150 asks for application statuses to be updated from the owner's Gmail while the app runs, from the last processed email to the newest, with the owner's permission. D-151 fixes the outcomes of stage A: IMAP with an app password, read-only, headers first, one transport boundary, special-use folders. This ADR records three structural choices those outcomes leave open.
 
 1. **The access route.** The brief compares IMAP with an app password, the Gmail API (`gmail.readonly`) and IMAP with XOAUTH2.
 2. **Placement.** Stage packages may not import each other (NF-04, `tests/test_layering.py`). The IMAP code that exists today lives in `apply/mail.py`, inside a stage, and F-50 is not part of applying.
@@ -56,7 +56,7 @@ P2 costs four test-set edits (§2.2 of the design) and one foundation module tha
 |---|---|---|---|---|
 | Blocks runs/applies | Yes (one job at a time) | No | No | No |
 | Layering | OK | Violates it (web would import an orchestrator and do network I/O) | OK (same pattern as `JobManager`) | OK |
-| "Only while the app runs" (D-90) | Yes | Yes | Yes | No (runs when closed); extra setup |
+| "Only while the app runs" (D-150) | Yes | Yes | Yes | No (runs when closed); extra setup |
 | Crash isolation | Yes | A crash or hang affects the web app | Yes | Yes |
 
 ## Trade-off analysis

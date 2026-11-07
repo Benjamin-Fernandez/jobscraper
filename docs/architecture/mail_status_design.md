@@ -1,6 +1,8 @@
-# Application status from email (F-50; Q-60; D-90, D-91; KA-3)
+# Application status from email (F-50; Q-60; D-150, D-151; KA-3)
 
 Architect, 2026-11-02, branch `int/Q-60-mail-status`. Stage B. Input: `docs/research/mail_status_brief.md` (cited **MB §n**). ADR: `adr/0007-mail-status-imap.md`. Build plan: `mail_status_build_plan.md` (**BP**). Status: READY for stage-E review.
+
+**Changelog.** 2026-11-07: aligned with D-153 (§8 row 2) and D-154 (a)–(g), as built in the lane S and lane I fix rounds (§5.6, §6.2–§6.5, §7, §8, §10.4, §11.3, §12, §13). Q-60 decision IDs renumbered to D-150..D-154 per D-155's map. Contracts (§3) unchanged.
 
 **In one paragraph.** With the owner's opt-in per mailbox, JobScraper reads one or more Gmail accounts over IMAP, read-only, using an app password from Credential Manager. While the web app runs, a timer starts `python -m jobscraper mail sync` as a separate process at start-up and then every 10 minutes. Each sync goes through every message after the stored cursor in All Mail and Spam. It reads headers first and fetches a body only for mail from a hiring platform or a tracked employer. It matches the message to one tracked application, classifies it with phrase rules (falling back to the local Qwen only for matched mail the rules can't sort), and then either moves the application forward automatically or leaves a suggestion. Every change carries a short quote from the email as evidence and can be undone. Nothing is ever written to the mailbox, no link is opened, and nothing from mail reaches a log.
 
@@ -31,7 +33,9 @@ Architect, 2026-11-02, branch `int/Q-60-mail-status`. Stage B. Input: `docs/rese
 | F-50s | THE SYSTEM SHALL store a message's outcome and the cursor advance in the same transaction. |
 | F-50t | THE SYSTEM SHALL take sender platforms, gates and phrases from `config/mail_rules.yaml`, so that a new sender or phrase needs no code change (§14). |
 
-**D-91 trace:** (a) → §4, §5, ADR. (b) → §4. (c) → §8. (d) → §5.6, §6.2, §13. (e) → §5.2.
+**D-151 trace:** (a) → §4, §5, ADR. (b) → §4. (c) → §8. (d) → §5.6, §6.2, §13. (e) → §5.2.
+
+**D-154 trace** (review `docs/reviews/Q-60-stage-imap-ui.md`): (a) F1 → §6.2 item 5, §7 "Employer domains". (b) F2 → §6.2 "Reply-To", §7 `employer_domain`. (c) F3 → §7 "Restricted names", decision step 4. (d) F6 → §6.5, §13. (e) F7 → §6.3, §6.4 (D-152). (f) F4 → §5.6, §12; F5 → §5.6, §13; F8 → §11.3. (g) → §8 "Text booleans", §10.4. **D-153** → §8 row 2.
 
 ---
 
@@ -485,7 +489,7 @@ REASON_TEXTS: dict[Reason, str] = {
 
 ## 4. Mailbox connection and consent
 
-**Account identity.** A mailbox is an `mail_accounts` row (§9) keyed on its lower-case address. Its password lives in the vault as `jobscraper:imap:imap.gmail.com` with user = the address. This is the same key shape as D-52, and `vault.imap_service` already says two Gmail accounts share the service and differ by username. Only Gmail is supported (D-90): the host is fixed to `GMAIL_HOST`, and `open()` refuses a server without `X-GM-EXT-1` (`not_gmail`).
+**Account identity.** A mailbox is an `mail_accounts` row (§9) keyed on its lower-case address. Its password lives in the vault as `jobscraper:imap:imap.gmail.com` with user = the address. This is the same key shape as D-52, and `vault.imap_service` already says two Gmail accounts share the service and differ by username. Only Gmail is supported (D-150): the host is fixed to `GMAIL_HOST`, and `open()` refuses a server without `X-GM-EXT-1` (`not_gmail`).
 
 **Connect (another Gmail).** Settings → the address, the app password and the consent box → `POST /api/mail/accounts`. The route parses the JSON body itself; no pydantic model holds the password, so a validation error can never echo it back (FastAPI's 422 echoes `input`). It wraps the password in `Secret` straight away. It then checks the inputs: an address that fully matches `ADDRESS_PATTERN` (contracts; web/ may not import `cli`), a consent version equal to `CONSENT_VERSION` and a non-empty password; anything else → `400 {"code": "bad_input", "detail": "Enter your Gmail address and app password, and tick the box."}`. Then it calls `MailSyncRunner.connect`. That runs `python -m jobscraper mail accounts add --address A --consent mail-consent:v1 --password-stdin --json` as a child process with `input=` the password plus a newline, so the password is never in argv, env or a file, and waits up to 45 s. The child runs `mailstatus_flow.connect`:
 0. an address already in `mail_accounts` → print `{"result": "exists"}`, exit 1 (the route answers `409 {"code": "exists", "detail": "This mailbox is already connected."}`);
@@ -528,7 +532,7 @@ mail sync ─▶ store.mail_run_begin (lease) ──busy──▶ exit BUSY
   store.mail_purge(now); store.mail_run_end(...)
 ```
 
-### 5.2 Folders (D-91 e)
+### 5.2 Folders (D-151 e)
 
 `LIST "" "*"`; parse each line's flags. `\All` → ALL, `\Junk` → JUNK. The raw name goes back to EXAMINE unchanged (quoted as needed, never decoded, because localised names are modified UTF-7). If `\All` is missing → read `INBOX` (role INBOX) and note `all_mail_hidden`. If `\Junk` is missing → note `junk_hidden`. Folders are re-resolved every sync; a cursor whose `mailbox` name changed but whose UIDVALIDITY matches simply carries on.
 
@@ -562,9 +566,13 @@ The first-sync window (F-50f) is fixed when the account is added: `first_sync_fr
 
 After the scans, for rows `outcome = pending_model`, `retries < 3` and `processed_at > now − retry_model_days`, oldest first, while the model budget lasts: `transport.refind(gm_msgid)` (`UID SEARCH X-GM-MSGID n` in ALL or INBOX, then JUNK) → `fetch_body` → steps 4–8 again, with `store.mail_resolve_pending` (an update of the row, no cursor). If the model is still unavailable → `retries + 1`. When retries or age run out → `SUGGEST(to=None, model_unavailable)`, with the quote from the first status-word sentence (or the subject). `refind` None → `NO_CHANGE / vanished`.
 
-### 5.6 Read-only by construction (F-50g, D-91 d)
+### 5.6 Read-only by construction (F-50g, D-151 d)
 
 `imapread` wraps `imaplib.IMAP4_SSL` in `_ReadOnly`, which exposes only `login`, `capability`, `list`, `examine(name)` (= `select(name, readonly=True)`), `uid_search(*criteria)`, `uid_fetch(uids, items)`, `noop` and `logout`. It has no `store`, `copy`, `move`, `expunge`, `append` or `select(readonly=False)`. `uid_fetch` refuses any item string with `BODY[` not preceded by `.PEEK`, or with `RFC822` other than `RFC822.SIZE`. Bodies are parsed with `email.policy.default`; HTML is turned into text (no rendering, nothing remote); every URL is replaced by `[link]` before the text leaves `imapread`. No link list is returned. The connection limit (15 clients, MB §2) is respected with one connection per account, logged out after each sync.
+
+**Arguments (D-154 f, review F4).** imaplib sends an argument as given, and a CR or LF in one ends the command line, so what follows would reach the server as a second command. `_ReadOnly` therefore checks every argument before imaplib sees it and raises `ValueError` ("read-only: …") for a CR, LF or NUL in a LIST reference or pattern, a folder name (`examine`), a search criterion or a fetch item string, and for a UID set that is not numbers, ranges and `*` (`[0-9]+([:,]([0-9]+|\*))*`, e.g. `16:*`, `3,5,9`). Current callers never pass such values; the check keeps "read-only by construction" true for future callers and for a LIST literal holding a line break.
+
+**Every URL (D-154 f, review F5).** `imapread.hide_links`, used by `body_text(links=False)`, replaces with `[link]`: any scheme (`https`, `ftp`, `hxxps`, …), a scheme-relative `//host…`, `www.…`, and a host without a scheme when a path, query or fragment follows it (three or more labels with any TLD; two labels only with a common TLD, so `Node.js/React` or `e.g.` is never taken for an address). A bare domain with nothing after it stays readable. A URL may hold balanced parentheses. A URL broken across lines is joined: after a quoted-printable soft break (`=` then the break) always; after another break only when the next piece looks like the rest of an address (it holds `?`, `=`, `&`, `%`, `#`, two `/` or a dotted host, and isn't an abbreviation such as `U.S.`). A URL that ends a sentence never joins the next line, and the sentence punctuation right after a URL stays outside `[link]` (T4). `URL_RE` for F-36 (`links=True`) is unchanged. `model._clean` replaces `http(s)://` and `www.` once more, so a subject never carries a link into a prompt.
 
 ### 5.7 `apply/mail.py` Spam fix (MB §7 item 8; its own WP-I2)
 
@@ -622,9 +630,11 @@ dominates:                         # when several categories hit, the key beats 
 1. `too_old`: `received_at < first_sync_from`.
 2. `own_mail`: `\Sent` or `\Draft` in labels, or `from_addr` ∈ own addresses (every connected account, `apply.mail.username`, profile `contact.email` and `contact.backup_email`).
 3. `auto_reply`: `auto_submitted` starts with `auto-replied` (RFC 3834; `auto-generated` is *not* skipped, because ATS notifications use it), or `autoreply_header`, or a `gates.auto_reply` phrase with `in: subject`.
-4. `job_board`: `from_reg` or a Reply-To domain is in `job_boards`.
-5. `not_job_mail` unless one of these holds: `from_reg` or a Reply-To domain matches a platform domain (suffix match), or an employer domain of any tracked application, or `gm_thrid` is in a matched thread.
+4. `job_board`: `from_domain`, `from_reg` or a Reply-To domain is, or sits under, a `job_boards` domain.
+5. `not_job_mail` unless one of these holds: `from_domain`, `from_reg` or a Reply-To domain matches a platform domain (suffix match); or `from_reg` or a Reply-To domain is an employer domain of a tracked application, after the shared domains are dropped (`rules.employer_regs_only`, which applies `rules.is_shared_domain`, §7; D-154 a); or `gm_thrid` is in a matched thread.
 6. `bulk`: `list_id` (when `bulk.list_id`) or `precedence` ∈ `bulk.precedence`, unless the message is in a matched thread.
+
+**Reply-To (D-154 b).** Gmail authenticates From only, so Reply-To can be anything. In the header gate it still counts: it opens item 5 (an employer replying from its own domain through a relay is read) and triggers item 4 (a job board behind a Reply-To is skipped). For *matching* it counts only on authenticated platform mail (§7 `employer_domain`): without an authenticated platform sender it can't give a strong match.
 
 **Content gate** (body text plus subject): `auto_reply`, then `account` (verification, security code, password reset, account created; the bare word "confirm" is deliberately absent, MB §4), then `job_alert` (includes talent-community welcomes and newsletters), then `outreach` (skipped only when not in a matched thread).
 
@@ -632,13 +642,15 @@ dominates:                         # when several categories hit, the key beats 
 
 `hits` = the categories with at least one phrase hit in the subject or text. `portal_update` drops out when anything else hits. The winner is the unique `w` with `hits − {w} ⊆ dominates[w]`. If there is one, the verdict is `Verdict(w, RULE, quote, rule_id=<first hit id of w>, status_words=True)`. With several hits and no winner → `Verdict(UNKNOWN, RULE, rule_id="conflict:a+b", status_words=True)`. With no hits → `UNKNOWN`, with `status_words` = any weak word hit, a calendar request, or ≥ 20% of the letters non-Latin (non-English mail goes to the model, MB §4).
 
+**Assessment vendors (D-152 (1), D-154 e).** A rule-tier `interview` verdict on mail whose From platform has `kind: assessment` is returned as `assessment`, with the same quote and rule id. Live interviews arrive from the employer or a scheduler.
+
 **Quote:** the sentence holding the deciding hit (split on `(?<=[.!?])\s+` and newlines), whitespace collapsed. If it is longer than `QUOTE_MAX`, a window of `QUOTE_MAX` characters around the hit, cut at word boundaries and marked with "…". A rule quote is present by construction.
 
 ### 6.4 Domain decisions (MB §7 item 6)
 
 | Case | Decision | Why |
 |---|---|---|
-| HireVue one-way ("on-demand", "digital", "pre-recorded" video interview) | **assessment** | No person on the other side; it is scored like a test. A *live* video interview booked through HireVue is **interview**. Phrases are filed that way |
+| Interview mail from an assessment vendor (platform `kind: assessment`, e.g. HireVue), one-way **or live** (D-152 (1), D-154 e) | **assessment** (§6.3) | An assessment vendor's "interview invitation" is usually a one-way recorded one, with no person on the other side, scored like a test. A live interview booked through such a vendor also reads as `assessment`; the employer's own invitation then moves it on, and forward-only keeps the order harmless. Assessment-centre and superday invitations from anyone else are **interview** (D-152 (2)) |
 | Posting closed or put on hold | its own category, `posting_closed` → **suggestion** to `rejected` (reason `closed_role`) | "On hold" can reopen, and "closed" doesn't always mean "you were rejected". "Position has been filled" stays a **rejected** phrase |
 | Application withdrawn | `withdrawn` → automatic to `withdrawn` | A terminal forward move; the owner usually did it on the portal |
 | Kept on file **with** a rejection phrase | `rejected` (dominates) | MB §4 |
@@ -660,7 +672,7 @@ quote: the shortest sentence from the email that shows the category, copied exac
 ```
 `user_prompt(h, body, max_chars)`: `SUBJECT: <subject>\nEMAIL:\n<text cut to model_max_chars at a line break>`. Only the email itself goes in: no profile data, no employer list, no address. URLs are already `[link]`. `SCHEMA = {"type": "object", "properties": {"category": {"type": "string", "enum": [<Category values>]}, "quote": {"type": "string", "maxLength": 200}}, "required": ["category", "quote"]}`. The call is `backend.complete(SYSTEM, user, max_tokens=200, format=SCHEMA, temperature=0, seed=7, timeout=model_timeout_s)`.
 
-`parse(reply, h, body) -> Verdict(tier=MODEL)`. Bad JSON, a category outside the enum, an empty quote for a non-unknown category, or a quote whose normalised form (casefolded, whitespace collapsed, "…" stripped) is not a substring of the normalised subject plus text → `UNKNOWN` with `status_words=True` and `rule_id="model:<why>"`. A `BackendError` or `backend.available == False` → pending (§5.4 step 6). **The boundary:** the model only picks a category from a fixed list and points at text; code checks the pointer, and model-tier verdicts are never automatic (§8 rule 11a). An email written to manipulate the model ("ignore your instructions…") can at most produce a suggestion.
+`parse(reply, h, body) -> Verdict(tier=MODEL)`. Bad JSON, a category outside the enum, an empty quote for a non-unknown category, a quote too short to prove anything, or a quote whose normalised form (casefolded, whitespace collapsed, "…" stripped) is not a substring of the normalised subject plus text → `UNKNOWN` with `status_words=True` and `rule_id="model:<why>"` (`bad_json`, `bad_category`, `bad_quote`, `empty_quote`, `short_quote`, `quote_not_found`). **Quote minimum (D-154 d):** the *normalised* quote must have at least 15 characters (`model.QUOTE_MIN_CHARS`) and at least 3 words (`QUOTE_MIN_WORDS`), checked before the substring test; otherwise `model:short_quote`. One letter "occurs" in any email, and the owner judges a suggestion by its quote. A `BackendError` or `backend.available == False` → pending (§5.4 step 6). **The boundary:** the model only picks a category from a fixed list and points at text; code checks the pointer, and model-tier verdicts are never automatic (§8 rule 11a). An email written to manipulate the model ("ignore your instructions…") can at most produce a suggestion.
 
 ---
 
@@ -668,7 +680,11 @@ quote: the shortest sentence from the email that shows the category, copied exac
 
 **Candidates:** every application (terminal ones included, so a late email about a closed application doesn't attach to a sibling), from `store.mail_match_context()`.
 
-**Normalisation:** `norm_company(name)`: NFKD, accents stripped, casefold, `&` → `and`, punctuation → space, trailing `company_suffixes` tokens removed repeatedly ("Example Holdings Pte Ltd" → "example"). The variants of an application's employer are its `company_names`, its `board_slugs` (hyphens → spaces), its `tenants`, and the first label of each employer domain, all normalised. `norm_role(title)`: casefold, punctuation → space, collapsed, with bracketed suffixes such as "(m/f/d)" removed. `compact(s)` = `norm_company(s)` with every space removed (and, for a tenant, hyphens and underscores too). "Example Bank" → `examplebank`.
+**Normalisation:** `norm_company(name)`: NFKD, accents stripped, casefold, `&` → `and`, punctuation → space, trailing `company_suffixes` tokens removed repeatedly ("Example Holdings Pte Ltd" → "example"). The variants of an application's employer are its `company_names`, its `board_slugs` (hyphens → spaces), its `tenants`, and the first label of each non-shared employer domain (below), all normalised. `norm_role(title)`: casefold, punctuation → space, collapsed, with bracketed suffixes such as "(m/f/d)" removed. `compact(s)` = `norm_company(s)` with every space removed (and, for a tenant, hyphens and underscores too). "Example Bank" → `examplebank`.
+
+**Employer domains (D-154 a, review F1).** Platform, tenant-site and job-board domains are never employer evidence. `rules.is_shared_domain(domain, rules)` is true when the domain is, or sits under, a platform domain, a `tenant_sites` suffix or a `job_boards` domain (an empty value counts as shared). `match.employer_domains(hosts, rules) -> tuple[str, ...]` takes `AppCandidate.employer_domains` (registrable domains, hosts or URLs), lower-cases and de-duplicates them, and drops every shared one. Such hosts carry mail for many employers: from a careers site `acmebank.tal.net`, `tal.net` would match every other tenant's mail. On a shared platform the employer comes only from the `tenant` signal. The filter is applied where lane F builds each `AppCandidate`, again in the header gate (`employer_regs_only`, §6.2) and again in the matcher, so the stage fails closed whatever it is given. `imapread.employer_domain` (F-36, D-85) is unchanged.
+
+**Restricted names (D-154 c, review F3).** A variant is *restricted* when it is a single token under 5 characters (`match.SHORT_NAME`) or is listed in `common_word_names`. In the sender name, the subject and the body alike, a restricted variant matches only as written: one of the application's `company_names` with accents dropped, capitalisation kept and trailing `company_suffixes` removed, as whole words. Board slugs, tenants and domain labels are identifiers with no written form, so a restricted one never matches in text. A restricted hit is never strong: alone it gives the employer tier WEAK (a suggestion); it can only confirm a strong signal (`thread`, `employer_domain`, `tenant`, or an unrestricted name in the sender or subject). "Summit" in a subject of shared-platform mail may name a conference, not the employer. The `tenant` signal is not restricted: it is read from the platform's sender address, not from text.
 
 **Tenants (E1).** `match.tenants_from_hosts(hosts, rules) -> tuple[str, ...]`: for each host from `mail_match_context` (the attempt `tenant_host`, and the hosts of `jobs.url`, `applications.url` and `companies.careers_url`), take its lower-case first label when the host is a strict subdomain of a platform's `tenant_sites` suffix. The flow calls it when building each `AppCandidate`, so applications made by hand, with no attempt row, still get their tenant.
 
@@ -677,11 +693,11 @@ quote: the shortest sentence from the email that shows the category, copied exac
 | Signal | Holds when | Employer strength |
 |---|---|---|
 | `thread` | `gm_thrid ∈ app.threads` | decides alone |
-| `employer_domain` | `from_reg` or a Reply-To domain ∈ `app.employer_domains` | strong |
+| `employer_domain` | `from_reg` ∈ `employer_domains(app.employer_domains)`, or a Reply-To domain is, but Reply-To only when From is a platform domain and `h.auth == PASS` (D-154 b) | strong |
 | `tenant` | the sender's platform has `tenant_from_local_part` (tenant = `compact(from_local)`) or `tenant_from_subdomain` (tenant = `compact` of the first label of `from_domain`, strict subdomain only). The tenant equals `compact(t)` for some `t` ∈ `app.tenants`, **or** the compact form of any company variant. The compact comparison applies to **both** kinds, because Workday local parts are often the compact employer name too | strong |
-| `name_in_sender` | a variant occurs as whole words in `norm(from_name)` | strong |
-| `name_in_subject` | a variant occurs in `norm(subject)` | strong |
-| `name_in_body` | a variant occurs in the normalised text. Variants of one token under 5 characters, or listed in `common_word_names`, count only in the raw text with the original capitalisation | weak |
+| `name_in_sender` | a variant occurs as whole words in `norm(from_name)`; a restricted variant only as written (above) | strong; restricted: weak |
+| `name_in_subject` | a variant occurs in `norm(subject)`; a restricted variant only as written | strong; restricted: weak |
+| `name_in_body` | a variant occurs in the normalised text; a restricted variant only as written | weak |
 | `role` | `norm_role(app.role)` occurs in the subject or text, or ≥ 80% of its tokens (at least 2) occur in one line | — |
 | `req_id` | an `app.req_ids` value occurs as a whole word | — (counts as `role`) |
 
@@ -689,7 +705,7 @@ quote: the shortest sentence from the email that shows the category, copied exac
 1. Some application has `thread` → it, `STRONG`. If several do (a shared thread) → continue below with those as the candidates.
 2. `E` = applications with an employer signal. If `E` is empty → `NONE`.
 3. If `E` spans several companies (by normalised name), keep those with the strongest employer signal tier. A tie across companies → `AMBIGUOUS`.
-4. `R` = the applications in `E` with `role` or `req_id`. If `|R| = 1` → that one, `STRONG`. If `|R| > 1` → `AMBIGUOUS(R)`.
+4. `R` = the applications in `E` with `role` or `req_id`. If `|R| = 1` → that one, `STRONG`, unless its only employer evidence is a restricted name: then `WEAK` (D-154 c; a role or req id never lifts a restricted name). An unrestricted name in the body plus a role still gives `STRONG`. If `|R| > 1` → `AMBIGUOUS(R)`.
 5. If `|R| = 0` and `|E| = 1` → that one, `STRONG` with a strong employer signal, else `WEAK`.
 6. If `|R| = 0` and `|E| > 1` → `AMBIGUOUS(E)`.
 
@@ -697,16 +713,18 @@ quote: the shortest sentence from the email that shows the category, copied exac
 
 ---
 
-## 8. Status transitions (`mailstatus/transition.py`; D-91 c)
+## 8. Status transitions (`mailstatus/transition.py`; D-151 c)
 
 **Rank order** (config `mail_status.ranks`): `to_apply 0 < applied 1 < assessment 2 < interviewing 3 < offer 4`. **Terminal:** `rejected`, `withdrawn`. Moving to a terminal status from any open one counts as forward. **Category → status:** `acknowledged→applied, assessment→assessment, interview→interviewing, offer→offer, rejected→rejected, withdrawn→withdrawn, posting_closed→rejected, kept_on_file→rejected`. `policy.suggest_only = {posting_closed, kept_on_file}`. A target missing from `applications.statuses` is dropped from `category_status` when the `Policy` is built (doctor warns), so its category behaves like `unknown`.
+
+**Text booleans (D-154 g).** `build_policy` reads `require_auth` with `transition.as_bool(value, default)`: a real bool as is; a number, True when ≠ 0; a string, trimmed and casefolded, `false/no/0/off/n/f` → False and `true/yes/1/on/y/t` → True; anything else → the default (for `require_auth`: on). A quoted YAML `'false'` therefore turns the switch off, not on. The rules-file loader stays strict: a quoted boolean in `config/mail_rules.yaml` is a `RulesError`.
 
 `decide(app, verdict, match, h, policy) -> Change`. The first rule that fires wins:
 
 | # | Condition | Change |
 |---|---|---|
 | 1 | category `no_change` | NONE `no_update` |
-| 2 | category `unknown` (or no target) | `status_words` ? SUGGEST(to=None, `unclear`) : NONE `no_status_words` |
+| 2 | category `unknown`, or a category whose target was dropped from the status list (D-153; never `portal_update`, which has no target by design: row 3 decides it) | `status_words` ? SUGGEST(to=None, `unclear`) : NONE `no_status_words` |
 | 3 | category `portal_update` | SUGGEST(to=None, `portal_check`) |
 | 4 | match `AMBIGUOUS` | rows 5–9 are evaluated per candidate, and the candidates they settle as NONE drop out. If none are left → NONE with the first candidate's reason. Otherwise → SUGGEST(to=target, `several_applications`, the remaining candidates). It never auto-picks, even when only one is left |
 | 5 | `app.status` neither ranked nor terminal (an owner-added status) | SUGGEST(`custom_status`) |
@@ -717,7 +735,7 @@ quote: the shortest sentence from the email that shows the category, copied exac
 | 10 | (forward) | go to the bar |
 | 11 | **bar for AUTO**, in order: (a) `tier == MODEL` → SUGGEST `model_tier`; (b) category ∈ suggest_only → SUGGEST `closed_role` / `kept_on_file` / `suggest_only`; (c) match `WEAK` → SUGGEST `weak_match`; (d) `h.ref.role == JUNK` and category ∉ `junk_auto` → SUGGEST `from_spam`; (e) `require_auth` and `h.auth != PASS` → SUGGEST `unauthenticated` | else **AUTO `forward`** |
 
-**"Confident, unique":** a rule-tier verdict, a `STRONG` match, a category that isn't suggest-only, not from Spam (except acknowledgements), and Gmail-authenticated. **How D-91 c's "anything else → a suggestion" is read:** forward moves that miss the bar become suggestions, and so do the explicit cases in rows 2–5 and 7. Backwards moves (row 9), same-status mail (row 8) and mail older than an owner change (row 6) change nothing *and* raise no suggestion. Without that, every late acknowledgement and every assessment reminder after an interview would ask a question. Out-of-order mail of that kind is common (MB §4).
+**"Confident, unique":** a rule-tier verdict, a `STRONG` match, a category that isn't suggest-only, not from Spam (except acknowledgements), and Gmail-authenticated. **How D-151 c's "anything else → a suggestion" is read:** forward moves that miss the bar become suggestions, and so do the explicit cases in rows 2–5 and 7. Backwards moves (row 9), same-status mail (row 8) and mail older than an owner change (row 6) change nothing *and* raise no suggestion. Without that, every late acknowledgement and every assessment reminder after an interview would ask a question. Out-of-order mail of that kind is common (MB §4).
 
 **Who wrote it.** An automatic change writes `app_events(by='mail', at=now)`. `applied_at` is the email date when the move leaves `to_apply`. The evidence row has `kind='auto'`, `event_id`, the quote, the subject (≤ 120 characters), the sender domain, `received_at`, the category, tier, rule id or model, the reason and `prev_applied_at`. An accepted suggestion writes the same event (`by='mail'`), and its evidence row moves to `state='accepted'` with `event_id`.
 
@@ -842,7 +860,7 @@ CREATE TABLE IF NOT EXISTS mail_sync_runs (    -- the lease and the last result
 
 The lease is `store.mail_run_begin(ttl_s = sync_timeout_s + 60)`. The child renews `heartbeat_at` after every chunk of headers and before each model call. A crashed child's lease goes stale after the TTL; the next run marks it `abandoned` and proceeds. The CLI, the live app and a second web process all go through the same lease. A dev instance has its own database copy, so it would have its own lease. That is why dev instances keep `JOBSCRAPER_MAIL_SYNC=0` (§15 R3).
 
-**When the app isn't running:** nothing syncs (D-90: "when the application is running"). At the next start the first tick continues from each cursor; a backlog drains in `partial` runs one minute apart.
+**When the app isn't running:** nothing syncs (D-150: "when the application is running"). At the next start the first tick continues from each cursor; a backlog drains in `partial` runs one minute apart.
 
 ### 10.3 CLI (`cli.py`)
 
@@ -875,7 +893,7 @@ mail_status:                   # F-50: application status from email (docs/archi
   suggest_only: [posting_closed, kept_on_file]
   junk_auto: [acknowledged]
 ```
-`applications.statuses: [to_apply, applied, assessment, interviewing, offer, rejected, withdrawn]`. `cfg.mail_rules_path = self._path("mail_rules", "config/mail_rules.yaml")`. Out-of-range values are clamped. Unknown keys are ignored, as in `TailorConfig`.
+`applications.statuses: [to_apply, applied, assessment, interviewing, offer, rejected, withdrawn]`. `cfg.mail_rules_path = self._path("mail_rules", "config/mail_rules.yaml")`. Out-of-range values are clamped. Unknown keys are ignored, as in `TailorConfig`. The booleans `enabled`, `model` and `require_auth` are read with the truth table of `transition.as_bool` (§8, D-154 g), so `'false'` is False; an unreadable value keeps the default shown. `MailStatusConfig` is lane F's (its pin in `mail_review_pins` waits for it).
 
 ---
 
@@ -917,7 +935,8 @@ mail_status:                   # F-50: application status from email (docs/archi
 | Disconnect dialog | Title "Disconnect {address}?" Body: "JobScraper stops reading this mailbox and deletes its app password from Windows Credential Manager, its place in the mailbox and its list of checked emails. Status changes already made stay in each application's history." Shared mailbox: the password sentence becomes "The app password stays, because email verification for auto-apply uses it." Buttons **Disconnect** / **Keep connected** |
 | Toasts | "Connected. The first check has started." · "Check finished: {n} updated, {m} to review." · "Back to {status}." |
 | Suggestions panel | Title "From your email" with a count; subtitle "Updates JobScraper wasn't sure enough to make." Item: "{Company} · {Role}" / "Email says: {Status}" (or "Check the email") / "“{quote}”" / "{sender domain} · {date}" / `reason_text`. Buttons **Set to {Status}** and **Dismiss**; with no target: **Got it**; ambiguous: the select "Which application?" then **Set to {Status}**; plus **Open in Gmail** |
-| Conflicts | Accept 409: "This application changed after the email. Set the status by hand if you still want this." · Undo 409: "Can't undo: the status changed after this email. Set it by hand." |
+| Conflicts | Accept 409: "This application changed after the email. Set the status by hand if you still want this." · Undo 409: "Can't undo: the status changed after this email. Set it by hand." After either 409 the view reloads (D-154 f, review F8): `MailSuggestions` calls `load()`, and `MailEvidence` emits `stale` so the timeline reloads; the superseded suggestion and its Undo button go away |
+| Password field | The typed app password is not cleared before the consent check passes (D-154 f, F8), so an implicit submit without consent loses nothing |
 | Timeline badge | **From email**; tooltip "{sender domain}, {date}" |
 
 ---
@@ -940,7 +959,10 @@ mail_status:                   # F-50: application status from email (docs/archi
 | Message deleted between header and body | FETCH empty | `NO_CHANGE / vanished`, advance | — | no |
 | Body larger than `max_body_bytes` | `RFC822.SIZE` | classify the subject only | — | no |
 | Model unavailable / deferred / over budget | `backend.available`, `BackendError`, flag, counter | `PENDING_MODEL`, retried ≤ 3 times within 3 days, then a `model_unavailable` suggestion | — | "{n} emails are waiting for the AI model." |
-| Model answer unusable or quote not found | `parse` | `UNKNOWN` → `unclear` suggestion | — | via the suggestion |
+| Model answer unusable, quote too short (< 15 characters or < 3 words, normalised) or not found | `parse` | `UNKNOWN` (`model:<why>`, §6.5) → `unclear` suggestion | — | via the suggestion |
+| Reply-To on mail without an authenticated platform sender | `match._Mail` | Reply-To ignored for matching (it still opens the gate, §6.2) | — | no |
+| Employer domain is a platform, tenant-site or job-board domain | `is_shared_domain` (flow, gate, matcher) | not employer evidence; the employer comes only from the tenant signal | — | no |
+| IMAP argument with CR, LF or NUL, or a UID set that isn't UIDs (a bug, never mail) | `_ReadOnly` `ValueError`, before imaplib sends anything | nothing sent; the transport raises it as a `MailFailure` (`_failure`) and the account stops | ERROR | yes |
 | Rules file invalid | `RulesError` at start | nothing processed | run failed `rules_invalid` | yes |
 | Database busy or locked | `sqlite3.OperationalError` in `mail_record` | rollback; cursor unchanged; stop | run failed `db_busy` | yes |
 | Owner changed the status while a sync ran | re-check in `mail_record` | `NO_CHANGE / owner_newer` | — | no |
@@ -958,7 +980,9 @@ No retry storm: per account, at most one connect attempt per timer tick, with ba
 - **Logs** (`log`, the CLI output, `data/jobs/mail/*.log`) may contain: account ids, counts, `SyncCode`/`Reason` values, platform ids and sender *domains* of matched or platform mail, job ids, UIDVALIDITY changes, timings. **Never:** an address (the account is "account 2"), a display name, a subject, a quote, body text, a URL, X-GM-MSGID or Message-ID, or the password. `MailFailure.detail` holds an exception class name only; login errors go through `imapread.login_code`, which returns a code, never the server text (the server text can echo the username).
 - **Prompts** go only to the local backend and contain only the email (§6.5). No profile value is added.
 - **The password** exists in the web request body, a `Secret` in the web process, the child's stdin, and Credential Manager. Never in argv, env, files, logs, the DB or responses.
-- **Never opened:** links (URLs are replaced before the text leaves `imapread`) and remote content (HTML is parsed, never rendered).
+- **Never opened:** links (URLs in every form listed in §5.6, broken ones included, are replaced before the text leaves `imapread`) and remote content (HTML is parsed, never rendered). So no link, token or reset URL reaches a quote, the DB, the UI or a prompt (D-154 f, F5).
+- **Quotes** (rule or model) are taken from that link-free text and stored only on evidence rows (≤ 200 characters). A model quote must be a real phrase (≥ 15 characters and ≥ 3 words after normalisation, §6.5; D-154 d), so the owner never judges a change by a fragment.
+- **IMAP arguments** are refused when they hold a line break or aren't UIDs (§5.6; D-154 f, F4), so no future caller can smuggle a write command past `_ReadOnly`.
 - **Fixtures are synthetic** (`tests/fixtures/mail/`): employers like "Example Corp" on `example.com`/`example.org`, real platform domains (public), and no real mail. Golden cases are built from the *shapes* in MB §3–§4 (and later from the researcher's header-only counts, MB §7 item 1), never from copied messages.
 - **Public repo:** `config/mail_rules.yaml` holds platform domains, public company names (`common_word_names`) and phrases only.
 
@@ -980,13 +1004,13 @@ No retry storm: per account, at most one connect attempt per timer tick, with ba
 
 ## 15. Decisions, owner questions, risks
 
-**Decided here:** placement and the timer (ADR-0007); HireVue on-demand → assessment; `posting_closed` and lone `kept_on_file` → suggestions; the `assessment` status added; model-tier verdicts never automatic; automatic changes need Gmail authentication and, outside acknowledgements, not Spam; no unmatched list; no X-GM-RAW; no IDLE (polling every 10 minutes is enough, MB §2); disconnect keeps the evidence of changes already made.
+**Decided here:** placement and the timer (ADR-0007); interview mail from an assessment vendor → assessment (D-152); `posting_closed` and lone `kept_on_file` → suggestions; the `assessment` status added; model-tier verdicts never automatic; automatic changes need Gmail authentication and, outside acknowledgements, not Spam; no unmatched list; no X-GM-RAW; no IDLE (polling every 10 minutes is enough, MB §2); disconnect keeps the evidence of changes already made.
 
 **For the owner (with recommendations; none blocks the build):**
 1. Which mailboxes: **recommend** the application Gmail only, at first. The personal one can be connected later from the same card (its first sync reads 180 days of headers, mostly gated out unread).
-2. Automatic offer and rejected (D-91 c says yes): **recommend** keeping it, with this design's bar (authenticated, not Spam, a rule hit, a unique strong match) and Undo.
+2. Automatic offer and rejected (D-151 c says yes): **recommend** keeping it, with this design's bar (authenticated, not Spam, a rule hit, a unique strong match) and Undo.
 3. The new `assessment` status in the dropdown: **recommend** yes; vetoing it is a one-line config change (assessment mail then becomes a suggestion with no target).
-4. The first real sync reads the owner's real mailbox: **recommend** that the owner triggers it ("Use this mailbox"), after the merge go-ahead (D-90).
+4. The first real sync reads the owner's real mailbox: **recommend** that the owner triggers it ("Use this mailbox"), after the merge go-ahead (D-150).
 
 **Risks:**
 - R1: app passwords are withdrawn by Google → ADR-0007 fallback (`gmail.readonly` transport).
@@ -996,7 +1020,7 @@ No retry storm: per account, at most one connect attempt per timer tick, with ba
 - R5: common-word employer names mis-match → `common_word_names` plus the bar (a body-only name is `WEAK` → suggestion).
 - R6: Qwen and an apply run competing for the GPU → `--defer-model`.
 
-**D-91 notes for the Coordinator:** none of D-91 is contradicted. Two readings are recorded in §8: "anything else → suggestion" covers forward moves below the bar, not backwards or stale mail; and "confident" excludes model-tier verdicts.
+**D-151 notes for the Coordinator:** none of D-151 is contradicted. Two readings are recorded in §8: "anything else → suggestion" covers forward moves below the bar, not backwards or stale mail; and "confident" excludes model-tier verdicts.
 
 ---
 

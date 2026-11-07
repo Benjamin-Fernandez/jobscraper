@@ -2,11 +2,12 @@
 
 **Last session:** 2026-11-02, session 3 (resumed; 4 agents: tester on `int/Q-35-M`, lane R R3 adapt, architect COMPOSE_NEEDED + Q-45, S-5b agent Q-41 phase 1). **Branch/commit:** `personal`, pushed (`git log -1`). Suite 920/920 Python, web 279 + 1 skipped.
 
-## Q-60 email status (branch `int/Q-60-mail-status`, worktree `.claude/worktrees/feat-Q-60`; paused by the owner 2026-11-02)
-- Owner asked (D-90): opt-in Gmail; while the app runs, read mail after the last processed one → update application status. D-91 (IMAP app password, read-only, automatic forward-only updates), D-92 (rules questions). Owner: application Gmail first; header-only scan approved and done (R2). Merge into `personal` only with the owner's go-ahead.
-- On int (9da713c → 5aed385): brief, design `docs/architecture/mail_status_design.md` + BP + ADR-0007 (+E1 Oleeo tenants), `config/mail_rules.yaml` v1, contracts S0 + tester T0 (layering 13/13, mail_contracts 5/5). `scopes.json` grant also committed on personal (9b1cb48).
-- Unmerged lane branches (worktrees `.claude/worktrees/agent-*`): S `eng/Q-60-S-stage` 1ee2241 (S1–S3 committed; its final full-suite run was cut off); I `eng/Q-60-I-imap` 7a34917 (U1, U2, I1, I2 committed; suite run cut off); F `eng/Q-60-F-flow` e16bacc (F1 committed; F2 edits UNCOMMITTED in worktree agent-ae3e3e64a7cf95570; F5a not started); tester `test/Q-60-mail-oracles` 6379749 (T1–T2 committed; T3 files + `_*tmp*` scratch UNCOMMITTED in worktree agent-a345ed4c1bdcc3200).
-- Resume: (1) tester finishes T3, deletes its tmp files, commits; (2) verify S and I on their branches (`-k mail_rules/mail_match/mail_transition/mail_model`, `-k imapread/apply_mail`, vitest, full suite) → merge into int; (3) lane F: finish F2 → F5a, then F3 → F4 → F5b; tester T4–T6; (4) reviewer (KA-3); (5) owner go-ahead → first real sync from the owner's click → backup live DB → merge personal → build bundle.
+## Q-60 email status (branch `int/Q-60-mail-status`, worktree `.claude/worktrees/feat-Q-60`; resumed 2026-11-07)
+- Owner asked (D-90→D-150): opt-in Gmail; while the app runs, read mail after the last processed one → update application status. IMAP app password, read-only, forward-only automatic updates. Application Gmail first. Merge into `personal` only with the owner's go-ahead; the first real sync from the owner's click.
+- IDs: Q-60 reserves D-150..D-169 (D-155); old D-90/91/92/103/104 → D-150..D-154, sweep at X1.
+- On int e2b3998: design + rules v1 + lanes S, I (with review fixes D-104 F1–F8 + T4 punctuation) + tester T0–T4 + review pins. Full suite 1040/1040, `-k mail_` 108/108 (5409278). Review `docs/reviews/Q-60-stage-imap-ui.md`.
+- Running: lane F `eng/Q-60-F-flow` (store F2/F5a, flow F3, CLI F4, web timer F5b; told to merge int 5409278, use `match.employer_domains`, `transition.as_bool`). MS aligned with D-153/D-154 + IDs renumbered in docs/architecture (e3e2666). Lane F also told: `as_bool` moves into foundation (`config`), neutral names in match.py comments.
+- Next: lane F hands off → verify → merge; tester T5/T6 (+ MailEvidence `stale` event, MailStatusConfig pin, swap the real common-word company names in review pins for neutral ones); ID sweep; planner P1; re-review (D-104 fixes + lane F, KA-3); X1 (full suite, vitest needs `npm ci` in feat-Q-60, dev 8768 with DB copy + `JOBSCRAPER_MAIL_SYNC=0`); owner go-ahead.
 
 ## Where we are
 - M19 DONE. M20: D-78 LLM-driven form filler (ADR-0006, `docs/architecture/llm_fill_design.md`, `llm_fill_build_plan.md`, contracts v5). Design READY (stage E + re-check; D-81..D-86).
