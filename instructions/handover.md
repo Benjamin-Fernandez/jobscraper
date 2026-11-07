@@ -5,7 +5,7 @@
 ## Q-60 email status: MERGED into `personal` 2026-11-07 (c20332a)
 - Feature live at the next app launch: Settings → Email updates (opt-in Gmail, IMAP app password, read-only). Timer every 10 min while the app runs; `JOBSCRAPER_MAIL_SYNC=0` for dev copies. Live DB backed up first: `data/jobscraper.pre-Q60-2026-11-07.db` (schema 4); migration 4→5 runs at launch.
 - Verified on personal: full suite 1106/1106; vitest 296 passed / 1 skipped; bundle rebuilt; smoke on 8769 (DB copy): schema 5, 112 applications, 16/16 GET endpoints 200.
-- Owner dry run (DB copy, D-160): 19 read, 0 changes, 0 suggestions, 0 errors; the owner confirmed the 17 skips. The 2 status emails were about tenant B R-70745 (Q-41), which has no application row → matched only the 3 closed tenant-B rows → NONE `terminal` (by design). Owner: mark R-70745 Applied in the live app, then connect Gmail; expect a `backfilled` suggestion → Rejected. Follow-up Q-71.
+- Owner dry run (DB copy, D-160): 19 read, 0 changes, 0 suggestions, 0 errors; the owner confirmed the 17 skips. The 2 status emails were about tenant B R-70745 (Q-41), which has no application row → matched only the 3 closed tenant-B rows → NONE `terminal` (by design). Owner: mark R-70745 Applied in the live app, then connect Gmail; expect a `backfilled` suggestion → Rejected. Follow-up Q-72.
 - Owner still to do: connect Gmail in the live app (password stays in Credential Manager). IDs Q-60 own D-150..D-169 (D-155). Branch `int/Q-60-mail-status` + worktree `feat-Q-60` can be removed.
 
 ## Where we are

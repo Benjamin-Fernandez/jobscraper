@@ -37,5 +37,5 @@ One entry per session. Older handover notes end up here, so `handover.md` stays 
 
 ## 2026-11-07 · Q-60 session (resumed; merged)
 - Lane F review fixes (D-157, D-158, D-159), tester T5/T6 and pins merged on int; IDs renamed into D-150..D-169 (D-155). int e0e97e4: 1106/1106.
-- X1 dev check on a DB copy (8769). Owner dry run on a fresh copy: 19 read, 0 changes (D-160; untracked tenant B application → Q-71).
+- X1 dev check on a DB copy (8769). Owner dry run on a fresh copy: 19 read, 0 changes (D-160; untracked tenant B application → Q-72).
 - Live DB backed up; merged into personal c20332a; suite 1106/1106, vitest 296/1 skipped, bundle rebuilt, smoke OK; pushed.
