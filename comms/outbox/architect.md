@@ -416,3 +416,95 @@ TYPE: handoff
 RE: Q-80 D-169b; answers the engineer's 2026-11-08 question (D-91 pin "Can you confirm you are clear of any conflict of interest?"); apply_design.md §7.5 D-164 step 2, step 4, pin table, header delta; KA-2
 BODY: Yes, accept the modal, but only directly before a LEAD. Spec (§7.5 D-164 step 2): a MODAL run (can you, could you, would you, will you), with an optional please after it, is dropped only when a LEAD comes immediately next; the LEAD is then dropped as before, so shape B applies. A modal anywhere else is not dropped and gives no frame. It is not a PREFIX run and does not count toward the 3-token cap. Gate 1 (step 4) never drops the MODAL run. New pin rows: "Can you confirm you are clear of any conflict of interest?" → Yes (freedom form, `conflict_audit_independence: false`); "Can you tell us whether you are a PEP?" → No; "Can you sign a non-compete?" → unknown (no frame; gate 2 willingness also fails). The existing D-91 pin keeps its expected Yes. Contracts unchanged, no ADR (additive to D-164). Coordinator: please commit as `docs(architecture): Q-80 D-169b modal before a LEAD in question_frame`.
 STATUS: open
+
+### 2026-11-08 architect → coordinator, software-engineer, tester (Q-82, D-170)
+TYPE: handoff
+RE: Q-82; `docs/reviews/Q-80-declarations.md` MEDIUM 1–3; `docs/architecture/apply_design.md` line 4 (delta), §7.5 D-164 step 3 (shape A line, D-170 pointer), new D-170 block and oracle table after the D-164 table; KA-2
+BODY: D-170 was free (grep of `instructions/` and all `*.md` found no D-17x). Please record it in 02_status §4: "D-170 | Q-82 | a status declaration (standing classes + disability) is answered only when the whole label is one status question: closed-span vocabulary per class, one-clause rule, `status` only at the end of a class noun phrase, the same check on a single checkbox | architect | DECIDED". Commit suggestion: `docs(architecture): Q-82 D-170 one status question per declaration label`. Contracts unchanged, no ADR: it tightens D-164 and changes no interface. No D-164/D-169b pin-table row changes. No existing test pin changes either: I replayed every declaration label in `tests/` by hand against the rule (F1_LABEL, D-89, D-90a, D-91 freedom forms, contracts tests, llm_fill probe). Review-table rows that change: the 16 over-answers → unknown, plus "Do you have a non-compete you'd like us to buy out?" (No → unknown, the review called it arguable). "Specify if you have a criminal record and the offence" stays No (benign).
+CODE DELTA (one lane, `src/jobscraper/apply/declarations.py` only; no new imports, `re` is already imported):
+1. `_STATUS_RUNS`: drop `("status",)`.
+2. After `STANDING_DECLARATIONS`, add `_STATUS_CLASSES = STANDING_DECLARATIONS | {L.DISABILITY}`, `_STATUS_FILLER` (the 72 SHARED words of §7.5 D-170), `_CLASS_FILLER: dict[DeclarationLabel, frozenset[str]]` (the 8 per-class lists, verbatim from §7.5), `_CLAUSE_OPENERS = _STATUS_STARTERS | {"you", "i", "you're", "you've", "i'm"}`, `_NUMBER = re.compile(r"[0-9]{1,3}")`.
+3. New helpers:
+```python
+def _class_spans(toks, c):
+    spans = _spans(toks, _PHRASE_TOKENS.get(c, ()))
+    if c is L.GOVERNMENT_EMPLOYMENT:                 # D-87 "(gov or mil) and excl"
+        spans += _spans(toks, _MILITARY_TOKENS)
+    return spans
+
+def _employer_spans(toks, employer_names=()):
+    out = _spans(toks, THIS_EMPLOYER_RUNS)
+    for name in employer_names:
+        want = _company_tokens(name or "")
+        for i in range(len(toks) if want else 0):
+            for j in range(i + 1, min(len(toks), i + len(want) + 2) + 1):
+                if _company_tokens(" ".join(toks[i:j])) == want:   # equality, not the prefix rule
+                    out.append((i, j))
+    return out
+
+def _one_status_question(toks, classes, employer_names=(), extra_runs=()):
+    """D-170 rules 1-3 (apply_design §7.5)."""
+    toks = strip_ns_exclusions(list(toks))
+    classes = set(classes)
+    per_class = [_class_spans(toks, c) for c in classes]
+    if not classes or not all(per_class):
+        return False                                             # rule 2
+    anchors = [s for spans in per_class for s in spans] + _spans(toks, _STATUS_RUNS)
+    covered = {i for a, b in anchors + _spans(toks, _FREEDOM_RUNS) + _spans(toks, extra_runs)
+               + _employer_spans(toks, employer_names) for i in range(a, b)}
+    filler = _STATUS_FILLER.union(*(_CLASS_FILLER.get(c, frozenset()) for c in classes))
+    if any(i not in covered and t not in filler and not _NUMBER.fullmatch(t)
+           for i, t in enumerate(toks)):
+        return False                                             # rule 1
+    cuts = [k for k in range(1, len(toks) - 1)
+            if toks[k] in ("and", "or") and toks[k + 1] in _CLAUSE_OPENERS]
+    bounds = [0, *cuts, len(toks)]
+    return all(any(a <= s < b for s, _e in anchors) or all(t in _STATUS_FILLER for t in toks[a:b])
+               for a, b in zip(bounds, bounds[1:]))              # rule 3
+
+def _status_tail(toks, classes):
+    """D-170 rule 4: "status" opens shape A only as the last token of a class noun phrase."""
+    if len(toks) < 2 or toks[-1] != "status":
+        return False
+    head = toks[:-1]
+    covered = {i for c in classes for a, b in _class_spans(head, c) for i in range(a, b)}
+    return bool(covered) and all(i in covered or t in _NOUN_FILLER or t == "your"
+                                 for i, t in enumerate(head))
+
+def _strip_attest_lead(toks):
+    for lead in sorted(_ATTEST_LEADS, key=len, reverse=True):
+        if tuple(toks[:len(lead)]) == lead:
+            return toks[len(lead):]
+    return toks
+```
+   (`attestation_polarity` may use `_strip_attest_lead` too. Same behaviour.)
+4. `question_frame(label_toks, classes, f, employer_names=())`: steps 1–2 unchanged; replace the shape tail with
+```python
+    classes = set(classes)
+    shape_ab = (toks[0] in _STATUS_STARTERS or any(tuple(toks[:len(r)]) == r for r in _FRAME_A_RUNS)
+                or any(_has_run(toks, r) for r in _STATUS_RUNS) or _status_tail(toks, classes)
+                or (lead and any(tuple(toks[:len(r)]) == r for r in _FRAME_B_RUNS)))
+    if shape_ab and (not classes or not classes <= _STATUS_CLASSES
+                     or _one_status_question(toks, classes, employer_names)):
+        return True                                              # D-170 for the status classes
+    return _noun_phrase(toks, classes, f)
+```
+5. `_bool_answer(..., employer_names: tuple[str, ...] = ())`:
+   - Non-checkbox branch: pass `employer_names` to `question_frame`.
+   - Checkbox branch, right after `if polarity is None: return _ended(...)`:
+```python
+        if cls is not L.NDA_WILLINGNESS and cls in _STATUS_CLASSES and not _one_status_question(
+                _strip_attest_lead(toks), {cls}, employer_names,
+                extra_runs=_NEGATIVE_ATTESTATIONS + _POSITIVE_ATTESTATIONS):
+            return _ended(f, name, "checkbox statement not recognised")   # D-170 rule 5
+```
+6. `answer()`: `names = employer_names_of(ctx)`. Pass `employer_names=names` to both `_bool_answer` calls, and call `_disability_answer(f, value, names)`, which forwards the names to its `_bool_answer`.
+Verify: `python tests/run_tests.py -k declarations` (then `-k apply_contracts`, `-k llm_fill`, `-k layering`, full suite). Expect every existing test to pass unchanged.
+TESTER PINS (new file `tests/test_apply_declarations_d170.py`, reuse `test_apply_declarations_q48` helpers as d164 does): every row of the §7.5 D-170 oracle table. Separate tests for:
+- rule 1, the modifier rows (lawyer, screening officer, record check, law firm);
+- rules 1 and 3, the compounds (right to work, relocate, eligible, valid work permit, "working in Singapore");
+- rule 4 (the two "status" rows, plus the two kept "status" rows);
+- rule 5 (the two checkbox rows);
+- the kept rows (F1_LABEL with `required=False` as `test_f1`; "aware of any conflict of interest with Acme" needs the employer in ctx).
+Note: rule 2 has no live probe. Pin it with a label/description pair: label "Do you have any?", description "Criminal record" → unknown. Every token of that label is filler, so only rule 2 stops it; today it fills No.
+STATUS: open
