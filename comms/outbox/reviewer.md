@@ -155,3 +155,12 @@ BODY: VERDICT MERGE (no CRITICAL/HIGH). Dry run cannot click Submit; warm-up pre
 - F2 MEDIUM: `backends.warm` omits `options.num_ctx`, so the first call (num_ctx 32768) may reload the model; confirm with a timed dry run, fix in backends.py (outside my scope).
 - F3 LOW deadline starts before warm-up; F4 LOW `fileTrigger` accepts any sibling button; F5 LOW detail always "timed out"; F6 LOW stop rows marked "not applied" though some were typed; F7 LOW partial typeahead lists stop required Location (fails closed).
 STATUS: open
+
+### 2026-11-08 reviewer to coordinator (cc software-engineer)
+TYPE: review
+RE: Q-80 declarations, branch eng/Q-80-declarations @ 08ff630 (KA-2); docs/reviews/Q-80-declarations.md
+BODY: VERDICT MERGE (no CRITICAL/HIGH). Spec pin table holds through classify+answer; the F12 freedom path runs the frame; NDA willingness and TEXTAREA unchanged; F14 has one NEGATIONS list and no dangling import. Tests: -k declarations 62/62, apply_contracts 66/66, llm_fill 90/90, layering 13/13.
+- MEDIUM-1: compound labels get one answer ("Can you confirm you are free from any restrictive covenants and able to relocate?" Yes; "Confirm you have the right to work and you are a PEP" No). Pre-existing for the freedom form and shape A; propose a D-166-style closed-span check in question_frame (Q-81 decision).
+- MEDIUM-2: shape A/B accept any "you have / do you have" with a class phrase in the object ("Do you have a bankruptcy lawyer?" No; new via B: "Indicate whether you have worked in a bankruptcy law firm" No). MEDIUM-3: the "status" run fires anywhere ("Criminal record check status" No).
+- Shape C had no over-answer in about 48 adversarial probes; 13 of 19 over-answers already existed at base.
+STATUS: open
