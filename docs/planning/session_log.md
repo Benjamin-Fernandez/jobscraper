@@ -53,3 +53,8 @@ One entry per session. Older handover notes end up here, so `handover.md` stays 
 - Merged int/Q-75-wave3 into personal (da515d2, bundle 129e8ef, pushed): Q-75 lanes I+J, Q-76 application detail, Q-44/Q-73 resume refresh (D-106). Tester pins: vitest 623 + 1 expected fail; Python 1323/1323. Smoke 8774 on a DB copy: 17/17 GET, all tabs, no console errors. Coordinated with jobscraper-2f, which merged M20 (7ba7597) and built its bundle first.
 - Q-74: review APPROVE WITH FIXES (F1 HIGH tier-5 grounding on S values) → fix round → re-review (R1 over-blocking, R2 form wording) → D-108 gate → pre-merge round (R1/R2/Q-77 + §4 llm_fill hooks, e9d54bb, 1313/1314). Decisions D-107..D-109. Pending: hook pins + re-review 2.
 - Cleanup: wave-3 worktrees/branches removed; orphaned Vite processes stopped by PID. Lesson: TaskStop on an `npx vite` background shell can leave node/esbuild children holding the worktree; find them by command line and stop by PID.
+
+## 2026-11-08 · Q-60 session (continued): WP-N6a merged
+- Owner "do it for me": live mail steps done (D-163). Q-81 architect decisions D-164..D-166.
+- N6a built (950eee4); tester settled 19 oracle failures, found D1 (typeahead fits → D-167 fit_type) and D2 (hidden resume input), both fixed; review MERGE, F1 (auto never submits before N6b) + F2 (warm num_ctx) fixed.
+- Merge order with the UX session: N6a first (Q-74 hit a _MONTHS collision). personal → N6a 6199e9d 1369/1369; merged 6001452; vitest 623; smoke 17/17; pushed. D-168.
