@@ -640,12 +640,20 @@ def _required_misses(run: _Run) -> tuple[str, ...]:
 
 # ------------------------------------------------------------------ step 13 and the outcome
 
+def _job_id(run: _Run) -> str:
+    """The cache's job key. A job row (`store.job_for_apply`) carries `job_id`, not `id`:
+    keying on `id` made every job share the key "" and replay each other's decisions
+    (N6a review note; WP-N6b)."""
+    job = run.ctx.job or {}
+    return str(job.get("job_id") or job.get("id") or "")
+
+
 def _cached(run: _Run, fields: Sequence[PageField]) -> list[ModelDecision]:
     """Replayed decisions (via "cache:<via>"); a row whose cited facts changed is a miss."""
     if not run.cfg.get("cache", True) or not fields:
         return []
     sigs = {pf.field.key: run.sigs.get(pf.field.key, "") for pf in fields}
-    rows = run.services.cache_get(str(run.ctx.job.get("id", "")), [s for s in sigs.values() if s],
+    rows = run.services.cache_get(_job_id(run), [s for s in sigs.values() if s],
                                   L.FILL_PROMPT_VERSION, run.services.model, run.inputs_hash) or {}
     out = []
     for key, sig in sigs.items():
@@ -690,7 +698,7 @@ def _cache_put(run: _Run) -> None:
                      "decision": {"source": d.source.value, "ref": d.ref, "evidence": d.evidence,
                                   "value": d.value if keep_value else None, "via": d.via}})
     if rows:
-        run.services.cache_put(str(run.ctx.job.get("id", "")), rows)
+        run.services.cache_put(_job_id(run), rows)
 
 
 def _mark(run: _Run, key: str, origin: ValueOrigin) -> None:

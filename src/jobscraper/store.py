@@ -1841,6 +1841,22 @@ class Store:
                 out[name] = {"name": name, "employer_norm": r["employer_norm"] or ""}
         return list(out.values())
 
+    def sighting_employers(self) -> list[str]:
+        """Every employer a question was ever sighted at, by first sighting (the
+        company's display name, else the normalised one). With the watchlist these
+        are the "other employers" whose names a kept or cited text must not carry
+        (llm_fill_design §7 G12); names only."""
+        out: dict[str, None] = {}
+        for r in self.conn.execute(
+                """SELECT c.name AS company, s.employer_norm FROM question_sightings s
+                     LEFT JOIN jobs j ON j.job_id = s.job_id
+                     LEFT JOIN companies c ON c.id = COALESCE(s.company_id, j.company_id)
+                    ORDER BY s.seen_at, s.id"""):
+            name = (r["company"] or r["employer_norm"] or "").strip()
+            if name:
+                out.setdefault(name)
+        return list(out)
+
     def set_questions_status(self, key: str, status: str, now: str, *,
                              ids: Optional[Sequence[int]] = None) -> int:
         """Set the rows of a group to `status`: every row, or only the rows in `ids`
