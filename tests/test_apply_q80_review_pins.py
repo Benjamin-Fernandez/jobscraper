@@ -16,6 +16,7 @@ Skip-clean without Edge. Verify: python tests/run_tests.py -k apply_q80
 """
 from __future__ import annotations
 
+import dataclasses
 import sys
 import tempfile
 import types
@@ -25,7 +26,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from apply_flow_support import edge_available  # noqa: E402
 from apply_support import needs  # noqa: E402
 import test_apply_pagefill as P  # noqa: E402
-from test_apply_pagefill_review import ENTRY_REPLY, SWALLOW, _reply_file, _run, _values  # noqa: E402
+from test_apply_pagefill_review import (  # noqa: E402
+    ENTRY_REPLY, OPTIONAL_REPLY, SWALLOW, _reply_file, _run, _values,
+)
 from test_apply_flow_n6a import FakeModel, FakeNav, ans, outcome, pf, run, scripted, two_steps, world  # noqa: E402
 
 from jobscraper import apply_flow  # noqa: E402
@@ -91,6 +94,103 @@ def test_f14_a_failed_add_does_not_mark_the_entries_that_were_filled_as_not_adde
                  if "could not be added" in n.lower() and "work experience" in n.lower().replace("_", " ")]
         assert named, ("(c) no row note names the section and says another entry could not be added",
                        sorted(set(notes.values())))
+
+
+# ------------------------------------------------------------------ review M1 (F12 cross-check)
+
+# A site that re-creates a deleted entry without the reader's mark: the delete click works, the
+# old group's controls are gone from the page, but a fresh copy takes its place. Keys alone say
+# "gone"; the section count (2 entries, 1 expected) says the delete did not happen.
+RECREATE = """sel => document.addEventListener('click', ev => {
+  const btn = ev.target.closest(sel);
+  const grp = btn && btn.closest('[role="group"][data-entry]');
+  if (!grp) return;
+  const copy = grp.cloneNode(true), host = grp.parentElement, next = grp.nextElementSibling;
+  copy.querySelectorAll('[data-llmfill]').forEach(e => e.removeAttribute('data-llmfill'));
+  copy.removeAttribute('data-llmfill');
+  setTimeout(() => host.insertBefore(copy, next), 0);      // after the site's own delete has run
+}, true)"""
+
+
+@needs(*FILL)
+def test_m1_a_delete_that_the_keys_call_done_but_the_section_count_denies_stops_the_page():
+    """Review M1: the section count is the independent signal. Entry 2's delete is clicked, its
+    marked controls vanish, but an unmarked copy takes its place (count 2, expected 1). The
+    required fields of the entry must stop the page with an E3 "delete not confirmed" note."""
+    with P._open("stubs/review_entries.html") as pg, tempfile.TemporaryDirectory() as tmp:
+        if pg is None:
+            return
+        pg.evaluate(RECREATE, DELETE_SEL.format(n=2))
+        out, _r, _sv, _fb = _run(pg, "my_experience", _reply_file(Path(tmp), ENTRY_REPLY))
+        k2 = _by_group(out, "Work Experience 2")
+        assert k2, [x.group_title for x in out.fields]
+        stopped = k2 & set(out.unknown_required)
+        assert stopped, ("M1: the section still has its old count but nothing stopped the page",
+                         out.unknown_required, out.fill_failed)
+        assert any("delete not confirmed" in (out.answers[k].note or "").lower() for k in stopped if k in out.answers),             sorted({(out.answers[k].note or "") for k in stopped if k in out.answers})
+
+
+# ------------------------------------------------------------------ review M2a (F5, pagefill half)
+
+def _transport_notes(out) -> set:
+    return {a.note for a in out.answers.values() if (a.note or "").startswith("transport:")}
+
+
+@needs(*FILL)
+def test_m2a_a_backend_error_in_the_page_call_is_noted_model_unavailable_not_timed_out():
+    """`fill_page` with a scripted model that refuses (BackendError, no timeout in the text):
+    the rows say "transport: model unavailable". A scripted TimeoutError says "timed out"."""
+    for raiser, want, other in (("BackendError", "transport: model unavailable", "timed out"),
+                                ("timeout", "transport: timed out", "model unavailable")):
+        with P._open("wd_a/02-my_information/page.html") as pg, tempfile.TemporaryDirectory() as tmp:
+            if pg is None:
+                return
+            calls = [{"kind": "page", "repeat": True, "match": "FIELDS", "raise": raiser}]
+            out, _r, _sv, _fb = _run(pg, "my_information", _reply_file(Path(tmp), calls))
+            notes = _transport_notes(out)
+            assert out.transport_failed is True, raiser
+            assert notes == {want}, (raiser, notes)
+            assert not any(other in n for n in notes), (raiser, notes)
+
+
+@needs(*FILL)
+def test_m2a_a_backend_error_in_a_pick_call_is_noted_model_unavailable_not_timed_out():
+    """The same split on the other path (`_picker`): the page call answers, the option pick fails."""
+    for raiser, want in (("BackendError", "transport: model unavailable"), ("timeout", "transport: timed out")):
+        calls = [c if c.get("kind") != "pick" else {"kind": "pick", "repeat": True, "match": "", "raise": raiser}
+                 for c in OPTIONAL_REPLY]
+        with P._open("stubs/review_optional_prompt.html") as pg, tempfile.TemporaryDirectory() as tmp:
+            if pg is None:
+                return
+            out, _r, _sv, _fb = _run(pg, "questions", _reply_file(Path(tmp), calls))
+            assert out.transport_failed is True, (raiser, out.fill_failed)
+            # every row has an answer by the time a pick fails, so the cause may be on no row
+            # (review note; the flow then falls back to "timed out"): the notes that exist must be right
+            assert _transport_notes(out) <= {want}, (raiser, _transport_notes(out))
+
+
+# ------------------------------------------------------------------ review M2b (F14, flow half)
+
+@needs(*FILL)
+def test_m2b_a_failed_add_ends_the_attempt_validation_error_and_says_an_entry_could_not_be_added():
+    """The real outcome of a swallowed Add goes through the real `apply_flow.page_result`: the
+    attempt ends `validation_error` and the detail names the missing entry, not just a list of
+    field labels (D-173)."""
+    with P._open("stubs/review_entries.html") as pg, tempfile.TemporaryDirectory() as tmp:
+        if pg is None:
+            return
+        pg.evaluate(SWALLOW, '[data-automation-id="add-button"]')
+        real, _r, _sv, _fb = _run(pg, "my_experience", _reply_file(Path(tmp), ENTRY_REPLY))
+    assert real.fill_failed or real.unknown_required, "the page must have stopped"
+    w, jid = world()
+    try:
+        nav = FakeNav()
+        with scripted(nav, lambda n, s: dataclasses.replace(real, step="one")):
+            r, _f, _s, _m = run(w, jid, nav)
+    finally:
+        w.close()
+    assert r.state is S.FAILED and r.reason is R.VALIDATION_ERROR, (r.state, r.reason, r.reason_detail)
+    assert "could not be added" in r.reason_detail, r.reason_detail
 
 
 # ------------------------------------------------------------------ N6a F3
