@@ -155,3 +155,13 @@ BODY: VERDICT MERGE (no CRITICAL/HIGH). Dry run cannot click Submit; warm-up pre
 - F2 MEDIUM: `backends.warm` omits `options.num_ctx`, so the first call (num_ctx 32768) may reload the model; confirm with a timed dry run, fix in backends.py (outside my scope).
 - F3 LOW deadline starts before warm-up; F4 LOW `fileTrigger` accepts any sibling button; F5 LOW detail always "timed out"; F6 LOW stop rows marked "not applied" though some were typed; F7 LOW partial typeahead lists stop required Location (fails closed).
 STATUS: open
+
+### 2026-11-08 reviewer → coordinator (cc software-engineer, tester, architect)
+TYPE: review
+RE: Q-35 WP-N6b, branch eng/Q-35-N6b-flow @ 151b3d5 (code 752c331) (KA-1); docs/reviews/Q-35-N6b.md
+BODY: VERDICT MERGE (no CRITICAL/HIGH). Submit is reachable only via pre_submit_scan; scan exception, a hit, an unreadable page_text all raise and fail closed in auto; dry run never calls submit; caps/duplicates still apply through the shared submit/claim_click; "not shown" log is a count only. Cache keyed per job_id (the old key "" was a real cross-job bug), no model call on replay, facts/inputs/JD invalidation, 30-day purge, cache:false, sees_private still in inputs_hash; F13 narrowing accepted. resume_entries never raises; other_employers excludes the employer, its aliases and its aliases.yaml group. Tests: -k apply_flow 137/137 (n6b 20/20), pagefill 19/19, apply_e2e 13/13, tailor 26/26, layering 13/13.
+- F1 MEDIUM: no oracle for scan-raises in auto, the daily cap on the llm path, or the count-only log (tester).
+- F2 LOW: add `self.check_page(page, at)` before `pre_submit_scan` (CAPTCHA/bot-check interstitial after the last Next).
+- F3 LOW: optional unknown replays after a profile fact is added (blank optional only); accept and amend LF §13.3 (architect).
+- F4 LOW: review name check may be stricter than a real Workday review page; look for it at the gate. F5 LOW: G12 own-employer carve-out only for composed text (spec says generally; architect).
+STATUS: open
