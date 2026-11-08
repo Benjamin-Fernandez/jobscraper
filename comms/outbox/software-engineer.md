@@ -875,3 +875,9 @@ BODY: files `src/jobscraper/apply/pagefill.py`, `src/jobscraper/apply_flow.py`, 
 - N6a F5 (`apply_flow._transport_cause`, used in `page_result`): the detail is the first row's `transport: <cause>` text plus ` on <step>`.
 - N6a F6 (`pagefill._note_typed`, `TYPED_BEFORE_STOP_NOTE`; `apply_flow.stage`): on a stop or a transport failure, filled rows whose value we typed (`run.known` is OURS) get the note "typed before the page stopped" and stage keeps them `filled`; the rest stay `skipped, not applied`.
 STATUS: open
+
+### 2026-11-08 software-engineer -> coordinator: Q-80 F14 update (D-173)
+TYPE: handoff
+BODY: commit ce8f0e4. `pagefill._add_failed` marks the section's keys (required, else all) in `fill_failed` again, so the flow stops `validation_error`; the rows keep their own status and carry "E5: another <section> entry could not be added (<why>) - this value was typed". `apply_flow._entry_problem` builds the flow's detail from that note: `reason_detail` = "another work experience entry could not be added (no entry appeared)" (field labels are listed after it only when other required fields also failed). The log line is kept. No contracts change.
+RESULT: `-k apply_q80` 11/11, `-k pagefill` 19/19, `-k apply_flow` 137/137, `-k apply_e2e` 13/13, full suite 1562/1562.
+STATUS: open
