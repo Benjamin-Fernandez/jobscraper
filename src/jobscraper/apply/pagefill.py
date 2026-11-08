@@ -172,8 +172,8 @@ def fill_page(page: Any, nav: Any, ctx: AttemptContext, rctx: ResolveContext, se
             return _outcome(run, unknown=stop)
     except _Stop as halt:
         return _transport(run, halt.note)
-    except BackendError:
-        return _transport(run, UNAVAILABLE_NOTE)
+    except BackendError as exc:
+        return _transport(run, _backend_note(exc))
     if run.transport:
         return _transport(run, run.transport)
     return _outcome(run)
@@ -470,8 +470,8 @@ def _picker(run: _Run, pf: PageField, ans: Answer):
             got = L.pick_option(run.services.backend, pf, want, list(options), s_values=run.sv,
                                 cfg=run.cfg, stats=run.stats, sensitive=ans.sensitive,
                                 deny=run.deny) or ""
-        except BackendError:
-            run.transport = UNAVAILABLE_NOTE
+        except BackendError as exc:
+            run.transport = _backend_note(exc)
             return ""
         return got if got and G.g4_ok(got, quote) else ""
     return pick
@@ -756,6 +756,14 @@ def _note_typed(run: _Run, answers: dict) -> None:
     for k, a in list(answers.items()):
         if a.status is AnswerStatus.FILLED and run.known.get(k) is ValueOrigin.OURS:
             answers[k] = _replace(a, note="; ".join(n for n in (a.note, TYPED_BEFORE_STOP_NOTE) if n))
+
+
+def _backend_note(exc: BaseException) -> str:
+    """N6a F5: a model call that ran out of time (`llm_fill` turns TimeoutError into a
+    BackendError "... timed out"; httpx's read timeout names itself) is a timeout, not a
+    missing model, so the flow's detail can tell them apart."""
+    text = str(exc).lower()
+    return TIMED_OUT_NOTE if ("timed out" in text or "timeout" in text) else UNAVAILABLE_NOTE
 
 
 def _transport(run: _Run, note: str) -> PageOutcome:
