@@ -10,6 +10,201 @@ BODY: <concise message>
 STATUS: open
 -->
 
+### 2026-11-08 architect → coordinator, software-engineer, tester (Q-83, D-171)
+TYPE: handoff + blocker
+RE: Q-83; review `docs/reviews/Q-82-declarations.md` MEDIUM-1..4 and §2; `docs/architecture/apply_design.md` §7.5 (after the D-170 block, before the D-90a bullet) and line 4; `src/jobscraper/apply/declarations.py`
+BODY: **Blocker:** when I started writing, the main checkout's `apply_design.md` had no D-170 block (grep `D-170` = 0 hits), so I did not touch it, as the delegation said. **This entry is the amendment of record** until §7.5 carries it. Section A is the spec text to paste after the D-170 block (5-space indent, same as D-170), B is the line-4 changelog line, C is the code delta, D is the tester pins. D-171 is free (02_status §4 ends at D-169; D-170 comes with the Q-82 merge). Contracts unchanged, no ADR (private helpers; a refinement of D-170 under ADR-0003). Suggested commit: `docs(arch): Q-83 D-171 declaration details tail, places, applicant subject`.
+
+**A. Spec text (§7.5, after the D-170 block)**
+
+     - **D-171 (Q-83; review `docs/reviews/Q-82-declarations.md` MEDIUM 1–4): D-170 refined. No D-170 over-answer reopens.** Same helper, same notes, no new reason code. Owner intent D-87 (answer the standard declarations, never ask) weighed against ADR-0003 (fail closed).
+       1. **Details tail (MEDIUM 2a).** D-164 step 1 becomes: drop a trailing answer hint; then, **only on a Yes/No DROPDOWN or RADIO** (`bool_shaped`), a trailing DETAILS TAIL; then a trailing answer hint again. DETAILS TAIL = `if yes` or `if so`, then optional please / kindly, then one VERB (provide, give, explain, specify, describe, elaborate, list, state), then 0–6 TAIL_OBJECT tokens (details, detail, further, more, full, brief, below, the, a, an, explanation, description, information, particulars, in, box, field, space, provided), running to the end of the label. Only the last `if yes` / `if so` is tried, and at least one token must stay before it. Any other tail ("If yes, please provide your position", "If so, when?") stays in and fails rule 1. On TEXT / TYPEAHEAD the tail is never dropped: that box asks for the details, so it ends `unknown`. `negated_question` and `_freedom_inverts` use the same strip. The tail has no negation in it, and the strip lets a mid-label "(Yes/No) If yes …" lose its hint too. Shape C sees the stripped tokens, so "Criminal record? If yes, please provide details." answers.
+       2. **Vocabulary (MEDIUM 2b).** Every addition is class filler. None is a class phrase, because a phrase widens classification and D-171 changes only the frame test.
+          - SHARED: + month, months (as year, years).
+          - `conflict_audit_independence`: + aware (moved from SHARED, item 5).
+          - `criminal_record`: + pleaded, plead (pleaded guilty), one ("… or pleaded guilty to one"), investigation (under investigation).
+          - `bankruptcy`: + filed, personal (filed for personal bankruptcy), entered, into, individual, voluntary, arrangement, arrangements (an IVA is an insolvency procedure, the same class).
+          - `regulatory_disciplinary`: + licence, license, licences, licenses ("suspended" is already a phrase, "revoked" already filler), disciplined.
+          - `government_employment`: + current, former.
+          - `non_compete`: + ability, work ("an agreement that restricts your ability to work for Acme"). "work" is not a PLACE_ANCHOR, so "… and work in Singapore" still fails.
+          - **NARROWING** (`criminal_record`, 7): excluding, than, minor, traffic, violation, violations, unspent ("other" is already SHARED). These count only when the declaration value is **false** (taken before a D-91 inversion). A narrowed question keeps a true No. A Yes to "convicted, excluding minor traffic offences?" or "any unspent convictions?" may be false, so with a true value they are not covered and the field ends `unknown`.
+          - Not added, recorded: "found guilty", "court order or injunction", "refused entry or deported", "dismissed or asked to resign", "disqualified as a director", "outstanding legal proceedings". These six labels are not declarations at all (classification, not D-170); they are a follow-up. Left unknown on purpose: "aware of any conflict of interest that may arise from your employment at Acme" (arguable), "crime involving dishonesty", "debarred by any government agency", "financial or business relationship … independence", "senior political figure" (each adds a second concept).
+       3. **Places (MEDIUM 1).** singapore, country, countries, jurisdiction, jurisdictions, elsewhere, overseas and anywhere leave SHARED. They are covered only inside a PLACE QUALIFIER:
+          - Form: one of in / within / of / from, then up to 2 of any / the / other / a / all, then a place noun (singapore, country, countries, jurisdiction, jurisdictions). Or a bare place adverb (elsewhere, overseas, anywhere).
+          - Extension: repeated (or / and), optional preposition, up to 2 determiners, a place word ("in Singapore or any other country", "in Singapore or elsewhere").
+          - Anchor: the qualifier counts only when the token right before it lies in a class-phrase span of a standing class, or is a PLACE_ANCHOR noun. PLACE_ANCHORS (56): crime(s), offences, offenses, felony, felonies, misdemeanor, misdemeanour, conviction(s), charge(s), charged, arrested, record(s), history, proceedings, case(s), court, order(s), petition(s), debt(s), action(s), sanction(s), sanctioned, investigation(s), body, bodies, authority, authorities, regulator(s), revoked, disciplined, licence, license, agreement(s), restriction(s), obligation(s), clause(s), contract(s), person(s).
+          - Scope: only for a class set that holds a standing class, never for `disability` alone.
+          - Result: a clause that names a place without a class ("… or currently in Singapore", "… or working in Singapore", "… a current role in Singapore", "… identify as living in Singapore") fails rule 1. The state words currently, now, still, status and subject stay SHARED: with places restricted and "aware" moved, no review probe passes through them.
+       4. **Rule 3, the lead-in comes first (MEDIUM 1).** A piece with no class span and no status run passes only when no earlier piece has one: it is a lead-in ("Are you, or have you ever been, …"). A trailing all-filler piece ("I am not a PEP and I am aware of the status", "… and I am in Singapore") fails, on a dropdown and on a checkbox alike.
+       5. **"aware" (MEDIUM 3).** Moves from SHARED to `conflict_audit_independence` filler. A conflict of interest is something the applicant knows of (D-90a keeps "Are you aware of any conflict of interest?" → No). For any other class, "aware of" asks what the applicant knows about other people ("Are you aware of any criminal convictions against Acme?"). "against" stays SHARED; with "aware" moved, the review's against-rows fail.
+       6. **New rule 6, the applicant is the subject (MEDIUM 3).** At the start of `toks`, and right after each rule-3 cut, a status starter must be followed by `you` or `your`. These fail: "Are other people politically exposed persons?", "Is the person politically exposed?", "Is there a criminal record?", "Are you or is any other person a PEP?". "Has your professional licence ever been revoked?" passes. Relatives are exempt by design: D-170 does not run on the employer classes, so "Do any of your relatives work at Acme?" keeps D-164. The D-164 statement runs "there is" / "there are" stay, because the checkbox attestation "there is no …" uses them.
+       7. **MEDIUM 4: kept recorded, not closed.** The employer-class compound ("Do you hold shares in this company and a valid visa?" → No; a single checkbox "I hold no shares in this company and have a valid visa" is ticked) stays the recorded D-170 residual. Why:
+          - Those five classes answer only when the label names this employer (gate 4), and they answer from computed facts.
+          - Closing it needs five new closed vocabularies with no label corpus behind them (the review replayed no employer-class variety). That trades one recorded shape for unmeasured under-answers on the commonest employer questions (relatives, previously applied).
+          - D-83 reads every dry-run row before any real submit.
+          - Revisit trigger: one such label in a dry-run audit or a live attempt. Then run rules 1, 3 and 6 on the employer classes with their own filler (queue it then).
+       - Rejected:
+         - (a) Strip any `if …` tail. It reopens "… ? If yes, are you also …".
+         - (b) Pleaded guilty and IVA as class phrases. They widen classification beyond the frame fix.
+         - (c) Cut before every and / or (the review's stronger rule 3). It breaks "suspended or revoked" and "adjudged bankrupt or entered into an IVA" without closing anything that items 3–6 leave open.
+         - (d) Narrowing words for every value. A true value would give a Yes that may be false.
+       - Vocabulary after D-171: SHARED 65 (72 − 8 places − aware + month, months); per class 169 (pep 10, conflict 12, criminal_record 29, bankruptcy 21, regulatory 25, non_compete 49, government 14, disability 9); NARROWING 7; PLACE_ANCHORS 56. Adding a word changes the spec and needs a pin.
+       - Oracles D-171: table D below (Yes/No dropdown unless stated; employer Acme; sample profile, every declaration false; `disability_status: no` where stated). Every D-164, D-169b and D-170 row keeps its result.
+
+**B. Line-4 changelog line (append after the D-170 delta)**
+`**D-171 delta (Q-83, 2026-11-08): §7.5 D-170 refined: a trailing "if yes/so, please provide details" tail is dropped on Yes/No choices, class filler for the common real suffixes (narrowing words only for a false value), place words only as a qualifier after a class noun, the lead-in piece only first, "aware" for conflict of interest only, the applicant as the subject; employer-class compound kept recorded; Q-82 review MEDIUM 1–3 closed; contracts unchanged.**`
+
+**C. Code delta (`src/jobscraper/apply/declarations.py` only; one lane)**
+1. Constants (next to `_STATUS_FILLER`):
+   - `_STATUS_FILLER`: delete `country countries jurisdiction jurisdictions singapore elsewhere overseas anywhere aware`; add `month months` (65 words).
+   - `_CLASS_FILLER`: CONFLICT `+ aware`; CRIMINAL_RECORD `+ pleaded plead one investigation`; BANKRUPTCY `+ filed personal entered into individual voluntary arrangement arrangements`; REGULATORY `+ licence license licences licenses disciplined`; NON_COMPETE `+ ability work`; GOVERNMENT_EMPLOYMENT `+ current former`.
+   - New: `_NARROWING_FILLER = {L.CRIMINAL_RECORD: frozenset("excluding than minor traffic violation violations unspent".split())}`
+   - New: `_PLACE_NOUNS = frozenset("singapore country countries jurisdiction jurisdictions".split())`, `_PLACE_ADVERBS = frozenset({"elsewhere", "overseas", "anywhere"})`, `_PLACE_PREPS = frozenset({"in", "within", "of", "from"})`, `_PLACE_DETS = frozenset({"any", "the", "other", "a", "all"})`, `_PLACE_ANCHORS = frozenset("""crime crimes offences offenses felony felonies misdemeanor misdemeanour conviction convictions charge charges charged arrested record records history proceedings case cases court order orders petition petitions debt debts action actions sanction sanctions sanctioned investigation investigations body bodies authority authorities regulator regulators revoked disciplined licence license agreement agreements restriction restrictions obligation obligations clause clauses contract contracts person persons""".split())` (56).
+   - New: `_APPLICANT_SUBJECT = frozenset({"you", "your"})`.
+   - New: `_DETAIL_IFS = (("if", "yes"), ("if", "so"))`, `_DETAIL_VERBS = frozenset("provide give explain specify describe elaborate list state".split())`, `_DETAIL_OBJECT = frozenset("details detail further more full brief below the a an explanation description information particulars in box field space provided".split())`, `_DETAIL_OBJECT_MAX = 6`.
+2. New helpers (after `_strip_answer_hint`):
+```python
+def _strip_detail_tail(toks):
+    """D-171 (1): drop a trailing "if yes/so, [please] provide details ..." tail (closed)."""
+    for i in range(len(toks) - 3, 0, -1):
+        if tuple(toks[i:i + 2]) in _DETAIL_IFS:
+            rest = toks[i + 2:]
+            if rest[:1] in (["please"], ["kindly"]):
+                rest = rest[1:]
+            ok = bool(rest) and rest[0] in _DETAIL_VERBS and len(rest) - 1 <= _DETAIL_OBJECT_MAX \
+                and all(t in _DETAIL_OBJECT for t in rest[1:])
+            return toks[:i] if ok else toks          # only the last "if yes/so" is tried
+    return toks
+
+
+def _strip_trailers(toks, tail):
+    toks = _strip_answer_hint(toks)
+    return _strip_answer_hint(_strip_detail_tail(toks)) if tail else toks
+```
+   Place helpers (before `_one_status_question`):
+```python
+def _place_end(toks, i, prep_required):
+    if i < len(toks) and toks[i] in _PLACE_ADVERBS:
+        return i + 1
+    j = i
+    if j < len(toks) and toks[j] in _PLACE_PREPS:
+        j += 1
+    elif prep_required:
+        return None
+    for _ in range(2):
+        if j < len(toks) and toks[j] in _PLACE_DETS:
+            j += 1
+    return j + 1 if j < len(toks) and toks[j] in _PLACE_NOUNS | _PLACE_ADVERBS else None
+
+
+def _place_spans(toks, classes, standing_cover):
+    """D-171 (3): place qualifiers right after a standing class phrase or a PLACE_ANCHOR."""
+    if not set(classes) & STANDING_DECLARATIONS:
+        return []
+    out = []
+    for i in range(1, len(toks)):
+        if (i - 1) not in standing_cover and toks[i - 1] not in _PLACE_ANCHORS:
+            continue
+        end = _place_end(toks, i, True)
+        if end is None:
+            continue
+        while end < len(toks) and toks[end] in ("or", "and"):
+            nxt = _place_end(toks, end + 1, False)
+            if nxt is None:
+                break
+            end = nxt
+        out.append((i, end))
+    return out
+```
+3. `_one_status_question(toks, classes, employer_names=(), extra_runs=(), narrowing_ok=False)`:
+   - After `anchors`: `standing_cover = {i for c in classes & STANDING_DECLARATIONS for a, b in _class_spans(toks, c) for i in range(a, b)}`; add `+ _place_spans(toks, classes, standing_cover)` to the `covered` span list.
+   - After `filler`: `if narrowing_ok: filler = filler.union(*(_NARROWING_FILLER.get(c, frozenset()) for c in classes))`.
+   - Replace the rule-3 `return all(...)` with:
+```python
+    for s in [0, *(k + 1 for k in cuts)]:                        # rule 6 (D-171): the applicant
+        if toks[s] in _STATUS_STARTERS and (s + 1 >= len(toks) or toks[s + 1] not in _APPLICANT_SUBJECT):
+            return False
+    seen = False
+    for a, b in zip(bounds, bounds[1:]):                         # rule 3; D-171: a lead-in only first
+        if any(a <= s < b for s, _e in anchors):
+            seen = True
+        elif seen or not all(t in _STATUS_FILLER for t in toks[a:b]):
+            return False
+    return True
+```
+   (`toks` is non-empty here: rule 2 needs a class span.)
+4. `question_frame(label_toks, classes, f, employer_names=(), narrowing_ok=False)`: `from .resolve import bool_shaped`; `yes_no = f.fit_type in (FieldType.DROPDOWN, FieldType.RADIO) and bool_shaped(f)`; first line becomes `toks = _strip_frame_prefix(_strip_trailers(list(label_toks), yes_no))`; pass `narrowing_ok=narrowing_ok` to `_one_status_question`.
+5. `negated_question` and `_freedom_inverts`: replace the inline ANSWER_HINTS loop with `toks = _strip_trailers(toks, True)`.
+6. `_bool_answer`: right after the `value is None` return, `narrowing_ok = value is False` (before any `value = not value`); pass `narrowing_ok=narrowing_ok` to the checkbox `_one_status_question` call (rule 5) and to `question_frame`.
+7. Update the D-170 comment block above `_STATUS_FILLER` to cite D-171. No other module changes; `locks` reaches all this through `answer()`.
+Verify: `python tests/run_tests.py -k declarations`, `-k apply_contracts`, `-k llm_fill`, `-k layering`, then the full suite.
+
+**D. Tester pins (new file `tests/test_apply_declarations_d171.py`, gated on `declarations:_place_spans`, same `_run` helper as the d170 file)** (59 rows)
+| # | Label | Want |
+|---|---|---|
+| 1 | Have you ever been convicted of a crime? If yes, please provide details. | No (tail) |
+| 2 | Do you have a criminal record? If yes, please provide details. | No |
+| 3 | Have you ever been convicted of a felony? If yes, please explain | No |
+| 4 | Are you currently bound by a non-compete agreement? If yes, please specify. | No |
+| 5 | Have you ever been declared bankrupt? If so, please give details. | No |
+| 6 | Have you ever been convicted of a criminal offence or declared bankrupt? If yes, please provide details below. | No (agreement + tail) |
+| 7 | Criminal record? If yes, please provide details. | No (shape C after the strip) |
+| 8 | Have you ever been convicted of, or pleaded guilty to, any criminal offence? | No |
+| 9 | Have you ever been convicted of a criminal offence or pleaded guilty to one? | No |
+| 10 | Have you ever been convicted of a crime (excluding minor traffic offences)? | No (narrowing, false value) |
+| 11 | Have you ever been convicted of a criminal offence (other than a minor traffic violation)? | No |
+| 12 | Have you ever been convicted of a criminal offence, other than a minor traffic offence? | No |
+| 13 | Have you ever been convicted of a criminal offence in the last 12 months? | No |
+| 14 | Are you, or have you been in the last 12 months, a politically exposed person? | No |
+| 15 | Are you a current or former government official? | No |
+| 16 | Have you ever filed for bankruptcy? · Have you ever filed for personal bankruptcy? | No · No |
+| 17 | Have you ever been adjudged bankrupt or entered into an individual voluntary arrangement? | No |
+| 18 | Do you have any unspent criminal convictions? | No |
+| 19 | Are you currently under investigation for any criminal offence? | No |
+| 20 | Has your professional licence ever been revoked or suspended? | No (subject "your") |
+| 21 | Have you ever had a professional licence suspended or revoked? | No |
+| 22 | Have you ever been disciplined by any professional regulatory body? | No |
+| 23 | Are you party to any agreement that restricts your ability to work for Acme? | No |
+| 24 | Have you been convicted of a criminal offence in Singapore or any other country? | No (place after a class noun) |
+| 25 | Have you ever been declared bankrupt in any jurisdiction? | No |
+| 26 | Are you a politically exposed person in Singapore or elsewhere? | No (anchor "person") |
+| 27 | row 1 as TEXT | unknown (tail kept on TEXT) |
+| 28 | Are you a PEP? If yes, please provide your position. | unknown (tail object closed) |
+| 29 | Have you ever been declared bankrupt? If so, when? | unknown (no tail verb) |
+| 30 | rows 10 and 18 with `criminal_record: true` | unknown · unknown (narrowing only for false) |
+| 31 | Have you ever been convicted of a crime? with `criminal_record: true` | Yes (control) |
+| 32 | Are you a politically exposed person or currently in Singapore? | unknown |
+| 33 | Are you a politically exposed person or currently overseas? | unknown |
+| 34 | Have you been convicted of a crime or been in Singapore for the past year? | unknown |
+| 35 | Do you have a criminal record or any status in Singapore? | unknown |
+| 36 | Are you bound by a non-compete or working in Singapore? | unknown |
+| 37 | Do you have a non-compete agreement or a current role in Singapore? | unknown |
+| 38 | Are you a government employee or currently working in Singapore? | unknown |
+| 39 | Have you worked for the government or worked in Singapore? | unknown |
+| 40 | Do you have a disability or identify as living in Singapore? (`disability_status: no`) | unknown |
+| 41 | checkbox "I confirm I am not a PEP and am currently in Singapore" | not ticked, unknown |
+| 42 | checkbox "I am not a PEP and I am aware of the status" | not ticked, unknown |
+| 43 | checkbox "I have no criminal record and I am in Singapore" | not ticked, unknown |
+| 44 | checkbox "I am not bound by a non-compete and I am currently in Singapore" | not ticked, unknown |
+| 45 | checkbox "I am not subject to any non-compete or working in Singapore" | not ticked, unknown |
+| 46 | Are other people politically exposed persons? · Are any people politically exposed persons? | unknown · unknown |
+| 47 | Is the person politically exposed? | unknown |
+| 48 | Are you aware of any politically exposed persons? | unknown |
+| 49 | Are you aware of any criminal convictions against Acme? · …any bankruptcy proceedings against Acme? · …of the criminal record status of Acme? | unknown ×3 |
+| 50 | Is there a criminal record? | unknown |
+| 51 | Are you or is any other person a PEP? | unknown (rule 6 after the cut) |
+| 52 | Do any of your relatives work at Acme? | No (relatives: D-170/171 do not run) |
+| 53 | Are you aware of any conflict of interest with Acme? · Are you aware of any conflict of interest? | No · No ("aware" is conflict filler) |
+| 54 | Are you a senior political figure? · Are you aware of any conflict of interest that may arise from your employment at Acme? | unknown · unknown (left on purpose) |
+| 55 | checkbox "I confirm I am not bound by any restrictive agreement" | ticked (rule 5 control) |
+| 56 | Are you, or have you ever been, a senior government official? | No (lead-in first) |
+| 57 | Q-48 `F1_LABEL` (optional) | No, rule_id `conflict_audit_independence+non_compete` |
+| 58 | guard: `test_apply_declarations_d170.GUARD_ROWS` and every d170 / d164 / Q-48 / D-89 / D-90a / D-91 pin | unchanged (whole `-k declarations` green) |
+| 59 | guard: `Are you subject to a non-compete and are you in Singapore?` | unknown (now also by item 3) |
+Tester note: `test_d170_rule3_a_piece_without_a_class_or_status_run_fails_even_with_listed_words` keeps passing, but its docstring ("every word … is listed filler") is no longer true after item 3. Reword the docstring only.
+Open questions: none for the owner. Follow-up for the queue: classify the six non-declaration labels (item 2, "Not added").
+STATUS: open
+
 ### 2026-11-07 architect → coordinator, software-engineer, tester (Q-81 → Q-80 addition)
 TYPE: handoff
 RE: Q-81 (closes it), Q-80; review `docs/reviews/Q-48-and-lane-M-fixes.md` re-review F11, F12, F13, F15, F16; `docs/architecture/apply_design.md` line 4 (delta), §5.4 template line 379, §7.5 (gate 2 D-164 block, D-91 bullet, D-166 bullet, gate 4 D-165 note, D-165 bullet)
