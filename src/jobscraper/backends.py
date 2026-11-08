@@ -219,10 +219,13 @@ class OllamaBackend(Backend):
     def warm(self, keep_alive: Any = None) -> None:
         """Load the model now (a cold load costs ~33 s, S-5b) so the first form page
         doesn't pay for it. Ollama loads a model on a generate request with no
-        prompt; `keep_alive` (sent only when given) holds it loaded."""
+        prompt; `keep_alive` (sent only when given) holds it loaded. It sends the same
+        `num_ctx` as `complete` (apply's cli sets `llm_fill.num_ctx` on this object
+        first): Ollama reloads a model whose context size differs, which would put
+        the cold load back on the first form page."""
         if not self.available:
             raise BackendError(self.unavailable_reason)
-        body: dict[str, Any] = {"model": self.model_id}
+        body: dict[str, Any] = {"model": self.model_id, "options": {"num_ctx": self.num_ctx}}
         if keep_alive is not None:
             body["keep_alive"] = keep_alive
         try:

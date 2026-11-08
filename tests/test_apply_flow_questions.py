@@ -250,6 +250,16 @@ class _world:
         self.tmp.cleanup()
 
 
+def _extra_without_visa() -> dict:
+    """The sample `extra:` block minus `visa_status`. With it, tier 3 correctly answers this file's
+    VISA field for Shopee (`by_employer.shopee` picks [citizen], same employer, same options), so
+    nothing is captured: the tests that want the VISA question captured use this block instead.
+    The other entries (incl. the sensitive one) stay, for the redaction checks."""
+    ex = extra_block()
+    ex.pop("visa_status")
+    return ex
+
+
 def _stopped(res):
     assert res.state is S.FAILED and res.reason is ReasonCode.UNANSWERABLE_REQUIRED, (res.state, res.reason,
                                                                                      res.reason_detail)
@@ -372,8 +382,24 @@ def test_capture_can_be_switched_off():
 
 
 @needs(*CAPTURE)
-def test_the_job_log_holds_key_kind_and_reason_but_no_profile_value_and_no_answer():
+def test_a_by_employer_pick_answers_the_visa_field_for_its_own_employer_only():
+    """apply_design tier 3: `visa_status.by_employer.shopee` (picks [citizen]) answers this file's
+    VISA field at Shopee, so it is not captured; the same field at another employer gets only the
+    entry's general picks ("singapore citizen" is no option here), so it IS captured. Pins that the
+    override is neither ignored for its employer nor applied to the wrong one."""
     with _world(extra=extra_block()) as w:
+        _stopped(w.run(w.job(), FakeAdapter([FIRST, WEEKEND, VISA])))
+        assert set(w.groups()) == {"describe_ideal_weekend"}, sorted(w.groups())
+    with _world(extra=extra_block()) as w:
+        other = w.store.insert_company("othercorp", "Othercorp", "https://othercorp.example")
+        res = w.run(make_job(w.store, other, 77), FakeAdapter([FIRST, WEEKEND, VISA]))
+        _stopped(res)
+        assert set(w.groups()) == {"describe_ideal_weekend", "visa_status"}, sorted(w.groups())
+
+
+@needs(*CAPTURE)
+def test_the_job_log_holds_key_kind_and_reason_but_no_profile_value_and_no_answer():
+    with _world(extra=_extra_without_visa()) as w:
         res = w.run(w.job(), FakeAdapter([FIRST, WEEKEND, VISA]))
         _stopped(res)
         text = "\n".join(w.lines)
@@ -392,7 +418,7 @@ def test_naming_uses_the_attempts_backend_with_the_fixed_call_and_a_prompt_free_
         "Describe your ideal weekend.": {"key": "ideal_weekend", "title": "Ideal weekend", "description": "d",
                                           "same_as": ""},
         "What is your visa status?": {"key": "visa_type", "title": "Visa type", "description": "d", "same_as": ""}})
-    with _world(naming=True, extra=extra_block()) as w:
+    with _world(naming=True, extra=_extra_without_visa()) as w:
         res = w.run(w.job(), FakeAdapter([WEEKEND, VISA]), backend=be)
         _stopped(res)
         groups = w.groups()

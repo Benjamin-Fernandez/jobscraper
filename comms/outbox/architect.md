@@ -107,6 +107,70 @@ BODY: Fast-track amendment to tier 4 (declarations). Budget ran out (36/35 calls
 - D-89 (2026-11-02): R1 extended in AD §7.5: a prior/current-employee span that overlaps a government span also loses. The drop is skipped when the label names this employer (`us`/`our`, or `employer_names` via `company_match`). F18 stays AMBIGUOUS; NS-inclusive military questions are unchanged. New oracles: "Have you previously worked for the government?" and "Are you currently employed by a government body?" → `government_employment` → No.
 - D-90 (2026-11-02): written into AD §7.5: phrase-table rows for disability and prior/current employment conditioned; the "Negated question" rule is replaced by five gates (field type, status frame, polarity with a grown NEGATIONS list and the negative-attestation checkbox rule, the employer condition shared with Q-46c, disability status frames), plus no S state in notes. Also the "Value onto the field" checkbox clause, and LF §4 L3/L7 (one shared helper, F10). Open: an extension to the WILLINGNESS list, proposed and marked pending in AD (see the report).
 - D-91 (2026-11-02): written into AD §7.5. Gate 3: freedom forms (free from/of, clear of/from, unrestricted by, unencumbered by, not bound/subject/party to) take the inverted value when they are the only negation and govern every class phrase. Gate 2: new class `nda_willingness` (an NDA object plus a consent verb) reads the new `declarations.willing_to_sign_nda` (default false; not standing). Also AD §5.4 yaml, the QD §3 row-14 Profile row, and `DeclarationLabel.NDA_WILLINGNESS` (v5 additive). Engineer: classifier + truth + form row + example yaml line. Tester: "Are you free from any restrictive covenants?" → Yes; "Are you willing to sign an NDA?" → the switch; "I agree to sign the NDA" box ticked only when true; "Are you willing to sign a non-compete?" → unknown; "Are you not free from …" / two negations → unknown.
+### 2026-11-07 architect → coordinator, software-engineer, tester (Q-35 N6a defect D1, D-167)
+TYPE: handoff
+RE: tester D1 (`comms/outbox/tester.md` "Q-35 WP-N6a oracles settled"); `tests/test_apply_n6a_defect_pins.py::test_d1_*`; `src/jobscraper/apply/contracts.py` (FormField.fit_type); `docs/architecture/llm_fill_design.md` §3.1 row "Fit type", §15 D-167, header
+BODY: Decision D-167: a TYPEAHEAD that has an offered list (non-empty `options`) is fitted as a DROPDOWN. A search typeahead (`options == ()`) stays free text.
+Contract (done; v5, additive, no CONTRACT_VERSION bump):
+- New derived property `FormField.fit_type -> FieldType`. It returns DROPDOWN when `type is TYPEAHEAD and options`, else `type`.
+- `CHOICE_TYPES` is unchanged.
+Rejected options:
+- (a) Adding TYPEAHEAD to `CHOICE_TYPES`. This would break search typeaheads: `fit_text`, `fit_country` and `fit_bool` would return None when there are no options.
+- (b) The predicate repeated at each site. About 20 sites would drift apart.
+
+Engineer delta. Replace `f.type` with `f.fit_type` at exactly these lines. Leave the other `f.type` reads alone.
+- resolve.py
+  - L376 `bool_shaped`: `if f.fit_type not in SINGLE_CHOICE or not f.options:`
+  - L493 `fit_bool`: `if f.fit_type in CHOICE_TYPES:`. L497 stays as it is: it now sees only unlisted typeaheads.
+  - L518 `fit_decline` and L589 `fit_enum`: `f.fit_type not in CHOICE_TYPES`
+  - L606 `fit_text`: `if f.fit_type in CHOICE_TYPES:`. L609 stays as it is.
+  - L649 `fit_number`: `if f.fit_type in SINGLE_CHOICE:`
+  - L721 `fit_country`: `if f.fit_type in CHOICE_TYPES:`
+  - L819 (PHONE_COUNTRY_CODE) and L839 (COUNTRY): `f.fit_type in CHOICE_TYPES`. L876 (HOW_HEARD) is already equivalent; optionally write it as `f.fit_type in CHOICE_TYPES`.
+  - L1017 `_extra_fit` choice: `if f.fit_type not in SINGLE_CHOICE:`
+  - L1146 and L1152 memory tier: `f.fit_type`. Keep L1134's memory key `f.type.value` (stored rows stay valid).
+  - L1204 `_llm_kind`: leave it. Tier 5 is retired, and the rules path gets DROPDOWN from the schema.
+- declarations.py
+  - L741 `_field_gate`: `if f.fit_type in (FieldType.DROPDOWN, FieldType.RADIO, FieldType.CHECKBOX):`. L743 is then reached only by TEXT or a search TYPEAHEAD. The Q-48 F2 rule on TEXTAREA and multi-select is unchanged.
+  - L873 `_disability_answer`: `if f.fit_type in CHOICE_TYPES and not bool_shaped(f):`
+- facts.py
+  - L497 `_leaf_fit`: `if f.fit_type not in CHOICE_TYPES or ...`. This also gives Workday prompts their "Category > Leaf" leaf fit (D-86 F7 intent).
+  - L1067 `is_choice`: `_ff(field).fit_type in CHOICE_TYPES`
+- questions.py
+  - L85 `kind_for`: `if f.fit_type in (FieldType.DROPDOWN, FieldType.RADIO):`. A listed typeahead is now captured as a CHOICE. `field_type` keeps `f.type`.
+- guards.py
+  - L262 `is_choice`: optionally `pf.field.fit_type in CHOICE_TYPES or pf.field.type is FieldType.CHECKBOX`. This is the same truth table.
+  - L488 `_model_row`: `if pf.field.fit_type in CHOICE_TYPES and ...`. The audit rows then carry option labels.
+- apply_flow.py L384 `_shown_form`: `f.fit_type in CHOICE_TYPES`. This is harmless: the value equals `option_labels[0]`.
+- Untouched: page.py, widgets.py, pagefill.py (L271/L446 already handle TYPEAHEAD), llm_fill.py L290/L295, greenhouse.py (its schema location TYPEAHEAD has no options).
+
+Verify:
+- `python tests/run_tests.py -k apply_n6a_defect_pins`: D1 passes.
+- `-k apply_e2e`: the fill-llm Greenhouse test reaches ready_to_submit.
+- Then the full suite.
+
+Tester pins (add to `tests/test_apply_n6a_defect_pins.py` or a new `test_apply_fit_type.py`):
+1. Parity. A TYPEAHEAD with options gives the same result as a DROPDOWN with those options for: `fit_decline`, `fit_enum` (decline, male), `fit_bool` (Yes/No both ways), `fit_text`, `fit_country` (options Singapore/Malaysia, "SG"), `fit_number` (options "0-1 years", "2-3 years", value 2), `bool_shaped` (Yes/No/decline), the memory tier (stored "Female"), `_extra_fit` kind choice, and `questions.kind_for` (CHOICE and YES_NO).
+2. Search typeahead unchanged (`options=()`):
+   - `fit_text("Singapore")` returns ("Singapore", ()).
+   - `fit_country("SG")` returns the name.
+   - `fit_bool(True)` returns ("Yes", ()).
+   - `fit_decline` returns None.
+   - `kind_for` returns TEXT.
+   - `fit_type` is TYPEAHEAD.
+3. Declarations:
+   - Label "Prior employment with Acme", listed TYPEAHEAD with Yes/No options: passes `_field_gate`, same as a DROPDOWN.
+   - The same label as a search TYPEAHEAD: still "not a yes/no question".
+   - Disability on a listed TYPEAHEAD (Yes, I have.../No, I don't.../I don't wish to answer): same answer as on a DROPDOWN.
+4. facts `_leaf_fit` on a Workday prompt TYPEAHEAD with "Category > Leaf" options gives the same result as a DROPDOWN.
+5. The memory key is still "typeahead" (the memory callback receives `f.type.value`).
+6. Contract: `fit_type` is not a dataclass field (`dataclasses.fields(FormField)` is unchanged), and `dataclasses.replace(f, options=())` flips it back to TYPEAHEAD.
+7. Mutation checks: revert L518 and pin 1 must turn red; make `fit_type` ignore `options` and pin 2 must turn red.
+
+Known limit (not a defect; LF §15): `page.collect_options` sets `complete = bool(options)`, so a partial suggestion list counts as complete. A value outside it gets no fit, which fails closed.
+REQUEST: Coordinator: record D-167 in 02_status §4 and commit `docs(arch): Q-35 N6a D-167 FormField.fit_type for listed typeaheads`. Route the delta to the N6a engineer lane.
+STATUS: open
+
 ### 2026-11-07 architect → coordinator
 TYPE: handoff + request
 RE: Q-74 (D-105), Q-44 + Q-73, Q-76; `docs/architecture/q74_model_sees_sensitive.md`, `adr/0008-model-sees-sensitive.md`, `apply_design.md` §5.3 (D-105 amendment paragraph), `q44_refresh_from_resume.md`, `q76_application_detail.md`, `src/jobscraper/apply/contracts.py`

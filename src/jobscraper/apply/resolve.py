@@ -373,7 +373,7 @@ def bool_shaped(f: FormField) -> bool:
     option, one no option, at most one decline option and nothing else."""
     if f.type is FieldType.CHECKBOX:
         return True
-    if f.type not in SINGLE_CHOICE or not f.options:
+    if f.fit_type not in SINGLE_CHOICE or not f.options:
         return False
     yes = no = dec = 0
     for o in f.options:
@@ -490,7 +490,7 @@ def fit_bool(f: FormField, value: Any) -> Optional[Fit]:
         if not value and f.required:
             return None
         return ("true" if value else "false"), ()
-    if f.type in CHOICE_TYPES:
+    if f.fit_type in CHOICE_TYPES:
         hits = [o for o in f.options
                 if not _is_decline(o.label) and polarity(o.label) is value]
         return _choose(f, hits) if len(hits) == 1 else None
@@ -515,7 +515,7 @@ def decline_option(f: FormField) -> Optional[Option]:
 
 
 def fit_decline(f: FormField) -> Optional[Fit]:
-    if f.type not in CHOICE_TYPES:
+    if f.fit_type not in CHOICE_TYPES:
         return None
     o = decline_option(f)
     return _choose(f, [o]) if o else None
@@ -586,7 +586,7 @@ def how_heard_fit(f: FormField, value: Any) -> Optional[Fit]:
 def fit_enum(f: FormField, value: Any, value_map: dict[str, Sequence[str]]) -> Optional[Fit]:
     """enum -> exactly one option: by the value_map phrases, then by the enum
     value itself ("_" read as a space). "decline" -> the decline option."""
-    if _blank(value) or f.type not in CHOICE_TYPES:
+    if _blank(value) or f.fit_type not in CHOICE_TYPES:
         return None
     value = str(value)
     if value == "decline":
@@ -603,7 +603,7 @@ def fit_text(f: FormField, value: Any) -> Optional[Fit]:
     if _blank(value) or isinstance(value, (dict, list, bool)):
         return None
     text = str(value).strip()
-    if f.type in CHOICE_TYPES:
+    if f.fit_type in CHOICE_TYPES:
         hits = _match_options(f, [text])
         return _choose(f, hits) if len(hits) == 1 else None
     if f.type not in TEXT_TYPES or f.type is FieldType.NUMBER:
@@ -646,7 +646,7 @@ def fit_number(f: FormField, value: Any) -> Optional[Fit]:
     the unique one containing the value is chosen."""
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         return None
-    if f.type in SINGLE_CHOICE:
+    if f.fit_type in SINGLE_CHOICE:
         hits = [o for o in f.options
                 if (r := parse_range(o.label)) is not None and r[0] <= value <= r[1]]
         return _choose(f, hits) if len(hits) == 1 else None
@@ -718,7 +718,7 @@ def fit_country(f: FormField, code: Any) -> Optional[Fit]:
     names = country_names(code)
     if not names:
         return None
-    if f.type in CHOICE_TYPES:
+    if f.fit_type in CHOICE_TYPES:
         hits = _match_options(f, names)
         return _choose(f, hits) if len(hits) == 1 else None
     if f.type in (FieldType.TEXT, FieldType.TYPEAHEAD):
@@ -816,7 +816,7 @@ def _field_map_value(c: Canonical, f: FormField, ctx: ResolveContext) -> Optiona
         cc = str(pv("contact.phone_country_code") or "").strip()
         if not cc:
             return None
-        if f.type in CHOICE_TYPES:
+        if f.fit_type in CHOICE_TYPES:
             pat = re.compile(re.escape(cc) + r"(?!\d)")
             hits = [o for o in f.options if pat.search(o.label)]
             return _choose(f, hits) if len(hits) == 1 else None
@@ -836,7 +836,7 @@ def _field_map_value(c: Canonical, f: FormField, ctx: ResolveContext) -> Optiona
         names = country_names(pv("contact.country"))
         if not names:
             return None
-        if f.type in CHOICE_TYPES:
+        if f.fit_type in CHOICE_TYPES:
             hits = _match_options(f, names[:1])
             return _choose(f, hits) if len(hits) == 1 else None
         return fit_text(f, names[0])
@@ -1014,7 +1014,7 @@ def _extra_fit(f: FormField, kind: str, ans: dict) -> Optional[Fit]:
     if kind == "yes_no":
         return fit_bool(f, value)
     if kind == "choice":
-        if f.type not in SINGLE_CHOICE:
+        if f.fit_type not in SINGLE_CHOICE:
             return None
         hits = [o for o in f.options if norm_label(o.label) in picks]
         return _choose(f, hits) if len(hits) == 1 else None
@@ -1143,13 +1143,13 @@ def _memory_answer(f: FormField, label_norm: str, ctx: ResolveContext,
     except (TypeError, ValueError):
         return None
     fit: Optional[Fit] = None
-    if f.type in CHOICE_TYPES:
+    if f.fit_type in CHOICE_TYPES:
         wanted = stored if isinstance(stored, list) else [stored]
         if not wanted or not all(isinstance(w, str) for w in wanted):
             return None
         by_norm = {norm_label(o.label): o for o in f.options}
         chosen = [by_norm.get(norm_label(w)) for w in wanted]
-        if None in chosen or (f.type in SINGLE_CHOICE and len(chosen) != 1):
+        if None in chosen or (f.fit_type in SINGLE_CHOICE and len(chosen) != 1):
             return None
         fit = _choose(f, chosen)
     elif f.type is FieldType.CHECKBOX:

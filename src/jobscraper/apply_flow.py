@@ -34,9 +34,12 @@ from pathlib import Path
 from typing import Any, Callable, Optional, Sequence
 from urllib.parse import urlsplit
 
-from . import applicant, tailor_flow, vault
+from . import applicant, backends, tailor_flow, vault
 from .apply import browser as B
+from .apply import facts as F
 from .apply import mail
+from .apply import page as P
+from .apply import questions as Q
 from .apply import resolve as R
 from .apply.accounts import BOTH_NO_PASSWORD_DETAIL, NO_PASSWORD_DETAIL, SIGN_IN, choose_identity
 from .apply.classify import PageSignal, classify
@@ -44,9 +47,10 @@ from .apply.contracts import (
     ALWAYS_OURS, CHOICE_TYPES, EMPLOYER_SPECIFIC_DECLARATIONS, POST_CLICK_STATES, PREFILL_POLICY,
     REASON_TEXTS, STATE_TEXTS, TERMINAL_STATES, TRANSITIONS, AccountStatus, Answer, AnswerSource,
     AnswerStatus, AnswerTier, ApplyFailure, AttemptContext, AttemptResult, AttemptState, Canonical,
-    FieldType, FormField, PrefillPolicy, ReasonCode, ResolveContext, SignUpOutcome,
+    FieldType, FormField, PageOutcome, PrefillPolicy, ReasonCode, ResolveContext, SignUpOutcome,
 )
 from .apply.detect import detect
+from .apply.pagefill import fill_page
 from .apply.plan import norm_label
 from .config import ApplyConfig, Config
 from .scrape.net import HttpClient
@@ -184,6 +188,10 @@ _SIGNAL_NOTE = {
 
 # ---------------------------------------------------------------- one attempt
 
+# The llm path may not press Submit until the pre-Submit scan exists (WP-N6b; review F1).
+AUTO_SUBMIT_BLOCKED = "auto submit needs the pre-Submit scan (N6b)"
+
+
 class _Attempt:
     """The bookkeeping of one attempt: state writes, evidence, audit rows."""
 
@@ -302,6 +310,10 @@ def audit_row(step: str, f: FormField, a: Answer) -> dict[str, Any]:
         "confidence": a.confidence, "status": a.status.value, "rule_id": a.rule_id,
         "model": a.model, "prompt_hash": a.prompt_hash, "note": a.note,
         "sensitive": a.sensitive or f.section in ("compliance", "demographic"),
+        # D-78 columns (llm_fill_design §14): local DB only; empty on the pre-D-78 path.
+        "evidence": a.evidence or None,
+        "shown_json": a.shown if a.shown not in _BLANK else None,
+        "shown_origin": a.origin or None, "entry": a.entry or None,
     }
 
 
@@ -373,7 +385,7 @@ def _shown_form(f: FormField, a: Answer) -> Any:
     """How our answer reads back on the page (option labels, a file name)."""
     if f.type is FieldType.FILE:
         return Path(str(a.value)).name
-    if f.type in CHOICE_TYPES and a.option_labels:
+    if f.fit_type in CHOICE_TYPES and a.option_labels:
         return list(a.option_labels) if f.type is FieldType.MULTI_CHOICE else a.option_labels[0]
     if f.type is FieldType.CHECKBOX:
         return str(a.value).strip().lower()
@@ -508,12 +520,138 @@ class RunLock:
             self._fh = None
 
 
+# ---------------------------------------------------------------- D-78: pages, services, capture (WP-N6a)
+#
+# `apply.fill: llm` (default): the ATS module only navigates (SiteNavigator); the
+# generic page filler (`apply.pagefill.fill_page`) reads each page, asks the local
+# model and types. This section holds what the flow owes it: one FillServices per
+# attempt (the model, the rules, the clock, the deadline, the classifier) and the
+# capture of the required questions nobody could answer (questions_design §4.1,
+# llm_fill_design §11). The loop itself is `_Run.body_llm`.
+
+NOT_APPLIED_NOTE = "not applied: the page stopped"
+
+
+def _is_navigator(adapter: Any) -> bool:
+    """A SiteNavigator (contracts v5): it reads no fields itself. A pre-D-78 adapter
+    (`read_step`/`fill`) and a test fake without these members take the old path."""
+    return all(hasattr(adapter, n) for n in ("step_id", "scope", "entry_sections",
+                                             "choose_entry", "precheck"))
+
+
+class _FillServices:
+    """`FillServices` (contracts v5) for one attempt. The pure steps are module
+    functions in `apply/`; this holds what only the flow knows. The decision cache
+    is wired in WP-N6b (`cache_get` misses, `cache_put` keeps nothing until then)."""
+
+    def __init__(self, run: "_Run", at: _Attempt, ctx: AttemptContext, rules: Any,
+                 now: Optional[Callable[[], float]] = None):
+        self.run, self.at, self.ctx = run, at, ctx
+        self.backend = run.backend
+        self.model = str(getattr(run.backend, "model_id", "") or getattr(run.backend, "name", ""))
+        self.rules = rules
+        self.cfg: dict[str, Any] = dataclasses.asdict(run.acfg.llm_fill)
+        self._now = now or run.now
+
+    def now(self) -> float:
+        return float(self._now())
+
+    def today(self) -> str:
+        return F.today_sg(self.now())
+
+    def deadline_left(self) -> float:
+        """Seconds to the attempt deadline; the IMAP wait was added back to it (D-81)."""
+        return self.ctx.deadline - time.monotonic()
+
+    def classify(self, page: Any) -> None:
+        self.run.check_page(page, self.at)          # raises ApplyFailure; never solves anything
+
+    def cache_get(self, job_id: str, sigs: Sequence[str], prompt_version: str, model: str,
+                  inputs_hash: str) -> dict[str, dict[str, Any]]:
+        return {}
+
+    def cache_put(self, job_id: str, rows: Sequence[dict[str, Any]]) -> None:
+        return None
+
+    def log(self, line: str) -> None:
+        self.run.log(f"[attempt {self.at.id}] {line}")
+
+
+def _fill_services(run: "_Run", at: _Attempt, ctx: AttemptContext, *,
+                   now: Optional[Callable[[], float]] = None) -> _FillServices:
+    """The FillServices of one attempt (llm_fill_design §8). `now` is the UTC clock
+    (`apply_flow.run(..., now=)`, default `time.time`)."""
+    return _FillServices(run, at, ctx, run.load_rules(), now)
+
+
+def _naming_wanted(q: Any, extra: Any, rows: Sequence[dict[str, Any]]) -> bool:
+    """Would `assign_key` reach the model (QD §5.2 rule 4)? Not for a profile gap, a
+    sensitive question, or a label an `extra` entry or a stored row already holds."""
+    if q.sensitive or q.target_path:
+        return False
+    for e in Q.existing_keys(extra, rows):
+        if e.in_extra and q.label_norm in e.labels:
+            return False
+    kind = q.kind.value
+    return not any(r.get("label_norm") == q.label_norm and str(r.get("kind")) == kind
+                   and not r.get("target_path") for r in rows)
+
+
+def _capture_questions(store: Store, cfg: Config, backend: Any, at: _Attempt, job: dict[str, Any],
+                       fields: Sequence[Any], answers: dict[str, Answer], rctx: ResolveContext,
+                       rules: Any, *, page: bool = False) -> int:
+    """Questions from applications (questions_design §4.1, llm_fill_design §11): every
+    required field no tier could answer becomes a `questions` row plus a sighting, so
+    the owner answers it once in Profile -> Application details. `fields`/`answers` are
+    the resolved FormFields (pre-D-78 path) or, with `page=True`, the PageFields of the
+    stopped page. The model only names (never answers, never sees a sensitive question
+    or a profile value). Capture can never change an outcome: any exception is logged
+    by type only and the attempt ends as it would have. Returns how many were captured."""
+    qc = cfg.question_capture
+    if not qc.enabled:
+        return 0
+    try:
+        found = (Q.capture_page if page else Q.capture)(fields, answers, rctx, rules)
+        extra = rctx.profile.get("extra") if isinstance(rctx.profile, dict) else None
+        calls, said = 0, False
+        for q in found:
+            rows = store.question_rows()
+            suggestion = None
+            if (qc.llm_naming and calls < qc.naming_max_per_attempt
+                    and not any(r.get("sig") == Q.signature(q) for r in rows)
+                    and _naming_wanted(q, extra, rows)):
+                calls += 1
+                suggestion = Q.ask_model(backend, q, Q.existing_keys(extra, rows),
+                                         timeout=qc.naming_timeout_s)
+                if suggestion is None and not said:
+                    said = True
+                    at.log(f"[attempt {at.id}] question naming unavailable")
+            choice = Q.assign_key(q, extra, rows, suggestion=suggestion)
+            now = utcnow()
+            qid = store.upsert_question(Q.question_row(q, choice), now)
+            store.add_sighting(qid, at.id, str(job["job_id"]), job.get("company_id"),
+                               q.employer_norm, q.ats, q.step, q.field_key, q.label, q.required, now)
+            at.log(f"[attempt {at.id}] question captured key={choice.key} kind={q.kind.value} "
+                   f"reason={q.reason.value}")
+        return len(found)
+    except Exception as exc:                          # noqa: BLE001 - capture never changes the outcome
+        at.log(f"[attempt {at.id}] question capture failed: {type(exc).__name__}")
+        return 0
+
+
+def _signature(outcome: PageOutcome) -> frozenset:
+    """What a page asks, for the loop guard (llm_fill_design §8): label, type and entry."""
+    return frozenset((norm_label(pf.field.label), pf.field.type.value, pf.group)
+                     for pf in outcome.fields)
+
+
 # ---------------------------------------------------------------- the run
 
 class _Run:
     def __init__(self, cfg: Config, store: Store, *, dry_run: bool, backend: Any, http: Any,
                  browser_factory: Callable[[ApplyConfig], Any], acfg: ApplyConfig,
-                 say: Callable[[str], None], evidence: Optional[Path]):
+                 say: Callable[[str], None], evidence: Optional[Path],
+                 now: Optional[Callable[[], float]] = None):
         self.cfg = cfg
         self.store = store
         self.dry_run = dry_run
@@ -534,6 +672,8 @@ class _Run:
         if self.acfg.captcha_wait_s > 0:              # review F7: accepted deferral, said out loud
             self.log("apply: captcha_wait_s is not supported yet; a CAPTCHA ends the attempt at once")
         self.rules = None
+        self.now = now or time.time           # UTC epoch seconds: the clock of FillServices (TR-5)
+        self.reopened = False                 # check_email sent the page back to the posting (F7)
         self.seen: set[str] = set()
         self._resume_text: Optional[str] = None
         self._aliases = None
@@ -702,9 +842,26 @@ class _Run:
             reason, detail = _SIGNAL_REASON[sig]
             raise ApplyFailure(reason, detail, step=at.step)
 
-    def check_deadline(self, ctx: AttemptContext) -> None:
+    def check_deadline(self, ctx: AttemptContext, step: str = "") -> None:
         if time.monotonic() > ctx.deadline:
-            raise ApplyFailure(ReasonCode.ERROR, "timed out")
+            raise ApplyFailure(ReasonCode.ERROR, f"timed out on {step}" if step else "timed out",
+                               step=step)
+
+    def context(self, at: _Attempt, job: dict[str, Any], adapter: Any, tenant: Any,
+                resume_path: str) -> AttemptContext:
+        """The per-attempt services an adapter gets. D-81: Workday's wizard has its
+        own budget; both exclude the IMAP wait (`wait_for_mail` adds it back)."""
+        acfg = self.acfg
+        return AttemptContext(
+            attempt_id=at.id, job=job, tenant=tenant, dry_run=self.dry_run,
+            email=str(_profile_path(self.profile, "contact.email") or ""),
+            resume_path=resume_path, log=lambda line: self.log(f"[attempt {at.id}] {line}"),
+            screenshot=at.shot,
+            deadline=time.monotonic() + (acfg.attempt_timeout_workday_s
+                                         if adapter.name == "workday"
+                                         else acfg.attempt_timeout_s),
+            http=self.http,
+            applied_on_tenant=self.store.applied_on_tenant(adapter.name, tenant.host))
 
     # -- one job
 
@@ -791,24 +948,16 @@ class _Run:
         adapter, tenant = detect(job)
         at.ats = adapter.name
         self.store.update_attempt(at.id, ats=adapter.name, tenant_host=tenant.host)
+        if acfg.fill == "llm" and _is_navigator(adapter):
+            return self.body_llm(at, job, adapter, tenant, resume_path)       # D-78 (WP-N6a)
         if not hasattr(adapter, "read_step"):
-            # D-78 lane N: a navigation-only module (Workday) is registered before the
-            # page-filling loop that drives it (WP-N6). Until then it stops here,
-            # before Edge opens: nothing is opened, typed or created on the site.
+            # A navigation-only module (Workday) is driven by the LLM page filler
+            # only (`apply.fill: llm`); with `rules` it stops here, before Edge
+            # opens: nothing is opened, typed or created on the site.
             raise ApplyFailure(ReasonCode.UNSUPPORTED_ATS,
                                f"{adapter.name}: form filling arrives with WP-N6",
                                step="planning")
-        ctx = AttemptContext(
-            attempt_id=at.id, job=job, tenant=tenant, dry_run=self.dry_run,
-            email=str(_profile_path(self.profile, "contact.email") or ""),
-            resume_path=resume_path, log=lambda line: self.log(f"[attempt {at.id}] {line}"),
-            screenshot=at.shot,
-            # D-81: Workday's wizard gets its own budget; both exclude the IMAP wait.
-            deadline=time.monotonic() + (acfg.attempt_timeout_workday_s
-                                         if adapter.name == "workday"
-                                         else acfg.attempt_timeout_s),
-            http=self.http,
-            applied_on_tenant=self.store.applied_on_tenant(adapter.name, tenant.host))
+        ctx = self.context(at, job, adapter, tenant, resume_path)
         rctx = self.resolve_ctx(job, tenant, adapter, resume_path)
         plan = adapter.plan_from_schema(ctx)
         if plan is not None:
@@ -820,6 +969,7 @@ class _Run:
                 self.log(f"[attempt {at.id}] planning: a required question has no answer yet; "
                          f"checked again after the {adapter.prefill_source} autofill")
             elif bad:
+                self.capture(at, job, plan.fields, answers, rctx)
                 raise bad
         else:
             self.store.update_attempt(at.id, plan_source="dom")
@@ -863,9 +1013,10 @@ class _Run:
                 audit, step_answers = apply_prefill_policy(ctx.prefill, fields, step_answers,
                                                            shown, ctx.email)
                 at.answers.update(audit)
-            bad = _unanswerable(fields, {f.key: at.answers[f.key] for f in fields
-                                         if f.key in at.answers})
+            now_answers = {f.key: at.answers[f.key] for f in fields if f.key in at.answers}
+            bad = _unanswerable(fields, now_answers)
             if bad:
+                self.capture(at, job, fields, now_answers, rctx)
                 raise bad
             self.check_page(page, at)
             self.fill(page, ctx, adapter, at, fields, step_answers)
@@ -894,6 +1045,177 @@ class _Run:
             return adapter, ctx
         self.submit(page, ctx, adapter, at, job)
         return adapter, ctx
+
+    # -- D-78: the LLM filling loop (WP-N6a; llm_fill_design §8 flow part, §11, §13.1)
+
+    def load_rules(self) -> Any:
+        if self.rules is None:
+            self.rules = R.load_rules(self.cfg.questions_path)
+        return self.rules
+
+    def capture(self, at: _Attempt, job: dict[str, Any], fields: Sequence[Any],
+                answers: dict[str, Answer], rctx: ResolveContext, *, page: bool = False) -> int:
+        return _capture_questions(self.store, self.cfg, self.backend, at, job, fields, answers,
+                                  rctx, self.load_rules(), page=page)
+
+    def warm_up(self, at: _Attempt) -> None:
+        """Load the model before Edge opens (D-81: a cold load costs ~33 s). A model that
+        is not there ends the attempt `model_unavailable` with nothing opened (§11)."""
+        t0 = time.monotonic()
+        try:
+            backends.warm(self.backend, self.acfg.llm_fill.keep_alive or None)
+        except backends.BackendError as exc:
+            self.log(f"[attempt {at.id}] model warm-up failed ({type(exc).__name__})")
+            raise ApplyFailure(ReasonCode.MODEL_UNAVAILABLE,
+                               (str(exc).splitlines() or ["not running"])[0][:120] or "not running",
+                               step="planning") from None
+        self.log(f"[attempt {at.id}] model ready ({time.monotonic() - t0:.0f} s)")
+
+    def choose_entry(self, page: Any, ctx: AttemptContext, nav: Any, at: _Attempt) -> None:
+        """The site's own import (Workday "Autofill with Resume", MyGreenhouse), then the
+        origin later pages carry in `ctx.prefill` (D-78; the navigator also fills
+        `ctx.pre_import`). Anything but a page signal falls back to "fill everything"."""
+        try:
+            origin = nav.choose_entry(page, ctx) or ""
+        except ApplyFailure:
+            raise
+        except Exception as exc:                          # noqa: BLE001 - the generic fill still works
+            self.log(f"[attempt {at.id}] entry choice skipped: {self.log.exc(exc)}")
+            origin = ""
+        ctx.prefill = origin or ctx.prefill or ""
+        if ctx.prefill:
+            self.log(f"[attempt {at.id}] prefill: {ctx.prefill}")
+
+    def body_llm(self, at: _Attempt, job: dict[str, Any], nav: Any, tenant: Any, resume_path: str):
+        """The D-78 attempt: warm-up -> open -> the site's import -> account wall -> one
+        `fill_page` per step -> review. Same states, guards, evidence and submit rules as
+        the pre-D-78 body; only the middle differs."""
+        acfg = self.acfg
+        ctx = self.context(at, job, nav, tenant, resume_path)
+        rctx = self.resolve_ctx(job, tenant, nav, resume_path)
+        self.store.update_attempt(at.id, plan_source="page")
+        nav.precheck(ctx)                                 # POSTING_CLOSED before the model or Edge
+        self.check_deadline(ctx)
+        services = _fill_services(self, at, ctx, now=self.now)
+        self.warm_up(at)
+
+        # opening
+        at.to(S.OPENING, step="opening")
+        page = at.page = self.browser().new_page()
+        nav.open(page, ctx)
+        at.shot(page, "open")
+        self.check_page(page, at)
+        self.choose_entry(page, ctx, nav, at)
+        self.check_page(page, at)
+        if nav.account_wall(page):                        # accounts, sign-in, sign-up, email check (WP-N4)
+            self.reopened = False
+            rctx = self.account(page, ctx, nav, at, job, rctx)
+            self.check_page(page, at)
+            if self.reopened:                             # the email check reopened the posting (F7)
+                self.choose_entry(page, ctx, nav, at)
+                self.check_page(page, at)
+        at.to(S.FILLING, step="application")
+
+        # filling, one step at a time (loop guard: the same step with the same fields twice)
+        seen: set = set()
+        for _ in range(max(1, acfg.max_wizard_steps)):
+            self.check_deadline(ctx, at.step)
+            self.check_page(page, at)
+            outcome = fill_page(page, nav, ctx, rctx, services)
+            step = self.page_result(at, page, outcome, rctx, services, job)
+            if not outcome.fields and step != "review":
+                raise ApplyFailure(ReasonCode.PAGE_UNRECOGNISED, f"no fields on {step}", step=step)
+            sig = (step, _signature(outcome))
+            if sig in seen:
+                raise ApplyFailure(ReasonCode.PAGE_UNRECOGNISED, f"{step} shown again", step=step)
+            seen.add(sig)
+            at.shot(page, step)
+            self.check_page(page, at)
+            res = nav.next_step(page, ctx)
+            if res.errors:                                # one corrective pass (llm_fill_design §8)
+                self.log(f"[attempt {at.id}] errors after Next: {', '.join(res.errors[:3])}")
+                again = fill_page(page, nav, ctx, rctx, services)
+                self.page_result(at, page, again, rctx, services, job)
+                res = nav.next_step(page, ctx)
+                if res.errors:
+                    raise ApplyFailure(ReasonCode.VALIDATION_ERROR,
+                                       ", ".join(e[:80] for e in res.errors[:3]), step=step)
+            at.record(step, list(at.fields.values()))
+            if res.is_review:
+                break
+            at.to(S.FILLING, step=B.slug(res.step) or step)
+        else:
+            raise ApplyFailure(ReasonCode.PAGE_UNRECOGNISED, f"{nav.name}: too many steps")
+
+        # review (the pre-Submit scan and the review text check arrive with WP-N6b).
+        # Until then an auto-mode attempt fails closed (review F1, NF-06): it stops here, as a
+        # dry run does, and never reaches Submit. The owner sees "ready to submit" with the note.
+        at.shot(page, "review")
+        at.result.url = (page.url or "").split("?", 1)[0]
+        if self.dry_run:
+            at.to(S.READY_TO_SUBMIT, end_url=at.result.url)
+        else:
+            self.log(f"[attempt {at.id}] {AUTO_SUBMIT_BLOCKED}")
+            at.to(S.READY_TO_SUBMIT, end_url=at.result.url, detail=AUTO_SUBMIT_BLOCKED)
+        return nav, ctx
+
+    def page_result(self, at: _Attempt, page: Any, outcome: PageOutcome, rctx: ResolveContext,
+                    services: _FillServices, job: dict[str, Any]) -> str:
+        """What one `fill_page` outcome means (llm_fill_design §8, §11): a transport failure
+        or the deadline ends the attempt (never captured), a required unknown is captured
+        and ends it `unanswerable_required`, a required field the page would not take is a
+        `validation_error`. Returns the step id. The audit rows are staged first, so every
+        ending keeps them (R3 F10: a stop's answers are marked not applied)."""
+        step = B.slug(outcome.step) if outcome.step else "form"
+        if step != at.step:
+            at.to(S.FILLING, step=step)
+        self.log(f"[attempt {at.id}] page {step}: {len(outcome.fields)} fields, "
+                 f"{outcome.model_calls} model calls, {outcome.model_seconds:.0f} s")
+        by_key = {pf.field.key: pf for pf in outcome.fields}
+        if outcome.transport_failed:
+            self.stage(at, page, outcome, step, applied=False)
+            # An expired deadline is reported by pagefill as transport "timed out": it is
+            # the attempt's time that ran out, not the model (N1; llm_fill_design §11).
+            if services.deadline_left() <= 0:
+                raise ApplyFailure(ReasonCode.ERROR, f"timed out on {step}", step=step)
+            raise ApplyFailure(ReasonCode.MODEL_UNAVAILABLE, f"timed out on {step}", step=step)
+        if outcome.unknown_required:
+            self.stage(at, page, outcome, step, applied=False)
+            self.capture(at, job, outcome.fields, outcome.answers, rctx, page=True)
+            first = by_key.get(outcome.unknown_required[0])
+            label = first.field.label if first else outcome.unknown_required[0]
+            raise ApplyFailure(ReasonCode.UNANSWERABLE_REQUIRED, label[:120], step=step)
+        self.stage(at, page, outcome, step, applied=True)
+        bad = [by_key[k].field.label for k in outcome.fill_failed
+               if k in by_key and by_key[k].field.required]
+        if bad:
+            raise ApplyFailure(ReasonCode.VALIDATION_ERROR, ", ".join(b[:80] for b in bad[:3]),
+                               step=step)
+        return step
+
+    def stage(self, at: _Attempt, page: Any, outcome: PageOutcome, step: str, *,
+              applied: bool) -> None:
+        """Put a page's fields and answers into the attempt under their audit keys
+        (`apply.page.audit_keys`). `applied=False` (a stop or a transport failure) marks the
+        rows that were only decided: nothing is on the page for them (R3 F10)."""
+        try:
+            akeys = P.audit_keys(page, outcome.fields, step) if outcome.fields else {}
+        except Exception:                                 # noqa: BLE001 - the reader keys still work
+            akeys = {}
+        for pf in outcome.fields:
+            a = outcome.answers.get(pf.field.key)
+            if a is None:
+                continue
+            key = akeys.get(pf.field.key) or pf.field.key
+            f = dataclasses.replace(pf.field, key=key)
+            a = dataclasses.replace(
+                a, field_key=key, shown=a.shown if a.shown is not None else (pf.shown or None),
+                origin=a.origin or pf.origin.value, entry=a.entry or pf.group)
+            if not applied and a.status is AnswerStatus.FILLED:
+                a = dataclasses.replace(a, status=AnswerStatus.SKIPPED,
+                                        note=_join(a.note, NOT_APPLIED_NOTE))
+            at.fields[key] = f
+            at.answers[key] = a
 
     def prefill_may_answer(self, adapter: Any) -> bool:
         """Is a planning-time unknown worth taking to the browser? Only when
@@ -1107,6 +1429,7 @@ class _Run:
         if wall is None and getattr(adapter, "step_id", None) is not None \
                 and not adapter.step_id(page, ctx):
             adapter.open(page, ctx)                       # candidate home or a notice: back to the posting
+            self.reopened = True
             self.check_page(page, at)
             wall = adapter.account_wall(page)
         if wall == "sign_in":
@@ -1258,12 +1581,14 @@ def open_profile(acfg: ApplyConfig, url: str = "", *, say: Callable[[str], None]
 def run(cfg: Config, store: Store, job_ids: list[str], *, dry_run: bool, backend: Any,
         http: Any = None, browser_factory: Optional[Callable[[ApplyConfig], Any]] = None,
         apply_cfg: Optional[ApplyConfig] = None, say: Callable[[str], None] = print,
-        evidence_dir: Optional[Path] = None) -> list[AttemptResult]:
+        evidence_dir: Optional[Path] = None,
+        now: Optional[Callable[[], float]] = None) -> list[AttemptResult]:
     """Apply to each job in order (apply_design §3). `apply_cfg` is the
     effective settings (cmd_apply merges the settings table over config);
-    `http` and `browser_factory` exist so tests inject fakes."""
+    `http`, `browser_factory` and `now` (UTC epoch seconds, default `time.time`;
+    the clock of the FillServices, TR-5) exist so tests inject fakes."""
     r = _Run(cfg, store, dry_run=dry_run, backend=backend,
              http=http if http is not None else make_http(cfg),
              browser_factory=browser_factory or default_browser_factory,
-             acfg=apply_cfg or cfg.apply, say=say, evidence=evidence_dir)
+             acfg=apply_cfg or cfg.apply, say=say, evidence=evidence_dir, now=now)
     return r.run(job_ids)
