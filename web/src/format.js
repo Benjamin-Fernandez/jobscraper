@@ -46,8 +46,11 @@ export function exactTime(iso) {
 }
 
 // plural(3, 'role') -> "3 roles"; plural(2, 'company', 'companies').
+// Counts of a thousand or more get a separator ("1,234 companies"), the same as
+// the visible numbers beside them (Q-78).
 export function plural(n, word, many = `${word}s`) {
-  return `${n} ${n === 1 ? word : many}`
+  const shown = typeof n === 'number' && Number.isFinite(n) ? n.toLocaleString('en-SG') : n
+  return `${shown} ${n === 1 ? word : many}`
 }
 
 // ATS feeds often repeat a place: "Singapore, Singapore" -> "Singapore".
