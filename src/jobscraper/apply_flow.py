@@ -1193,6 +1193,7 @@ class _Run:
         # `submit` only through a passing scan (replaces the N6a review-F1 stop).
         at.shot(page, "review")
         at.result.url = (page.url or "").split("?", 1)[0]
+        self.check_page(page, at)                          # a bot check after the last Next ends as one (review F2)
         self.pre_submit_scan(page, nav, ctx, at)
         if self.dry_run:
             at.to(S.READY_TO_SUBMIT, end_url=at.result.url)
