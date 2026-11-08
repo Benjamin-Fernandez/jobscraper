@@ -102,7 +102,7 @@ def test_d170_rules_1_and_3_compounds_are_unknown():
 
 @needs(*D170)
 def test_d170_rule3_a_piece_without_a_class_or_status_run_fails_even_with_listed_words():
-    """Every word of the second clause is listed filler, but it holds no class and no status run."""
+    """The second clause holds no class span and no status run, and after D-171 'Singapore' is not filler either, so rules 1 and 3 both refuse it."""
     _run(_unknown_rows("Are you subject to a non-compete and are you in Singapore?"))
 
 
