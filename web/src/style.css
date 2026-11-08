@@ -197,7 +197,8 @@
 
 /* The phone header is two rows (brand, then tabs). */
 @media (max-width: 640px) {
-  :root { --header-h: 5.3rem; }
+  /* A phone-width window gets 44px controls even when the pointer reports as fine (Q-78 G31). */
+  :root { --header-h: 5.3rem; --control-h: 2.75rem; }
 }
 
 /* Touch screens get larger targets. */
