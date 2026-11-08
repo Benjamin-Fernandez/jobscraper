@@ -34,7 +34,6 @@ from jobscraper.apply.contracts import (  # noqa: E402
 )
 
 FILL = P.FILL
-E5_NOTE = "E5: entry not added"
 DELETE_NOTE = "E3: delete not confirmed"
 DELETE_SEL = '[data-entry="{n}"] [data-automation-id="panel-set-delete-button"]'
 
@@ -71,24 +70,27 @@ def test_f12_one_swallowed_delete_does_not_make_the_delete_that_worked_look_unco
 
 @needs(*FILL)
 def test_f14_a_failed_add_does_not_mark_the_entries_that_were_filled_as_not_added():
-    """The Add control is swallowed. Work Experience 1 is the profile's first job and was
-    filled; its rows may not say "E5: entry not added", and none of its keys is `fill_failed`.
-    The failed Add must still be reported somewhere (fill_failed / unknown_required / an E5 note
-    on a row, or the services log): the review asks for a section-level note, not silence."""
+    """D-173 (ruling on R3 F14): the Add control is swallowed. The attempt keeps stopping
+    (fail closed): (a) the section's keys are still in `fill_failed` or `unknown_required`.
+    The wording was the defect: (b) no row's note says "entry not added" (that reads as if a
+    value we typed were missing) and (c) a note names the section and says another entry
+    "could not be added"."""
     with P._open("stubs/review_entries.html") as pg, tempfile.TemporaryDirectory() as tmp:
         if pg is None:
             return
         pg.evaluate(SWALLOW, '[data-automation-id="add-button"]')
         out, _r, sv, _fb = _run(pg, "my_experience", _reply_file(Path(tmp), ENTRY_REPLY))
-        k1 = _by_group(out, "Work Experience 1")
-        assert k1, [x.group_title for x in out.fields]
-        wrongly = [x for x in k1 if x in out.fill_failed
-                   or E5_NOTE in ((out.answers[x].note or "") if x in out.answers else "")]
-        assert not wrongly, f"F14: filled entry 1 is marked 'entry not added': {sorted(wrongly)}"
-        reported = (out.fill_failed or out.unknown_required
-                    or any(E5_NOTE in (a.note or "") for a in out.answers.values())
-                    or any("E5" in line for line in sv.lines))
-        assert reported, "control: a failed Add is never silent"
+        section_keys = {x.field.key for x in out.fields}
+        assert section_keys, "the outcome lists the section's fields"
+        stopped = (set(out.fill_failed) | set(out.unknown_required)) & section_keys
+        assert stopped, "(a) a failed Add must keep the page stopping: nothing in fill_failed / unknown_required"
+        notes = {k: (a.note or "") for k, a in out.answers.items()}
+        old = sorted(k for k, n in notes.items() if "entry not added" in n.lower())
+        assert not old, f"(b) the old wording 'entry not added' is on rows: {old}"
+        named = [n for k, n in notes.items()
+                 if "could not be added" in n.lower() and "work experience" in n.lower().replace("_", " ")]
+        assert named, ("(c) no row note names the section and says another entry could not be added",
+                       sorted(set(notes.values())))
 
 
 # ------------------------------------------------------------------ N6a F3
