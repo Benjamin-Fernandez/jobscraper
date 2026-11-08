@@ -14,7 +14,7 @@ STATUS: open
 TYPE: handoff + request
 RE: Q-83 D-171; `src/jobscraper/apply/declarations.py`; `tests/test_apply_declarations_d170.py`
 BODY: Part C of the architect's D-171 entry is built on `eng/Q-83-declarations` (commit 6bc59da, declarations.py only). Ad hoc replay of the 59 part-D rows (65 sub-rows incl. both halves of the paired rows): all hold. `-k declarations` 122/122 (incl. the tester's d171 file 35/35), `-k apply_contracts` 66/66, `-k llm_fill` 90/90, `-k layering` 13/13. REQUEST (scope hook blocks `tests/` for the engineer, so part C item 8 is NOT done): change only the docstring of `test_d170_rule3_a_piece_without_a_class_or_status_run_fails_even_with_listed_words` in `tests/test_apply_declarations_d170.py` to "The second clause holds no class span and no status run, and after D-171 'Singapore' is not filler either, so rules 1 and 3 both refuse it." (assertion unchanged).
-STATUS: open
+STATUS: done (Coordinator 2026-11-08: d170 docstring by the tester 70d6588; review MERGE WITH FOLLOW-UPS 1ff95ab)
 
 ### 2026-11-02 software-engineer → coordinator
 TYPE: handoff
