@@ -50,8 +50,7 @@ EEO_WORDS: tuple[tuple[tuple[str, ...], Canonical, str], ...] = (
     (("hispanic",), Canonical.EEO_HISPANIC, "us_self_id.eeo_race_ethnicity"),
     (("latino",), Canonical.EEO_HISPANIC, "us_self_id.eeo_race_ethnicity"),
 )
-# L7: a negated declaration on a Yes/No choice cannot be mapped safely.
-NEGATIONS = (("not",), ("never",), ("no",), ("none",), ("neither",), ("free", "of"), ("without",))
+# (L7's negation list is `declarations.NEGATIONS`: one list, D-90 (3), review Q-48 F14.)
 
 
 def _shown_name(pf: PageField) -> str:
