@@ -312,7 +312,7 @@ STANDING_DECLARATIONS = frozenset({
     L.NON_COMPETE, L.GOVERNMENT_EMPLOYMENT,
 })
 
-# D-170 (Q-82; review Q-80 MEDIUM 1-3): a status declaration is answered only when the
+# D-170 (Q-82; review Q-80 MEDIUM 1-3), refined by D-171 (Q-83): a status declaration is answered only when the
 # WHOLE label is one status question. Every token must be a class phrase, a status or
 # freedom run, a reference to this employer, a number, or a word of this closed
 # vocabulary (apply_design §7.5 D-170). Adding a word changes the spec and needs a pin.
@@ -323,33 +323,62 @@ _STATUS_FILLER = frozenset("""
     i you you're you've i'm there are is am was were be been being do does did have has had
     ever currently presently now previously formerly otherwise still past last year years
     a an the any such other your all either or and as of in to for from by with at under
-    within during since against including e g country countries jurisdiction jurisdictions
-    singapore elsewhere overseas anywhere aware status defined subject""".split())
+    within during since against including e g month months status defined subject""".split())
 _CLASS_FILLER: dict[DeclarationLabel, frozenset[str]] = {
     L.PEP: frozenset("""person persons people individual served serving senior prominent
         position positions""".split()),
     L.CONFLICT_AUDIT_INDEPENDENCE: frozenset("""potential actual perceived client clients
-        auditor auditors issue issues government rules""".split()),
+        auditor auditors issue issues government rules aware""".split()),
     L.CRIMINAL_RECORD: frozenset("""crime crimes guilty found conviction convictions charge
         charges arrested record records history court law laws case cases offences offenses
-        felony felonies misdemeanor misdemeanour pending proceedings""".split()),
+        felony felonies misdemeanor misdemeanour pending proceedings pleaded plead one
+        investigation""".split()),
     L.BANKRUPTCY: frozenset("""declared adjudged undischarged discharged debt debts petition
-        petitions proceedings order orders record history""".split()),
+        petitions proceedings order orders record history filed personal entered into
+        individual voluntary arrangement arrangements""".split()),
     L.REGULATORY: frozenset("""action actions proceedings sanction sanctions sanctioned
         investigation investigations body bodies authority authorities regulator regulators
-        professional revoked penalty penalties record history""".split()),
+        professional revoked penalty penalties record history licence license licences
+        licenses disciplined""".split()),
     # sized by the live Q-48 F1 label, which must stay No
     L.NON_COMPETE: frozenset("""agreement agreements restriction restrictions restrict
         restricts restricted obligation obligations clause clauses contract contracts
         contractual accepted entered into prohibit prohibits prevent prevents limit limits
         that which would will may could join joining job role responsibilities duties working
         perform current former previous prior employer employers pursuant applicable effect
-        active""".split()),
+        active ability work""".split()),
     L.GOVERNMENT_EMPLOYMENT: frozenset("""worked work working served serving employed position
-        positions role roles capacity member""".split()),
+        positions role roles capacity member current former""".split()),
     L.DISABILITY: frozenset("""consider yourself identify living person persons people record
         history""".split()),
 }
+# D-171 (Q-83; review Q-82 MEDIUM 1-3): narrowing words ("excluding minor traffic
+# offences") are filler only when the declaration value is False: a narrowed question
+# keeps a true No, while a Yes to it may be false. Place words are covered only as a
+# qualifier right after a class noun (`_place_spans`), the applicant must be the subject
+# (rule 6), and a lead-in piece is allowed only first (rule 3).
+_NARROWING_FILLER: dict[DeclarationLabel, frozenset[str]] = {
+    L.CRIMINAL_RECORD: frozenset("excluding than minor traffic violation violations "
+                                 "unspent".split()),
+}
+_PLACE_NOUNS = frozenset("singapore country countries jurisdiction jurisdictions".split())
+_PLACE_ADVERBS = frozenset({"elsewhere", "overseas", "anywhere"})
+_PLACE_PREPS = frozenset({"in", "within", "of", "from"})
+_PLACE_DETS = frozenset({"any", "the", "other", "a", "all"})
+_PLACE_ANCHORS = frozenset("""crime crimes offences offenses felony felonies misdemeanor
+    misdemeanour conviction convictions charge charges charged arrested record records
+    history proceedings case cases court order orders petition petitions debt debts action
+    actions sanction sanctions sanctioned investigation investigations body bodies authority
+    authorities regulator regulators revoked disciplined licence license agreement agreements
+    restriction restrictions obligation obligations clause clauses contract contracts person
+    persons""".split())
+_APPLICANT_SUBJECT = frozenset({"you", "your"})
+# D-171 (1): a trailing "if yes, please provide details" tail, dropped on Yes/No choices
+_DETAIL_IFS = (("if", "yes"), ("if", "so"))
+_DETAIL_VERBS = frozenset("provide give explain specify describe elaborate list state".split())
+_DETAIL_OBJECT = frozenset("""details detail further more full brief below the a an explanation
+    description information particulars in box field space provided""".split())
+_DETAIL_OBJECT_MAX = 6
 _CLAUSE_OPENERS = _STATUS_STARTERS | {"you", "i", "you're", "you've", "i'm"}
 _NUMBER = re.compile(r"[0-9]{1,3}")
 
@@ -639,11 +668,7 @@ def negated_question(label_norm: str) -> bool:
     from, unrestricted, unencumbered, absence of, cannot, unable ...) cannot be
     mapped to a bool safely: it ends unknown, never inverted. A trailing
     "(Yes/No)" hint and NS-exclusion runs are not negations."""
-    toks = label_norm.split()
-    for hint in ANSWER_HINTS:
-        if len(toks) > len(hint) and tuple(toks[-len(hint):]) == hint:
-            toks = toks[:-len(hint)]
-            break
+    toks = _strip_trailers(label_norm.split(), True)           # D-171: and a details tail
     toks = strip_ns_exclusions(toks)
     return any(_has_run(toks, n) for n in NEGATIONS)
 
@@ -700,6 +725,26 @@ def _strip_answer_hint(toks: list[str]) -> list[str]:
     return toks
 
 
+def _strip_detail_tail(toks: list[str]) -> list[str]:
+    """D-171 (1): drop a trailing "if yes/so, [please] provide details ..." tail (closed)."""
+    for i in range(len(toks) - 3, 0, -1):
+        if tuple(toks[i:i + 2]) in _DETAIL_IFS:
+            rest = toks[i + 2:]
+            if rest[:1] in (["please"], ["kindly"]):
+                rest = rest[1:]
+            ok = bool(rest) and rest[0] in _DETAIL_VERBS and len(rest) - 1 <= _DETAIL_OBJECT_MAX \
+                and all(t in _DETAIL_OBJECT for t in rest[1:])
+            return toks[:i] if ok else toks          # only the last "if yes/so" is tried
+    return toks
+
+
+def _strip_trailers(toks: list[str], tail: bool) -> list[str]:
+    """A trailing answer hint, then (only when `tail`, i.e. a Yes/No choice) a details
+    tail, then an answer hint again."""
+    toks = _strip_answer_hint(toks)
+    return _strip_answer_hint(_strip_detail_tail(toks)) if tail else toks
+
+
 def _frame_lead(toks: list[str]):
     return next((r for r in _FRAME_LEADS if tuple(toks[:len(r)]) == r), None)
 
@@ -725,32 +770,85 @@ def _employer_spans(toks: list[str], employer_names: Iterable[str] = ()) -> list
     return out
 
 
+def _place_end(toks: list[str], i: int, prep_required: bool) -> Optional[int]:
+    """End of a place qualifier starting at `i` (prep, up to 2 determiners, place word)."""
+    if i < len(toks) and toks[i] in _PLACE_ADVERBS:
+        return i + 1
+    j = i
+    if j < len(toks) and toks[j] in _PLACE_PREPS:
+        j += 1
+    elif prep_required:
+        return None
+    for _ in range(2):
+        if j < len(toks) and toks[j] in _PLACE_DETS:
+            j += 1
+    return j + 1 if j < len(toks) and toks[j] in _PLACE_NOUNS | _PLACE_ADVERBS else None
+
+
+def _place_spans(toks: list[str], classes: Iterable[DeclarationLabel],
+                 standing_cover: set[int]) -> list[tuple[int, int]]:
+    """D-171 (3): place qualifiers right after a standing class phrase or a PLACE_ANCHOR."""
+    if not set(classes) & STANDING_DECLARATIONS:
+        return []
+    out = []
+    for i in range(1, len(toks)):
+        if (i - 1) not in standing_cover and toks[i - 1] not in _PLACE_ANCHORS:
+            continue
+        end = _place_end(toks, i, True)
+        if end is None:
+            continue
+        while end < len(toks) and toks[end] in ("or", "and"):
+            nxt = _place_end(toks, end + 1, False)
+            if nxt is None:
+                break
+            end = nxt
+        out.append((i, end))
+    return out
+
+
 def _one_status_question(toks: list[str], classes: Iterable[DeclarationLabel],
                          employer_names: Iterable[str] = (),
-                         extra_runs: Iterable[tuple[str, ...]] = ()) -> bool:
-    """D-170 rules 1-3 (apply_design §7.5): the whole label is ONE status question.
+                         extra_runs: Iterable[tuple[str, ...]] = (),
+                         narrowing_ok: bool = False) -> bool:
+    """D-170 rules 1-3, D-171 rule 6 (apply_design §7.5): the whole label is ONE status question.
     1 closed span: every token is covered by a class phrase, a status / freedom /
     extra run, this employer, a number, or the closed filler vocabulary. 2 every class
     is named in the label itself (not only in the description). 3 cut before each
     and / or that opens a new clause; each piece holds a class span or status run, or
-    is bare lead-in filler."""
+    is bare lead-in filler, and only before the first piece that has one (D-171). 6 the
+    start of the label and of each piece, when a status starter, is followed by you /
+    your (the applicant is the subject). `narrowing_ok` (a false value) adds the
+    NARROWING words to the filler."""
     toks = strip_ns_exclusions(list(toks))
     classes = set(classes)
     per_class = [_class_spans(toks, c) for c in classes]
     if not classes or not all(per_class):
         return False                                             # rule 2
     anchors = [s for spans in per_class for s in spans] + _spans(toks, _STATUS_RUNS)
+    standing_cover = {i for c, spans in zip(classes, per_class) if c in STANDING_DECLARATIONS
+                      for a, b in spans for i in range(a, b)}
     covered = {i for a, b in anchors + _spans(toks, _FREEDOM_RUNS) + _spans(toks, extra_runs)
-               + _employer_spans(toks, employer_names) for i in range(a, b)}
+               + _employer_spans(toks, employer_names) + _place_spans(toks, classes, standing_cover)
+               for i in range(a, b)}
     filler = _STATUS_FILLER.union(*(_CLASS_FILLER.get(c, frozenset()) for c in classes))
+    if narrowing_ok:
+        filler = filler.union(*(_NARROWING_FILLER.get(c, frozenset()) for c in classes))
     if any(i not in covered and t not in filler and not _NUMBER.fullmatch(t)
            for i, t in enumerate(toks)):
         return False                                             # rule 1
     cuts = [k for k in range(1, len(toks) - 1)
             if toks[k] in ("and", "or") and toks[k + 1] in _CLAUSE_OPENERS]
     bounds = [0, *cuts, len(toks)]
-    return all(any(a <= s < b for s, _e in anchors) or all(t in _STATUS_FILLER for t in toks[a:b])
-               for a, b in zip(bounds, bounds[1:]))              # rule 3
+    for s in [0, *(k + 1 for k in cuts)]:                        # rule 6 (D-171): the applicant
+        if toks[s] in _STATUS_STARTERS and (s + 1 >= len(toks) or toks[s + 1] not in _APPLICANT_SUBJECT):
+            return False
+    seen = False
+    for a, b in zip(bounds, bounds[1:]):                         # rule 3; D-171: a lead-in only first
+        if any(a <= s < b for s, _e in anchors):
+            seen = True
+        elif seen or not all(t in _STATUS_FILLER for t in toks[a:b]):
+            return False
+    return True
 
 
 def _status_tail(toks: list[str], classes: Iterable[DeclarationLabel]) -> bool:
@@ -764,7 +862,8 @@ def _status_tail(toks: list[str], classes: Iterable[DeclarationLabel]) -> bool:
 
 
 def question_frame(label_toks: list[str], classes: Iterable[DeclarationLabel],
-                   f: FormField, employer_names: Iterable[str] = ()) -> bool:
+                   f: FormField, employer_names: Iterable[str] = (),
+                   narrowing_ok: bool = False) -> bool:
     """D-164 (Q-81; review F12, F13): does the label have one of the closed STATUS
     frame shapes that make a declaration answerable? (D-90 gate 2; willingness is
     tested elsewhere.) Steps: drop a trailing answer hint, then PREFIX runs (<= 3
@@ -776,7 +875,10 @@ def question_frame(label_toks: list[str], classes: Iterable[DeclarationLabel],
     all in NOUN_CLASSES, so "Criminal record" or "Bankruptcy" is answered while
     "Non-compete agreement?" is not). Runs for every bool on a non-checkbox field
     except nda_willingness, including after the D-91 freedom inversion (F12)."""
-    toks = _strip_frame_prefix(_strip_answer_hint(list(label_toks)))
+    from .resolve import bool_shaped                 # resolve imports this module
+
+    yes_no = f.fit_type in (FieldType.DROPDOWN, FieldType.RADIO) and bool_shaped(f)
+    toks = _strip_frame_prefix(_strip_trailers(list(label_toks), yes_no))   # D-171: a details tail only on Yes/No
     lead = _frame_lead(toks)
     if lead is None:                       # D-169b: "can you [please] confirm ..." - a modal only before a LEAD
         for modal in _FRAME_MODALS:
@@ -797,7 +899,8 @@ def question_frame(label_toks: list[str], classes: Iterable[DeclarationLabel],
                 or any(_has_run(toks, r) for r in _STATUS_RUNS) or _status_tail(toks, classes)
                 or (lead and any(tuple(toks[:len(r)]) == r for r in _FRAME_B_RUNS)))
     if shape_ab and (not classes or not classes <= _STATUS_CLASSES
-                     or _one_status_question(toks, classes, employer_names)):
+                     or _one_status_question(toks, classes, employer_names,
+                                             narrowing_ok=narrowing_ok)):
         return True                                              # D-170 for the status classes
     return _noun_phrase(toks, classes, f)
 
@@ -981,11 +1084,7 @@ def _freedom_inverts(label_norm: str, cls: Optional[DeclarationLabel]) -> bool:
     phrase the run does not govern: False (unknown, as D-90)."""
     if cls is None or cls not in _PHRASE_TOKENS:
         return False
-    toks = label_norm.split()
-    for hint in ANSWER_HINTS:
-        if len(toks) > len(hint) and tuple(toks[-len(hint):]) == hint:
-            toks = toks[:-len(hint)]
-            break
+    toks = _strip_trailers(label_norm.split(), True)
     toks = strip_ns_exclusions(toks)
     spans = _spans(toks, _PHRASE_TOKENS[cls])
     for i, j in _spans(toks, _FREEDOM_RUNS):
@@ -1018,6 +1117,7 @@ def _bool_answer(f: FormField, name: str, value: Optional[bool], note: str = "",
         return _ended(f, name, gate)
     if value is None:
         return _ended(f, name, "no answer in the profile")
+    narrowing_ok = value is False                    # D-171: taken before any D-91 inversion
     label_norm = norm_label(f.label)
     toks = label_norm.split()
     if f.type is FieldType.CHECKBOX:
@@ -1031,7 +1131,8 @@ def _bool_answer(f: FormField, name: str, value: Optional[bool], note: str = "",
             return _ended(f, name, "checkbox statement not recognised")
         if cls is not L.NDA_WILLINGNESS and cls in _STATUS_CLASSES and not _one_status_question(
                 _strip_attest_lead(toks), {cls}, employer_names,
-                extra_runs=_NEGATIVE_ATTESTATIONS + _POSITIVE_ATTESTATIONS):
+                extra_runs=_NEGATIVE_ATTESTATIONS + _POSITIVE_ATTESTATIONS,
+                narrowing_ok=narrowing_ok):
             return _ended(f, name, "checkbox statement not recognised")   # D-170 rule 5
         tick = (not value) if polarity is False else bool(value)
         if not tick and f.required:
@@ -1043,7 +1144,8 @@ def _bool_answer(f: FormField, name: str, value: Optional[bool], note: str = "",
                 return _ended(f, name, "negated declaration question")
             value = not value
         if cls is not L.NDA_WILLINGNESS and not question_frame(
-                toks, classes or ({cls} if cls else ()), f, employer_names):   # D-164 (F12): after a freedom inversion too
+                toks, classes or ({cls} if cls else ()), f, employer_names,
+                narrowing_ok=narrowing_ok):   # D-164 (F12): after a freedom inversion too
             return _ended(f, name, "not a status question")
         fit = fit_bool(f, value)
     if fit is None:
