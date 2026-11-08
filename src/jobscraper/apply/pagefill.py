@@ -348,8 +348,10 @@ def _delete_entries(run: _Run, decision: Any, fields: Sequence[PageField],
     """E3/E6, verified (review F2). Bottom-up clicks on each group's delete control, then
     `run.sections` is re-read. A delete counts only when the group was clicked and its own
     controls are gone from the page (per group, review R3 F12: a swallowed click on one
-    group never demotes another group's real delete); the section's entry count is only a
-    cross-check, logged. A group that is still there (or
+    group never demotes another group's real delete). The section's entry count is the
+    independent second signal (review Q-80 M1): if the section still has more entries than
+    `initial - confirmed`, the keys alone can't be trusted (a site may re-create list items
+    without the reader's mark) and every group of that section is unconfirmed. A group that is still there (or
     had no delete control) is never skipped: its required fields stop the page (unknown,
     as E3's "no delete control" rule), its optional ones are reset (G9) or, when that
     can't be done, flagged PREFILLED unverified. Returns (stop keys, handled keys)."""
@@ -365,14 +367,19 @@ def _delete_entries(run: _Run, decision: Any, fields: Sequence[PageField],
     left = {s.section: len(s.entries) for s in run.sections}
     stop: list[str] = []
     handled: set = set()
-    confirmed: dict[str, int] = {}
+    alive_of = {gid: {pf.field.key for pf in fields if pf.group == gid and _present(run, pf)}
+                for gid in decision.deletes}
+    gone = {gid for gid in decision.deletes if clicked.get(gid) and not alive_of[gid]}
+    for section in {g.rpartition("#")[0] for g in gone}:             # M1: the count must agree
+        mine = {g for g in gone if g.rpartition("#")[0] == section}
+        if left.get(section, 0) > initial.get(section, 0) - len(mine):
+            run.services.log(f"E3: {section} has more entries than the confirmed deletes explain")
+            gone -= mine
     for gid in decision.deletes:
         members = [pf for pf in fields if pf.group == gid]
-        alive = {pf.field.key for pf in members if _present(run, pf)}
-        section = gid.rpartition("#")[0]
-        if clicked.get(gid) and not alive:
+        alive = alive_of[gid]
+        if gid in gone:
             run.dead |= {pf.field.key for pf in members}             # gone: never inherited (F5/F6)
-            confirmed[section] = confirmed.get(section, 0) + 1
             continue
         run.services.log(f"E3: delete not confirmed for {gid}")
         for pf in members:
@@ -395,9 +402,6 @@ def _delete_entries(run: _Run, decision: Any, fields: Sequence[PageField],
                                             tier=AnswerTier.NONE, source=pf.origin.value,
                                             status=AnswerStatus.PREFILLED, confidence=G.CONF_UNVERIFIED,
                                             note=G.UNVERIFIED_NOTE)
-    for section, n in confirmed.items():                             # cross-check only (R3 F12)
-        if left.get(section, 0) > initial.get(section, 0) - n:
-            run.services.log(f"E3: {section} has more entries than the confirmed deletes explain")
     return tuple(stop), handled
 
 
