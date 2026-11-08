@@ -1899,7 +1899,7 @@ def protected_strings(profile: dict) -> list[str]:
     return sorted(vals, key=lambda s: (-len(s), s))
 
 
-_MONTHS = ("January", "February", "March", "April", "May", "June", "July", "August",
+_MONTH_LABELS = ("January", "February", "March", "April", "May", "June", "July", "August",
            "September", "October", "November", "December")
 
 
@@ -1912,11 +1912,11 @@ def date_forms(iso: str) -> list[str]:
         if not m2 or not 1 <= int(m2.group(2)) <= 12:
             return [iso] if iso else []
         y, mo = m2.groups()
-        return [iso, f"{mo}/{y}", f"{int(mo)}/{y}", f"{_MONTHS[int(mo) - 1]} {y}"]
+        return [iso, f"{mo}/{y}", f"{int(mo)}/{y}", f"{_MONTH_LABELS[int(mo) - 1]} {y}"]
     y, mo, d = m.groups()
     if not 1 <= int(mo) <= 12:
         return [iso]
-    name, mon = _MONTHS[int(mo) - 1], _MONTHS[int(mo) - 1][:3]
+    name, mon = _MONTH_LABELS[int(mo) - 1], _MONTH_LABELS[int(mo) - 1][:3]
     out = [iso, f"{d}/{mo}/{y}", f"{int(d)}/{int(mo)}/{y}", f"{mo}/{d}/{y}",
            f"{int(mo)}/{int(d)}/{y}", f"{d}-{mo}-{y}", f"{d}.{mo}.{y}",
            f"{y}/{mo}/{d}", f"{y}.{mo}.{d}", f"{y}{mo}{d}"]
