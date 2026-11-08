@@ -1,0 +1,248 @@
+<!doctype html>
+<!--
+  Local stand-in for a Greenhouse job-board application form (tests only; no network).
+  Mirrors gh_dataiku.json (board "dataiku", job 6237419004) as the S-3 spike saw it:
+    - every schema field is addressable as [id="<field name>"] (numeric ids too);
+    - multi_value_single_select fields are react-select look-alikes: click the input,
+      type, pick a `.select__menu [role="option"]`; the value shows in `.select__single-value`
+      inside the nearest `.select__control`. Enter does nothing (the design forbids it);
+    - a hidden intl-tel-input country list of [role="option"] items OUTSIDE any .select__menu
+      (the "bare [role=option]" gotcha), #country = phone country react-select, #phone = tel;
+    - #resume / #cover_letter are hidden file inputs; the chosen file name appears on the page;
+    - GDPR checkboxes gdpr_processing_consent_given_1 / gdpr_retention_consent_given_1;
+    - #candidate-location react-select (location_questions);
+    - an INVISIBLE reCAPTCHA Enterprise anchor iframe (size=invisible) and a .grecaptcha-badge,
+      which classify() must NOT treat as a challenge.
+  Query switches (read by the inline script):
+    ?after=inline   (default) Submit shows #application-confirmation "Thank you for applying"
+    ?after=navigate Submit goes to confirm.html
+    ?after=code     Submit shows "enter the security code we emailed you" + a new text input
+    ?after=errors   Submit shows a server-side error on #email (validation_error path)
+  Test hooks: document.body.dataset.submitCount counts Submit clicks that passed validation
+  (a duplicate-submission oracle asserts it is exactly 1); window.__submitted holds the values.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Job Application for Senior Manager, Global Benefits at Dataiku</title>
+<style>
+  body { font-family: sans-serif; max-width: 760px; margin: 24px auto; }
+  .field { margin: 14px 0; }
+  label { display: block; font-weight: 600; }
+  .select { position: relative; }
+  .select__control { border: 1px solid #888; min-height: 32px; display: flex; align-items: center; padding: 0 6px; }
+  .select__single-value { margin-right: 6px; }
+  .select__input { border: 0; outline: 0; flex: 1; min-width: 40px; }
+  .select__menu { position: absolute; z-index: 5; background: #fff; border: 1px solid #888; left: 0; right: 0; }
+  .select__option { padding: 4px 8px; cursor: pointer; }
+  .select__option:hover { background: #eef; }
+  .helper-text--error { color: #b00; font-size: 0.9em; }
+  .iti__country-list { display: none; }
+  .file-name { font-style: italic; }
+  .grecaptcha-badge { position: fixed; bottom: 14px; right: -186px; width: 256px; height: 60px; visibility: hidden; }
+  #application-confirmation { display: none; border: 2px solid #2a2; padding: 12px; }
+  #security-code-block { display: none; }
+</style>
+</head>
+<body>
+<h1>Senior Manager, Global Benefits</h1>
+<p>Dataiku · France, Remote; United Kingdom, Remote</p>
+
+<form id="application-form" novalidate>
+  <div class="field"><label for="first_name">First Name *</label><input id="first_name" type="text" aria-required="true"></div>
+  <div class="field" id="pet_wrap" style="display:none"><label for="pet_name">Name of your first pet *</label><input id="pet_name" type="text" aria-required="true"></div>
+  <script>document.addEventListener("DOMContentLoaded", function () { document.getElementById("first_name").addEventListener("input", function () { document.getElementById("pet_wrap").style.display = ""; }); });</script>
+  <div class="field"><label for="last_name">Last Name *</label><input id="last_name" type="text" aria-required="true"></div>
+  <div class="field"><label for="preferred_name">Preferred First Name</label><input id="preferred_name" type="text"></div>
+  <div class="field"><label for="email">Email *</label><input id="email" type="text" aria-required="true"></div>
+
+  <div class="field">
+    <label for="country">Country</label>
+    <div class="select" data-options='["Singapore +65","United Kingdom +44","France +33","United States +1"]'>
+      <div class="select__control"><span class="select__single-value"></span><input id="country" class="select__input" role="combobox" autocomplete="off" aria-expanded="false"></div>
+    </div>
+    <ul class="iti__country-list" aria-hidden="true">
+      <li role="option" data-dial="+65">Singapore</li><li role="option" data-dial="+44">United Kingdom</li>
+      <li role="option" data-dial="+33">France</li><li role="option" data-dial="+1">United States</li>
+      <li role="option" data-dial="+60">Malaysia</li>
+    </ul>
+  </div>
+  <div class="field"><label for="phone">Phone *</label><input id="phone" type="tel" aria-required="true"></div>
+
+  <div class="field"><label for="candidate-location">Location (City) *</label>
+    <div class="select" data-options='["Singapore, Singapore","Paris, Île-de-France, France","London, England, United Kingdom"]' data-required="1">
+      <div class="select__control"><span class="select__single-value"></span><input id="candidate-location" class="select__input" role="combobox" autocomplete="off" aria-expanded="false"></div>
+    </div>
+  </div>
+
+  <div class="field"><label>Resume/CV *</label>
+    <input id="resume" type="file" style="display:none" aria-required="true"><button type="button" onclick="document.getElementById('resume').click()">Attach</button>
+    <span class="file-name" data-for="resume"></span>
+    <label for="resume_text">or enter manually</label><textarea id="resume_text"></textarea></div>
+  <div class="field"><label>Cover Letter</label>
+    <input id="cover_letter" type="file" style="display:none"><span class="file-name" data-for="cover_letter"></span>
+    <label for="cover_letter_text">or enter manually</label><textarea id="cover_letter_text"></textarea></div>
+
+  <div class="field"><label for="question_20424893004">Are you currently an employee at Dataiku? *</label>
+    <div class="select" data-options='["Yes","No"]' data-required="1">
+      <div class="select__control"><span class="select__single-value"></span><input id="question_20424893004" class="select__input" role="combobox" autocomplete="off" aria-expanded="false"></div>
+    </div><input class="remix-css-requiredInput" tabindex="-1" aria-hidden="true" style="opacity:0;height:0"></div>
+  <div class="field"><label for="question_20424894004">Would you require a visa sponsorship or visa transfer for this opportunity? *</label>
+    <div class="select" data-options='["Yes","No"]' data-required="1">
+      <div class="select__control"><span class="select__single-value"></span><input id="question_20424894004" class="select__input" role="combobox" autocomplete="off" aria-expanded="false"></div>
+    </div><input class="remix-css-requiredInput" tabindex="-1" aria-hidden="true" style="opacity:0;height:0"></div>
+  <div class="field"><label for="question_20424895004">What are your salary expectations? *</label><input id="question_20424895004" type="text" aria-required="true"></div>
+  <div class="field"><label for="question_20424896004">Are you located in or willing to relocate to this job posting's city? *</label><input id="question_20424896004" type="text" aria-required="true"></div>
+  <div class="field"><label for="question_20424897004">Where did you see or hear about this job? *</label>
+    <div class="select" data-options='["A recruiter from Dataiku contacted me","Someone I know shared the job with me","Dataiku Career Site","LinkedIn","myGwork","50inTech","JobTeaser","Welcome to the Jungle","Other job board","Other"]' data-required="1">
+      <div class="select__control"><span class="select__single-value"></span><input id="question_20424897004" class="select__input" role="combobox" autocomplete="off" aria-expanded="false"></div>
+    </div></div>
+  <div class="field"><label for="question_20424898004">Current Company</label><input id="question_20424898004" type="text"></div>
+  <div class="field"><label for="question_20424899004">LinkedIn URL</label><input id="question_20424899004" type="text"></div>
+  <div class="field"><label for="question_20424900004">Twitter URL</label><input id="question_20424900004" type="text"></div>
+  <div class="field"><label for="question_20424901004">Github URL</label><input id="question_20424901004" type="text"></div>
+  <div class="field"><label for="question_20424902004">Other URL</label><input id="question_20424902004" type="text"></div>
+
+  <h3>Demographic Questionnaire (Non USA locations)</h3>
+  <div class="field"><label for="4000563004">Gender *</label>
+    <div class="select" data-options='["Male","Female","Non-Binary","I don&#39;t wish to answer"]' data-required="1">
+      <div class="select__control"><span class="select__single-value"></span><input id="4000563004" class="select__input" role="combobox" autocomplete="off" aria-expanded="false"></div>
+    </div></div>
+
+  <div class="field">
+    <input id="gdpr_processing_consent_given_1" name="gdpr_processing_consent_given" type="checkbox" value="1" aria-required="true">
+    <label for="gdpr_processing_consent_given_1" style="display:inline">I consent to Dataiku processing my personal data for this application. *</label>
+  </div>
+  <div class="field">
+    <input id="gdpr_retention_consent_given_1" name="gdpr_retention_consent_given" type="checkbox" value="1" aria-required="true">
+    <label for="gdpr_retention_consent_given_1" style="display:inline">I consent to Dataiku keeping my data for 720 days for future roles. *</label>
+  </div>
+
+  <div id="security-code-block">
+    <p>To finish, enter the security code we emailed you.</p>
+    <input id="security_code" type="text" autocomplete="one-time-code">
+  </div>
+
+  <button type="submit" id="submit-app">Submit application</button>
+</form>
+
+<div id="application-confirmation" role="status">
+  <h2>Thank you for applying.</h2>
+  <p>Your application has been received.</p>
+</div>
+
+<!-- Invisible reCAPTCHA Enterprise, as on every Greenhouse board (S-3). Local stub, no network. -->
+<iframe title="reCAPTCHA" src="recaptcha/anchor.html?ar=1&amp;k=test-site-key&amp;size=invisible" width="256" height="60"
+        style="position:absolute;left:-10000px;top:0" tabindex="-1"></iframe>
+<div class="grecaptcha-badge" data-style="bottomright"></div>
+
+<script>
+(function () {
+  var params = new URLSearchParams(location.search);
+  var after = params.get('after') || 'inline';
+  var norm = function (s) { return (s || '').toLowerCase().replace(/\s+/g, ' ').trim(); };
+
+  // react-select look-alike
+  document.querySelectorAll('.select').forEach(function (sel) {
+    var options = JSON.parse(sel.getAttribute('data-options'));
+    var input = sel.querySelector('.select__input');
+    var single = sel.querySelector('.select__single-value');
+    var menu = null;
+    function close() { if (menu) { menu.remove(); menu = null; } input.setAttribute('aria-expanded', 'false'); }
+    function open() {
+      close();
+      var q = norm(input.value);
+      menu = document.createElement('div');
+      menu.className = 'select__menu';
+      menu.setAttribute('role', 'listbox');
+      options.filter(function (o) { return !q || norm(o).indexOf(q) !== -1; }).forEach(function (o) {
+        var d = document.createElement('div');
+        d.className = 'select__option';
+        d.setAttribute('role', 'option');
+        d.textContent = o;
+        d.addEventListener('mousedown', function (e) {
+          e.preventDefault();
+          single.textContent = o;
+          sel.dataset.value = o;
+          input.value = '';
+          input.removeAttribute('aria-invalid');
+          var err = sel.parentNode.querySelector('.helper-text--error'); if (err) err.remove();
+          close();
+        });
+        menu.appendChild(d);
+      });
+      sel.appendChild(menu);
+      input.setAttribute('aria-expanded', 'true');
+    }
+    sel.querySelector('.select__control').addEventListener('mousedown', function () { setTimeout(open, 0); });
+    input.addEventListener('focus', open);
+    input.addEventListener('input', open);
+    input.addEventListener('blur', function () { setTimeout(close, 150); });
+    input.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); } if (e.key === 'Escape') { close(); } });   // react-select closes its menu on Escape
+  });
+
+  // file inputs show the chosen file name
+  ['resume', 'cover_letter'].forEach(function (id) {
+    var el = document.getElementById(id);
+    el.addEventListener('change', function () {
+      var span = document.querySelector('.file-name[data-for="' + id + '"]');
+      span.textContent = el.files.length ? el.files[0].name : '';
+    });
+  });
+
+  function markError(el, text) {
+    el.setAttribute('aria-invalid', 'true');
+    var box = el.closest('.field');
+    if (box && !box.querySelector('.helper-text--error')) {
+      var p = document.createElement('p');
+      p.className = 'helper-text--error';
+      p.textContent = text || 'This field is required';
+      box.appendChild(p);
+    }
+  }
+
+  function values() {
+    var v = {};
+    document.querySelectorAll('#application-form input[id], #application-form textarea[id]').forEach(function (el) {
+      if (el.type === 'file') v[el.id] = el.files.length ? el.files[0].name : '';
+      else if (el.type === 'checkbox') v[el.id] = el.checked;
+      else if (!el.classList.contains('select__input')) v[el.id] = el.value;
+    });
+    document.querySelectorAll('.select').forEach(function (sel) {
+      v[sel.querySelector('.select__input').id] = sel.dataset.value || '';
+    });
+    return v;
+  }
+
+  var codeAsked = false;
+  document.body.dataset.submitCount = '0';
+  document.getElementById('application-form').addEventListener('submit', function (e) {
+    e.preventDefault();
+    document.querySelectorAll('.helper-text--error').forEach(function (n) { n.remove(); });
+    var bad = 0;
+    document.querySelectorAll('#application-form input[aria-required="true"]').forEach(function (el) {
+      var empty = el.type === 'checkbox' ? !el.checked
+                : el.type === 'file' ? (!el.files.length && !document.getElementById('resume_text').value)
+                : !el.value.trim();
+      if (empty) { markError(el); bad++; }
+    });
+    document.querySelectorAll('.select[data-required="1"]').forEach(function (sel) {
+      if (!sel.dataset.value) { markError(sel.querySelector('.select__input')); bad++; }
+    });
+    if (bad) return;
+    if (after === 'errors') { markError(document.getElementById('email'), 'Please enter a valid email address'); return; }
+    if (after === 'code' && !codeAsked) {
+      codeAsked = true;
+      document.getElementById('security-code-block').style.display = 'block';
+      return;
+    }
+    document.body.dataset.submitCount = String(Number(document.body.dataset.submitCount) + 1);
+    window.__submitted = values();
+    if (after === 'navigate') { location.href = 'confirm.html'; return; }
+    document.getElementById('application-form').style.display = 'none';
+    document.getElementById('application-confirmation').style.display = 'block';
+  });
+})();
+</script>
+</body>
+</html>
