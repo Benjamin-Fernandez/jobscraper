@@ -648,12 +648,21 @@ def _required_misses(run: _Run) -> tuple[str, ...]:
 
 # ------------------------------------------------------------------ step 13 and the outcome
 
+def _job_id(run: _Run) -> str:
+    """The cache's job key. A job row (`store.job_for_apply`) carries `job_id`, not `id`:
+    keying on `id` made every job share the key "" and replay each other's decisions
+    (N6a review note; WP-N6b)."""
+    job = run.ctx.job or {}
+    return str(job.get("job_id") or job.get("id") or "")
+
+
 def _cached(run: _Run, fields: Sequence[PageField]) -> list[ModelDecision]:
     """Replayed decisions (via "cache:<via>"); a row whose cited facts changed is a miss."""
     if not run.cfg.get("cache", True) or not fields:
         return []
     sigs = {pf.field.key: run.sigs.get(pf.field.key, "") for pf in fields}
-    rows = run.services.cache_get(str(run.ctx.job.get("id", "")), [s for s in sigs.values() if s],
+    fields_by_key = {pf.field.key: pf for pf in fields}
+    rows = run.services.cache_get(_job_id(run), [s for s in sigs.values() if s],
                                   L.FILL_PROMPT_VERSION, run.services.model, run.inputs_hash) or {}
     out = []
     for key, sig in sigs.items():
@@ -668,14 +677,18 @@ def _cached(run: _Run, fields: Sequence[PageField]) -> list[ModelDecision]:
             source = FillSource(d.get("source", ""))
         except ValueError:
             continue
+        if source is FillSource.UNKNOWN and fields_by_key[key].field.required:
+            continue                                      # F13: never replay a required unknown
         out.append(ModelDecision(key, source, d.get("ref", ""), d.get("value"), d.get("evidence", ""),
                                  via=f"cache:{d.get('via', 'page')}"))
     return out
 
 
-def _cache_put(run: _Run) -> None:
-    """The latest fresh decision per field (no G5 or corrective replies; no value for a
-    fact decision: the program recomputes it, §13.3)."""
+def _cache_put(run: _Run, unknown: Sequence[str] = ()) -> None:
+    """The latest fresh decision per field (no G5 or corrective replies, no required `unknown` (F13);
+    no value for a fact decision: the program recomputes it, §13.3). `unknown`: the fields the
+    page stopped on (a required fact with no value, a required unknown): their decisions are
+    not stored, so the retry after the owner fills the fact asks the model again (F13)."""
     if not run.cfg.get("cache", True) or not run.fresh:
         return
     latest: dict[str, ModelDecision] = {}
@@ -685,6 +698,13 @@ def _cache_put(run: _Run) -> None:
         if d.via == "pick" and not d.value:
             latest.pop(d.field_key, None)                 # F8: no negative pick rows
             continue
+        pf = run.fields.get(d.field_key)
+        if d.field_key in unknown:
+            latest.pop(d.field_key, None)
+            continue
+        if d.source is FillSource.UNKNOWN and pf is not None and pf.field.required:
+            latest.pop(d.field_key, None)                 # R3 re-review F13: a required unknown (the
+            continue                                      # stop) is never stored: a retry asks again
         latest[d.field_key] = d
     rows = []
     for key, d in latest.items():
@@ -698,7 +718,7 @@ def _cache_put(run: _Run) -> None:
                      "decision": {"source": d.source.value, "ref": d.ref, "evidence": d.evidence,
                                   "value": d.value if keep_value else None, "via": d.via}})
     if rows:
-        run.services.cache_put(str(run.ctx.job.get("id", "")), rows)
+        run.services.cache_put(_job_id(run), rows)
 
 
 def _mark(run: _Run, key: str, origin: ValueOrigin) -> None:
@@ -712,7 +732,7 @@ def _outcome(run: _Run, *, unknown: Sequence[str] = ()) -> PageOutcome:
     # 13. the decision cache, on a finished page AND on a stop: the retry after the owner
     # answers the captured question replays every other decision (§13.3). Never on a
     # transport failure (`_transport`).
-    _cache_put(run)
+    _cache_put(run, unknown)
     answers = dict(run.answers)
     why = {**run.entry_failed, **run.failed}
     failed = [k for k in run.order if k in why and k not in unknown]
