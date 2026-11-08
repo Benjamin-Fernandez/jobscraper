@@ -137,6 +137,7 @@ def _place_spans(toks, classes, standing_cover):
 5. `negated_question` and `_freedom_inverts`: replace the inline ANSWER_HINTS loop with `toks = _strip_trailers(toks, True)`.
 6. `_bool_answer`: right after the `value is None` return, `narrowing_ok = value is False` (before any `value = not value`); pass `narrowing_ok=narrowing_ok` to the checkbox `_one_status_question` call (rule 5) and to `question_frame`.
 7. Update the D-170 comment block above `_STATUS_FILLER` to cite D-171. No other module changes; `locks` reaches all this through `answer()`.
+8. `tests/test_apply_declarations_d170.py`, `test_d170_rule3_a_piece_without_a_class_or_status_run_fails_even_with_listed_words`: change only the docstring, to "The second clause holds no class span and no status run, and after D-171 'Singapore' is not filler either, so rules 1 and 3 both refuse it." The assertion stays; it still passes.
 Verify: `python tests/run_tests.py -k declarations`, `-k apply_contracts`, `-k llm_fill`, `-k layering`, then the full suite.
 
 **D. Tester pins (new file `tests/test_apply_declarations_d171.py`, gated on `declarations:_place_spans`, same `_run` helper as the d170 file)** (59 rows)
@@ -201,7 +202,7 @@ Verify: `python tests/run_tests.py -k declarations`, `-k apply_contracts`, `-k l
 | 57 | Q-48 `F1_LABEL` (optional) | No, rule_id `conflict_audit_independence+non_compete` |
 | 58 | guard: `test_apply_declarations_d170.GUARD_ROWS` and every d170 / d164 / Q-48 / D-89 / D-90a / D-91 pin | unchanged (whole `-k declarations` green) |
 | 59 | guard: `Are you subject to a non-compete and are you in Singapore?` | unknown (now also by item 3) |
-Tester note: `test_d170_rule3_a_piece_without_a_class_or_status_run_fails_even_with_listed_words` keeps passing, but its docstring ("every word … is listed filler") is no longer true after item 3. Reword the docstring only.
+(The d170 docstring note moved to part C item 8, for the engineer.) Update 2026-11-08: A and B are pasted into the eng-Q83 worktree's `apply_design.md` (branch eng/Q-83-declarations), with a condensed oracle table; the blocker above is resolved.
 Open questions: none for the owner. Follow-up for the queue: classify the six non-declaration labels (item 2, "Not added").
 STATUS: open
 
