@@ -12,6 +12,7 @@
 import { computed, reactive, ref } from 'vue'
 import { fieldId, findItem, isEmptyValue, optionList } from '../applicantForm.js'
 import { plural } from '../format.js'
+import { privateBadge, privateSentence } from '../privacy.js'
 import FieldInput from './FieldInput.vue'
 
 const props = defineProps({
@@ -24,7 +25,8 @@ const props = defineProps({
 })
 const emit = defineEmits(['save', 'dismiss', 'reload', 'cancel'])
 
-const PRIVATE = 'Private: never sent to the AI'
+const PRIVATE = computed(() => privateBadge())
+const PRIVATE_SENTENCE = computed(() => privateSentence())
 const REASONS = {
   no_rule: 'Not in your profile',
   ungrounded: "The AI's answer couldn't be checked against your details",
@@ -136,7 +138,7 @@ function save() {
   <article class="q-card surface" :aria-labelledby="`${base}-title`" :data-key="group.key">
     <header class="q-head">
       <h3 :id="`${base}-title`" class="q-title">{{ group.title }}</h3>
-      <span v-if="group.sensitive" class="tag private">{{ PRIVATE }}</span>
+      <span v-if="group.sensitive" class="tag private" :title="PRIVATE_SENTENCE">{{ PRIVATE }}</span>
       <span v-if="reason && !answered" class="chip q-reason">{{ reason }}</span>
     </header>
     <p v-if="meta" class="q-meta muted">{{ meta }}</p>

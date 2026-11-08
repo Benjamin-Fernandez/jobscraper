@@ -143,17 +143,7 @@ def _template_entry(lst: str, e: Any) -> bool:
 
 def _form_item(path: str) -> tuple[Optional[applicant.FormItem], Optional[applicant.FormItem]]:
     """(FORM item, its entries sub-item or None) for a bare path."""
-    b = bare(path)
-    for g in applicant.FORM:
-        for it in g.items:
-            if it.kind == "entries" and b.startswith(it.path + "."):
-                rest = b[len(it.path) + 1:]
-                for s in it.sub:
-                    if s.path == rest:
-                        return it, s
-            elif it.path == b or b.startswith(it.path + "."):
-                return it, None
-    return None, None
+    return applicant.form_item(path)
 
 
 def _title(path: str) -> str:
@@ -341,17 +331,29 @@ def _standing_values(profile: dict, rctx: ResolveContext, today: str) -> dict[st
     }
 
 
+def _model_may_read(path: str) -> bool:
+    """D-105 / Q-74 §4: a private profile leaf the local model may be shown when
+    `rctx.model_sees_sensitive` is on: the paths `llm_extract(sensitive=True)` adds.
+    Never `extra` or a standing private fact (they stay "set"/"empty")."""
+    b = bare(path)
+    return any(b == p or b.startswith(p + ".") for p in applicant.LLM_ALLOW_SENSITIVE)
+
+
 def fact_catalogue(profile: dict, rctx: ResolveContext, *, today: str) -> list[Fact]:
     """Every fact the model may cite on this attempt, in the fixed order profile,
     extra, standing (§5.1). Pure and deterministic, so FACTS is byte-identical
-    across the calls of an attempt (TR-11)."""
+    across the calls of an attempt (TR-11). With `rctx.model_sees_sensitive` (D-105,
+    a local model) a private profile fact on the S allow-list carries its value, so
+    FACTS can show it; `private` keeps its meaning (G2d, G7, the audit)."""
     profile = applicant.normalise(profile or {})
+    reads = bool(getattr(rctx, "model_sees_sensitive", False))
     out: list[Fact] = []
     for path, value in _leaves(profile):
         private = not _visible(path)
         is_set = _is_set(value)
+        shown = is_set and (not private or (reads and _model_may_read(path)))
         out.append(Fact(ref=f"profile:{path}", title=_title(path),
-                        value="" if private or not is_set else _text(value),
+                        value=_text(value) if shown else "",
                         private=private, is_set=is_set, kind=_kind(path, value),
                         entry=_entry_of(path)))
     others = other_employers(rctx)
@@ -382,14 +384,18 @@ def listed(fact: Fact) -> bool:
     return fact.private or fact.is_set
 
 
-def facts_text(facts: Sequence[Fact]) -> str:
+def facts_text(facts: Sequence[Fact], *, show_private: bool = False) -> str:
     """The FACTS block: one line per listed fact, in catalogue order (§5.1, §6.2).
-    A private fact shows only whether it is set."""
+    A private fact shows only whether it is set; with `show_private` (D-105, a local
+    model) one that carries a value shows `private: <value>`. The model still cites
+    the ref with value "" and the program writes the value."""
     lines = []
     for f in facts:
         if not listed(f):
             continue
-        if f.private:
+        if f.private and show_private and f.value:
+            lines.append(f"{f.ref} | {f.title} | private: {f.value}")
+        elif f.private:
             lines.append(f"{f.ref} | {f.title} | private, {'set' if f.is_set else 'empty'}")
         else:
             lines.append(f"{f.ref} | {f.title} | {f.value}")
@@ -914,28 +920,8 @@ def check_entries(sections: Sequence[EntrySection], rctx: ResolveContext) -> Non
 # Privacy (§6.5), clock and cache keys (§13.3)
 # --------------------------------------------------------------------------
 
-_MONTHS = ("January", "February", "March", "April", "May", "June", "July", "August",
-           "September", "October", "November", "December")
-
-
 def _date_forms(iso: str) -> list[str]:
-    m = re.match(r"^(\d{4})-(\d{2})-(\d{2})$", iso or "")
-    if not m:
-        m2 = re.match(r"^(\d{4})-(\d{2})$", iso or "")
-        if not m2:
-            return [iso] if iso else []
-        y, mo = m2.groups()
-        return [iso, f"{mo}/{y}", f"{int(mo)}/{y}", f"{_MONTHS[int(mo) - 1]} {y}"]
-    y, mo, d = m.groups()
-    name, mon = _MONTHS[int(mo) - 1], _MONTHS[int(mo) - 1][:3]
-    out = [iso, f"{d}/{mo}/{y}", f"{int(d)}/{int(mo)}/{y}", f"{mo}/{d}/{y}",
-           f"{int(mo)}/{int(d)}/{y}", f"{d}-{mo}-{y}", f"{d}.{mo}.{y}",
-           f"{y}/{mo}/{d}", f"{y}.{mo}.{d}", f"{y}{mo}{d}"]
-    for dd in dict.fromkeys((str(int(d)), d)):       # "5" and "05"
-        for mm in (name, mon):                         # "March" and "Mar"
-            out += [f"{dd} {mm} {y}", f"{mm} {dd}, {y}", f"{mm} {dd} {y}",
-                    f"{dd}-{mm}-{y}"]
-    return list(dict.fromkeys(out))
+    return applicant.date_forms(iso)           # moved to applicant (Q-74 R2), one copy
 
 
 def s_values(profile: dict, account_email: str) -> list[str]:
@@ -1035,10 +1021,13 @@ def field_sig(field: PageField, qualified_label: str, *, key: bytes) -> str:
     return hmac.new(key, msg.encode("utf-8"), hashlib.sha256).hexdigest()[:16]
 
 
-def inputs_hash(redacted_resume: str, jd_text: str) -> str:
+def inputs_hash(redacted_resume: str, jd_text: str, *, sees_private: bool = False) -> str:
     """sha256(redacted resume text + JD text)[:16] (§13.3): a cache row is reused only
     for the same resume and posting."""
-    return _sha16((redacted_resume or "") + "\n\x1e\n" + (jd_text or ""))
+    # `sees_private` (D-105, the effective switch) is folded in: flipping it re-runs cached
+    # fills once, because the prompt text changed.
+    return _sha16((redacted_resume or "") + "\n\x1e\n" + (jd_text or "")
+                  + ("\n\x1e\x1dprivate-visible" if sees_private else ""))
 
 
 def facts_used_hash(refs: Iterable[str], rctx: ResolveContext, *, today: str = "") -> str:

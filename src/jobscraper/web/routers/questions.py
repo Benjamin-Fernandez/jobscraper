@@ -33,7 +33,8 @@ from jobscraper.config import Config
 from jobscraper.store import utcnow
 from jobscraper.web.deps import get_config, get_jobs, open_store
 from jobscraper.web.jobs import JobBusy
-from jobscraper.web.routers.applicant import PROFILE_WRITE_LOCK, invalid, load_for_write
+from jobscraper.web.routers.applicant import (PROFILE_WRITE_LOCK, invalid, load_for_write,
+                                              model_sees_private)
 
 router = APIRouter(tags=["questions"])
 
@@ -116,6 +117,8 @@ def list_questions(request: Request, status: str = "open",
         "waiting": [{k: c[k] for k in ("job_id", "company", "title", "open")}
                     for c in cands if c["open"] > 0],
         "busy": _busy(jobs),
+        # D-105: the effective switch; the Private tag's wording follows it.
+        "model_sees_private": model_sees_private(cfg),
     }
 
 

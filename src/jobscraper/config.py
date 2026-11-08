@@ -79,7 +79,8 @@ class ApplyMailConfig:
 @dataclass(frozen=True)
 class LlmFillConfig:
     """`apply.llm_fill` (llm_fill_design §13.4, D-78): the local model that fills
-    every page. Nothing here is personal; prompts never hold S values."""
+    every page. Nothing here is personal; prompts never hold S values unless D-105
+    is in effect (`ApplyConfig.model_sees_sensitive` on and a local backend)."""
     num_ctx: int = 32768
     page_timeout_s: int = 120               # one model call
     max_fields_per_call: int = 20           # chunk size outside repeated entries (§6.1)
@@ -118,6 +119,10 @@ class ApplyConfig:
     max_wizard_steps: int = 15
     llm_text_temperature: float = 0.3
     fill: str = "llm"                       # D-78: llm | rules (the pre-D-78 path, removed by WP-C1)
+    # D-105 (q74_model_sees_sensitive.md §1, ADR-0008): the local model may read private
+    # (S) profile values. Takes effect only with a local backend (backends.is_local);
+    # S values are never logged and code-decided answers stay code-decided either way.
+    model_sees_sensitive: bool = False
     llm_fill: LlmFillConfig = LlmFillConfig()
     mail: ApplyMailConfig = ApplyMailConfig()
     # D-70 §11.5: the mailbox for contact.backup_email; host "" = the same mailbox as `mail`.

@@ -10,7 +10,7 @@
 - Wave 3 = Q-75 lanes I+J (local times, Inbox shortcuts + ? sheet, page polish), Q-76 application detail (JobDetail + auto-apply attempts on rows), Q-44/Q-73 (resume summary card, log under Details, "Update your application details" from the resume; D-106 dates). Verified: Python 1323/1323, vitest 623 + 1 expected fail, smoke 8774 on a DB copy (17/17 GET, all tabs, no console errors), browser pass incl. 390px and a Q-44 save on a scratch applicant file.
 - Owner to do: restart the live app; Profile → Resume and titles → "Re-derive profile from the stored resume" to get the resume-to-details offer (proposals appear after a profile job).
 - Kept: worktree `int-Q-70-ux` holds the owner's preview entries in its gitignored data/; delete only with the owner.
-- Q-74 (model may see private fields, D-105/D-107/D-108/D-109): NOT merged. eng/Q-74-model-sees-sensitive e9d54bb (worktree eng-q74) has the fix rounds + R1/R2/Q-77 + all §4 llm_fill hooks, full suite 1313/1314 (the D-109 pin being rewritten). Pending: tester (test/Q-74-pins, hook pins a–d, vitest), reviewer re-review 2 (appends to docs/reviews/Q-74.md); then merge, bundle, smoke, push.
+- Q-74 (local AI may read private profile fields, D-105, D-107..D-110; Q-77 folded in): MERGED 2026-11-08 (1b4143b, bundle 2045f06, pushed). Reviews in `docs/reviews/Q-74.md` (review, re-review, re-review 2 → MERGE). Verified: Python 1443/1443, vitest 635 + 1 expected fail, smoke 8774 (17/17 GET, 32/32 assets, doctor privacy line on). Live at next launch: protected values (race, religion, DOB, residency, NS, gender, declarations) are read but never decide an AI answer; they wait as Private questions. Follow-up Q-79 (body_llm pin).
 - Follow-ups: Q-78 (Q-44 skills row as chips with "and N more"; Runs `plural()` lacks thousands separator, pinned `it.fails`; browser-only checks G41/G17/G38/G31/N18). Scope hook path is relative (agents keep cwd at the worktree root).
 
 ## M20: Q-35 lanes M + R + Q-48 (7ba7597, D-162) and WP-N6a (6001452, D-168) MERGED into `personal`, pushed
@@ -20,7 +20,7 @@
 
 ## Where we are
 - M19 DONE. M20: D-78 LLM form filler built through lanes M/N/R + declarations; Workday still stops as `unsupported_ats` live until the gate. Dry-run audits are read row by row before any real submit (D-83).
-- Wave 3 is merged (129e8ef). Q-74 (llm_fill hooks: facts_text, field_view, recheck_entry, pick_option redaction, G3 guards, fill-cache key) merges after its pins + re-review 2. Agreed: Q-80 waits for Q-74.
+- Wave 3 (129e8ef) and Q-74 (2045f06) are merged; Q-80/N6b may proceed.
 
 ## Next 1–3 actions
 1. After Q-74 lands (jobscraper-07 merges personal into int/Q-74 and resolves the resolve_ctx hunk): Q-80 (R3 F12-F14, Q-48 F12/F14, D-164 question_frame, N6a F3-F7) with tester pins.
