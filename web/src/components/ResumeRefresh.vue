@@ -98,13 +98,20 @@ function label(c) {
 // The remove row's note repeats its label; the others' notes say something new.
 const noteOf = c => (c.op === 'remove' ? '' : c.note || '')
 const listName = c => (c.list === 'experience' ? 'Experience' : 'Education')
+// The row's sentence is the checkbox label; the skills themselves follow as chips
+// (the first 12, then "and N more"), like the summary card, so a long list is not
+// one very long line.
+const SKILL_CHIPS = 12
+const allSkills = ref(false)
+const addSkills = computed(() => plan.value?.skills?.add ?? [])
+const shownSkills = computed(() => (allSkills.value ? addSkills.value : addSkills.value.slice(0, SKILL_CHIPS)))
+const moreSkills = computed(() => Math.max(0, addSkills.value.length - SKILL_CHIPS))
 const skillsText = computed(() => {
-  const add = plan.value?.skills?.add ?? []
-  const n = add.length
+  const n = addSkills.value.length
   const what = `${n} ${n === 1 ? 'skill' : 'skills'} from your resume`
   return skillChange.value?.op === 'replace'
-    ? `Replace the example skills with ${what}: ${add.join(', ')}`
-    : `Add ${what}: ${add.join(', ')}`
+    ? `Replace the example skills with ${what}:`
+    : `Add ${what}:`
 })
 
 function notNow() {
@@ -182,6 +189,12 @@ async function save() {
             <input v-model="ticked[skillChange.id]" type="checkbox" class="rr-check" :data-id="skillChange.id">
             <span class="rr-text"><span class="rr-entry">{{ skillsText }}</span></span>
           </label>
+          <ul v-if="addSkills.length" class="rr-chips" aria-label="Skills from your resume">
+            <li v-for="sk in shownSkills" :key="sk">{{ sk }}</li>
+          </ul>
+          <button v-if="moreSkills" type="button" class="link rr-more-skills" :aria-expanded="allSkills" @click="allSkills = !allSkills">
+            {{ allSkills ? 'Show fewer' : `and ${moreSkills} more` }}
+          </button>
         </li>
         <li v-for="c in kept" :key="c.id" class="rr-row rr-kept" data-op="kept">
           <span class="rr-text">
@@ -231,6 +244,13 @@ async function save() {
 .rr-arrow { flex-basis: 100%; color: var(--muted); }
 .rr-before { text-decoration: line-through; color: var(--text-2); }
 .rr-note { font-size: var(--text-xs); }
+.rr-chips, .rr-more-skills { margin-left: calc(1rem + var(--space-2)); }
+.rr-chips { list-style: none; padding: 0; margin-top: var(--space-1); margin-bottom: 0; display: flex; flex-wrap: wrap; gap: var(--space-1); }
+.rr-chips li {
+  font-family: var(--mono); font-size: var(--text-xs);
+  background: var(--surface-2); border-radius: var(--radius-sm); padding: 0.15rem var(--space-2);
+}
+.rr-more-skills { margin-top: var(--space-1); padding: 0; font-size: var(--text-sm); }
 .rr-kept .rr-text { padding-left: calc(1rem + var(--space-2)); }
 .rr-details { margin-top: var(--space-3); font-size: var(--text-sm); }
 .rr-buttons { display: flex; flex-wrap: wrap; gap: var(--space-2); margin-top: var(--space-3); }
