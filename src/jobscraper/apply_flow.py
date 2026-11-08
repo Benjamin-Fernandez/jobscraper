@@ -1091,7 +1091,7 @@ class _Run:
         the pre-D-78 body; only the middle differs."""
         acfg = self.acfg
         ctx = self.context(at, job, nav, tenant, resume_path)
-        rctx = self.resolve_ctx(job, tenant, nav, resume_path)
+        rctx = self.resolve_ctx(job, tenant, nav, resume_path, attempt_id=at.id)
         self.store.update_attempt(at.id, plan_source="page")
         nav.precheck(ctx)                                 # POSTING_CLOSED before the model or Edge
         self.check_deadline(ctx)
