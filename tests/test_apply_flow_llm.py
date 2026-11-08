@@ -18,8 +18,8 @@ test_apply_flow_n6a.py.
   - replay smoke: the 7 `wd_a` steps -> ready_to_submit, one audit row per field per step,
     data-submit-count=0, prompts pass `assert_no_secrets`.
 
-Still gated for WP-N6b (the cache and the pre-Submit scan are stubs/absent in N6a; build plan
-N6b "Done when: all T4 flow oracles pass (cache replay, pre-Submit scan)"):
+Gated for WP-N6b, written in test_apply_flow_n6b.py (build plan N6b "Done when: all T4 flow
+oracles pass (cache replay, pre-Submit scan)"):
   - cache replay: zero model calls on a retry, a changed cited fact -> a miss (LF §13.3, TR-2);
   - Greenhouse/review pre-Submit scan stops an empty required field (`validation_error`, no click)
     and the review text check (resume file name must appear).
@@ -393,8 +393,10 @@ def test_replay_wd_a_dry_run_reaches_ready_to_submit():
 @needs(*N6B_GATE)
 def test_n6b_the_pre_submit_scan_stops_an_empty_required_field():
     """LF §8 "Before Submit (H7)": `page.scan_required` over the whole form -> any hit ->
-    `validation_error`, nothing sent. Written with WP-N6b."""
-    raise AssertionError("WP-N6b landed: write the pre-Submit scan oracle (validation_error, no click)")
+    `validation_error`, nothing sent. The oracles live in test_apply_flow_n6b.py (b); this one
+    runs the hit-stops-before-Submit case under the T4 file's name."""
+    import test_apply_flow_n6b as N
+    N.test_b_a_required_field_left_empty_at_review_stops_before_submit_in_both_modes()
 
 
 if WAITING[_W0:]:

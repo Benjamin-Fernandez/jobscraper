@@ -1,7 +1,7 @@
 """Unit tests of the two N6a review fixes (docs/reviews/Q-35-N6a.md F1, F2). No Edge, no Ollama.
 
-F1: an auto-mode (not dry-run) attempt on the llm path never reaches Submit before the pre-Submit
-    scan exists (WP-N6b); it ends READY_TO_SUBMIT with a note.
+F1: an auto-mode (not dry-run) attempt on the llm path never reaches Submit without the pre-Submit
+    scan (N6a: a stop with a note; WP-N6b: the scan itself, fail closed when it cannot read the page).
 F2: the warm-up request carries the same `options.num_ctx` and `keep_alive` as the fill calls.
 Verify: python tests/run_tests.py -k apply_n6a_review_fixes
 """
@@ -17,21 +17,23 @@ from jobscraper import apply_flow, backends  # noqa: E402
 from jobscraper.apply.contracts import AttemptState as S  # noqa: E402
 
 
-def test_f1_an_auto_mode_llm_attempt_stops_at_review_and_never_presses_submit():
+def test_f1_an_auto_mode_llm_attempt_never_presses_submit_when_the_review_cannot_be_checked():
+    """F1, restated at WP-N6b (the N6a stop `AUTO_SUBMIT_BLOCKED` is gone; the pre-Submit scan
+    replaced it, LF §8 "Before Submit"): on a page the scan cannot read (the fake page has no DOM)
+    an auto-mode attempt fails closed (`validation_error`) and never presses Submit (NF-06).
+    The clean-page and hit paths are pinned in test_apply_flow_n6b.py."""
     w, jid = world()
     try:
         nav = FakeNav()
 
         def boom(page, ctx):
-            raise AssertionError("auto mode must not press Submit before the pre-Submit scan (N6b)")
+            raise AssertionError("auto mode must not press Submit when the pre-Submit scan cannot run")
         nav.submit = boom
         with scripted(nav, two_steps):
             r, factory, say, model = run(w, jid, nav, dry_run=False)
-        assert r.state is S.READY_TO_SUBMIT, (r.state, r.reason, r.reason_detail)
-        assert r.reason_detail == apply_flow.AUTO_SUBMIT_BLOCKED == "auto submit needs the pre-Submit scan (N6b)"
-        assert apply_flow.AUTO_SUBMIT_BLOCKED in say.text
+        assert r.state is S.FAILED and r.reason.value == "validation_error", (r.state, r.reason, r.reason_detail)
         row = w.store.conn.execute("SELECT state, submit_clicked_at FROM apply_attempts").fetchone()
-        assert row[0] == "ready_to_submit" and row[1] is None, tuple(row)
+        assert row[0] == "failed" and row[1] is None, tuple(row)
     finally:
         w.close()
 
