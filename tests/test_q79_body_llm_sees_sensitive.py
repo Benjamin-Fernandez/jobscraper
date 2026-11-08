@@ -200,8 +200,8 @@ def test_c_no_s_value_in_any_log_line_or_audit_row():
 
 @contextlib.contextmanager
 def cache_spy():
-    """Record what the flow's FillServices is asked to read and write (a stub in N6a, so the
-    rows stay empty; the point is that nothing S could be written, and the key is what pagefill built)."""
+    """Record what the flow's FillServices is asked to read and write (real since N6b: the rows land
+    in `fill_cache`). `gets` holds the `inputs_hash` pagefill built, the cache key under test."""
     gets, puts = [], []
     og, op = apply_flow._FillServices.cache_get, apply_flow._FillServices.cache_put
 
@@ -222,6 +222,13 @@ def cache_spy():
 def edge_run(backend_kw: dict, *, flag: bool):
     """body_llm with the real fill_page over the recorded wd_b page. None without headless Edge."""
     from llm_fill_support import FIX, FakeFillBackend
+    import asyncio
+    try:                       # an earlier test in the one-process full run can leave a loop running;
+        asyncio.get_running_loop()   # Playwright's sync API then refuses. Skip loudly, never pass vacuously.
+        print("  note: an asyncio loop is running in this process; the q79 Edge tier is not run")
+        return None
+    except RuntimeError:
+        pass
     inner = FakeFillBackend.from_file(FIX / "wd_b" / "02-my_information" / "reply.json")
     be = LocalFill(inner=inner, **backend_kw)
     with cache_spy() as (gets, puts):
@@ -229,6 +236,10 @@ def edge_run(backend_kw: dict, *, flag: bool):
                                resume_text=(FIX / "resume_sample.txt").read_text(encoding="utf-8"),
                                acfg_over={"model_sees_sensitive": flag})
     if out is None:
+        return None
+    if "inside the asyncio loop" in out.say.text:        # same pollution, seen only once Edge starts
+        print("  note: Playwright refused (an earlier test left an asyncio loop); the q79 Edge tier is not run")
+        out.w.close()
         return None
     # A run that never reached the model proves nothing: say what happened instead of passing vacuously.
     assert inner.calls, ("the attempt never called the model", out.r.state, out.r.reason, out.r.reason_detail,
@@ -251,6 +262,8 @@ def test_edge_a_real_fill_page_flag_on_local_prompt_holds_the_private_value_and_
         assert f"| private: {dob}" in user_text(on[1])
         assert dob not in user_text(off[1]), "flag off: unchanged"
         assert on[2] and off[2] and set(on[2]).isdisjoint(off[2]), "inputs_hash differs between flag on and off"
+        assert stored_hashes(on) and stored_hashes(off) and stored_hashes(on).isdisjoint(stored_hashes(off)),             "the stored fill_cache rows carry different inputs_hash keys"
+        assert stored_hashes(on) <= set(on[2]), "the stored key is the one pagefill asked with"
         assert not ignored_lines(on[0].say)
         _c_edge(on, dob)
         _c_edge(off, dob)
@@ -270,6 +283,7 @@ def test_edge_b_real_fill_page_flag_on_non_local_is_ignored_with_the_attempt_pre
             try:
                 assert dob not in user_text(on[1]), (what, "the flag is ignored: no private value in the prompt")
                 assert on[2] and set(on[2]) == set(off[2]), (what, "inputs_hash equals the flag-off key")
+                assert stored_hashes(on) == stored_hashes(off), (what, "the stored cache key equals flag-off")
                 lines = ignored_lines(on[0].say)
                 assert lines, what
                 assert all(re.search(rf"\[attempt {on[0].r.attempt_id}\] {re.escape(IGNORED)}$", ln) for ln in lines), lines
@@ -280,10 +294,20 @@ def test_edge_b_real_fill_page_flag_on_non_local_is_ignored_with_the_attempt_pre
         off[0].w.close()
 
 
+def stored_hashes(run) -> set:
+    return {r["inputs_hash"] for r in run[0].w.store.conn.execute("SELECT inputs_hash FROM fill_cache")}
+
+
 def _c_edge(run, dob: str) -> None:
     out, _inner, _gets, puts = run
+    assert puts, "N6b: the page's decisions were handed to cache_put, so there are rows to check"
     assert dob not in out.say.text, "the log"
-    assert dob not in repr(puts), "the cache rows"
+    assert dob not in repr(puts), "the cache rows handed to cache_put"
+    store = out.w.store
+    stored = [dict(r) for r in store.conn.execute("SELECT * FROM fill_cache")]
+    assert dob not in repr(stored), "the stored fill_cache rows"
+    for pr in PROTECTED:
+        assert pr not in repr(stored) and pr not in repr(puts), "a protected marker in the cache"
     store = out.w.store
     for x in store.answers(out.r.attempt_id):
         assert dob not in " ".join(str(x.get(k) or "") for k in ("note", "evidence", "detail")), "the audit row"
