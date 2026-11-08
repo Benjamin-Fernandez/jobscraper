@@ -221,7 +221,8 @@ _FRAME_PREFIXES = (("self", "declaration"), ("please",), ("kindly",), ("declarat
 _FRAME_PREFIX_MAX = 3
 _FRAME_LEADS = (("tell", "us"), ("let", "us", "know"), ("confirm",), ("indicate",), ("state",),
                 ("specify",), ("advise",))
-_FRAME_LEAD_LINKS = frozenset({"if", "whether", "that"})
+_FRAME_MODALS = (("can", "you"), ("could", "you"), ("would", "you"), ("will", "you"))   # D-169b
+_FRAME_LEAD_LINKS =frozenset({"if", "whether", "that"})
 # shape A (direct): a status starter, or one of these leading runs
 _FRAME_A_RUNS = (("i", "am"), ("i", "have"), ("i", "hold"), ("there", "is"), ("there", "are"))
 # shape B (indirect, only after a LEAD)
@@ -654,6 +655,10 @@ def _strip_answer_hint(toks: list[str]) -> list[str]:
     return toks
 
 
+def _frame_lead(toks: list[str]):
+    return next((r for r in _FRAME_LEADS if tuple(toks[:len(r)]) == r), None)
+
+
 def question_frame(label_toks: list[str], classes: Iterable[DeclarationLabel],
                    f: FormField) -> bool:
     """D-164 (Q-81; review F12, F13): does the label have one of the closed STATUS
@@ -668,7 +673,15 @@ def question_frame(label_toks: list[str], classes: Iterable[DeclarationLabel],
     "Non-compete agreement?" is not). Runs for every bool on a non-checkbox field
     except nda_willingness, including after the D-91 freedom inversion (F12)."""
     toks = _strip_frame_prefix(_strip_answer_hint(list(label_toks)))
-    lead = next((r for r in _FRAME_LEADS if tuple(toks[:len(r)]) == r), None)
+    lead = _frame_lead(toks)
+    if lead is None:                       # D-169b: "can you [please] confirm ..." - a modal only before a LEAD
+        for modal in _FRAME_MODALS:
+            rest = toks[len(modal):] if tuple(toks[:len(modal)]) == modal else None
+            if rest is not None:
+                rest = rest[1:] if rest[:1] == ["please"] else rest
+                if _frame_lead(rest):
+                    toks, lead = rest, _frame_lead(rest)
+                    break
     if lead:
         toks = toks[len(lead):]
         if toks[:1] and toks[0] in _FRAME_LEAD_LINKS:
