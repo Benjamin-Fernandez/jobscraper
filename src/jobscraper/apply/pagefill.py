@@ -57,9 +57,11 @@ from .contracts import (
 
 L1_KEPT_NOTE = "L1: kept, uploaded in this attempt"     # locks: the file on the page is ours
 TIMED_OUT_NOTE = "transport: timed out"
+ENTRY_NOTE_PREFIX = "E5: another "                         # a section note (R3 F14, D-173), not a value failure
+ENTRY_NOTE_TAIL = " - this value was typed"
+TYPED_BEFORE_STOP_NOTE = "typed before the page stopped"  # N6a F6: the row is on the page; apply_flow keeps it applied
 G9_FAILED_NOTE = "G9: cleared after failed fill"
 DELETE_UNCONFIRMED_NOTE = "E3: delete not confirmed"
-ENTRY_ADD_FAILED_NOTE = "E5: entry not added"
 MISS_NOTES = ("search_miss", "no_option")                 # widgets notes: the list had nothing to take
 UNAVAILABLE_NOTE = "transport: model unavailable"
 DEFAULT_REVEAL_ROUNDS = 2
@@ -114,8 +116,8 @@ class _Run:
     fresh: list = dc_field(default_factory=list)            # model decisions made on this page
     transport: str = ""                                     # set by a pick that failed in transport
     alias: dict = dc_field(default_factory=dict)            # re-created reader key -> the old key (F6)
-    entry_failed: dict = dc_field(default_factory=dict)     # reader key -> note: an E5 add that failed (F5)
     corrected: set = dc_field(default_factory=set)          # keys the corrective pass re-asked (F8)
+    entry_failed: dict = dc_field(default_factory=dict)     # reader key -> section note: an E5 add that failed
     dead: set = dc_field(default_factory=set)               # keys of entries we confirmed deleted (F2)
 
 
@@ -173,8 +175,8 @@ def fill_page(page: Any, nav: Any, ctx: AttemptContext, rctx: ResolveContext, se
             return _outcome(run, unknown=stop)
     except _Stop as halt:
         return _transport(run, halt.note)
-    except BackendError:
-        return _transport(run, UNAVAILABLE_NOTE)
+    except BackendError as exc:
+        return _transport(run, _backend_note(exc))
     if run.transport:
         return _transport(run, run.transport)
     return _outcome(run)
@@ -344,29 +346,39 @@ def _apply(run: _Run, decision: Any, fields: Sequence[PageField],
 def _delete_entries(run: _Run, decision: Any, fields: Sequence[PageField],
                     sections: Sequence[EntrySection]) -> tuple[tuple[str, ...], set]:
     """E3/E6, verified (review F2). Bottom-up clicks on each group's delete control, then
-    `run.sections` is re-read. A delete counts only when the group's controls are gone
-    from the page and its section shrank as expected. A group that is still there (or
+    `run.sections` is re-read. A delete counts only when the group was clicked and its own
+    controls are gone from the page (per group, review R3 F12: a swallowed click on one
+    group never demotes another group's real delete). The section's entry count is the
+    independent second signal (review Q-80 M1): if the section still has more entries than
+    `initial - confirmed`, the keys alone can't be trusted (a site may re-create list items
+    without the reader's mark) and every group of that section is unconfirmed. A group that is still there (or
     had no delete control) is never skipped: its required fields stop the page (unknown,
     as E3's "no delete control" rule), its optional ones are reset (G9) or, when that
     can't be done, flagged PREFILLED unverified. Returns (stop keys, handled keys)."""
     groups = {f"{s.section}#{g.index}": g for s in sections for g in s.entries}
-    want = {s.section: len(s.entries) for s in sections}
+    initial = {s.section: len(s.entries) for s in sections}
     clicked: dict[str, bool] = {}
     for gid in sorted(decision.deletes, key=lambda g: -_index(g)):    # bottom up: the rest stay put
         g = groups.get(gid)
         clicked[gid] = bool(g is not None and g.delete_locator
                             and P.click(run.page, run.page.locator(g.delete_locator).first))
-        want[gid.rpartition("#")[0]] = want.get(gid.rpartition("#")[0], 0) - 1
         run.page.wait_for_timeout(300)
     run.sections = list(run.nav.entry_sections(run.page, run.ctx) or [])
     left = {s.section: len(s.entries) for s in run.sections}
     stop: list[str] = []
     handled: set = set()
+    alive_of = {gid: {pf.field.key for pf in fields if pf.group == gid and _present(run, pf)}
+                for gid in decision.deletes}
+    gone = {gid for gid in decision.deletes if clicked.get(gid) and not alive_of[gid]}
+    for section in {g.rpartition("#")[0] for g in gone}:             # M1: the count must agree
+        mine = {g for g in gone if g.rpartition("#")[0] == section}
+        if left.get(section, 0) > initial.get(section, 0) - len(mine):
+            run.services.log(f"E3: {section} has more entries than the confirmed deletes explain")
+            gone -= mine
     for gid in decision.deletes:
         members = [pf for pf in fields if pf.group == gid]
-        alive = {pf.field.key for pf in members if _present(run, pf)}
-        section = gid.rpartition("#")[0]
-        if clicked.get(gid) and not alive and left.get(section, 0) <= want.get(section, 0):
+        alive = alive_of[gid]
+        if gid in gone:
             run.dead |= {pf.field.key for pf in members}             # gone: never inherited (F5/F6)
             continue
         run.services.log(f"E3: delete not confirmed for {gid}")
@@ -465,8 +477,8 @@ def _picker(run: _Run, pf: PageField, ans: Answer):
             got = L.pick_option(run.services.backend, pf, want, list(options), s_values=run.sv,
                                 cfg=run.cfg, stats=run.stats, sensitive=ans.sensitive,
                                 deny=run.deny) or ""
-        except BackendError:
-            run.transport = UNAVAILABLE_NOTE
+        except BackendError as exc:
+            run.transport = _backend_note(exc)
             return ""
         return got if got and G.g4_ok(got, quote) else ""
     return pick
@@ -504,18 +516,20 @@ def _add_entry(run: _Run, section: str, source: str) -> tuple[str, ...]:
 
 
 def _add_failed(run: _Run, section: str, why: str) -> tuple[str, ...]:
-    """Review F5: E5 asked for an entry the page didn't get; never silent. Logged (the
-    section name only) and reported in the outcome: the section's fields on the page
-    (its required ones, else all of them) are listed in `fill_failed` with the note
-    "E5: entry not added" (`run.entry_failed`, kept through the corrective pass), so the
-    flow sees the application is missing an entry the source has. PageOutcome has no
-    entry channel; a section with no fields on the page is logged only."""
+    """Review F5 / R3 F14 (D-173): E5 asked for an entry the page didn't get; never silent
+    and fail closed. Logged (the section name and the reason only), and the section's fields
+    on the page (its required ones, else all of them) are listed in `fill_failed`
+    (`run.entry_failed`, kept through the corrective pass), so a required one stops the flow
+    `validation_error`: auto mode must not submit with fewer entries than the profile has.
+    Those rows keep their own status and carry a SECTION note, not a claim that their value
+    failed. PageOutcome has no entry-level channel yet (next contract version)."""
     run.services.log(f"E5: add failed in {section}: {why}")
     keys = [k for k in run.order if k in run.fields and k not in run.dead
             and run.fields[k].group.rpartition("#")[0] == section]
     required = [k for k in keys if run.fields[k].field.required]
+    note = f"{ENTRY_NOTE_PREFIX}{section.replace('_', ' ')} entry could not be added ({why}){ENTRY_NOTE_TAIL}"
     for key in required or keys:
-        run.entry_failed[key] = ENTRY_ADD_FAILED_NOTE
+        run.entry_failed[key] = note
     return ()
 
 
@@ -734,22 +748,48 @@ def _outcome(run: _Run, *, unknown: Sequence[str] = ()) -> PageOutcome:
     # transport failure (`_transport`).
     _cache_put(run, unknown)
     answers = dict(run.answers)
+    if unknown:
+        _note_typed(run, answers)
     why = {**run.entry_failed, **run.failed}
     failed = [k for k in run.order if k in why and k not in unknown]
     for k in failed:
-        if k in answers:
-            note = why[k] if k in run.entry_failed and k not in run.failed else (answers[k].note or f"fill: {why[k]}")
-            answers[k] = _replace(answers[k], status=AnswerStatus.FILL_FAILED, note=note)
+        if k not in answers:
+            continue
+        if k in run.entry_failed and k not in run.failed:
+            # the section's problem; this value was typed and keeps its status in the audit
+            answers[k] = _replace(answers[k], note="; ".join(n for n in (answers[k].note, why[k]) if n))
+            continue
+        answers[k] = _replace(answers[k], status=AnswerStatus.FILL_FAILED,
+                              note=answers[k].note or f"fill: {why[k]}")
     fields = [run.fields[k] for k in run.order if k in run.fields]
     return PageOutcome(step=run.step, fields=fields, answers=answers, unknown_required=tuple(unknown),
                        fill_failed=tuple(failed), model_calls=run.stats.calls,
                        model_seconds=round(run.stats.seconds, 3), transport_failed=False)
 
 
+def _note_typed(run: _Run, answers: dict) -> None:
+    """N6a F6: a stop or a transport failure after step 9 leaves some values on the employer's
+    page. Those filled rows say so (`TYPED_BEFORE_STOP_NOTE`), so the flow does not write them
+    as "not applied". A stop at step 7 typed nothing (`run.known` has no OURS), so its rows
+    stay decided-only."""
+    for k, a in list(answers.items()):
+        if a.status is AnswerStatus.FILLED and run.known.get(k) is ValueOrigin.OURS:
+            answers[k] = _replace(a, note="; ".join(n for n in (a.note, TYPED_BEFORE_STOP_NOTE) if n))
+
+
+def _backend_note(exc: BaseException) -> str:
+    """N6a F5: a model call that ran out of time (`llm_fill` turns TimeoutError into a
+    BackendError "... timed out"; httpx's read timeout names itself) is a timeout, not a
+    missing model, so the flow's detail can tell them apart."""
+    text = str(exc).lower()
+    return TIMED_OUT_NOTE if ("timed out" in text or "timeout" in text) else UNAVAILABLE_NOTE
+
+
 def _transport(run: _Run, note: str) -> PageOutcome:
     """§11: no capture; every field without an answer is noted "transport: ...". A lane
     note about the deadline: it comes back the same way ("transport: timed out")."""
     answers = dict(run.answers)
+    _note_typed(run, answers)
     for key in run.order:
         if key not in answers:
             answers[key] = Answer(field_key=key, value=None, tier=AnswerTier.NONE, source="",
