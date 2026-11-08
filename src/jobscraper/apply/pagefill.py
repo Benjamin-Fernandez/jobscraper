@@ -57,9 +57,9 @@ from .contracts import (
 
 L1_KEPT_NOTE = "L1: kept, uploaded in this attempt"     # locks: the file on the page is ours
 TIMED_OUT_NOTE = "transport: timed out"
+TYPED_BEFORE_STOP_NOTE = "typed before the page stopped"  # N6a F6: the row is on the page; apply_flow keeps it applied
 G9_FAILED_NOTE = "G9: cleared after failed fill"
 DELETE_UNCONFIRMED_NOTE = "E3: delete not confirmed"
-ENTRY_ADD_FAILED_NOTE = "E5: entry not added"
 MISS_NOTES = ("search_miss", "no_option")                 # widgets notes: the list had nothing to take
 UNAVAILABLE_NOTE = "transport: model unavailable"
 DEFAULT_REVEAL_ROUNDS = 2
@@ -114,7 +114,6 @@ class _Run:
     fresh: list = dc_field(default_factory=list)            # model decisions made on this page
     transport: str = ""                                     # set by a pick that failed in transport
     alias: dict = dc_field(default_factory=dict)            # re-created reader key -> the old key (F6)
-    entry_failed: dict = dc_field(default_factory=dict)     # reader key -> note: an E5 add that failed (F5)
     corrected: set = dc_field(default_factory=set)          # keys the corrective pass re-asked (F8)
     dead: set = dc_field(default_factory=set)               # keys of entries we confirmed deleted (F2)
 
@@ -344,30 +343,33 @@ def _apply(run: _Run, decision: Any, fields: Sequence[PageField],
 def _delete_entries(run: _Run, decision: Any, fields: Sequence[PageField],
                     sections: Sequence[EntrySection]) -> tuple[tuple[str, ...], set]:
     """E3/E6, verified (review F2). Bottom-up clicks on each group's delete control, then
-    `run.sections` is re-read. A delete counts only when the group's controls are gone
-    from the page and its section shrank as expected. A group that is still there (or
+    `run.sections` is re-read. A delete counts only when the group was clicked and its own
+    controls are gone from the page (per group, review R3 F12: a swallowed click on one
+    group never demotes another group's real delete); the section's entry count is only a
+    cross-check, logged. A group that is still there (or
     had no delete control) is never skipped: its required fields stop the page (unknown,
     as E3's "no delete control" rule), its optional ones are reset (G9) or, when that
     can't be done, flagged PREFILLED unverified. Returns (stop keys, handled keys)."""
     groups = {f"{s.section}#{g.index}": g for s in sections for g in s.entries}
-    want = {s.section: len(s.entries) for s in sections}
+    initial = {s.section: len(s.entries) for s in sections}
     clicked: dict[str, bool] = {}
     for gid in sorted(decision.deletes, key=lambda g: -_index(g)):    # bottom up: the rest stay put
         g = groups.get(gid)
         clicked[gid] = bool(g is not None and g.delete_locator
                             and P.click(run.page, run.page.locator(g.delete_locator).first))
-        want[gid.rpartition("#")[0]] = want.get(gid.rpartition("#")[0], 0) - 1
         run.page.wait_for_timeout(300)
     run.sections = list(run.nav.entry_sections(run.page, run.ctx) or [])
     left = {s.section: len(s.entries) for s in run.sections}
     stop: list[str] = []
     handled: set = set()
+    confirmed: dict[str, int] = {}
     for gid in decision.deletes:
         members = [pf for pf in fields if pf.group == gid]
         alive = {pf.field.key for pf in members if _present(run, pf)}
         section = gid.rpartition("#")[0]
-        if clicked.get(gid) and not alive and left.get(section, 0) <= want.get(section, 0):
+        if clicked.get(gid) and not alive:
             run.dead |= {pf.field.key for pf in members}             # gone: never inherited (F5/F6)
+            confirmed[section] = confirmed.get(section, 0) + 1
             continue
         run.services.log(f"E3: delete not confirmed for {gid}")
         for pf in members:
@@ -390,6 +392,9 @@ def _delete_entries(run: _Run, decision: Any, fields: Sequence[PageField],
                                             tier=AnswerTier.NONE, source=pf.origin.value,
                                             status=AnswerStatus.PREFILLED, confidence=G.CONF_UNVERIFIED,
                                             note=G.UNVERIFIED_NOTE)
+    for section, n in confirmed.items():                             # cross-check only (R3 F12)
+        if left.get(section, 0) > initial.get(section, 0) - n:
+            run.services.log(f"E3: {section} has more entries than the confirmed deletes explain")
     return tuple(stop), handled
 
 
@@ -504,18 +509,13 @@ def _add_entry(run: _Run, section: str, source: str) -> tuple[str, ...]:
 
 
 def _add_failed(run: _Run, section: str, why: str) -> tuple[str, ...]:
-    """Review F5: E5 asked for an entry the page didn't get; never silent. Logged (the
-    section name only) and reported in the outcome: the section's fields on the page
-    (its required ones, else all of them) are listed in `fill_failed` with the note
-    "E5: entry not added" (`run.entry_failed`, kept through the corrective pass), so the
-    flow sees the application is missing an entry the source has. PageOutcome has no
-    entry channel; a section with no fields on the page is logged only."""
+    """Review F5 / R3 F14: E5 asked for an entry the page didn't get; never silent. Logged
+    (the section name and the reason only). The section's existing entries were filled and
+    stay as they are: marking their rows `fill_failed` "entry not added" (the first fix) said
+    the wrong thing about values we did type. PageOutcome has no entry-level channel, so the
+    log line is the only report until the contracts get one (the flow then cannot stop on a
+    missing entry; see the handoff)."""
     run.services.log(f"E5: add failed in {section}: {why}")
-    keys = [k for k in run.order if k in run.fields and k not in run.dead
-            and run.fields[k].group.rpartition("#")[0] == section]
-    required = [k for k in keys if run.fields[k].field.required]
-    for key in required or keys:
-        run.entry_failed[key] = ENTRY_ADD_FAILED_NOTE
     return ()
 
 
@@ -734,22 +734,35 @@ def _outcome(run: _Run, *, unknown: Sequence[str] = ()) -> PageOutcome:
     # transport failure (`_transport`).
     _cache_put(run, unknown)
     answers = dict(run.answers)
-    why = {**run.entry_failed, **run.failed}
+    if unknown:
+        _note_typed(run, answers)
+    why = dict(run.failed)
     failed = [k for k in run.order if k in why and k not in unknown]
     for k in failed:
         if k in answers:
-            note = why[k] if k in run.entry_failed and k not in run.failed else (answers[k].note or f"fill: {why[k]}")
-            answers[k] = _replace(answers[k], status=AnswerStatus.FILL_FAILED, note=note)
+            answers[k] = _replace(answers[k], status=AnswerStatus.FILL_FAILED,
+                                  note=answers[k].note or f"fill: {why[k]}")
     fields = [run.fields[k] for k in run.order if k in run.fields]
     return PageOutcome(step=run.step, fields=fields, answers=answers, unknown_required=tuple(unknown),
                        fill_failed=tuple(failed), model_calls=run.stats.calls,
                        model_seconds=round(run.stats.seconds, 3), transport_failed=False)
 
 
+def _note_typed(run: _Run, answers: dict) -> None:
+    """N6a F6: a stop or a transport failure after step 9 leaves some values on the employer's
+    page. Those filled rows say so (`TYPED_BEFORE_STOP_NOTE`), so the flow does not write them
+    as "not applied". A stop at step 7 typed nothing (`run.known` has no OURS), so its rows
+    stay decided-only."""
+    for k, a in list(answers.items()):
+        if a.status is AnswerStatus.FILLED and run.known.get(k) is ValueOrigin.OURS:
+            answers[k] = _replace(a, note="; ".join(n for n in (a.note, TYPED_BEFORE_STOP_NOTE) if n))
+
+
 def _transport(run: _Run, note: str) -> PageOutcome:
     """§11: no capture; every field without an answer is noted "transport: ...". A lane
     note about the deadline: it comes back the same way ("transport: timed out")."""
     answers = dict(run.answers)
+    _note_typed(run, answers)
     for key in run.order:
         if key not in answers:
             answers[key] = Answer(field_key=key, value=None, tier=AnswerTier.NONE, source="",
