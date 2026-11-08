@@ -410,3 +410,32 @@ STATUS: open
 - `tests/test_apply_fit_type.py` (9 tests, 6 of the architect's 7 groups; 9/9): g1 parity with DROPDOWN (fit_decline, fit_enum decline/male, fit_bool both ways, fit_text, fit_country, fit_number, bool_shaped, _extra_fit choice, kind_for CHOICE and YES_NO, memory tier), g2 search typeahead unchanged, g3 declaration gate + disability, g4 Workday Category > Leaf, g5 memory key stays "typeahead", g6 fit_type not a dataclass field, follows options, CHOICE_TYPES unchanged.
 - Group 7 mutation checks run by hand without touching src (scratch patch): fit_decline reading f.type -> g1 red ("Gender: TYPEAHEAD with options gives None"); fit_type ignoring options -> g2 red. Both red, control green.
 STATUS: open
+
+## 2026-11-08 handoff: Q-35 WP-N6b oracles (branch eng/Q-35-N6b-flow; `tests/test_apply_flow_n6b.py`, tests only)
+Written from the spec, then run against the engineer's N6b commits (cc2b880, 0ba2b97). Gate: `N6B_GATE` (`jobscraper.apply_flow:_Run.pre_submit_scan`, defined in `test_apply_flow_llm.py`; change it there only) and `ENTRIES_GATE` (`jobscraper.tailor_flow:resume_entries`); both skip cleanly before the code exists. Edge-level tests return early without Edge; unit tests use the FakeNav of `test_apply_flow_n6a.py`.
+### Oracles and spec lines
+- (a) cache, LF §13.3/§14, build plan T4 "cache: replay with zero model calls on retry, a changed cited fact -> a miss":
+  - `test_a_retry_of_the_same_job_replays_the_page_with_no_model_call`: wd_a page 05; retry = strict backend with no replies, 0 calls, same audit rows, field still filled.
+  - `test_a_retry_never_asks_again_for_a_cached_field_only_for_a_model_unknown`: page 04; only the `unknown` optional field may be asked again, never the salary.
+  - `test_a_changed_cited_fact_is_a_miss_and_an_unrelated_change_is_not`: uncited leaf changed -> 0 calls; cited `availability.earliest_start_date` changed -> one fresh page call (§13.3 "leaves every other decision cached").
+  - `test_a_changed_resume_text_is_a_miss`, `test_a_changed_job_description_is_a_miss` (key `inputs_hash`).
+  - `test_a_two_jobs_never_share_a_cache_entry`: job B asks despite A cached; each job's own retry silent; `fill_cache` holds exactly the two non-empty job ids (the `ctx.job.get("id","")` defect class).
+  - `test_a_model_unknown_is_never_replayed_as_an_answer`: R3 re-review F13 (Q-80 pin). Retry asks again for "Address Line 2" while "Given Name(s)" replays. RED at 0ba2b97..ab369d1 until `_cache_put` skips UNKNOWN or `_cached` treats it as a miss.
+  - `test_a_cache_disabled_in_config_writes_and_replays_nothing` (§13.3 last line, `llm_fill.cache: false`).
+  - `test_a_rows_older_than_30_days_are_purged_at_run_start_on_the_attempt_clock`: rows at clock-31d purged, clock-29d kept, clock = injected 2023 `now` (a wall-clock purge would drop both).
+  - `test_a_the_services_cache_round_trips_per_job_model_and_inputs_and_stamps_with_the_clock`: `cache_put`/`cache_get` per job, model, prompt version, inputs_hash; rows stamped with the injected clock (kept at C+29d, purged at C+31d).
+- (b) LF §8 "Before Submit (H7)":
+  - `test_b_a_required_field_left_empty_at_review_stops_before_submit_in_both_modes` (scan hit -> FAILED validation_error with a detail, no Submit, no `submit_clicked_at`, dry run too).
+  - `test_b_a_clean_page_reaches_submit_only_in_auto_mode_once_after_the_scan` (order last fill < scan < submit; submit once; dry run scans, never submits, ready_to_submit with no note).
+  - `test_b_the_scan_covers_the_form_scope_after_the_last_fill_and_never_on_a_transport_stop`.
+  - `test_b_the_review_must_show_the_uploaded_resume_file_name` (variant copy of the wd_a fixtures; "review: resume not shown").
+  - `test_b_a_review_that_shows_the_resume_name_passes_and_a_missing_text_value_is_a_note_only` (dry run ready_to_submit; auto run presses the fixture Submit once, `data-submit-count` 1).
+- (c) LF §5.2 / §7 G12: `test_c_resume_entries_come_from_the_cached_master_only` (tuple of `(id, kind, text)`, contact excluded, reading order), `test_c_resume_entries_is_empty_on_any_miss_and_never_raises` (no cache, other resume hash, corrupt JSON, leaf-check failure, unreadable resume), `test_c_rctx_gets_the_resume_entries_and_a_miss_gives_the_empty_tuple`, `test_c_other_employers_are_watchlist_and_sighting_names_minus_this_employer_and_aliases`, `test_c_other_employers_is_empty_when_there_is_nobody_else`.
+- Superseded pin updated: `test_apply_n6a_review_fixes.py::test_f1_...` asserted the N6a stop (`AUTO_SUBMIT_BLOCKED`, now removed). It now pins the F1 invariant on the new code: an auto attempt on a page the scan cannot read fails closed (`validation_error`) and never presses Submit.
+### Spec ambiguities (decide, then tighten the test)
+1. `resume_entries` ids: contracts say "like `experience[0]`"; §5.2 lists "`experience[0]`, `education[1]`". Per-kind index (profile-list style) or running index? The oracle accepts both (the first experience entry may be `experience[0]` or `experience[1]` in a master that starts with education) and checks only the kind prefix and uniqueness.
+2. F13 is a Q-80 item, but build plan N6b "Done when" says "all T4 flow oracles pass (cache replay ...)". The F13 oracle is in this file; if the architect keeps F13 out of N6b, it is the one expected red test.
+3. Sighting employers: `store.sighting_employers()` names a sighting by its job's company, else `employer_norm`. Spec §7 G12 says "the employers in captured questions' sightings"; the oracle seeds sightings whose job is gone (`employer_norm` only) and expects the norm form. Fine as built.
+4. Review check and the recorded wd_a review page: the page prints `Alex_Testcase_Resume.pdf` while the world uploads `resume.pdf`. The existing replay passes only because the check is a case-insensitive substring. The oracle variants use the exact uploaded name; a case-sensitive check would fail the recorded fixture, not the oracle.
+5. A changed cited start date made the attempt stop (date guard), which the oracle deliberately does not assert on (it only asserts the miss).
+STATUS: open

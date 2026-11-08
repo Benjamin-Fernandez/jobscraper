@@ -352,17 +352,62 @@ def purge(cfg: Config, store: Store, now: str) -> int:
                          t.closed_statuses)
 
 
+def _cached_master(cfg: Config) -> Optional[MasterResume]:
+    """The cached master when it matches the current resume file; else None. Never
+    parses (no model call) and never raises (D-68)."""
+    try:
+        path = resume_ingest.find_resume(cfg.resume_dir)
+        text = resume_ingest.extract_text(path)
+        return master_mod.load(cfg.master_resume_path, resume_ingest.file_hash(path), text)
+    except Exception:
+        return None
+
+
 def master_text(cfg: Config) -> Optional[str]:
     """The cached master's resume text (summary, entry fields, bullets, items;
     contact excluded) when the cache matches the current resume file; else
     None. Never parses (no model call) and never raises (D-68)."""
+    m = _cached_master(cfg)
     try:
-        path = resume_ingest.find_resume(cfg.resume_dir)
-        text = resume_ingest.extract_text(path)
-        m = master_mod.load(cfg.master_resume_path, resume_ingest.file_hash(path), text)
         return mapping.resume_text(m) if m else None
     except Exception:
         return None
+
+
+# Master section kind -> `ResolveContext.resume_entries` kind (llm_fill_design §5.2).
+_ENTRY_KINDS = {SectionKind.EXPERIENCE: "experience", SectionKind.EDUCATION: "education"}
+
+
+def resume_entries(cfg: Config) -> tuple[tuple[str, str, str], ...]:
+    """The cached master's entries as `(id, kind, text)` for `ResolveContext.resume_entries`
+    (llm_fill_design §5.2, WP-N6b): id `experience[0]`, `education[2]`, ... one running index
+    over all entries in reading order; kind `experience` or `education`, every other entry (projects,
+    leadership, awards, certifications) `other`, and a certification or award line without
+    an entry is an `other` of its own. `text` is the entry's fields (title first) then its
+    bullets, verbatim; contact and skills never appear. Cached master only: no parse, no
+    model call, never raises, `()` on a miss (the `master_text` pattern)."""
+    m = _cached_master(cfg)
+    if m is None:
+        return ()
+    try:
+        out: list[tuple[str, str, str]] = []
+
+        def add(kind: str, text: str) -> None:
+            if text.strip():
+                out.append((f"{kind}[{len(out)}]", kind, text))   # one running index (design 5.2)
+
+        for s in m.sections:
+            kind = _ENTRY_KINDS.get(s.kind, "other")
+            for e in s.entries:
+                lines = [e.title, e.organisation, e.location, e.dates, e.subtitle,
+                         *(b.text for b in e.bullets)]
+                add(kind, "\n".join(x.strip() for x in lines if x and x.strip()))
+            if s.kind in (SectionKind.AWARDS, SectionKind.CERTIFICATIONS):
+                for item in s.items:
+                    add("other", item.strip())
+        return tuple(out)
+    except Exception:
+        return ()
 
 
 def alias_groups(cfg: Config) -> tuple[tuple[tuple[str, ...], ...], tuple[str, ...]]:
