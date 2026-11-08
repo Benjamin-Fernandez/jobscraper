@@ -14,7 +14,8 @@
     is never logged; D-85 (failing pins until lane N applies it): the code is the only line of
     6-12 letters/digits after the sentence, "security" is never the code, a letters-only code
     is valid, zero or two candidates -> no code;
-  - F7 (skip-clean until N6a): on Workday `choose_entry` runs before the account wall.
+  - F7 (gated on what N6a built): `choose_entry` runs before the account wall, and again after an
+    email-check reopen.
 Fakes: tests/apply_flow_support.py (adapter, browser), tests/vault_support.py (keyring), a fake
 `imaplib.IMAP4_SSL` serving tests/fixtures/mail/greenhouse_code.eml re-dated to now.
 Verify: python tests/run_tests.py -k apply_flow_accounts
@@ -68,29 +69,61 @@ def _run(w, job_ids, adapter=None, *, dry_run=True, apply_over=None, profile_fil
 
 # ------------------------------------------------------------------ F3: the Workday gate
 
-@needs("jobscraper.apply.ats.workday:NAVIGATOR")
-def test_a_workday_job_stops_unsupported_before_edge_and_before_any_account_call():
-    """Review F3: the only thing stopping live Workday runs before WP-N6a. Real REGISTRY."""
-    from jobscraper.apply.ats import REGISTRY
-    assert "workday" in REGISTRY and not hasattr(REGISTRY["workday"], "read_step"), \
-        "N6a landed: replace this pin with the Workday flow oracles (T4 flow part)"
+def _workday_world():
     w = make_world()
+    _cid, jid = add_job(w.store, key="exampleco", name="Example Employer", provider="workday",
+                        slug="exampleco", external_id="REQ-0001", url=A_URL)
+    return w, jid
+
+
+def _nothing_opened_or_created(w, mem, factory, r):
+    """The shared claim of both Workday gates: no Edge, no vault call, no account row, no answers."""
+    assert factory.started == 0, "Edge never starts"
+    row = w.store.attempt(r.attempt_id)
+    assert row["step"] == "planning" and row["submit_clicked_at"] is None
+    assert row["ats"] == "workday"
+    assert w.store.answers(r.attempt_id) == []
+    assert mem.calls == [], "no vault read or write"
+    assert w.store.accounts() == [], "no account row"
+
+
+@needs("jobscraper.apply.ats.workday:NAVIGATOR")
+def test_a_workday_job_under_fill_rules_still_stops_unsupported_before_edge_and_any_account_call():
+    """Review F3, kept under `apply.fill: rules` (the old path, until WP-C1): Workday has no
+    `read_step`, so that path cannot fill it and stops in planning, before Edge and any vault or
+    account call. The default `llm` path drives it (next test)."""
+    from jobscraper.apply.ats import REGISTRY
+    assert "workday" in REGISTRY and not hasattr(REGISTRY["workday"], "read_step")
+    w, jid = _workday_world()
     try:
-        _cid, jid = add_job(w.store, key="exampleco", name="Example Employer", provider="workday",
-                            slug="exampleco", external_id="REQ-0001", url=A_URL)
         with memory_keyring() as mem:
             for dry in (True, False):
-                res, factory, say = _run(w, [jid], dry_run=dry)
+                res, factory, _say = _run(w, [jid], dry_run=dry, apply_over={"fill": "rules"})
                 r = res[0]
                 assert r.state is S.FAILED and r.reason is R.UNSUPPORTED_ATS, (dry, r.state, r.reason)
                 assert "form filling arrives" in r.reason_detail
-                assert factory.started == 0, "Edge never starts"
-                row = w.store.attempt(r.attempt_id)
-                assert row["step"] == "planning" and row["submit_clicked_at"] is None
-                assert row["ats"] == "workday"
-                assert w.store.answers(r.attempt_id) == []
-            assert mem.calls == [], "no vault read or write"
-            assert w.store.accounts() == [], "no account row"
+                _nothing_opened_or_created(w, mem, factory, r)
+    finally:
+        w.close()
+
+
+@needs("jobscraper.apply.ats.workday:NAVIGATOR")
+def test_a_workday_job_flips_at_n6a_it_is_driven_by_fill_llm_and_a_missing_model_stops_it_first():
+    """The F3 pin flipped at WP-N6a ("flips at N6a"): under the default `apply.fill: llm` Workday is
+    no longer `unsupported_ats`; the attempt reaches the model warm-up (llm_fill_design §13.1, §11:
+    "Ollama not running -> warm-up fails before Edge opens -> model_unavailable"). With no model it
+    stops there, still before Edge and before any vault or account call: the account wall is only
+    reached after the warm-up, so an unavailable model can never leave an account behind."""
+    w, jid = _workday_world()
+    try:
+        with memory_keyring() as mem:
+            for dry in (True, False):
+                res, factory, _say = _run(w, [jid], dry_run=dry)        # NoModel; fill defaults to llm
+                r = res[0]
+                assert w.cfg.apply.fill == "llm"
+                assert r.state is S.FAILED and r.reason is R.MODEL_UNAVAILABLE, (dry, r.state, r.reason)
+                assert r.reason is not R.UNSUPPORTED_ATS
+                _nothing_opened_or_created(w, mem, factory, r)
     finally:
         w.close()
 
@@ -395,11 +428,83 @@ def test_d85_the_code_is_the_only_short_alphanumeric_line_after_the_sentence():
 
 # ------------------------------------------------------------------ F7 (N6a)
 
-@needs("jobscraper.apply.pagefill:fill_page", "jobscraper.apply.ats.workday:NAVIGATOR.read_step")
+# Gated on what WP-N6a built (the LLM loop's `fill_page` and the navigator dispatch), not on a
+# `read_step` the SiteNavigator contract never had (the old gate could never open).
+@needs("jobscraper.apply.pagefill:fill_page", "jobscraper.apply_flow:_fill_services",
+       "jobscraper.apply_flow:_Run.body_llm")
 def test_on_workday_choose_entry_runs_before_the_account_wall():
-    """Review F7 (N6a "Done when"): open -> choose_entry -> account wall; after an email-check
-    reopen, choose_entry again. Waits for WP-N6a; the flow oracle is written against it then."""
-    raise AssertionError("N6a landed: write the F7 flow oracle (choose_entry before account())")
+    """Review F7 (N6a "Done when"; llm_fill_design §9.1 order): open -> choose_entry -> account
+    wall; after an email-check reopen (the verification sent the browser to candidate home, so
+    the flow reopens the posting), choose_entry again BEFORE the first page is filled. Scripted
+    navigator (account wall: sign-up -> emailed code -> reopen), scripted `fill_page`, fake IMAP."""
+    from jobscraper import vault
+    from jobscraper.apply.contracts import Secret
+    from test_apply_flow_n6a import FakeModel, FakeNav, outcome, pf, scripted
+
+    class WallNav(FakeNav):
+        needs_account = True
+        mail_domains = ("greenhouse.io", "greenhouse-mail.io")
+        otp_pattern = GH_OTP
+
+        def __init__(self):
+            super().__init__(steps=("one", "review"))
+            self.walls = ["sign_up"]
+            self.home = False                        # True after the code: candidate home, no step
+
+        def account_wall(self, page):
+            self.calls.append("account_wall")
+            return self.walls.pop(0) if self.walls else None
+
+        def sign_up(self, page, ctx, password):
+            self.calls.append("sign_up")
+            return "verify_email"
+
+        def enter_code(self, page, ctx, code):
+            self.calls.append("enter_code")
+            self.home = True
+
+        def open(self, page, ctx):
+            self.calls.append("open")
+            self.home = False
+
+        def step_id(self, page, ctx):
+            return "" if self.home else super().step_id(page, ctx)
+
+    p = sample_profile()
+    p["consents"]["privacy_consent"] = True
+    w = make_world(profile=p)
+    try:
+        add_job(w.store, key="fakeco", name="Fake Co", provider="wallnav", slug="fakeco",
+                external_id="1", url="https://fake.example.com/jobs/1")
+        jid = w.store.conn.execute("SELECT job_id FROM jobs").fetchone()[0]
+        nav, model = WallNav(), FakeModel()
+        nav.name = "wallnav"
+        factory, say = FakeBrowserFactory(), Say()
+        acfg = dataclasses.replace(w.cfg.apply, dry_run_hold_s=0, confirm_timeout_s=0)
+        with memory_keyring():
+            vault.put(vault.imap_service(IMAP_HOST), EMAIL, Secret("synthetic-app-password"))
+            for k, v in (("host", IMAP_HOST), ("username", EMAIL), ("poll_s", "1"), ("wait_s", "5")):
+                w.store.set_setting(f"apply.mail.{k}", v)
+            w.store.commit()
+            msg = _code_mail(datetime.now(timezone.utc) + timedelta(minutes=1))
+            with _fake_imap([msg]), registered(nav), page_signals():
+                with scripted(nav, lambda n, s: outcome("one", [pf("a", "First name")])):
+                    res = apply_flow.run(w.cfg, w.store, [jid], dry_run=True, backend=model, http=object(),
+                                         browser_factory=factory, apply_cfg=acfg, say=say,
+                                         evidence_dir=w.tmp / "evidence")
+        r = res[0]
+        assert r.state is S.READY_TO_SUBMIT, (r.state, r.reason, r.reason_detail, say.text[-800:])
+        c = nav.calls
+        assert c[:4] == ["precheck", "open", "choose_entry", "account_wall"], c
+        assert c.index("choose_entry") < c.index("account_wall") < c.index("sign_up") < c.index("enter_code"), c
+        assert c.count("open") == 2, "the email check reopened the posting"
+        assert c.count("choose_entry") == 2, c
+        second_open = [i for i, x in enumerate(c) if x == "open"][1]
+        assert c[second_open:].index("choose_entry") > 0 and c.index("next") >             [i for i, x in enumerate(c) if x == "choose_entry"][1], "the second choose_entry precedes the first Next"
+        assert say.text.count("prefill: resume_import") == 2
+        assert CODE not in say.text
+    finally:
+        w.close()
 
 
 if WAITING[_W0:]:

@@ -1245,8 +1245,13 @@ def cmd_apply(args) -> int:
     try:
         acfg = _effective_apply(cfg, store)
         dry_run = bool(args.dry_run) or acfg.mode != "auto"
-        results = apply_flow.run(cfg, store, words, dry_run=dry_run,
-                                 backend=backends.build(cfg.budget), apply_cfg=acfg)
+        backend = backends.build(cfg.budget)
+        if acfg.fill == "llm" and hasattr(backend, "num_ctx"):
+            # D-78 (llm_fill_design §13.4): a form page plus facts and resume needs the
+            # larger window; only this run's backend object changes, not config.
+            backend.num_ctx = acfg.llm_fill.num_ctx
+        results = apply_flow.run(cfg, store, words, dry_run=dry_run, backend=backend,
+                                 apply_cfg=acfg)
         print(BAR)
         print(f"{'job id':<28} {'attempt':>7}  {'state':<22} reason")
         for r in results:

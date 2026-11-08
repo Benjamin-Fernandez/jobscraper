@@ -176,7 +176,7 @@
     input.addEventListener('focus', open);
     input.addEventListener('input', open);
     input.addEventListener('blur', function () { setTimeout(close, 150); });
-    input.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); } });
+    input.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); } if (e.key === 'Escape') { close(); } });   // react-select closes its menu on Escape
   });
 
   // file inputs show the chosen file name

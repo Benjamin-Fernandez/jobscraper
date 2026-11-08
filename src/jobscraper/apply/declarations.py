@@ -738,7 +738,7 @@ def _field_gate(f: FormField) -> str:
     """D-90 gate 1 (review F2): a declaration goes only onto a dropdown / radio, a
     single checkbox, or a TEXT / TYPEAHEAD box whose label opens like a question;
     never a TEXTAREA, a multi-select or any other type. "" = fine, else the note."""
-    if f.type in (FieldType.DROPDOWN, FieldType.RADIO, FieldType.CHECKBOX):
+    if f.fit_type in (FieldType.DROPDOWN, FieldType.RADIO, FieldType.CHECKBOX):
         return ""
     if f.type in (FieldType.TEXT, FieldType.TYPEAHEAD) \
             and _starts_as_question(norm_label(f.label).split()):
@@ -870,7 +870,7 @@ def _disability_answer(f: FormField, value: Optional[bool]) -> Answer:
         if fit is None:
             return _ended(f, name, "disability: no answer offered")     # never "declined" (F8)
         return _answer(f, name, fit)
-    if f.type in CHOICE_TYPES and not bool_shaped(f):
+    if f.fit_type in CHOICE_TYPES and not bool_shaped(f):
         fit = fit_enum(f, "yes" if value else "no", DISABILITY_VALUE_MAP)
         if fit is None:
             return _ended(f, name, "no offered option fits the declaration")

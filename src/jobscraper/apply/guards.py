@@ -491,7 +491,7 @@ def _model_row(c: _Ctx, pf: PageField, value: Any, source: str, *, conf: float,
                status: AnswerStatus = AnswerStatus.FILLED, sensitive: bool = False,
                note: str = "") -> Answer:
     labels: tuple[str, ...] = ()
-    if pf.field.type in CHOICE_TYPES and value not in (None, ""):
+    if pf.field.fit_type in CHOICE_TYPES and value not in (None, ""):
         labels = tuple(value) if isinstance(value, list) else (str(value),)
     return Answer(field_key=pf.field.key, value=value, tier=tier, source=source,
                   confidence=conf, status=status, option_labels=labels, rule_id=RULE_ID,
