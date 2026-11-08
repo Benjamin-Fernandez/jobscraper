@@ -213,7 +213,7 @@ QUESTION_STARTERS = frozenset({"are", "is", "do", "does", "did", "have", "has", 
 _STATUS_STARTERS = frozenset({"are", "is", "do", "does", "did", "have", "has", "had", "was",
                               "were"})
 _STATUS_RUNS = (("bound", "by"), ("subject", "to"), ("party", "to"), ("signed",), ("convicted",),
-                ("charged",), ("hold",), ("holds",), ("held",), ("status",))
+                ("charged",), ("hold",), ("holds",), ("held",))   # D-170: "status" is no run
 # D-164 (Q-81; review F12, F13): the STATUS frame is a closed list of label shapes
 # (`question_frame`). PREFIX runs and a LEAD verb are dropped before the shape test.
 _FRAME_PREFIXES = (("self", "declaration"), ("please",), ("kindly",), ("declaration",),
@@ -311,6 +311,47 @@ STANDING_DECLARATIONS = frozenset({
     L.PEP, L.CONFLICT_AUDIT_INDEPENDENCE, L.CRIMINAL_RECORD, L.BANKRUPTCY, L.REGULATORY,
     L.NON_COMPETE, L.GOVERNMENT_EMPLOYMENT,
 })
+
+# D-170 (Q-82; review Q-80 MEDIUM 1-3): a status declaration is answered only when the
+# WHOLE label is one status question. Every token must be a class phrase, a status or
+# freedom run, a reference to this employer, a number, or a word of this closed
+# vocabulary (apply_design §7.5 D-170). Adding a word changes the spec and needs a pin.
+# Why closed: token rules cannot parse a sentence; an unseen word costs one answer in
+# the Questions inbox, a wrong No on a form that submits itself is a false attestation.
+_STATUS_CLASSES = STANDING_DECLARATIONS | {L.DISABILITY}
+_STATUS_FILLER = frozenset("""
+    i you you're you've i'm there are is am was were be been being do does did have has had
+    ever currently presently now previously formerly otherwise still past last year years
+    a an the any such other your all either or and as of in to for from by with at under
+    within during since against including e g country countries jurisdiction jurisdictions
+    singapore elsewhere overseas anywhere aware status defined subject""".split())
+_CLASS_FILLER: dict[DeclarationLabel, frozenset[str]] = {
+    L.PEP: frozenset("""person persons people individual served serving senior prominent
+        position positions""".split()),
+    L.CONFLICT_AUDIT_INDEPENDENCE: frozenset("""potential actual perceived client clients
+        auditor auditors issue issues government rules""".split()),
+    L.CRIMINAL_RECORD: frozenset("""crime crimes guilty found conviction convictions charge
+        charges arrested record records history court law laws case cases offences offenses
+        felony felonies misdemeanor misdemeanour pending proceedings""".split()),
+    L.BANKRUPTCY: frozenset("""declared adjudged undischarged discharged debt debts petition
+        petitions proceedings order orders record history""".split()),
+    L.REGULATORY: frozenset("""action actions proceedings sanction sanctions sanctioned
+        investigation investigations body bodies authority authorities regulator regulators
+        professional revoked penalty penalties record history""".split()),
+    # sized by the live Q-48 F1 label, which must stay No
+    L.NON_COMPETE: frozenset("""agreement agreements restriction restrictions restrict
+        restricts restricted obligation obligations clause clauses contract contracts
+        contractual accepted entered into prohibit prohibits prevent prevents limit limits
+        that which would will may could join joining job role responsibilities duties working
+        perform current former previous prior employer employers pursuant applicable effect
+        active""".split()),
+    L.GOVERNMENT_EMPLOYMENT: frozenset("""worked work working served serving employed position
+        positions role roles capacity member""".split()),
+    L.DISABILITY: frozenset("""consider yourself identify living person persons people record
+        history""".split()),
+}
+_CLAUSE_OPENERS = _STATUS_STARTERS | {"you", "i", "you're", "you've", "i'm"}
+_NUMBER = re.compile(r"[0-9]{1,3}")
 
 # --- the government / National Service rule (apply_design §7.5, D-87) --------
 # A "government employment" question that includes the military or National
@@ -614,17 +655,21 @@ def is_negated(label_norm: str) -> bool:
     return any(_has_run(toks, n) for n in NEGATIONS)
 
 
+def _strip_attest_lead(toks: list[str]) -> list[str]:
+    """Drop the attestation lead (i confirm [that], i declare [that], i hereby ...)."""
+    for lead in sorted(_ATTEST_LEADS, key=len, reverse=True):
+        if tuple(toks[:len(lead)]) == lead:
+            return toks[len(lead):]
+    return toks
+
+
 def attestation_polarity(label_norm: str) -> Optional[bool]:
     """Polarity of a single checkbox's statement (D-90 (3)): False = a recognised
     NEGATIVE attestation ("I am not bound by ...", "I do not have ..."), True = a
     recognised positive one ("I am a ...", "I have ..." with no negation in it),
     None = anything else. A stray "no" ("I have read it and have no questions")
     is not a negative attestation."""
-    toks = strip_ns_exclusions(label_norm.split())
-    for lead in sorted(_ATTEST_LEADS, key=len, reverse=True):
-        if tuple(toks[:len(lead)]) == lead:
-            toks = toks[len(lead):]
-            break
+    toks = _strip_attest_lead(strip_ns_exclusions(label_norm.split()))
     for run in _NEGATIVE_ATTESTATIONS:
         if tuple(toks[:len(run)]) == run:
             return False
@@ -659,8 +704,67 @@ def _frame_lead(toks: list[str]):
     return next((r for r in _FRAME_LEADS if tuple(toks[:len(r)]) == r), None)
 
 
+def _class_spans(toks: list[str], c: DeclarationLabel) -> list[tuple[int, int]]:
+    spans = _spans(toks, _PHRASE_TOKENS.get(c, ()))
+    if c is L.GOVERNMENT_EMPLOYMENT:                 # D-87 "(gov or mil) and excl"
+        spans += _spans(toks, _MILITARY_TOKENS)
+    return spans
+
+
+def _employer_spans(toks: list[str], employer_names: Iterable[str] = ()) -> list[tuple[int, int]]:
+    """Spans that refer to this employer: THIS_EMPLOYER_RUNS, or a run whose company
+    tokens EQUAL those of the employer or an alias (equality, not the `company_match`
+    prefix rule, so "acme and relocate" covers only "acme")."""
+    out = _spans(toks, THIS_EMPLOYER_RUNS)
+    for name in employer_names:
+        want = _company_tokens(name or "")
+        for i in range(len(toks) if want else 0):
+            for j in range(i + 1, min(len(toks), i + len(want) + 2) + 1):
+                if _company_tokens(" ".join(toks[i:j])) == want:
+                    out.append((i, j))
+    return out
+
+
+def _one_status_question(toks: list[str], classes: Iterable[DeclarationLabel],
+                         employer_names: Iterable[str] = (),
+                         extra_runs: Iterable[tuple[str, ...]] = ()) -> bool:
+    """D-170 rules 1-3 (apply_design §7.5): the whole label is ONE status question.
+    1 closed span: every token is covered by a class phrase, a status / freedom /
+    extra run, this employer, a number, or the closed filler vocabulary. 2 every class
+    is named in the label itself (not only in the description). 3 cut before each
+    and / or that opens a new clause; each piece holds a class span or status run, or
+    is bare lead-in filler."""
+    toks = strip_ns_exclusions(list(toks))
+    classes = set(classes)
+    per_class = [_class_spans(toks, c) for c in classes]
+    if not classes or not all(per_class):
+        return False                                             # rule 2
+    anchors = [s for spans in per_class for s in spans] + _spans(toks, _STATUS_RUNS)
+    covered = {i for a, b in anchors + _spans(toks, _FREEDOM_RUNS) + _spans(toks, extra_runs)
+               + _employer_spans(toks, employer_names) for i in range(a, b)}
+    filler = _STATUS_FILLER.union(*(_CLASS_FILLER.get(c, frozenset()) for c in classes))
+    if any(i not in covered and t not in filler and not _NUMBER.fullmatch(t)
+           for i, t in enumerate(toks)):
+        return False                                             # rule 1
+    cuts = [k for k in range(1, len(toks) - 1)
+            if toks[k] in ("and", "or") and toks[k + 1] in _CLAUSE_OPENERS]
+    bounds = [0, *cuts, len(toks)]
+    return all(any(a <= s < b for s, _e in anchors) or all(t in _STATUS_FILLER for t in toks[a:b])
+               for a, b in zip(bounds, bounds[1:]))              # rule 3
+
+
+def _status_tail(toks: list[str], classes: Iterable[DeclarationLabel]) -> bool:
+    """D-170 rule 4: "status" opens shape A only as the last token of a class noun phrase."""
+    if len(toks) < 2 or toks[-1] != "status":
+        return False
+    head = toks[:-1]
+    covered = {i for c in classes for a, b in _class_spans(head, c) for i in range(a, b)}
+    return bool(covered) and all(i in covered or t in _NOUN_FILLER or t == "your"
+                                 for i, t in enumerate(head))
+
+
 def question_frame(label_toks: list[str], classes: Iterable[DeclarationLabel],
-                   f: FormField) -> bool:
+                   f: FormField, employer_names: Iterable[str] = ()) -> bool:
     """D-164 (Q-81; review F12, F13): does the label have one of the closed STATUS
     frame shapes that make a declaration answerable? (D-90 gate 2; willingness is
     tested elsewhere.) Steps: drop a trailing answer hint, then PREFIX runs (<= 3
@@ -688,12 +792,14 @@ def question_frame(label_toks: list[str], classes: Iterable[DeclarationLabel],
             toks = toks[1:]
     if not toks:
         return False
-    if toks[0] in _STATUS_STARTERS or any(tuple(toks[:len(r)]) == r for r in _FRAME_A_RUNS) \
-            or any(_has_run(toks, r) for r in _STATUS_RUNS):
-        return True
-    if lead and any(tuple(toks[:len(r)]) == r for r in _FRAME_B_RUNS):
-        return True
-    return _noun_phrase(toks, set(classes), f)
+    classes = set(classes)
+    shape_ab = (toks[0] in _STATUS_STARTERS or any(tuple(toks[:len(r)]) == r for r in _FRAME_A_RUNS)
+                or any(_has_run(toks, r) for r in _STATUS_RUNS) or _status_tail(toks, classes)
+                or (lead and any(tuple(toks[:len(r)]) == r for r in _FRAME_B_RUNS)))
+    if shape_ab and (not classes or not classes <= _STATUS_CLASSES
+                     or _one_status_question(toks, classes, employer_names)):
+        return True                                              # D-170 for the status classes
+    return _noun_phrase(toks, classes, f)
 
 
 def _noun_phrase(toks: list[str], classes: set, f: FormField) -> bool:
@@ -807,20 +913,22 @@ def answer(label, f: FormField, ctx: ResolveContext) -> Answer:
             return _ended(f, "", "attestation not recognised: " + norm_label(f.label)[:120])
         classes, value = agreed
         name = "+".join(sorted(c.value for c in classes))
-        return _bool_answer(f, name, value, note=f"agreed: {name}", classes=classes)
+        return _bool_answer(f, name, value, note=f"agreed: {name}", classes=classes,
+                            employer_names=employer_names_of(ctx))
     gate = _field_gate(f)                    # D-90 gate 1: the field can carry a Yes/No
     if gate:
         return _ended(f, label.value, gate)
+    names = employer_names_of(ctx)
     if label in (L.PRIOR_EMPLOYMENT, L.CURRENT_EMPLOYEE) \
-            and not names_this_employer(f.label or "", employer_names_of(ctx)):
+            and not names_this_employer(f.label or "", names):
         return _ended(f, label.value, "question does not name this employer")   # D-90 (4)
     if label is L.HEALTH:
         return _health_answer(f)
     value = truth(label, ctx.profile, ctx.employer_name, ctx.employer_aliases,
                   ctx.previously_applied)
     if label is L.DISABILITY:
-        return _disability_answer(f, value)
-    return _bool_answer(f, label.value, value, cls=label)
+        return _disability_answer(f, value, names)
+    return _bool_answer(f, label.value, value, cls=label, employer_names=names)
 
 
 def _field_gate(f: FormField) -> str:
@@ -896,11 +1004,13 @@ def _freedom_inverts(label_norm: str, cls: Optional[DeclarationLabel]) -> bool:
 
 def _bool_answer(f: FormField, name: str, value: Optional[bool], note: str = "",
                  cls: Optional[DeclarationLabel] = None,
-                 classes: Iterable[DeclarationLabel] = ()) -> Answer:
+                 classes: Iterable[DeclarationLabel] = (),
+                 employer_names: tuple[str, ...] = ()) -> Answer:
     """A declaration bool onto a field (§7.3.2); `name` is the class (or the
     agreed classes joined by "+"; then `cls` is None and `classes` is the agreed
     set). D-90: field type (gate 1), status frame (2, D-164 `question_frame`),
-    known polarity (3) - otherwise unknown / blank."""
+    known polarity (3) - otherwise unknown / blank. D-170: a status class answers
+    only when the whole label (or checkbox statement) is one status question."""
     from .resolve import fit_bool                    # resolve imports this module
 
     gate = _field_gate(f)
@@ -919,6 +1029,10 @@ def _bool_answer(f: FormField, name: str, value: Optional[bool], note: str = "",
                 polarity = False
         if polarity is None:
             return _ended(f, name, "checkbox statement not recognised")
+        if cls is not L.NDA_WILLINGNESS and cls in _STATUS_CLASSES and not _one_status_question(
+                _strip_attest_lead(toks), {cls}, employer_names,
+                extra_runs=_NEGATIVE_ATTESTATIONS + _POSITIVE_ATTESTATIONS):
+            return _ended(f, name, "checkbox statement not recognised")   # D-170 rule 5
         tick = (not value) if polarity is False else bool(value)
         if not tick and f.required:
             return _ended(f, name, "required box left unticked")
@@ -929,7 +1043,7 @@ def _bool_answer(f: FormField, name: str, value: Optional[bool], note: str = "",
                 return _ended(f, name, "negated declaration question")
             value = not value
         if cls is not L.NDA_WILLINGNESS and not question_frame(
-                toks, classes or ({cls} if cls else ()), f):   # D-164 (F12): after a freedom inversion too
+                toks, classes or ({cls} if cls else ()), f, employer_names):   # D-164 (F12): after a freedom inversion too
             return _ended(f, name, "not a status question")
         fit = fit_bool(f, value)
     if fit is None:
@@ -948,7 +1062,8 @@ def _health_answer(f: FormField) -> Answer:
     return _answer(f, L.HEALTH.value, fit)
 
 
-def _disability_answer(f: FormField, value: Optional[bool]) -> Answer:
+def _disability_answer(f: FormField, value: Optional[bool],
+                       employer_names: tuple[str, ...] = ()) -> Answer:
     """The one disability answer (D-87) onto a field. A bool goes onto a
     bool-shaped field or a text box like any declaration (§7.3.2), onto a
     single checkbox by the negation rule, and onto any other choice by its
@@ -967,7 +1082,8 @@ def _disability_answer(f: FormField, value: Optional[bool]) -> Answer:
         if fit is None:
             return _ended(f, name, "no offered option fits the declaration")
         return _answer(f, name, fit)
-    return _bool_answer(f, name, value, cls=L.DISABILITY, classes={L.DISABILITY})
+    return _bool_answer(f, name, value, cls=L.DISABILITY, classes={L.DISABILITY},
+                        employer_names=employer_names)
 
 
 _strip_ns_exclusions = strip_ns_exclusions      # the old private name, kept for callers
