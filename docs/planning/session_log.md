@@ -58,3 +58,8 @@ One entry per session. Older handover notes end up here, so `handover.md` stays 
 - Owner "do it for me": live mail steps done (D-163). Q-81 architect decisions D-164..D-166.
 - N6a built (950eee4); tester settled 19 oracle failures, found D1 (typeahead fits → D-167 fit_type) and D2 (hidden resume input), both fixed; review MERGE, F1 (auto never submits before N6b) + F2 (warm num_ctx) fixed.
 - Merge order with the UX session: N6a first (Q-74 hit a _MONTHS collision). personal → N6a 6199e9d 1369/1369; merged 6001452; vitest 623; smoke 17/17; pushed. D-168.
+
+## 2026-11-08 (jobscraper-89): Q-74 merged
+- Re-review 2 → MERGE after N1/N2 (D-110, bf96b6e) and N4 (pins). int/Q-74 full suite first showed 78 failures: a semantic merge collision (Q-74 `_MONTHS` tuple shadowed by Q-44's `_MONTHS` dict in applicant.py; git merged cleanly). Fixed a93fdf4 (`_MONTH_LABELS`). N6a (6001452) merged first by agreement; resolve_ctx hunk resolved on the Q-74 side (683ba02, af11b3b).
+- Merged 1b4143b + bundle 2045f06, pushed. Python 1443/1443, vitest 635 + 1 expected fail, smoke 8774 17/17 GET + 32/32 assets. Worktrees/branches for Q-74 removed.
+- Lesson: always run the full suite on the integration tree after merging personal, even when git reports no conflicts; module-level name collisions only show at runtime.
