@@ -380,8 +380,8 @@ _ENTRY_KINDS = {SectionKind.EXPERIENCE: "experience", SectionKind.EDUCATION: "ed
 
 def resume_entries(cfg: Config) -> tuple[tuple[str, str, str], ...]:
     """The cached master's entries as `(id, kind, text)` for `ResolveContext.resume_entries`
-    (llm_fill_design §5.2, WP-N6b): id `experience[0]`, `education[1]`, ... counted per kind
-    in reading order; kind `experience` or `education`, every other entry (projects,
+    (llm_fill_design §5.2, WP-N6b): id `experience[0]`, `education[2]`, ... one running index
+    over all entries in reading order; kind `experience` or `education`, every other entry (projects,
     leadership, awards, certifications) `other`, and a certification or award line without
     an entry is an `other` of its own. `text` is the entry's fields (title first) then its
     bullets, verbatim; contact and skills never appear. Cached master only: no parse, no
@@ -390,15 +390,11 @@ def resume_entries(cfg: Config) -> tuple[tuple[str, str, str], ...]:
     if m is None:
         return ()
     try:
-        counts: dict[str, int] = {}
         out: list[tuple[str, str, str]] = []
 
         def add(kind: str, text: str) -> None:
-            if not text.strip():
-                return
-            i = counts.get(kind, 0)
-            counts[kind] = i + 1
-            out.append((f"{kind}[{i}]", kind, text))
+            if text.strip():
+                out.append((f"{kind}[{len(out)}]", kind, text))   # one running index (design 5.2)
 
         for s in m.sections:
             kind = _ENTRY_KINDS.get(s.kind, "other")
