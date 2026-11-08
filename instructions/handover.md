@@ -8,19 +8,20 @@
 - M20 filler: lanes M+R+Q-48 (7ba7597), N6a llm FILLING loop (6001452, D-168), N6b (b684d2a): pre-Submit scan, review check (resume name on the page), fill cache keyed by job_id (30-day purge), resume_entries, other_employers. Auto mode submits only after a passing scan; live config stays `apply.mode: dry_run`, `apply.fill: llm`. Needs Ollama.
 - Declarations: Q-80 D-164 `question_frame` + D-169b (a50510d); Q-82 D-170 one status question per label (bf664cf); Q-83 D-171 tails / narrowing words (false value only) / place phrases / you-subject (merged 2026-11-08). Reviews: `docs/reviews/Q-80-declarations.md`, `Q-82-declarations.md`, `Q-83-declarations.md`.
 - Q-83 verified on the merged branch: Python 1551/1551, `-k apply_e2e` 13/13, `-k apply_flow` 137/137 with Edge.
+- Q-80 finished (merged 2026-11-08): R3 F12/F14, N6a F3-F6, review M1/M2 (D-172 file trigger, D-173 failed Add stays fail-closed). Review `docs/reviews/Q-80-flow-fixes.md`; follow-ups Q-93.
 
 ## Where we are
 - M19 DONE. M20: the filler is complete through N6b; what remains is the M20 gate (D-83) plus follow-ups. Workday is filled in dry runs; account creation happens only inside owner-started attempts.
 - Owner declarations are all false (D-87), plus `willing_to_sign_nda: true`, `government_employment: false`.
 
 ## Next 1–3 actions
-1. M20 gate (D-83): owner-watched dry runs, then 5 Greenhouse dry runs whose audits are read row by row. Needs the owner and Ollama; check Q-92 F4 (the resume-name check on a real Workday review page) on the first one.
-2. Q-80 remainder: R3 F12/F14 (pagefill delete count, E5 add note) and N6a F3-F7; then Q-90 (D-171 review MEDIUM-1: place and time words still cover a TRUE value; LOW-1/2), Q-91 (six unclassified declaration labels), Q-92 F3/F5 spec notes.
+1. M20 gate (D-83): owner-watched dry runs, then 5 Greenhouse dry runs whose audits are read row by row. Needs the owner and Ollama; on the first one check Q-92 F4 (resume-name check on a real Workday review page) and Q-93 (the M1 delete count).
+2. Q-90 (D-171 review MEDIUM-1: place and time words still cover a TRUE value; LOW-1/2), Q-91 (six unclassified declaration labels), Q-92 F3/F5 spec notes.
 3. Backlog: R3 F7/F11, Q-46 e, Q-45 compose_needed, Q-47, Q-43, Q-34, Q-32, Q-27, A04, Q-15.
 
 ## Watch out
 - **The full suite skips the Edge tests silently** (a leaked asyncio loop; `edge_available()` caches the failure). Until the peer's Q-84 lands, gate every apply merge on separate `-k apply_e2e` and `-k apply_flow` runs.
-- IDs: mine are Q-80..Q-83, Q-90+ and D-150..D-179; the peer has Q-73..Q-79, Q-84..Q-89, D-100..D-119. Re-read queue/status before taking one. Message jobscraper-07 before merging into personal or building the bundle.
+- IDs: mine are Q-80..Q-83, Q-90..Q-93 (next Q-94) and D-150..D-179 (next D-174); the peer has Q-73..Q-79, Q-84..Q-89, D-100..D-119. Re-read queue/status before taking one. Message jobscraper-07 before merging into personal or building the bundle.
 - Always run the full suite on the integration tree after merging personal: name collisions (Q-74 `_MONTHS`) show only at runtime.
 - The engineer's scope hook refuses `tests/`: route test edits (even docstrings) to the tester.
 - Before every push: deny-list scan, including req ids and employer names from real mail. Live app 8765; dev 8768/8769 with a DB copy.
