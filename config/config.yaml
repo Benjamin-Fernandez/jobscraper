@@ -160,6 +160,7 @@ apply:
   max_wizard_steps: 15
   llm_text_temperature: 0.3
   fill: llm                  # D-78: the local model fills every page | rules (the pre-D-78 path)
+  model_sees_sensitive: true # D-105: the AI may read private profile fields, only when it runs on this computer
   llm_fill:                  # docs/architecture/llm_fill_design.md §13.4
     num_ctx: 32768
     page_timeout_s: 120      # one model call

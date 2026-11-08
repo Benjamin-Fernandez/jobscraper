@@ -124,6 +124,15 @@ def cmd_doctor(args) -> int:
     else:
         print(f"               UNAVAILABLE - {backend.unavailable_reason}")
         print("               (runs still work; survivors wait for the model)")
+    # D-105 (q74_model_sees_sensitive.md §1): the effective switch, and why it is off
+    # when the owner turned it on but the model runs elsewhere. No URL, no values.
+    if not cfg.apply.model_sees_sensitive:
+        private = "Private fields: kept from the AI"
+    elif backends.is_local(backend):
+        private = "Private fields: the local AI may read them"
+    else:
+        private = "Private fields: kept from the AI (model backend is not on this computer)"
+    print(f"privacy        {private}")
 
     print(f"budget         llm={'on' if cfg.budget.get('enable_llm') else 'off'}, "
           f"{int(cfg.budget.get('decide_batch', 20))} postings per decide call")

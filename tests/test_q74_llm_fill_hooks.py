@@ -1,0 +1,219 @@
+"""Q-74 design section 4: the llm_fill hooks (pins a-d), and the D-109 split.
+
+(a) flag on + local backend: a private value is in the llm_fill prompt (`facts_text(show_private=)`);
+(b) no dump, log, cache row or audit note holds an S value; `pick_option` keeps its full redaction;
+(c) a text value holding a protected term that the resume, JD and facts do not hold gives unknown
+    (guards `_model_field`), and a quote holding one is rejected (`_grounded`);
+(d) flipping the flag changes `inputs_hash` (the fill-cache key).
+Every case also runs with the flag off, where behaviour must be unchanged.
+
+Synthetic values (`zzz...`); scripted fake backends; no network, no Ollama. The browser case is skipped
+cleanly when headless Edge is missing, like the other pagefill oracles.
+"""
+from __future__ import annotations
+
+import dataclasses
+import sys
+import tempfile
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import llm_fill_t2 as T  # noqa: E402
+import test_q74_model_sees_sensitive as base  # noqa: E402
+from llm_fill_support import FIX, FakeFillBackend  # noqa: E402
+from questions_support import StubBackend  # noqa: E402
+
+from jobscraper.apply import facts as F, guards as G, llm_fill as L, locks  # noqa: E402
+from jobscraper.apply.contracts import (  # noqa: E402
+    AnswerStatus, FieldType as FT, FillSource, ModelDecision,
+)
+
+class KwStub(StubBackend):
+    """StubBackend that also takes the `timeout` keyword llm_fill passes."""
+
+    def complete(self, system, user, max_tokens=4096, *, timeout=None, **kw):
+        return super().complete(system, user, max_tokens, **kw)
+
+
+PROTECTED = (base.RACE, base.FAITH, base.RESIDENCY, base.GENDER, base.DOB)
+
+
+def _ctx(on: bool, **kw):
+    return dataclasses.replace(T.rctx(base.s_profile(), **kw), model_sees_sensitive=on)
+
+
+def _facts(ctx):
+    return F.fact_catalogue(ctx.profile, ctx, today=T.TODAY)
+
+
+def _prompt(ctx, label="Why do you want to work here?"):
+    """The llm_fill user prompt as pagefill builds it: nothing is redacted when the flag is on
+    (`run.sv_prompt` is []), the full S list when it is off."""
+    pf = T.pf("k", label, FT.TEXTAREA, required=True)
+    sv = [] if ctx.model_sees_sensitive else F.s_values(ctx.profile, ctx.account_email)
+    return L.user_prompt(L.Chunk("one:k", None, (pf,)), _facts(ctx), ctx, step_title="Step", s_values=sv, cfg={})
+
+
+def _decide(ctx, value, evidence, source=FillSource.RESUME):
+    fields = [T.pf("k", "Why do you want to work here?", FT.TEXTAREA, required=True)]
+    rules = T.rules()
+    lk = locks.lock_page(fields, ctx, rules, today=T.TODAY, uploaded={})
+    d = [ModelDecision(field_key="k", source=source, value=value, evidence=evidence)]
+    out = G.decide(fields, lk, d, _facts(ctx), ctx, matches={}, second=lambda pf: None, today=T.TODAY, rules=rules)
+    return out.answers["k"], out
+
+
+# ------------------------------------------------------------------ (a) the prompt
+
+def test_hook_a_flag_on_the_llm_fill_prompt_shows_private_values():
+    up = _prompt(_ctx(True))
+    for m in (base.DOB, base.GENDER, base.RACE, base.FAITH, base.RESIDENCY):
+        assert m in up, m
+    assert f"| private: {base.DOB}" in up, "facts_text prints `private: <value>`"
+
+
+def test_hook_a_flag_off_the_prompt_is_unchanged_and_shows_none():
+    ctx = _ctx(False)
+    up = _prompt(ctx)
+    base.assert_no_s(up, "llm_fill prompt with the flag off")
+    assert "| private, set" in up
+    assert F.facts_text(_facts(ctx)) == F.facts_text(_facts(ctx), show_private=False)
+
+
+def test_hook_a_the_catalogue_value_is_filled_only_with_the_flag_and_the_ref_stays_private():
+    on = {f.ref: f for f in _facts(_ctx(True))}
+    off = {f.ref: f for f in _facts(_ctx(False))}
+    assert on["profile:identity.date_of_birth"].value == base.DOB and on["profile:identity.date_of_birth"].private
+    assert off["profile:identity.date_of_birth"].value == "" and off["profile:identity.date_of_birth"].private
+    assert on.keys() == off.keys()
+
+
+def test_hook_a_extra_answers_never_reach_the_prompt_even_with_the_flag_on():
+    p = base.s_profile()
+    p["extra"] = {"pet": {"label": "Pet", "value": "zzzextra", "sensitive": True}}
+    ctx = dataclasses.replace(T.rctx(p), model_sees_sensitive=True)
+    assert "zzzextra" not in _prompt(ctx)
+
+
+def test_hook_a_show_private_without_a_value_keeps_the_set_marker():
+    f = F.Fact if hasattr(F, "Fact") else None
+    on = F.facts_text(_facts(_ctx(True)), show_private=True)
+    assert "profile:identity.pronouns | Pronouns | private, empty" in on, "an unset private fact has nothing to show"
+
+
+# ------------------------------------------------------------------ (b) no S value in a dump, log, cache row or note
+
+def test_hook_b_pick_option_keeps_the_full_redaction_whatever_the_flag():
+    ctx = _ctx(True)
+    sv = F.s_values(ctx.profile, ctx.account_email)
+    pf = T.pf("k", "Which group applies?", FT.DROPDOWN, options=[f"Alpha {base.PHONE}", "Beta"])
+    be = KwStub([{"choice": "Beta"}])
+    L.pick_option(be, pf, "Group Q", [f"Alpha {base.PHONE}", "Beta"], s_values=sv, cfg={})
+    assert be.calls, "the pick ran"
+    base.assert_no_s(be.calls[0]["user"], "the pick prompt", (base.PHONE,))
+
+
+def test_hook_b_rejected_answers_carry_no_s_value_in_note_or_value():
+    ctx = _ctx(True)
+    a, out = _decide(ctx, f"I am a {base.RESIDENCY} who loves APIs", "Built REST APIs")
+    assert a.status is AnswerStatus.UNGROUNDED and a.value is None
+    base.assert_no_s(a.note + " " + str(a.value) + " " + str(out.unknown_required), "the guard result", PROTECTED)
+    resume = ctx.resume_text + f"\nReligion: {base.FAITH}\n"
+    a2, _ = _decide(_ctx(True, resume_text=resume), "I volunteer weekly", f"Religion: {base.FAITH}")
+    base.assert_no_s(a2.note + str(a2.value), "the quote-guard result", PROTECTED)
+
+
+def test_hook_b_a_flag_on_page_fill_sends_private_values_to_the_model_and_stores_none():
+    """fill_page end to end on a recorded page (skipped when headless Edge is missing): the model
+    prompt holds the private value, the cache rows, the log lines and the audit notes do not."""
+    import test_apply_pagefill as TP
+    from jobscraper.apply.pagefill import fill_page
+    dob = base.DOB
+
+    def run(on):
+        with TP._open("wd_b/02-my_information/page.html") as pg:
+            if pg is None:
+                return None
+            fb = FakeFillBackend.from_file(FIX / "wd_b/02-my_information/reply.json")
+            with tempfile.TemporaryDirectory() as tmp:
+                ctx, rctx = TP._world(Path(tmp))
+                rctx.profile["identity"]["date_of_birth"] = dob
+                rctx = dataclasses.replace(rctx, model_sees_sensitive=on)
+                hashes = []
+
+                class Svc(TP.FakeServices):
+                    def cache_get(self, job_id, sigs, prompt_version, model, inputs_hash):
+                        hashes.append(inputs_hash)
+                        return {}
+                sv = Svc(fb, pg)
+                pg.evaluate(TP.INPUTS)
+                out = fill_page(pg, TP.FakeNav("my_information"), ctx, rctx, sv)
+                return fb, sv, out, hashes
+
+    off, on = run(False), run(True)
+    if off is None or on is None:
+        return
+    fb_off, sv_off, _o, h_off = off
+    fb_on, sv_on, out_on, h_on = on
+    assert dob not in "\n".join(c.user for c in fb_off.calls), "flag off: unchanged, no private value"
+    assert dob in "\n".join(c.user for c in fb_on.calls), "flag on: the local model reads it"
+    assert h_off and h_on and h_off != h_on, "hook 9: the flag is part of the cache key"
+    for sv, out in ((sv_off, None), (sv_on, out_on)):
+        assert dob not in "\n".join(sv.lines), "the log"
+        assert dob not in repr(sv.puts), "the cache rows"
+    for a in out_on.answers.values() if hasattr(out_on, "answers") else ():
+        assert dob not in str(a.note), "the audit note"
+
+
+# ------------------------------------------------------------------ (c) guards
+
+def test_hook_c_value_with_a_protected_term_not_in_resume_jd_or_facts_gives_unknown():
+    a, out = _decide(_ctx(True), f"I am a {base.RESIDENCY} who loves APIs", "Built REST APIs")
+    assert a.status is AnswerStatus.UNGROUNDED and a.value is None and "k" in out.unknown_required
+    assert "private value" in a.note
+
+
+def test_hook_c_the_same_value_fills_with_the_flag_off():
+    a, out = _decide(_ctx(False), f"I am a {base.RESIDENCY} who loves APIs", "Built REST APIs")
+    assert a.status is AnswerStatus.FILLED and "k" not in out.unknown_required, "behaviour unchanged"
+
+
+def test_hook_c_a_clean_value_fills_with_the_flag_on():
+    a, out = _decide(_ctx(True), "I love building APIs", "Built REST APIs")
+    assert a.status is AnswerStatus.FILLED and a.value == "I love building APIs" and not out.unknown_required
+
+
+def test_hook_c_a_protected_term_the_resume_also_holds_does_not_block_the_value():
+    ctx = _ctx(True, resume_text=T.rctx().resume_text + f"\nVolunteer, {base.FAITH} community centre\n")
+    a, _ = _decide(ctx, f"I volunteer at the {base.FAITH} community centre", "Built REST APIs")
+    assert a.status is AnswerStatus.FILLED, (a.status, a.note)
+
+
+def test_hook_c_a_quote_holding_a_protected_term_is_rejected():
+    ctx = _ctx(True, resume_text=T.rctx().resume_text + f"\nReligion: {base.FAITH}\n")
+    a, out = _decide(ctx, "I volunteer weekly", f"Religion: {base.FAITH}")
+    assert a.status is not AnswerStatus.FILLED and a.value is None and "k" in out.unknown_required, (a.status, a.note)
+    assert "G3" in a.note and "private" in a.note
+
+
+def test_hook_c_the_same_quote_is_accepted_with_the_flag_off():
+    ctx = _ctx(False, resume_text=T.rctx().resume_text + f"\nReligion: {base.FAITH}\n")
+    a, _ = _decide(ctx, "I volunteer weekly", f"Religion: {base.FAITH}")
+    assert a.status is AnswerStatus.FILLED, (a.status, a.note)
+
+
+def test_hook_c_a_quote_the_posting_also_holds_is_not_blocked():
+    jd = T.rctx().jd_text + f"\nWe welcome the {base.FAITH} community.\n"
+    ctx = _ctx(True, jd_text=jd, resume_text=T.rctx().resume_text + f"\nReligion: {base.FAITH}\n")
+    a, _ = _decide(ctx, "I volunteer weekly", f"Religion: {base.FAITH}")
+    assert a.status is AnswerStatus.FILLED, (a.status, a.note)
+
+
+# ------------------------------------------------------------------ (d) the cache key
+
+def test_hook_d_flipping_the_flag_changes_inputs_hash_and_off_is_the_old_hash():
+    old = F.inputs_hash("resume", "jd")
+    assert F.inputs_hash("resume", "jd", sees_private=False) == old, "flag off: the old key, byte for byte"
+    assert F.inputs_hash("resume", "jd", sees_private=True) != old
+    assert F.inputs_hash("resume", "jd", sees_private=True) == F.inputs_hash("resume", "jd", sees_private=True)
+    assert F.inputs_hash("resume2", "jd", sees_private=True) != F.inputs_hash("resume", "jd", sees_private=True)

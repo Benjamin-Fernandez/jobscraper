@@ -370,6 +370,23 @@ Merged int/Q-75-wave3 (f56bb1c, includes Q-76) into test/Q-75-pins with no confl
 - web/tests/q44-refresh.test.js (23): summary card lines and no path, 0/N years, 12 chips + "and k more", Details closed on success/open on failure, "Reading your resume…", panel rows (label, entry, before/after, kept without checkbox, skills, not-on-resume), default ticks, Save n count, POST {etag, accept}, saved line + Application details link, Not now (hash remembered), 409 changed/stale, 500, empty/stale/none/404 states, unavailable from the job log, reload after each job, skillLabel on the shared fixture.
 - Expectation changes (follow design §4/§5, not loosened): test_web_control argv `profile --refresh --plan-applicant`; /api/profile exact key set + payload gain years_experience/graduation (the serve test now also sets them); Profile.test.js success note `Resume read: 3 skills, 2 job titles.` (`Profile refreshed.` pinned for the no-profile case). helpers.js: defaultProfile gains years_experience/graduation; fakeApi `refresh` option and GET/POST api/applicant/refresh.
 - Mutations (red): drop "anticipated" (44/46); owner entries replaceable (44/46); "to date" not an open end (45/46); router ignores the etag (45/46); panel ticks everything; card shows data/ folder; Details open on success.
+## 2026-11-07 handoff: Q-74 pins (branch test/Q-74-pins, on top of eng/Q-74 ace64ba)
+TYPE: handoff
+Files: `tests/test_q74_model_sees_sensitive.py` (43 tests: T1-T4, T6-T8, F1a-F1d, F2a, F2b, F3, doctor, web payloads), `tests/test_q74_open_defects.py` (9: R1, R2, R3).
+Supersession pinned: T5 replaced by the F1 rule (protected values never ground a tier-5 answer; contact values fill, tagged Private).
+Expected FAIL until the next fix round:
+- `test_q74_r1_generic_word_completed_does_not_block_a_text_answer`, `test_q74_r1_a_yes_option_is_not_blocked_by_a_protected_yes`, `test_q74_r1_employer_in_holdings_is_not_blocked_when_it_is_in_the_plain_corpus` (R1, MEDIUM: `_protected_hit` over-blocks; answer is UNGROUNDED "private value").
+- `test_q74_r2_residency_pr_is_caught_under_the_form_wording`, `..._religion_...` ("Buddhism"), `..._gender_...` ("Woman") (R2, MEDIUM: slug-only matching; the pick FILLS and is untagged).
+- `test_f1b_retry_instruction_holds_no_s_value` (LOW): the retry prompt lists raw token violations ("number 2001; month March; word Zzzfaith"). The handoff says the retry holds no S value; only the stored note is reduced to kinds. The prompt goes to the local model only.
+Passing controls keep the pins honest (`*_control_*`). R3 matrix passes (`is_local_config == is_local(build)`, 7 budgets x 4 env states).
+Gap: no vitest pin written. `web/node_modules` is absent in this worktree, so a pin could not be verified. Wanted: `privateBadge(true)` == "Private: local AI only", `privateSentence`, ApplicationDetails header with `model_sees_private: true`, QuestionsInbox + QuestionCard badge (call `setModelSeesPrivate(false)` in afterEach).
+Note: "Which ethnic group best describes you? (diversity report)" matches a profile rule (race) and is FILLED at tier 2, so the F1a pin uses "Which cultural heritage do you identify with, for our diversity report?" (no rule; reaches tier 5).
+STATUS: resolved (R1/R2 fixed at 78519a1; see the next entry)
+
+## 2026-11-07 handoff: Q-74 pins round 2 (on eng/Q-74 e9d54bb)
+TYPE: handoff
+Added: `tests/test_q74_llm_fill_hooks.py` (16: design section 4 pins a-d, flag on and off, incl. a real fill_page run on the recorded wd_b page with headless Edge: model prompt holds the private value only with the flag on, cache `inputs_hash` differs, log and cache rows hold none); D-109 pin `test_f1b_retry_instruction_may_hold_tokens_but_stored_notes_hold_kinds_only` (replaces the old retry pin); `web/tests/q74-private.test.js` (12 vitest: privateBadge/privateSentence/setModelSeesPrivate, ApplicationDetails header variant on/off/absent plus screen-reader text, QuestionsInbox + answered list + bare QuestionCard).
+Observations (no defect): `pick_option` keeps `run.sv`, so only free-text S values (phone, DOB) are redacted there; enum slugs like a race value are guarded by `deny`/`pick_refused` instead. vitest full run: 9 failures, none in Q-74 files: the 8 known lane I/J ones plus the `shell-job` visibility flake.
 STATUS: open
 
 ## 2026-11-07 handoff: Q-35 WP-N6a oracles settled (branch eng/Q-35-N6a-flow, base 0b2516c)
