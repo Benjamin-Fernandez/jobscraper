@@ -164,3 +164,12 @@ BODY: VERDICT MERGE (no CRITICAL/HIGH). Spec pin table holds through classify+an
 - MEDIUM-2: shape A/B accept any "you have / do you have" with a class phrase in the object ("Do you have a bankruptcy lawyer?" No; new via B: "Indicate whether you have worked in a bankruptcy law firm" No). MEDIUM-3: the "status" run fires anywhere ("Criminal record check status" No).
 - Shape C had no over-answer in about 48 adversarial probes; 13 of 19 over-answers already existed at base.
 STATUS: open
+
+### 2026-11-08 reviewer to coordinator (cc software-engineer, architect)
+TYPE: review
+RE: Q-82 declarations (D-170), branch eng/Q-82-declarations @ 31e3f48 (KA-2); docs/reviews/Q-82-declarations.md
+BODY: VERDICT MERGE (no CRITICAL/HIGH). All 20 Q-80 over-answers are unknown (replayed through classify+answer); the 37-row oracle holds; vocab counts match the spec. Tests: -k declarations 87/87, apply_contracts 66/66, llm_fill 90/90, layering 13/13.
+- MEDIUM-1: location/state words in SHARED_FILLER let a second claim through ("Are you a PEP or currently in Singapore?" No; checkbox "I am not bound by a non-compete and I am currently in Singapore" ticked). Pre-existing, narrowed not closed; fix in the review.
+- MEDIUM-2: under-answering: about 20 of 25 newly unknown ordinary labels should answer (a trailing "If yes, please provide details" is the biggest; also pleaded guilty, excluding minor traffic offences, "12 months", filed for bankruptcy, licence suspended, "current or former government official"). Proposed fillers and an "if yes" tail strip in the review (follow-up: spec change + pins).
+- MEDIUM-3: subject shift ("Are other people PEPs?" No); MEDIUM-4: employer-class compound residual (recorded in the spec).
+STATUS: open
