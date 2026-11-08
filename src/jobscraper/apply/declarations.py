@@ -214,6 +214,27 @@ _STATUS_STARTERS = frozenset({"are", "is", "do", "does", "did", "have", "has", "
                               "were"})
 _STATUS_RUNS = (("bound", "by"), ("subject", "to"), ("party", "to"), ("signed",), ("convicted",),
                 ("charged",), ("hold",), ("holds",), ("held",), ("status",))
+# D-164 (Q-81; review F12, F13): the STATUS frame is a closed list of label shapes
+# (`question_frame`). PREFIX runs and a LEAD verb are dropped before the shape test.
+_FRAME_PREFIXES = (("self", "declaration"), ("please",), ("kindly",), ("declaration",),
+                   ("declarations",), ("note",), ("question",), ("important",))
+_FRAME_PREFIX_MAX = 3
+_FRAME_LEADS = (("tell", "us"), ("let", "us", "know"), ("confirm",), ("indicate",), ("state",),
+                ("specify",), ("advise",))
+_FRAME_MODALS = (("can", "you"), ("could", "you"), ("would", "you"), ("will", "you"))   # D-169b
+_FRAME_LEAD_LINKS =frozenset({"if", "whether", "that"})
+# shape A (direct): a status starter, or one of these leading runs
+_FRAME_A_RUNS = (("i", "am"), ("i", "have"), ("i", "hold"), ("there", "is"), ("there", "are"))
+# shape B (indirect, only after a LEAD)
+_FRAME_B_RUNS = (("you", "are"), ("you're",), ("you", "have"), ("you've",), ("you", "were"),
+                 ("you", "had"), ("you", "hold"), ("you", "do"), ("you", "did"))
+# shape C (noun phrase on a Yes/No choice): only these classes, only these filler tokens
+_NOUN_CLASSES = frozenset({L.PEP, L.CONFLICT_AUDIT_INDEPENDENCE, L.CRIMINAL_RECORD, L.BANKRUPTCY,
+                           L.REGULATORY, L.GOVERNMENT_EMPLOYMENT, L.DISABILITY})
+_NOUN_FILLER = frozenset({"a", "an", "the", "any", "of", "or", "person", "persons", "record",
+                          "records", "history", "status", "declaration", "employment", "action",
+                          "actions", "case", "cases"})
+_NOUN_MAX_TOKENS = 6
 # A single checkbox is ticked only by a recognised attestation of the right
 # polarity: "I am not bound by ..." / "I do not have ..." for a false profile
 # value, "I am ..." / "I have ..." for a true one - never by a stray "no".
@@ -613,17 +634,85 @@ def attestation_polarity(label_norm: str) -> Optional[bool]:
     return None
 
 
-def _status_frame(label_toks: list[str]) -> bool:
-    """The label asks the applicant's STATUS (D-90 (2)): it starts with have / has /
-    are / is / do / did / ..., or holds bound by / subject to / party to / signed /
-    convicted / hold ..."""
-    toks = label_toks[1:] if label_toks[:1] in (["please"], ["kindly"]) else label_toks
-    return bool(toks) and (toks[0] in _STATUS_STARTERS
-                           or any(_has_run(toks, r) for r in _STATUS_RUNS))
+def _strip_frame_prefix(toks: list[str]) -> list[str]:
+    """D-164 step 1: drop leading PREFIX runs (please, kindly, declaration(s), self
+    declaration, note, question, important), at most 3 tokens in total."""
+    used = 0
+    while True:
+        for run in _FRAME_PREFIXES:
+            n = len(run)
+            if used + n <= _FRAME_PREFIX_MAX and tuple(toks[:n]) == run:
+                toks, used = toks[n:], used + n
+                break
+        else:
+            return toks
+
+
+def _strip_answer_hint(toks: list[str]) -> list[str]:
+    for hint in ANSWER_HINTS:
+        if len(toks) > len(hint) and tuple(toks[-len(hint):]) == hint:
+            return toks[:-len(hint)]
+    return toks
+
+
+def _frame_lead(toks: list[str]):
+    return next((r for r in _FRAME_LEADS if tuple(toks[:len(r)]) == r), None)
+
+
+def question_frame(label_toks: list[str], classes: Iterable[DeclarationLabel],
+                   f: FormField) -> bool:
+    """D-164 (Q-81; review F12, F13): does the label have one of the closed STATUS
+    frame shapes that make a declaration answerable? (D-90 gate 2; willingness is
+    tested elsewhere.) Steps: drop a trailing answer hint, then PREFIX runs (<= 3
+    tokens), then an optional LEAD (confirm, indicate, state, specify, advise, tell
+    us, let us know) and an optional if / whether / that; what is left needs
+    shape A (a status starter, i am / i have / i hold / there is / there are, or a
+    status run anywhere), shape B (you are / you have / ..., only after a LEAD) or
+    shape C (a short noun phrase on a Yes/No dropdown or radio whose classes are
+    all in NOUN_CLASSES, so "Criminal record" or "Bankruptcy" is answered while
+    "Non-compete agreement?" is not). Runs for every bool on a non-checkbox field
+    except nda_willingness, including after the D-91 freedom inversion (F12)."""
+    toks = _strip_frame_prefix(_strip_answer_hint(list(label_toks)))
+    lead = _frame_lead(toks)
+    if lead is None:                       # D-169b: "can you [please] confirm ..." - a modal only before a LEAD
+        for modal in _FRAME_MODALS:
+            rest = toks[len(modal):] if tuple(toks[:len(modal)]) == modal else None
+            if rest is not None:
+                rest = rest[1:] if rest[:1] == ["please"] else rest
+                if _frame_lead(rest):
+                    toks, lead = rest, _frame_lead(rest)
+                    break
+    if lead:
+        toks = toks[len(lead):]
+        if toks[:1] and toks[0] in _FRAME_LEAD_LINKS:
+            toks = toks[1:]
+    if not toks:
+        return False
+    if toks[0] in _STATUS_STARTERS or any(tuple(toks[:len(r)]) == r for r in _FRAME_A_RUNS) \
+            or any(_has_run(toks, r) for r in _STATUS_RUNS):
+        return True
+    if lead and any(tuple(toks[:len(r)]) == r for r in _FRAME_B_RUNS):
+        return True
+    return _noun_phrase(toks, set(classes), f)
+
+
+def _noun_phrase(toks: list[str], classes: set, f: FormField) -> bool:
+    """D-164 shape C: a short noun-phrase label on a Yes/No dropdown or radio."""
+    from .resolve import bool_shaped                 # resolve imports this module
+
+    if not classes or not classes <= _NOUN_CLASSES or len(toks) > _NOUN_MAX_TOKENS \
+            or f.fit_type not in (FieldType.DROPDOWN, FieldType.RADIO) or not bool_shaped(f):
+        return False
+    if _spans(toks, _NDA_OBJECTS):
+        return False
+    covered = {i for c in classes for a, b in _spans(toks, _PHRASE_TOKENS[c]) for i in range(a, b)}
+    return all(i in covered or t in _NOUN_FILLER for i, t in enumerate(toks))
 
 
 def _starts_as_question(label_toks: list[str]) -> bool:
-    toks = label_toks[1:] if label_toks[:1] in (["please"], ["kindly"]) else label_toks
+    """D-90 gate 1: a TEXT / TYPEAHEAD label opens like a question. D-164: the same
+    PREFIX strip as `question_frame`, never a LEAD, never shape C."""
+    toks = _strip_frame_prefix(list(label_toks))
     return bool(toks) and toks[0] in QUESTION_STARTERS
 
 
@@ -718,7 +807,7 @@ def answer(label, f: FormField, ctx: ResolveContext) -> Answer:
             return _ended(f, "", "attestation not recognised: " + norm_label(f.label)[:120])
         classes, value = agreed
         name = "+".join(sorted(c.value for c in classes))
-        return _bool_answer(f, name, value, note=f"agreed: {name}")
+        return _bool_answer(f, name, value, note=f"agreed: {name}", classes=classes)
     gate = _field_gate(f)                    # D-90 gate 1: the field can carry a Yes/No
     if gate:
         return _ended(f, label.value, gate)
@@ -806,10 +895,12 @@ def _freedom_inverts(label_norm: str, cls: Optional[DeclarationLabel]) -> bool:
 
 
 def _bool_answer(f: FormField, name: str, value: Optional[bool], note: str = "",
-                 cls: Optional[DeclarationLabel] = None) -> Answer:
+                 cls: Optional[DeclarationLabel] = None,
+                 classes: Iterable[DeclarationLabel] = ()) -> Answer:
     """A declaration bool onto a field (§7.3.2); `name` is the class (or the
-    agreed classes joined by "+"; then `cls` is None). D-90: field type (gate 1),
-    status frame (2), known polarity (3) - otherwise unknown / blank."""
+    agreed classes joined by "+"; then `cls` is None and `classes` is the agreed
+    set). D-90: field type (gate 1), status frame (2, D-164 `question_frame`),
+    known polarity (3) - otherwise unknown / blank."""
     from .resolve import fit_bool                    # resolve imports this module
 
     gate = _field_gate(f)
@@ -837,7 +928,8 @@ def _bool_answer(f: FormField, name: str, value: Optional[bool], note: str = "",
             if not _freedom_inverts(label_norm, cls):
                 return _ended(f, name, "negated declaration question")
             value = not value
-        elif cls is not L.NDA_WILLINGNESS and not _status_frame(toks):
+        if cls is not L.NDA_WILLINGNESS and not question_frame(
+                toks, classes or ({cls} if cls else ()), f):   # D-164 (F12): after a freedom inversion too
             return _ended(f, name, "not a status question")
         fit = fit_bool(f, value)
     if fit is None:
@@ -875,7 +967,7 @@ def _disability_answer(f: FormField, value: Optional[bool]) -> Answer:
         if fit is None:
             return _ended(f, name, "no offered option fits the declaration")
         return _answer(f, name, fit)
-    return _bool_answer(f, name, value, cls=L.DISABILITY)
+    return _bool_answer(f, name, value, cls=L.DISABILITY, classes={L.DISABILITY})
 
 
 _strip_ns_exclusions = strip_ns_exclusions      # the old private name, kept for callers

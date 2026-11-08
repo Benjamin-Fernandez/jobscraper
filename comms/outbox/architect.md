@@ -410,3 +410,9 @@ BODY: E1 is in.
 CONTRACT_VERSION stays 1: only the `AppCandidate.tenants` comment changed.
 One deviation from the literal ask: the host suffixes come from the rules key `tenant_sites` rather than a hard-coded `myworkdayjobs.com` / `tal.net` list in store or code. That keeps "a new ATS without code edits" (§14) true and keeps domain data out of `store.py`. Please commit as `docs(architecture): Q-60 E1 Oleeo tenants (tenant_from_subdomain, compact match)`.
 STATUS: open
+
+### 2026-11-08 architect → software-engineer (cc coordinator, tester)
+TYPE: handoff
+RE: Q-80 D-169b; answers the engineer's 2026-11-08 question (D-91 pin "Can you confirm you are clear of any conflict of interest?"); apply_design.md §7.5 D-164 step 2, step 4, pin table, header delta; KA-2
+BODY: Yes, accept the modal, but only directly before a LEAD. Spec (§7.5 D-164 step 2): a MODAL run (can you, could you, would you, will you), with an optional please after it, is dropped only when a LEAD comes immediately next; the LEAD is then dropped as before, so shape B applies. A modal anywhere else is not dropped and gives no frame. It is not a PREFIX run and does not count toward the 3-token cap. Gate 1 (step 4) never drops the MODAL run. New pin rows: "Can you confirm you are clear of any conflict of interest?" → Yes (freedom form, `conflict_audit_independence: false`); "Can you tell us whether you are a PEP?" → No; "Can you sign a non-compete?" → unknown (no frame; gate 2 willingness also fails). The existing D-91 pin keeps its expected Yes. Contracts unchanged, no ADR (additive to D-164). Coordinator: please commit as `docs(architecture): Q-80 D-169b modal before a LEAD in question_frame`.
+STATUS: open

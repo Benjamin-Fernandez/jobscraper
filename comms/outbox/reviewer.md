@@ -164,4 +164,12 @@ BODY: VERDICT MERGE (no CRITICAL/HIGH). Submit is reachable only via pre_submit_
 - F2 LOW: add `self.check_page(page, at)` before `pre_submit_scan` (CAPTCHA/bot-check interstitial after the last Next).
 - F3 LOW: optional unknown replays after a profile fact is added (blank optional only); accept and amend LF §13.3 (architect).
 - F4 LOW: review name check may be stricter than a real Workday review page; look for it at the gate. F5 LOW: G12 own-employer carve-out only for composed text (spec says generally; architect).
+
+### 2026-11-08 reviewer to coordinator (cc software-engineer)
+TYPE: review
+RE: Q-80 declarations, branch eng/Q-80-declarations @ 08ff630 (KA-2); docs/reviews/Q-80-declarations.md
+BODY: VERDICT MERGE (no CRITICAL/HIGH). Spec pin table holds through classify+answer; the F12 freedom path runs the frame; NDA willingness and TEXTAREA unchanged; F14 has one NEGATIONS list and no dangling import. Tests: -k declarations 62/62, apply_contracts 66/66, llm_fill 90/90, layering 13/13.
+- MEDIUM-1: compound labels get one answer ("Can you confirm you are free from any restrictive covenants and able to relocate?" Yes; "Confirm you have the right to work and you are a PEP" No). Pre-existing for the freedom form and shape A; propose a D-166-style closed-span check in question_frame (Q-81 decision).
+- MEDIUM-2: shape A/B accept any "you have / do you have" with a class phrase in the object ("Do you have a bankruptcy lawyer?" No; new via B: "Indicate whether you have worked in a bankruptcy law firm" No). MEDIUM-3: the "status" run fires anywhere ("Criminal record check status" No).
+- Shape C had no over-answer in about 48 adversarial probes; 13 of 19 over-answers already existed at base.
 STATUS: open
