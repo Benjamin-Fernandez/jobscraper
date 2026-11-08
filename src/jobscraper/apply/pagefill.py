@@ -57,6 +57,8 @@ from .contracts import (
 
 L1_KEPT_NOTE = "L1: kept, uploaded in this attempt"     # locks: the file on the page is ours
 TIMED_OUT_NOTE = "transport: timed out"
+ENTRY_NOTE_PREFIX = "E5: another "                         # a section note (R3 F14, D-173), not a value failure
+ENTRY_NOTE_TAIL = " - this value was typed"
 TYPED_BEFORE_STOP_NOTE = "typed before the page stopped"  # N6a F6: the row is on the page; apply_flow keeps it applied
 G9_FAILED_NOTE = "G9: cleared after failed fill"
 DELETE_UNCONFIRMED_NOTE = "E3: delete not confirmed"
@@ -115,6 +117,7 @@ class _Run:
     transport: str = ""                                     # set by a pick that failed in transport
     alias: dict = dc_field(default_factory=dict)            # re-created reader key -> the old key (F6)
     corrected: set = dc_field(default_factory=set)          # keys the corrective pass re-asked (F8)
+    entry_failed: dict = dc_field(default_factory=dict)     # reader key -> section note: an E5 add that failed
     dead: set = dc_field(default_factory=set)               # keys of entries we confirmed deleted (F2)
 
 
@@ -509,13 +512,20 @@ def _add_entry(run: _Run, section: str, source: str) -> tuple[str, ...]:
 
 
 def _add_failed(run: _Run, section: str, why: str) -> tuple[str, ...]:
-    """Review F5 / R3 F14: E5 asked for an entry the page didn't get; never silent. Logged
-    (the section name and the reason only). The section's existing entries were filled and
-    stay as they are: marking their rows `fill_failed` "entry not added" (the first fix) said
-    the wrong thing about values we did type. PageOutcome has no entry-level channel, so the
-    log line is the only report until the contracts get one (the flow then cannot stop on a
-    missing entry; see the handoff)."""
+    """Review F5 / R3 F14 (D-173): E5 asked for an entry the page didn't get; never silent
+    and fail closed. Logged (the section name and the reason only), and the section's fields
+    on the page (its required ones, else all of them) are listed in `fill_failed`
+    (`run.entry_failed`, kept through the corrective pass), so a required one stops the flow
+    `validation_error`: auto mode must not submit with fewer entries than the profile has.
+    Those rows keep their own status and carry a SECTION note, not a claim that their value
+    failed. PageOutcome has no entry-level channel yet (next contract version)."""
     run.services.log(f"E5: add failed in {section}: {why}")
+    keys = [k for k in run.order if k in run.fields and k not in run.dead
+            and run.fields[k].group.rpartition("#")[0] == section]
+    required = [k for k in keys if run.fields[k].field.required]
+    note = f"{ENTRY_NOTE_PREFIX}{section.replace('_', ' ')} entry could not be added ({why}){ENTRY_NOTE_TAIL}"
+    for key in required or keys:
+        run.entry_failed[key] = note
     return ()
 
 
@@ -736,12 +746,17 @@ def _outcome(run: _Run, *, unknown: Sequence[str] = ()) -> PageOutcome:
     answers = dict(run.answers)
     if unknown:
         _note_typed(run, answers)
-    why = dict(run.failed)
+    why = {**run.entry_failed, **run.failed}
     failed = [k for k in run.order if k in why and k not in unknown]
     for k in failed:
-        if k in answers:
-            answers[k] = _replace(answers[k], status=AnswerStatus.FILL_FAILED,
-                                  note=answers[k].note or f"fill: {why[k]}")
+        if k not in answers:
+            continue
+        if k in run.entry_failed and k not in run.failed:
+            # the section's problem; this value was typed and keeps its status in the audit
+            answers[k] = _replace(answers[k], note="; ".join(n for n in (answers[k].note, why[k]) if n))
+            continue
+        answers[k] = _replace(answers[k], status=AnswerStatus.FILL_FAILED,
+                              note=answers[k].note or f"fill: {why[k]}")
     fields = [run.fields[k] for k in run.order if k in run.fields]
     return PageOutcome(step=run.step, fields=fields, answers=answers, unknown_required=tuple(unknown),
                        fill_failed=tuple(failed), model_calls=run.stats.calls,
