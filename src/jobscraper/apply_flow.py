@@ -36,6 +36,7 @@ from urllib.parse import urlsplit
 
 from . import applicant, backends, tailor_flow, vault
 from .apply import browser as B
+from .apply import declarations
 from .apply import facts as F
 from .apply import mail
 from .apply import page as P
@@ -55,7 +56,7 @@ from .apply.plan import norm_label
 from .config import ApplyConfig, Config
 from .scrape.net import HttpClient
 from .store import (ATTEMPT_TRANSITIONS, POST_CLICK_ATTEMPT_STATES, TERMINAL_ATTEMPT_STATES,
-                    TIME_FMT, Store, utcnow)
+                    TIME_FMT, Store, shift, utcnow)
 
 S = AttemptState
 SG = timezone(timedelta(hours=8))        # Asia/Singapore: no DST since 1982, so a fixed offset
@@ -187,10 +188,6 @@ _SIGNAL_NOTE = {
 
 
 # ---------------------------------------------------------------- one attempt
-
-# The llm path may not press Submit until the pre-Submit scan exists (WP-N6b; review F1).
-AUTO_SUBMIT_BLOCKED = "auto submit needs the pre-Submit scan (N6b)"
-
 
 class _Attempt:
     """The bookkeeping of one attempt: state writes, evidence, audit rows."""
@@ -530,6 +527,13 @@ class RunLock:
 # llm_fill_design §11). The loop itself is `_Run.body_llm`.
 
 NOT_APPLIED_NOTE = "not applied: the page stopped"
+REVIEW_SCAN_FAILED = "review: could not check the required fields"
+REVIEW_RESUME_MISSING = "review: resume not shown"
+
+
+def _squash(text: str) -> str:
+    """Lower-case with whitespace collapsed, for the review text check."""
+    return " ".join(str(text or "").lower().split())
 
 
 def _is_navigator(adapter: Any) -> bool:
@@ -541,8 +545,8 @@ def _is_navigator(adapter: Any) -> bool:
 
 class _FillServices:
     """`FillServices` (contracts v5) for one attempt. The pure steps are module
-    functions in `apply/`; this holds what only the flow knows. The decision cache
-    is wired in WP-N6b (`cache_get` misses, `cache_put` keeps nothing until then)."""
+    functions in `apply/`; this holds what only the flow knows, among it the decision
+    cache (`fill_cache`, llm_fill_design §13.3; WP-N6b)."""
 
     def __init__(self, run: "_Run", at: _Attempt, ctx: AttemptContext, rules: Any,
                  now: Optional[Callable[[], float]] = None):
@@ -568,13 +572,32 @@ class _FillServices:
 
     def cache_get(self, job_id: str, sigs: Sequence[str], prompt_version: str, model: str,
                   inputs_hash: str) -> dict[str, dict[str, Any]]:
-        return {}
+        """The job's stored decisions among `sigs` (the caller checks `facts_used_hash`).
+        The cache is an optimisation: a store error is a miss, said by type only."""
+        try:
+            return self.run.store.fill_cache_get(job_id, sigs, prompt_version, model, inputs_hash)
+        except Exception as exc:                          # noqa: BLE001 - a miss never fails the attempt
+            self.log(f"decision cache unavailable ({type(exc).__name__})")
+            return {}
 
     def cache_put(self, job_id: str, rows: Sequence[dict[str, Any]]) -> None:
-        return None
+        """Keep the page's decisions (a ModelDecision only, never a private value); stamped
+        with the attempt's clock so the 30-day purge and tests share one seam (TR-5)."""
+        try:
+            self.run.store.fill_cache_put(job_id, rows, _stamp(self.now()))
+        except Exception as exc:                          # noqa: BLE001 - nothing is lost but a replay
+            self.log(f"decision cache not kept ({type(exc).__name__})")
 
     def log(self, line: str) -> None:
         self.run.log(f"[attempt {self.at.id}] {line}")
+
+
+FILL_CACHE_DAYS = 30                                      # llm_fill_design §13.3: purged at run start
+
+
+def _stamp(epoch: float) -> str:
+    """UTC epoch seconds as the store's sortable text time."""
+    return datetime.fromtimestamp(epoch, timezone.utc).strftime(TIME_FMT)
 
 
 def _fill_services(run: "_Run", at: _Attempt, ctx: AttemptContext, *,
@@ -676,6 +699,7 @@ class _Run:
         self.reopened = False                 # check_email sent the page back to the posting (F7)
         self.seen: set[str] = set()
         self._resume_text: Optional[str] = None
+        self._resume_entries: Optional[tuple[tuple[str, str, str], ...]] = None
         self._aliases = None
 
     # -- browser
@@ -792,6 +816,20 @@ class _Run:
             self._resume_text = text or ""
         return self._resume_text
 
+    def other_employers(self, job: dict[str, Any], aliases: Sequence[str],
+                        groups: Sequence[Sequence[str]]) -> tuple[str, ...]:
+        """G12 (llm_fill_design §7): the names a kept or cited text must not carry here: the
+        watchlist's companies and the employers question sightings came from, minus this
+        employer, its aliases and every spelling in its aliases.yaml group. Names only."""
+        mine = [m for m in (str(job.get("company") or ""), *aliases) if m]
+        for g in groups:
+            if any(declarations.company_match(m, v) for m in mine for v in g):
+                mine += [v for v in g if v]
+        names = [c.name for c in self.store.companies()] + self.store.sighting_employers()
+        return tuple(dict.fromkeys(
+            n for n in (str(x).strip() for x in names)
+            if n and not any(declarations.company_match(n, m) for m in mine)))
+
     def resolve_ctx(self, job: dict[str, Any], tenant: Any, adapter: Any,
                     resume_path: str) -> ResolveContext:
         aliases = tuple(dict.fromkeys(a for a in (job.get("company_key"), tenant.board)
@@ -799,10 +837,14 @@ class _Run:
         if self._aliases is None:
             self._aliases = tailor_flow.alias_groups(self.cfg)
         groups, ambiguous = self._aliases
+        if self._resume_entries is None:
+            self._resume_entries = tailor_flow.resume_entries(self.cfg)
         # ResolveContext has no job title yet (Q-27): the company only.
         return ResolveContext(
             profile=self.profile, employer_name=str(job.get("company") or ""),
             employer_aliases=aliases,
+            resume_entries=self._resume_entries,
+            other_employers=self.other_employers(job, aliases, groups),
             previously_applied=self.store.applied_to_company(job.get("company_id"), job["job_id"]),
             jd_text=str(job.get("jd_text") or ""), resume_text=self.resume_text(resume_path),
             resume_path=resume_path, ats=adapter.name, alias_groups=groups,
@@ -1147,17 +1189,67 @@ class _Run:
         else:
             raise ApplyFailure(ReasonCode.PAGE_UNRECOGNISED, f"{nav.name}: too many steps")
 
-        # review (the pre-Submit scan and the review text check arrive with WP-N6b).
-        # Until then an auto-mode attempt fails closed (review F1, NF-06): it stops here, as a
-        # dry run does, and never reaches Submit. The owner sees "ready to submit" with the note.
+        # review: the pre-Submit scan and the review text check (llm_fill_design §8, H7), then,
+        # unchanged, a dry run stops here and auto mode submits (NF-06). Auto mode reaches
+        # `submit` only through a passing scan (replaces the N6a review-F1 stop).
         at.shot(page, "review")
         at.result.url = (page.url or "").split("?", 1)[0]
+        self.pre_submit_scan(page, nav, ctx, at)
         if self.dry_run:
             at.to(S.READY_TO_SUBMIT, end_url=at.result.url)
-        else:
-            self.log(f"[attempt {at.id}] {AUTO_SUBMIT_BLOCKED}")
-            at.to(S.READY_TO_SUBMIT, end_url=at.result.url, detail=AUTO_SUBMIT_BLOCKED)
+            return nav, ctx
+        self.submit(page, ctx, nav, at, job)
         return nav, ctx
+
+    def pre_submit_scan(self, page: Any, nav: Any, ctx: AttemptContext, at: _Attempt) -> None:
+        """Before Submit (llm_fill_design §8, review H7). (1) `page.scan_required` over the whole
+        form (Greenhouse: the one page; Workday: the review page shows no inputs, so the last
+        step's scan before Next stands): a required control empty or in error ->
+        `validation_error`, nothing sent. (2) The review text check: when this attempt uploaded
+        the resume, its file name must be on the page ("review: resume not shown"). (3) Required
+        text answers the page does not show: a log line only. Fail closed: a scan that cannot
+        run stops an auto-mode attempt (a dry run, which sends nothing, says so and goes on).
+        Raises ApplyFailure; never clicks anything; no field value is logged."""
+        try:
+            scope = nav.scope(page, ctx)
+            hits = P.scan_required(page, scope)
+        except Exception as exc:                          # noqa: BLE001 - fail closed (NF-06)
+            self.log(f"[attempt {at.id}] pre-Submit scan could not run ({type(exc).__name__})")
+            if not self.dry_run:
+                raise ApplyFailure(ReasonCode.VALIDATION_ERROR, REVIEW_SCAN_FAILED,
+                                   step="review") from None
+            return
+        if hits:
+            labels = self._labels_of(page, scope, hits)
+            raise ApplyFailure(ReasonCode.VALIDATION_ERROR,
+                               ("review: " + ", ".join(x[:80] for x in labels[:3]))[:200],
+                               step="review")
+        name = Path(ctx.resume_path).name if ctx.resume_path else ""
+        text = _squash(P.page_text(page, scope))
+        if name and name in ctx.uploaded and _squash(name) not in text:
+            raise ApplyFailure(ReasonCode.VALIDATION_ERROR, REVIEW_RESUME_MISSING, step="review")
+        unseen = 0
+        for key, a in at.answers.items():
+            f = at.fields.get(key)
+            if (f is None or not f.required or a.status is not AnswerStatus.FILLED
+                    or f.type not in (FieldType.TEXT, FieldType.TEXTAREA)
+                    or not isinstance(a.value, str) or len(a.value.strip()) < 3):
+                continue
+            if _squash(a.value)[:60] not in text:
+                unseen += 1
+        if unseen:
+            self.log(f"[attempt {at.id}] review: {unseen} required text value(s) not shown on "
+                     "the review page (note only)")
+        self.log(f"[attempt {at.id}] pre-Submit scan passed")
+
+    def _labels_of(self, page: Any, scope: str, keys: Sequence[str]) -> list[str]:
+        """The labels of scan hits (the reader's marks are stable, so a second read maps
+        keys to labels); the keys themselves when that read fails."""
+        try:
+            by_key = {pf.field.key: pf.field.label for pf in P.read_page(page, scope=scope, options=False)}
+        except Exception:                                 # noqa: BLE001 - labels are a courtesy
+            by_key = {}
+        return [by_key.get(k) or k for k in keys]
 
     def page_result(self, at: _Attempt, page: Any, outcome: PageOutcome, rctx: ResolveContext,
                     services: _FillServices, job: dict[str, Any]) -> str:
@@ -1509,6 +1601,16 @@ class _Run:
 
     # -- the batch
 
+    def purge_fill_cache(self) -> None:
+        """Drop decision-cache rows older than 30 days (llm_fill_design §13.3), by the
+        run's clock (TR-5). Housekeeping: it never stops a run."""
+        try:
+            n = self.store.fill_cache_purge(shift(_stamp(self.now()), days=-FILL_CACHE_DAYS))
+            if n:
+                self.log(f"apply: purged {n} old cached decision(s)")
+        except Exception as exc:                          # noqa: BLE001
+            self.log(f"apply: decision cache purge skipped ({type(exc).__name__})")
+
     def run(self, job_ids: Sequence[str]) -> list[AttemptResult]:
         lock = RunLock(self.evidence / "run.lock")
         if not lock.acquire():
@@ -1519,6 +1621,7 @@ class _Run:
             reaped = self.store.reap_attempts(utcnow())
             if reaped:
                 self.log(f"apply: closed {reaped} interrupted attempt(s)")
+            self.purge_fill_cache()
             for job_id in job_ids:
                 results.append(self.attempt(job_id))
             ready = [r for r in results if r.state is S.READY_TO_SUBMIT]
