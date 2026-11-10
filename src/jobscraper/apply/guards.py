@@ -55,6 +55,8 @@ CONF_KEEP_TRUSTED = 0.95
 CONF_KEEP_GROUNDED = 0.85
 CONF_UNVERIFIED = 0.5
 MIN_EVIDENCE = 3
+# Sources the program knows as fact (not the model's guess); `pagefill` imports this (R3 F11).
+FACT_SOURCES = frozenset({FillSource.PROFILE, FillSource.EXTRA, FillSource.STANDING})
 
 # Module constants (TR-10), all matched on whole words / token runs.
 LEVEL_SYNONYMS: tuple[tuple[str, ...], ...] = (
@@ -383,7 +385,7 @@ def recheck_targets(fields: Sequence[PageField], decisions: Any,
             continue
         d = ds.get(pf.field.key)
         src = d.source if d else FillSource.UNKNOWN
-        if src in (FillSource.PROFILE, FillSource.EXTRA, FillSource.STANDING):
+        if src in FACT_SOURCES:
             continue
         if pf.field.type is FieldType.TEXTAREA:
             out.append(pf.field.key)
@@ -469,7 +471,7 @@ def _decision_value(c: _Ctx, pf: PageField, d: ModelDecision) -> Any:
     model's option. When the run also states an option that differs from the fact's
     value, it does not agree with anything (None): a second run citing the same fact
     while choosing "No" is a disagreement, not a "Yes" (D-84 R2)."""
-    if d.source in (FillSource.PROFILE, FillSource.EXTRA, FillSource.STANDING):
+    if d.source in FACT_SOURCES:
         fit = F.fact_value(d.ref, pf, c.rctx, c.rules, today=c.today)
         if fit is not None:
             own = option_for(pf, d.value) if is_choice(pf) else d.value
@@ -808,7 +810,7 @@ def _field(c: _Ctx, pf: PageField, d: Optional[ModelDecision]) -> Answer:
         return _answer_unknown(pf, "model: no reply")
     if d.source is FillSource.UNKNOWN:
         return _answer_unknown(pf, "model: unknown" + (" (recheck)" if d.via == "recheck" else ""))
-    if d.source in (FillSource.PROFILE, FillSource.EXTRA, FillSource.STANDING):
+    if d.source in FACT_SOURCES:
         return _fact_field(c, pf, d)
     if d.source in (FillSource.RESUME, FillSource.JOB):
         return _model_field(c, pf, d)
