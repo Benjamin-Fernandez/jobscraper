@@ -243,6 +243,18 @@ def compose_needed(f: FormField, group: str = "") -> bool:
         _COVER.search(text) or _MOTIVE.search(f.label))
 
 
+def compose_kind(f: FormField) -> str:
+    """`letter` for a FILE or a cover-letter label, else `answer` (§19.3 step 1)."""
+    return "letter" if f.type is FieldType.FILE or _COVER.search(f"{f.label} {f.description}")         else "answer"
+
+
+def owner_compose_text(f: FormField, ctx: ResolveContext) -> str:
+    """The owner's saved answer for this posting's compose label (L6, §19.2), else ""."""
+    ans, _note = resolve.extra_answer(f, compose_label(f, ctx), ctx)
+    value = getattr(ans, "value", None)
+    return value.strip() if isinstance(value, str) else ""
+
+
 def compose_note(note: str) -> str:
     """The capture note of a compose target: `compose_needed: <why>`. A lock's note may
     already carry the prefix (L8, apply_flow's failure notes); an empty one means `off`

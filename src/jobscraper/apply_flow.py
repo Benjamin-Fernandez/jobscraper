@@ -37,6 +37,7 @@ from urllib.parse import urlsplit
 from . import applicant, backends, tailor_flow, vault
 from .apply import browser as B
 from .apply import declarations
+from .apply import llm_fill
 from .apply import facts as F
 from .apply import mail
 from .apply import page as P
@@ -55,6 +56,7 @@ from .apply.pagefill import ENTRY_NOTE_PREFIX, ENTRY_NOTE_TAIL, TYPED_BEFORE_STO
 from .apply.plan import norm_label
 from .config import ApplyConfig, Config
 from .scrape.net import HttpClient
+from .tailor.contracts import ComposeRequest
 from .store import (ATTEMPT_TRANSITIONS, POST_CLICK_ATTEMPT_STATES, TERMINAL_ATTEMPT_STATES,
                     TIME_FMT, Store, shift, utcnow)
 
@@ -568,6 +570,7 @@ class _FillServices:
         self.model = str(getattr(run.backend, "model_id", "") or getattr(run.backend, "name", ""))
         self.rules = rules
         self.cfg: dict[str, Any] = dataclasses.asdict(run.acfg.llm_fill)
+        self.compose_enabled = bool(run.acfg.compose.enabled)     # pagefill step 7b (Q-45, section 19.2)
         self._now = now or run.now
 
     def now(self) -> float:
@@ -714,6 +717,7 @@ class _Run:
         self._resume_text: Optional[str] = None
         self._resume_entries: Optional[tuple[tuple[str, str, str], ...]] = None
         self._aliases = None
+        self.compose_meta: dict[str, tuple[str, str]] = {}    # audit key -> (model, prompt hash) of a composed text
 
     # -- browser
 
@@ -859,9 +863,9 @@ class _Run:
         if self.acfg.model_sees_sensitive and not sees_s:
             prefix = f"[attempt {attempt_id}] " if attempt_id is not None else ""
             self.log(f"{prefix}model_sees_sensitive ignored: model backend is not on this computer")
-        # ResolveContext has no job title yet (Q-27): the company only.
         return ResolveContext(
             profile=self.profile, employer_name=str(job.get("company") or ""),
+            job_title=str(job.get("title") or ""),
             employer_aliases=aliases,
             resume_entries=self._resume_entries,
             other_employers=self.other_employers(job, aliases, groups),
@@ -1187,6 +1191,8 @@ class _Run:
             self.check_deadline(ctx, at.step)
             self.check_page(page, at)
             outcome = fill_page(page, nav, ctx, rctx, services)
+            if outcome.compose_needed:                    # Q-45: write the texts, then once more (section 19.3)
+                outcome = self.compose_step(at, page, nav, ctx, rctx, services, job, outcome)
             step = self.page_result(at, page, outcome, rctx, services, job)
             if not outcome.fields and step != "review":
                 raise ApplyFailure(ReasonCode.PAGE_UNRECOGNISED, f"no fields on {step}", step=step)
@@ -1296,6 +1302,10 @@ class _Run:
                 raise ApplyFailure(ReasonCode.ERROR, f"timed out on {step}", step=step)
             raise ApplyFailure(ReasonCode.MODEL_UNAVAILABLE,
                                f"{_transport_cause(outcome)} on {step}", step=step)
+        if outcome.compose_needed:
+            # the texts were written and the page still asks for them (section 19.3 step 4): never again
+            self.stage(at, page, outcome, step, applied=False)
+            raise ApplyFailure(ReasonCode.ERROR, f"compose loop on {step}", step=step)
         if outcome.unknown_required:
             self.stage(at, page, outcome, step, applied=False)
             self.capture(at, job, outcome.fields, outcome.answers, rctx, page=True)
@@ -1336,8 +1346,100 @@ class _Run:
             if not applied and a.status is AnswerStatus.FILLED and TYPED_BEFORE_STOP_NOTE not in (a.note or ""):
                 a = dataclasses.replace(a, status=AnswerStatus.SKIPPED,
                                         note=_join(a.note, NOT_APPLIED_NOTE))
+            meta = self.compose_meta.get(key)
+            if meta and a.source == AnswerSource.COMPOSED.value:
+                a = dataclasses.replace(a, model=meta[0], prompt_hash=meta[1])   # audit (section 19.5)
             at.fields[key] = f
             at.answers[key] = a
+
+    # -- Q-45: composed texts (llm_fill_design section 19.3)
+
+    def compose_step(self, at: _Attempt, page: Any, nav: Any, ctx: AttemptContext,
+                     rctx: ResolveContext, services: _FillServices, job: dict[str, Any],
+                     outcome: PageOutcome) -> PageOutcome:
+        """The page stopped at step 7b with nothing changed: write the text of each compose
+        target, in page order (the owner's saved answer when there is one, else the tailor's
+        checked composition), put it into `ctx.composed` (a FILE target also gets a letter
+        file in `ctx.composed_files`), then run `fill_page` again on the same step, once. A
+        draft that failed its checks or a missing master is captured (`compose_needed: failed
+        check` / `no master`) and ends the attempt `unanswerable_required`; a transport failure
+        ends it `model_unavailable` with nothing captured. No text is ever logged."""
+        step = B.slug(outcome.step) if outcome.step else "form"
+        by_key = {pf.field.key: pf for pf in outcome.fields}
+        try:
+            akeys = P.audit_keys(page, outcome.fields, step) if outcome.fields else {}
+        except Exception:                                 # noqa: BLE001 - the reader keys still work
+            akeys = {}
+        for key in outcome.compose_needed:
+            pf = by_key.get(key)
+            if pf is None:
+                continue
+            if services.deadline_left() <= 0:
+                self.stage(at, page, outcome, step, applied=False)
+                raise ApplyFailure(ReasonCode.ERROR, f"timed out on {step}", step=step)
+            f, akey = pf.field, akeys.get(key) or key
+            text, meta = Q.owner_compose_text(f, rctx), ("", "")
+            if not text:
+                if not self.acfg.compose.enabled:
+                    self.compose_stop(at, page, job, rctx, outcome, step, key, Q.COMPOSE_OFF)
+                res = tailor_flow.compose(self.cfg, self.compose_request(f, rctx),
+                                          backend=self.backend, redact=llm_fill.redact)
+                if not res.ok:
+                    if (res.error or "").startswith("transport"):
+                        self.stage(at, page, outcome, step, applied=False)
+                        raise ApplyFailure(ReasonCode.MODEL_UNAVAILABLE,
+                                           f"{res.error[:60]} on {step}", step=step)
+                    self.compose_stop(at, page, job, rctx, outcome, step, key,
+                                      Q.COMPOSE_NO_MASTER if res.error == "no master"
+                                      else Q.COMPOSE_FAILED)
+                text, meta = res.text, (res.model, res.prompt_hash)
+            ctx.composed[akey] = text
+            if f.type is FieldType.FILE:
+                ctx.composed_files[akey] = self.write_letter(at, ctx, text)
+            self.compose_meta[akey] = meta
+            self.log(f"[attempt {at.id}] composed 1 text ({len(text.split())} words)")
+        return fill_page(page, nav, ctx, rctx, services)
+
+    def compose_request(self, f: FormField, rctx: ResolveContext) -> ComposeRequest:
+        """The tailor's request (section 19.3 step 1): employer text and limits, and the S
+        values that must be redacted from the prompt and absent from the text."""
+        cc, kind = self.acfg.compose, Q.compose_kind(f)
+        letter = kind == "letter"
+        return ComposeRequest(
+            kind=kind, question=" ".join(x for x in (f.label, f.description) if x).strip(),
+            employer=rctx.employer_name, employer_aliases=tuple(rctx.employer_aliases),
+            job_title=rctx.job_title, jd_text=rctx.jd_text or "",
+            max_words=int(cc.letter_max_words if letter else cc.answer_max_words),
+            max_chars=int(f.max_length or (4000 if letter else 1500)),
+            s_values=tuple(dict.fromkeys([*F.s_values(rctx.profile, rctx.account_email),
+                                          *F.enum_s_values(rctx.profile)])),
+            other_employers=tuple(" ".join(t) for t in F.other_employers(rctx, composed=True)))
+
+    def write_letter(self, at: _Attempt, ctx: AttemptContext, text: str) -> str:
+        """`data/apply/<attempt id>/cover_letter.<docx|txt>` (`cover_letter-2.docx` for a
+        second one): plain paragraphs in the tailor's font, no name, no contact block."""
+        fmt = self.acfg.compose.file_format if self.acfg.compose.file_format in ("docx", "txt") else "docx"
+        n = len(ctx.composed_files) + 1
+        name = "cover_letter" if n == 1 else f"cover_letter-{n}"
+        return tailor_flow.write_letter(text, at.dir / f"{name}.{fmt}", fmt)
+
+    def compose_stop(self, at: _Attempt, page: Any, job: dict[str, Any], rctx: ResolveContext,
+                     outcome: PageOutcome, step: str, key: str, why: str) -> None:
+        """Capture the compose target `key` (reason `compose_needed`, note `compose_needed:
+        <why>`) and end the attempt `unanswerable_required` (section 19.3 step 3). Never returns."""
+        old = outcome.answers.get(key)
+        note = f"{Q.COMPOSE_NOTE}: {why}"
+        ans = dataclasses.replace(old, value=None, status=AnswerStatus.UNKNOWN, note=note) \
+            if old is not None else Answer(field_key=key, value=None, tier=AnswerTier.NONE, source="",
+                                           confidence=0.0, status=AnswerStatus.UNKNOWN, note=note)
+        stopped = dataclasses.replace(outcome, answers={**outcome.answers, key: ans},
+                                      compose_needed=(), unknown_required=(key,))
+        self.stage(at, page, stopped, step, applied=False)
+        self.capture(at, job, stopped.fields, {key: ans}, rctx, page=True)
+        self.log(f"[attempt {at.id}] compose_needed: {why} on {step}")
+        pf = next((p for p in stopped.fields if p.field.key == key), None)
+        raise ApplyFailure(ReasonCode.UNANSWERABLE_REQUIRED,
+                           (pf.field.label if pf else key)[:120], step=step)
 
     def prefill_may_answer(self, adapter: Any) -> bool:
         """Is a planning-time unknown worth taking to the browser? Only when
