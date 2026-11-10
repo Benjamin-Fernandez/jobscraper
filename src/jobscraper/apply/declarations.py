@@ -107,10 +107,16 @@ PHRASES: dict[DeclarationLabel, tuple[str, ...]] = {
     L.RELATIVES: ("relative", "relatives", "related to", "family member", "family members",
                   "friends or family", "know anyone who works", "close personal relationship"),
     L.CRIMINAL_RECORD: ("convicted", "criminal", "offence", "offense", "pending charges",
-                        "court proceedings"),
+                        "court proceedings", "found guilty"),    # D-176: found guilty = convicted
     L.BANKRUPTCY: ("bankrupt", "bankruptcy", "insolvency", "insolvent", "judgment debt"),
+    # D-176 (Coordinator ruling, Q1 option A): a director disqualification is a company-law
+    # sanction, listed beside bankruptcy on fit-and-proper forms; it widens what a false
+    # `regulatory_disciplinary` states (the D-87 `non_compete` precedent).
     L.REGULATORY: ("regulatory", "disciplinary", "mas", "licence revoked", "license revoked",
-                   "suspended", "censured", "investigated by"),
+                   "suspended", "censured", "investigated by",
+                   "disqualified as a director", "disqualified as director",
+                   "disqualified from acting as a director",
+                   "disqualified from being a director", "director disqualification"),
     # D-87: any agreement that limits the work you can do. "subject to any
     # restrictions" is left out on purpose: work-rights questions use it.
     L.NON_COMPETE: ("non compete", "non competes", "noncompete", "non competition",
@@ -321,9 +327,17 @@ STANDING_DECLARATIONS = frozenset({
 _STATUS_CLASSES = STANDING_DECLARATIONS | {L.DISABILITY}
 _STATUS_FILLER = frozenset("""
     i you you're you've i'm there are is am was were be been being do does did have has had
-    ever currently presently now previously formerly otherwise still past last year years
+    ever currently presently now previously formerly otherwise still
     a an the any such other your all either or and as of in to for from by with at under
-    within during since against including e g month months status defined subject""".split())
+    within during against including e g status defined subject""".split())
+# D-176 (Q-90; review Q-83 MEDIUM-1): time words are filler only for a false value
+# (`narrowing_ok`): "convicted in the last 5 years?" is a No for "never", but a Yes the
+# profile cannot back for "at least once". They used to sit in _STATUS_FILLER.
+_TIME_FILLER = frozenset("last past year years month months since".split())
+# D-176 (rule 6b): third parties that rule 1 lets through (class filler or employer
+# references). One in a piece's subject zone means the question is not about the applicant.
+_OTHER_PARTY = frozenset("""employer employers company companies client clients auditor
+    auditors regulator regulators authority authorities""".split())
 _CLASS_FILLER: dict[DeclarationLabel, frozenset[str]] = {
     L.PEP: frozenset("""person persons people individual served serving senior prominent
         position positions""".split()),
@@ -339,7 +353,7 @@ _CLASS_FILLER: dict[DeclarationLabel, frozenset[str]] = {
     L.REGULATORY: frozenset("""action actions proceedings sanction sanctions sanctioned
         investigation investigations body bodies authority authorities regulator regulators
         professional revoked penalty penalties record history licence license licences
-        licenses disciplined""".split()),
+        licenses disciplined company companies""".split()),
     # sized by the live Q-48 F1 label, which must stay No
     L.NON_COMPETE: frozenset("""agreement agreements restriction restrictions restrict
         restricts restricted obligation obligations clause clauses contract contracts
@@ -357,6 +371,8 @@ _CLASS_FILLER: dict[DeclarationLabel, frozenset[str]] = {
 # keeps a true No, while a Yes to it may be false. Place words are covered only as a
 # qualifier right after a class noun (`_place_spans`), the applicant must be the subject
 # (rule 6), and a lead-in piece is allowed only first (rule 3).
+# D-176: place qualifiers and time words (`_TIME_FILLER`) are value-sensitive in the same
+# way: covered only when `narrowing_ok`; a third party in a piece's subject zone fails (6b).
 _NARROWING_FILLER: dict[DeclarationLabel, frozenset[str]] = {
     L.CRIMINAL_RECORD: frozenset("excluding than minor traffic violation violations "
                                  "unspent".split()),
@@ -411,6 +427,15 @@ _DISABILITY_COMPANIONS = frozenset({
 def _toks(phrases: Iterable[str]) -> tuple[tuple[str, ...], ...]:
     return tuple(tuple(norm_label(p).split()) for p in phrases)
 
+
+# D-176 (Q-91): families no profile key states. Label-only runs, checked in `classify()`
+# when no class matched: the answer is "unknown on purpose" (never tier 5, never a guess).
+# NOT in ATTESTATION_MARKERS: `_compound_unclassified` reads that set, and "worked for
+# Acme, or have you ever been deported?" would then answer one clause.
+UNCLASSED_MARKERS = _toks((
+    "court order", "court orders", "injunction", "injunctions", "restraining order",
+    "refused entry", "denied entry", "deported", "deportation", "dismissed", "asked to resign",
+    "terminated for cause", "legal proceedings", "litigation"))
 
 _MILITARY_TOKENS, _UNSURE_TOKENS = _toks(_MILITARY), _toks(_UNSURE)
 _EXCLUDING_TOKENS, _NS_TOKENS = _toks(_EXCLUDING), _toks(_NS_TERMS)
@@ -649,7 +674,10 @@ def classify(label_norm: str, description_norm: str = "", employer_names: Iterab
         return next(iter(hits))
     if len(hits) > 1:
         return AMBIGUOUS
-    if ATTESTATION_MARKERS & set(label_norm.split()):
+    toks = label_norm.split()
+    if ATTESTATION_MARKERS & set(toks):
+        return AMBIGUOUS
+    if any(_has_run(toks, r) for r in UNCLASSED_MARKERS):        # D-176 (Q-91)
         return AMBIGUOUS
     return None
 
@@ -817,8 +845,11 @@ def _one_status_question(toks: list[str], classes: Iterable[DeclarationLabel],
     and / or that opens a new clause; each piece holds a class span or status run, or
     is bare lead-in filler, and only before the first piece that has one (D-171). 6 the
     start of the label and of each piece, when a status starter, is followed by you /
-    your (the applicant is the subject). `narrowing_ok` (a false value) adds the
-    NARROWING words to the filler."""
+    your (the applicant is the subject). 6b (D-176) no piece's subject zone (its tokens up
+    to the first class span or status run) holds a third party (`_OTHER_PARTY`, this
+    employer). `narrowing_ok` (a false value, read before a D-91 inversion) adds the
+    NARROWING words, the TIME words and the place qualifiers to the closed span: for a
+    true value they narrow what the bare bool states, so the question is not answerable."""
     toks = strip_ns_exclusions(list(toks))
     classes = set(classes)
     per_class = [_class_spans(toks, c) for c in classes]
@@ -827,10 +858,13 @@ def _one_status_question(toks: list[str], classes: Iterable[DeclarationLabel],
     anchors = [s for spans in per_class for s in spans] + _spans(toks, _STATUS_RUNS)
     standing_cover = {i for c, spans in zip(classes, per_class) if c in STANDING_DECLARATIONS
                       for a, b in spans for i in range(a, b)}
+    emp = _employer_spans(toks, employer_names)
+    places = _place_spans(toks, classes, standing_cover) if narrowing_ok else []   # D-176
     covered = {i for a, b in anchors + _spans(toks, _FREEDOM_RUNS) + _spans(toks, extra_runs)
-               + _employer_spans(toks, employer_names) + _place_spans(toks, classes, standing_cover)
+               + emp + places
                for i in range(a, b)}
-    filler = _STATUS_FILLER.union(*(_CLASS_FILLER.get(c, frozenset()) for c in classes))
+    shared = _STATUS_FILLER | _TIME_FILLER if narrowing_ok else _STATUS_FILLER
+    filler = shared.union(*(_CLASS_FILLER.get(c, frozenset()) for c in classes))
     if narrowing_ok:
         filler = filler.union(*(_NARROWING_FILLER.get(c, frozenset()) for c in classes))
     if any(i not in covered and t not in filler and not _NUMBER.fullmatch(t)
@@ -842,11 +876,16 @@ def _one_status_question(toks: list[str], classes: Iterable[DeclarationLabel],
     for s in [0, *(k + 1 for k in cuts)]:                        # rule 6 (D-171): the applicant
         if toks[s] in _STATUS_STARTERS and (s + 1 >= len(toks) or toks[s + 1] not in _APPLICANT_SUBJECT):
             return False
+    for a, b in zip(bounds, bounds[1:]):                         # rule 6b (D-176): no third party
+        first = min((s for s, _e in anchors if a <= s < b), default=b)   # in the subject zone
+        if any(toks[i] in _OTHER_PARTY for i in range(a, first)) \
+                or any(a <= s < first for s, _e in emp):
+            return False
     seen = False
     for a, b in zip(bounds, bounds[1:]):                         # rule 3; D-171: a lead-in only first
         if any(a <= s < b for s, _e in anchors):
             seen = True
-        elif seen or not all(t in _STATUS_FILLER for t in toks[a:b]):
+        elif seen or not all(t in shared for t in toks[a:b]):
             return False
     return True
 
