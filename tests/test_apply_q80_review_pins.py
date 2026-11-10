@@ -164,9 +164,9 @@ def test_m2a_a_backend_error_in_a_pick_call_is_noted_model_unavailable_not_timed
                 return
             out, _r, _sv, _fb = _run(pg, "questions", _reply_file(Path(tmp), calls))
             assert out.transport_failed is True, (raiser, out.fill_failed)
-            # every row has an answer by the time a pick fails, so the cause may be on no row
-            # (review note; the flow then falls back to "timed out"): the notes that exist must be right
-            assert _transport_notes(out) <= {want}, (raiser, _transport_notes(out))
+            # Q-93: the pick path carries the real cause into the outcome (exact match; a
+            # constant `_backend_note` fails one of the two raisers, a missing note fails both)
+            assert _transport_notes(out) == {want}, (raiser, _transport_notes(out))
 
 
 # ------------------------------------------------------------------ review M2b (F14, flow half)
