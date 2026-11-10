@@ -75,3 +75,5 @@ One entry per session. Older handover notes end up here, so `handover.md` stays 
 ## 2026-11-10 · Q-60/M20 session (jobscraper-25): Q-93, Q-90/Q-91
 - Q-93 on eng/Q-93-flow: tester pins + engineer in parallel; review MERGE WITH FOLLOW-UPS, MEDIUM-1 (D-175 dropped real resume buttons: Résumé, Curriculum Vitae, Add document) and MEDIUM-2 (no trace of a skipped hidden input) fixed before merge (cbd1008, 177a7f6).
 - Lesson: a narrowing heuristic on the resume control needs a recall probe of real button texts before merge, not only the false positives it was meant to drop.
+- Q-90/Q-91 on eng/Q-90-declarations: architect D-176 spec (no shell: Coordinator committed), tester pins, engineer; review found MEDIUM-1 (company filler let "suspended by a company" answer No: an over-answer) and MEDIUM-2 (bare legal nouns blocked skills questions from the model) → D-177 + addenda fixed before merge. 167/167 declarations pins.
+- Lesson: a class filler added for one phrase widens every label of that class; put such words inside the phrase instead.
