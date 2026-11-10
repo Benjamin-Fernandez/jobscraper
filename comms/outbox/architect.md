@@ -704,3 +704,33 @@ TESTER PINS (new file `tests/test_apply_declarations_d170.py`, reuse `test_apply
 - the kept rows (F1_LABEL with `required=False` as `test_f1`; "aware of any conflict of interest with Acme" needs the employer in ctx).
 Note: rule 2 has no live probe. Pin it with a label/description pair: label "Do you have any?", description "Criminal record" → unknown. Every token of that label is filler, so only rule 2 stops it; today it fills No.
 STATUS: open
+
+### 2026-11-10 architect → coordinator, software-engineer, tester (Q-90, Q-91, Q-92 F3/F5; D-176)
+TYPE: handoff + question
+RE: Q-90 (review `docs/reviews/Q-83-declarations.md` MEDIUM-1, LOW-1, LOW-2), Q-91, Q-92 F3/F5 (`docs/reviews/Q-35-N6b.md`); `docs/architecture/apply_design.md` line 4, §7.5 classifier line, table row `criminal_record`, D-176 block after D-171; `docs/architecture/llm_fill_design.md` §7 G12 row, §13.3; `src/jobscraper/apply/declarations.py` (engineer, one lane)
+BODY: Spec of record is the D-176 block in apply_design §7.5 (A) and its 39-row oracle table (D, for the tester to copy). Contracts, reason codes and profile keys unchanged, so no ADR (a refinement of D-171 under ADR-0003). Q-92 F3 and F5 are spec notes that match the code as built (N6b b684d2a); no code change. No existing pin changes its expected answer.
+
+**C. Code delta (`src/jobscraper/apply/declarations.py` only)**
+1. `PHRASES[L.CRIMINAL_RECORD]` += `"found guilty"`.
+2. Only if the Coordinator approves Q1 (option A): `PHRASES[L.REGULATORY]` += `"disqualified as a director", "disqualified as director", "disqualified from acting as a director", "disqualified from being a director", "director disqualification"`; `_CLASS_FILLER[L.REGULATORY]` += `company companies`. Option B: put the same five runs in `UNCLASSED_MARKERS` (item 3) and add nothing to the class.
+3. New `UNCLASSED_MARKERS = _toks(("court order", "court orders", "injunction", "injunctions", "restraining order", "refused entry", "denied entry", "deported", "deportation", "dismissed", "asked to resign", "terminated for cause", "legal proceedings", "litigation"))`, defined after `_toks` (line ~411). In `classify()`, after the `ATTESTATION_MARKERS` check: `if any(_has_run(toks, r) for r in UNCLASSED_MARKERS): return AMBIGUOUS` (toks = `label_norm.split()`; label only). Do **not** add them to `ATTESTATION_MARKERS`: `_compound_unclassified` reads that set, and the employer-class compound "…worked for Acme, or have you ever been deported?" would then answer one clause.
+4. `_STATUS_FILLER` −= `last past year years month months since` (65 → 58). New `_TIME_FILLER = frozenset("last past year years month months since".split())`.
+5. New `_OTHER_PARTY = frozenset("employer employers company companies client clients auditor auditors regulator regulators authority authorities".split())`.
+6. `_one_status_question` (signature unchanged; `narrowing_ok` keeps its name and meaning: the stored value is false, read before the D-91 inversion):
+   - `shared = _STATUS_FILLER | _TIME_FILLER if narrowing_ok else _STATUS_FILLER`; build `filler` from `shared` instead of `_STATUS_FILLER`; NARROWING as today.
+   - `emp = _employer_spans(toks, employer_names)` once; `places = _place_spans(toks, classes, standing_cover) if narrowing_ok else []`; `covered` uses `emp` and `places`.
+   - Rule 3 lead-in test: `all(t in shared for t in toks[a:b])` (was `_STATUS_FILLER`).
+   - Rule 6b, after rule 6: for each piece `(a, b)`, `first = min((s for s, _e in anchors if a <= s < b), default=b)`; fail when `any(toks[i] in _OTHER_PARTY for i in range(a, first))` or `any(a <= s < first for s, _e in emp)`.
+   - Docstring: add "6b no third party in the subject zone; time words and place qualifiers count only when `narrowing_ok`".
+7. The comment above `_NARROWING_FILLER`: one line for D-176 (time and place are value-sensitive too).
+Verify (engineer): `python tests/run_tests.py -k declarations` stays green (122 today) plus the tester's new file; then `-k layering`, `-k apply_flow`, `-k apply_e2e` (the full suite skips Edge silently: handover).
+
+**D. Tester:** new file `tests/test_apply_declarations_d176.py`, gated on `declarations:_TIME_FILLER`, with the same `_run` helper as the d171 file; rows 1–38 of the D-176 table (row 39 is the existing suites). Row 32: write it for the option the Coordinator picks. Rows 33–36 also assert `D.classify(_n(label), "") is D.AMBIGUOUS`.
+
+**Questions for the Coordinator**
+- Q1 (owner data meaning, your call): map "disqualified as a director" onto `regulatory_disciplinary` (option A: it widens what the owner's `false` states, as D-87 widened `non_compete`), or keep it unknown on purpose (option B)? I recommend A: a new grad cannot have been a director, and D-87's intent is "answer the standard declarations". B is the strict ADR-0003 reading. Neither touches `data/`.
+- Q2 (D-84 R1 wording): the code subtracts the applicant's own employers in G12 only for composed texts. I amended LF G12 to match the code and gave the reason (a stored `extra`/kept text that names a past employer may have been written for that employer). Confirm, or rule that D-84 R1 covers every G12 source; that would need a code change in `facts.other_employers`.
+- No new profile key is proposed. If one is wanted later for the four AMBIGUOUS families, it defaults to null (asked), not false: they are outside D-87 and D-55.
+
+**Not done in this session:** I had no shell tool, so I made **no commits** and **did not run** `-k declarations`. The Coordinator (or the next agent with a shell) should commit on `eng/Q-90-declarations` as two commits: `docs(architecture): Q-90/Q-91 D-176 value-sensitive place and time, rule 6b, six labels` (apply_design.md + this outbox entry) and `docs(architecture): Q-92 F3/F5 spec notes` (llm_fill_design.md). No code was changed, so `-k declarations` should still give 122/122.
+STATUS: open
