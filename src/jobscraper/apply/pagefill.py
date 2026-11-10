@@ -522,7 +522,8 @@ def _add_failed(run: _Run, section: str, why: str) -> tuple[str, ...]:
     (`run.entry_failed`, kept through the corrective pass), so a required one stops the flow
     `validation_error`: auto mode must not submit with fewer entries than the profile has.
     Those rows keep their own status and carry a SECTION note, not a claim that their value
-    failed. PageOutcome has no entry-level channel yet (next contract version)."""
+    failed. The flow stops on any `fill_failed` row with that note, required or not (D-174).
+    PageOutcome has no entry-level channel yet (next contract version)."""
     run.services.log(f"E5: add failed in {section}: {why}")
     keys = [k for k in run.order if k in run.fields and k not in run.dead
             and run.fields[k].group.rpartition("#")[0] == section]
@@ -794,6 +795,13 @@ def _transport(run: _Run, note: str) -> PageOutcome:
         if key not in answers:
             answers[key] = Answer(field_key=key, value=None, tier=AnswerTier.NONE, source="",
                                   confidence=0.0, status=AnswerStatus.UNKNOWN, note=note)
+    # Q-93: a pick that fails mid-fill leaves every row answered, so no row would say why the
+    # page stopped and the flow's detail fell back to "timed out" even for a refusing model.
+    # The cause then rides on the first row's note (first in the note, where the flow reads it).
+    if not any((a.note or "").lower().startswith("transport:") for a in answers.values()):
+        first = next((k for k in run.order if k in answers), None)
+        if first is not None and note.lower().startswith("transport:"):
+            answers[first] = _replace(answers[first], note="; ".join(n for n in (note, answers[first].note) if n))
     fields = [run.fields[k] for k in run.order if k in run.fields]
     return PageOutcome(step=run.step, fields=fields, answers=answers, unknown_required=(),
                        fill_failed=(), model_calls=run.stats.calls,

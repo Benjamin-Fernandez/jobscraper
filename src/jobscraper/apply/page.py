@@ -355,13 +355,19 @@ READER_JS = "(arg) => {" + HELPERS_JS + r"""
   // button next to it (same parent) that is no other field's control and no submit/reset
   // (review N6a F4). The parent must be a field-like container, not the form or page wrapper
   // that also holds the Submit button.
-  const pickerButton = c => vis(c) && c.matches('button, [role="button"]') && !c.matches(CTRL) &&
-    !['submit', 'reset'].includes(c.type || '');
+  // Q-93 (D-175): a button counts only if it says it picks a file (its text or aria-label
+  // names attach/upload/browse/choose/select/file/resume/CV) or points at this input
+  // (aria-controls = its id); a "Cancel" or "Help" button beside a hidden input proves nothing.
+  const PICK_WORDS = /\b(attach\w*|upload\w*|browse|choose|select|files?|resume|cv)\b/i;
+  const pickerButton = (c, el) => vis(c) && c.matches('button, [role="button"]') && !c.matches(CTRL) &&
+    !['submit', 'reset'].includes(c.type || '') &&
+    (PICK_WORDS.test(txt(c) + ' ' + (c.getAttribute('aria-label') || '')) ||
+     !!(el && el.id && c.getAttribute('aria-controls') === el.id));
   const fileTrigger = el => {
     if ([...(el.labels || [])].some(vis)) return true;
     const p = el.parentElement;
     if (!p || p.matches('form, main, body')) return false;
-    return [...p.children].some(c => c !== el && ((pickerButton(c))
+    return [...p.children].some(c => c !== el && ((pickerButton(c, el))
       || (vis(c) && c.tagName === 'LABEL' && c.htmlFor === el.id && el.id)));
   };
   // A hidden file input's label: the first label in its parent that names no other control.
@@ -390,7 +396,7 @@ READER_JS = "(arg) => {" + HELPERS_JS + r"""
       // A display:none file input is the target of a visible control (Greenhouse: an
       // "Attach" button next to it, or a label[for]); any other hidden input stays out.
       // A visible container alone proves nothing (N6a F4): it must hold a picker button.
-      const trigger = !vis(el) && (fileTrigger(el) || (vis(cont) && [...cont.querySelectorAll('button, [role="button"]')].some(pickerButton)));
+      const trigger = !vis(el) && (fileTrigger(el) || (vis(cont) && [...cont.querySelectorAll('button, [role="button"]')].some(c => pickerButton(c, el))));
       if (!(vis(el) || trigger)) continue;
       // Its label is the field's own label (no label[for] points at a hidden input).
       const own = labelOf(el, cont) ? null : fileLabel(el);
