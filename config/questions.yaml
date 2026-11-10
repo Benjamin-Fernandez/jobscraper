@@ -30,33 +30,46 @@
 version: 1
 questions:
   # ---------------- Singapore status ----------------
-  - key: singapore_status.authorised_to_work.SG
-    kind: bool
+  # D-75 work rights (questions_design 8.2-8.3, WP-A04, 2026-11-10): two `kind: country_bool` rows replace the
+  # four per-country bool rows (authorised_to_work.SG/.US, requires_sponsorship.SG/.US). The resolver detects
+  # the country (or countries) from the label and answers from applicant.work_right(profile, country), so these
+  # rows carry NO country excludes. A label naming no country uses the job's / residence country (8.2).
+  # Synonyms: the QD 8.3 minimum set plus every phrase of the four old rows (country-suffixed phrases are kept:
+  # the country words are harmless now and the longer phrase helps this row win a score tie).
+  # Rule (8.3): `without ...` phrases belong ONLY to the authorised row; the sponsorship row has exclude [without],
+  # so "Can you work in the US without sponsorship?" answers authorised-and-needs-none, never the sponsorship row.
+  - key: singapore_status.authorised_to_work
+    kind: country_bool
     sensitive: false
     synonyms:
-      - authorised to work in singapore
-      - authorized to work in singapore
+      - authorised to work
+      - authorized to work
       - legally authorised to work
       - legally authorized to work
       - legally entitled to work
       - legally allowed to work
-      - eligible to work in singapore
-      - right to work in singapore
+      - legally eligible to work
+      - legally able to work
+      - eligible to work
+      - eligible for employment
       - right to work
       - work authorisation
       - work authorization
-      - authorization to work          # [gh] "Your authorization to work in the country where you live" (no country named: treated as SG, the profile's home country)
       - authorisation to work
+      - authorization to work          # [gh] "Your authorization to work in the country where you live" (no country named: job/residence country, 8.2)
       - permitted to work
-      - eligible to work
-    exclude: [united states, u s, usa, united kingdom, uk, canada, australia, europe, european union, india, germany, hong kong, malaysia, china, japan, argentina, in the us, in us, in the usa, in the uk, in uk, in canada, in australia, in europe, in the eu, in india, in germany, in malaysia, in china, in japan, in argentina]
-    # One-token excludes (usa, uk, canada...) only act on labels of 4 tokens or fewer (7.1), so the 'in <country>'
-    # pairs below are what stop "authorised to work in the UK" from answering as Singapore (2026-11-02, Q-26).
-
-  - key: singapore_status.authorised_to_work.US
-    kind: bool
-    sensitive: false
-    synonyms:
+      - allowed to work
+      - entitled to work
+      - work rights
+      - working rights
+      - without sponsorship
+      - without visa sponsorship
+      - without requiring sponsorship
+      # kept from the old .SG / .US rows
+      - authorised to work in singapore
+      - authorized to work in singapore
+      - eligible to work in singapore
+      - right to work in singapore
       - authorized to work in the united states
       - authorised to work in the united states
       - authorized to work in the u s
@@ -66,41 +79,44 @@ questions:
       - work authorization in the united states
     exclude: []
 
-  - key: singapore_status.requires_sponsorship.SG
-    kind: bool
+  - key: singapore_status.requires_sponsorship
+    kind: country_bool
     sensitive: false
     synonyms:
       - require sponsorship               # [gh] "Will you require Visa Sponsorship now, or in the future?"
       - require visa sponsorship
       - need sponsorship
+      - need visa sponsorship
       - visa sponsorship                  # [gh] "Would you require a visa sponsorship or visa transfer"
       - work visa sponsorship
-      - sponsorship now or in the future
-      - require an employment pass
-      - require a work pass
-      - need a work pass
-      - need an employment pass
-      - work pass sponsorship
-      - require visa support
-      - require a visa
-      - need a visa
-      - visa transfer
       - immigration sponsorship
       - sponsorship to work
-    exclude: [united states, u s, usa, united kingdom, uk, canada, australia, europe, european union, india, germany, hong kong, malaysia, china, japan, in the us, in us, in the usa, in the uk, in uk, in canada, in australia, in europe, in the eu, in india, in germany, in malaysia, in china, in japan, in argentina]
-    # One-token excludes (usa, uk, canada...) only act on labels of 4 tokens or fewer (7.1), so the 'in <country>'
-    # pairs below are what stop "authorised to work in the UK" from answering as Singapore (2026-11-02, Q-26).
-
-  - key: singapore_status.requires_sponsorship.US
-    kind: bool
-    sensitive: false
-    synonyms:
+      - sponsorship for employment
+      - sponsorship now or in the future
+      - now or in the future require
+      - require a work permit
+      - need a work permit
+      - work permit required
+      - require a work visa
+      - need a work visa
+      - work visa required
+      - visa required
+      - require a visa
+      - need a visa
+      - require visa support
+      - visa transfer
+      - require an employment pass        # the work_pass yes_if rows never list a bare "employment pass" (see there)
+      - need an employment pass
+      - require a work pass
+      - need a work pass
+      - work pass sponsorship
+      # kept from the old .US row
       - require sponsorship to work in the united states
       - visa sponsorship in the united states
       - sponsorship to work in the u s
       - require visa sponsorship in the u s
       - require sponsorship for employment in the united states
-    exclude: []
+    exclude: [without]
 
   - key: singapore_status.residency_status
     kind: enum
@@ -335,7 +351,7 @@ questions:
       other: [other, others]
     # yes_if (apply_design 7.3.3): Yes/No "do you hold ..." labels answered from work_pass. Wording [common]; not
     # individually web-verified (2026-11-02). Only "hold / have / holder / on a valid X" wordings are listed, never a
-    # bare "employment pass", so "Will you require an Employment Pass?" (requires_sponsorship.SG) is never
+    # bare "employment pass", so "Will you require an Employment Pass?" (requires_sponsorship, D-75) is never
     # captured. `other` is deliberately in no list, so an unusual pass answers No here, never Yes.
     yes_if:
       - id: holds_ep
