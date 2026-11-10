@@ -255,10 +255,8 @@ describe('Runs: error state, aborted reason, separators (G20, G27, G37)', () => 
     expect(w.find('.failed-link').text()).toBe('1,234')
   })
 
-  // KNOWN DEFECT (Q-75 G37, lane J notes): plural() in format.js has no thousands separator, so the
-  // failed link's title/aria-label say "1234 companies" beside the visible "1,234". it.fails passes
-  // while the defect stands and goes red when it is fixed: then turn it into a plain it().
-  it.fails('the failed link title uses the same separators as its text', async () => {
+  // Q-78: plural() formats counts with a thousands separator, so title/aria match the visible text.
+  it('the failed link title uses the same separators as its text', async () => {
     const w = mountRuns({ runs: [{ ...aborted, stats: { companies_due: 1500, postings_seen: 41200, companies_failed: 1234 } }] })
     await flushPromises()
     expect(w.find('.failed-link').attributes('title')).toContain('1,234 companies could not be read in this run')

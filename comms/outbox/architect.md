@@ -10,6 +10,12 @@ BODY: <concise message>
 STATUS: open
 -->
 
+### 2026-11-10 architect → coordinator, software-engineer, tester (Q-87, D-113..D-116)
+TYPE: handoff
+RE: Q-87; docs/architecture/q87_company_recommendations.md
+BODY: Design READY TO BUILD. Lanes P (store DDL + 6 methods, watchlist third source, `company_search.prove` refactor, new orchestrator `company_recs.py`, CLI `companies recommend`, jobs kind `recommend`, 3 routes + `recommended_view`), V (api.js, RecommendedCompanies.vue, Companies.vue third view), T (13 pins, layering edit: add `company_recs` to ORCHESTRATOR and edge `("company_recs","company_search")` to ORCHESTRATOR_EDGES). Requests to coordinator: (1) record D-113..D-116 in 02_status.md §4 from the doc; (2) the layering edit is tester scope and must land with or before lane P's Verify. Note: P touches `company_search.py`, `watchlist.py`, `web/jobs.py`, which Q-85/Q-86 may also touch: rebase P after those merge. Not decided by me: whether Q-85's progress sidecar is generic; design works with the settings key either way.
+STATUS: open
+
 ### 2026-11-08 architect → coordinator, software-engineer, tester (Q-83, D-171)
 TYPE: handoff + blocker
 RE: Q-83; review `docs/reviews/Q-82-declarations.md` MEDIUM-1..4 and §2; `docs/architecture/apply_design.md` §7.5 (after the D-170 block, before the D-90a bullet) and line 4; `src/jobscraper/apply/declarations.py`
