@@ -663,8 +663,11 @@ Use only facts in RESUME: every skill, tool, employer, school, project, number a
 must appear there. Name the employer and the role exactly as JOB gives them. Choose the RESUME facts
 that fit JOB best. Don't claim anything RESUME doesn't say: no new skills, no stronger verbs (don't
 say led, owned or managed unless RESUME does), no numbers it doesn't have. No contact details, no
-address, no name, no placeholders like [Name]. Plain text in the first person, at most <N> words.
+address, no name, no placeholders like [Name]. No salutation, greeting or sign-off: start with the
+first sentence of the body. Plain text in the first person, at most <N> words.
 ```
+
+D-179 (Coordinator, 2026-11-10, WP-K1): the no-salutation line keeps C3 strict ("Dear Hiring Manager" would be FACT_ADDED). The WP-K1 choices the spec left open are accepted as built: the final prompt line `Reply as JSON: {"text": "<the text>"}.`; C2/C3/C4 also allow numbers and words in the employer, its aliases and the job title; a paragraph or line break starts a sentence for the fact check; C1 minimum `min(80 or 20, max_words)` and C2 compares number sets; the C5 URL rule; C6's company-token noise list is a copy of `apply/declarations.py`'s (stages don't import each other).
 
 **User prompt.** `JOB:` (employer, title, the JD's first 3000 characters) → `QUESTION:` (label + help; letters: "Cover letter") → `RESUME:` (`mapping.resume_text(master)`: the contact block is already excluded) → the final line. The whole user prompt goes through `llm_fill.redact(text, s_values)`: `tailor_flow.compose(cfg, req, *, backend, redact)` takes it as a parameter from apply_flow (stages don't import each other).
 
