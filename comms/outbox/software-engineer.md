@@ -892,3 +892,10 @@ BODY: branch eng/Q-93-flow; files `src/jobscraper/apply_flow.py`, `src/jobscrape
 - Pick-path cause (`pagefill._transport`): when no row carries a "transport:" note (every row already answered), the cause is put first on the first row's note ("transport: model unavailable; ..."). `_transport_cause` reads it unchanged; a real timeout still says "timed out". No contracts change.
 - Limit: a FILLED row can now carry a "transport: ..." note after a mid-fill pick failure; `questions` capture already skips transport-noted unanswered rows only, answered rows are unaffected.
 STATUS: open
+
+## handoff Q-94 (gate prep: R3 F11 + Q-43), branch eng/Q-94-gate-prep
+- a2e2c34 refactor(apply): `L1_KEPT_NOTE` now defined once in `apply/locks.py` (used by `locks` itself); `FACT_SOURCES` defined once in `apply/guards.py` (replaces the three inline tuples there). `pagefill` aliases both (`K.L1_KEPT_NOTE`, `G.FACT_SOURCES`; names kept, so importers are unchanged). No behaviour change.
+- 634f9c1 fix(profile): `applicant.normalise` turns an `experience[]`/`education[]` `end` of present/current/now/ongoing/to date (any case, spaces trimmed) into None (`_is_open_end`). Runs in load, validate and save, idempotent.
+- Null end as ongoing downstream: `applicant.computed_facts` (empty end -> now), `applicant.py` ~1251 (education completeness), `apply/declarations.py:75`, `apply/resolve.py:847` (current employer), `apply/facts.py:765` ("present"). The tailor stage never reads profile entry dates (grep of `src/jobscraper/tailor/`); `tailor_flow` proposals already emit None for an open end.
+- Known limit: `education[].end` null is read as "no graduation date" by computed_facts (graduation_year), as before.
+- Evidence (tail lines): pagefill 19/19, locks 5/5, guards 5/5, layering 13/13, profile 98/98, applicant 115/115, q94 14/14.
