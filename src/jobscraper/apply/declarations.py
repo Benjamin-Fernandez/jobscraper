@@ -122,7 +122,11 @@ PHRASES: dict[DeclarationLabel, tuple[str, ...]] = {
                    "disqualified from acting as a company director",
                    "disqualified from being a director",
                    "disqualified from being a company director", "director disqualification",
-                   "disqualified director"),
+                   "disqualified director",
+                   # D-177 addendum (D-176 row 32): the "of a company" tail as phrases too
+                   "disqualified as a director of a company",
+                   "disqualified from acting as a director of a company",
+                   "disqualified from being a director of a company"),
     # D-87: any agreement that limits the work you can do. "subject to any
     # restrictions" is left out on purpose: work-rights questions use it.
     L.NON_COMPETE: ("non compete", "non competes", "noncompete", "non competition",
