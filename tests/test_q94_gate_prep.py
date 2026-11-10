@@ -152,6 +152,105 @@ def test_q94_real_file_the_countrys_own_key_decides_and_an_unlisted_country_uses
     assert c.source.endswith(".standing"), c.source
 
 
+# ---- D-180 / D-181 (Q-94 review F1, F2; questions_design.md 8.2): two false answers closed
+
+def _resolve_real(label):
+    """(answer, number of model calls) for a yes/no label through the real rules on the sample applicant."""
+    spy = StubBackend([{"choice": 0, "evidence": "x"}] * 4)
+    a = resolve_one(yes_no("q", label), profile(), REAL_RULES, backend=spy)
+    return a, len(spy.calls)
+
+
+def _note_lands(label: str, text: str) -> bool:
+    try:
+        return text in _resolve_real(label)[0].note
+    except Exception:                                   # noqa: BLE001 - a gate probe must never break the import
+        return False
+
+
+_D180 = _note_lands("Are you authorised to work in London?", "place not recognised")
+_D181 = _note_lands("Are you a US citizen or permanent resident?", "names another country")
+
+SG_AUTH_SOURCE = f"profile:{AUTH}.SG"
+
+
+def _stopped(label, note):
+    a, calls = _resolve_real(label)
+    assert calls == 0, f"{label!r}: a stop never reaches the model ({calls} calls)"
+    assert a.status is AnswerStatus.UNKNOWN and not a.fills, (label, a.status, a.source)
+    assert note in a.note, (label, a.note)
+    assert not a.sensitive, label
+    assert a.tier is not AnswerTier.LLM, (label, a.tier)
+    return a
+
+
+@gated(_D180, "resolve: D-180 place not recognised")
+@needs(*RESOLVER)
+def test_q94_d180_an_unknown_place_or_a_region_stops_the_work_rights_label_unanswered():
+    for label in ("Are you authorised to work in London?",
+                  "Are you able to work worldwide?",
+                  "Are you legally authorised to work worldwide?",
+                  "Are you authorised to work anywhere in APAC?",
+                  "Do you require visa sponsorship to work in EMEA?",
+                  "Do you require visa sponsorship to work in Europe or Asia?"):
+        a = _stopped(label, "place not recognised")
+        assert a.source != SG_AUTH_SOURCE and "SG" not in a.source, (label, a.source)
+
+
+@gated(_D180, "resolve: D-180 place not recognised")
+@needs(*RESOLVER)
+def test_q94_d180_spain_is_either_stopped_as_an_unknown_place_or_answered_for_spain_never_for_singapore():
+    label = "Are you authorised to work in Spain?"
+    from jobscraper.apply import resolve
+    a, calls = _resolve_real(label)
+    assert calls == 0, "never the model"
+    if resolve.label_countries("are you authorised to work in spain") == {"ES"}:   # the engineer added Spain
+        assert a.status is AnswerStatus.FILLED and a.rule_id == AUTH, (a.status, a.rule_id, a.note)
+        # the sample map has no ES key and no default: the standing answer, not the SG key
+        assert a.source == f"profile:{AUTH}.standing", a.source
+    else:
+        _stopped(label, "place not recognised")
+
+
+@gated(_D180, "resolve: D-180 place not recognised")
+@needs(*RESOLVER)
+def test_q94_d180_labels_with_no_place_or_a_generic_place_keep_the_job_country_singapore():
+    for label in ("Are you authorised to work in this country?",
+                  "Are you authorised to work in the location of this role?",
+                  "Are you authorised to work in the country where this job is located?",
+                  "Do you have the right to work?"):
+        a, calls = _resolve_real(label)
+        assert calls == 0, label
+        assert a.status is AnswerStatus.FILLED and chosen(a) == ("Yes",), (label, a.status, a.note)
+        assert a.rule_id == AUTH and a.source == SG_AUTH_SOURCE, (label, a.rule_id, a.source)
+    a, _ = _resolve_real("Are you authorised to work in Singapore?")
+    assert a.status is AnswerStatus.FILLED and a.source == SG_AUTH_SOURCE and chosen(a) == ("Yes",)
+    # the sponsorship row keeps step 2 as well
+    b, _ = _resolve_real("Do you require visa sponsorship to work in this country?")
+    assert b.status is AnswerStatus.FILLED and b.rule_id == SPONS and chosen(b) == ("No",), (b.rule_id, b.note)
+
+
+@gated(_D181, "resolve: D-181 names another country")
+@needs(*RESOLVER)
+def test_q94_d181_a_singapore_residency_row_never_answers_another_countrys_citizenship():
+    for label in ("Are you a US citizen or permanent resident?",
+                  "Are you a Canadian citizen or permanent resident?",
+                  "Are you a citizen or permanent resident of the United States?"):
+        a = _stopped(label, "names another country")
+        assert "residency_status" not in a.source, (label, a.source)
+
+
+@gated(_D181, "resolve: D-181 names another country")
+@needs(*RESOLVER)
+def test_q94_d181_the_singapore_and_the_no_country_citizenship_labels_still_answer_from_the_singapore_row():
+    for label in ("Are you a Singapore Citizen or Permanent Resident?",
+                  "Are you a citizen or permanent resident?"):
+        a, calls = _resolve_real(label)
+        assert calls == 0, label
+        assert a.status is AnswerStatus.FILLED and chosen(a) == ("Yes",), (label, a.status, a.note)
+        assert a.rule_id.startswith("singapore_status.residency_status") and a.tier is AnswerTier.PROFILE_RULE,             (label, a.rule_id)
+
+
 # ================================================================== 2. Q-43 ongoing entry end
 
 def _with_end(end, lst="experience"):
