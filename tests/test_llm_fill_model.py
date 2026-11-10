@@ -21,7 +21,7 @@ _W0 = len(WAITING)
 NEEDS = ("jobscraper.apply.llm_fill:ask", "jobscraper.apply.llm_fill:chunks",
          "jobscraper.apply.llm_fill:redact", "jobscraper.apply.llm_fill:FINAL_LINE",
          "jobscraper.apply.facts:fact_catalogue")
-WHY = "Why do you want to work here?"
+WHY = "Describe a project you are proud of"   # not a compose target (WP-K2: "Why do you want to work here?" is, and never reaches the model)
 
 
 def test_the_model_oracles_file_loads():
