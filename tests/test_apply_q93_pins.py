@@ -149,6 +149,100 @@ def test_l1_control_a_button_that_names_a_picker_or_points_at_the_input_is_still
     assert not missing, f"D-175 controls no longer read: {missing}"
 
 
+# ------------------------------------------------------------------ L1 review MEDIUM-1 (amended D-175)
+
+def _btn(inner: str, attrs: str = "") -> str:
+    return _SIB % f'{_CV}<button type="button" {attrs}>{inner}</button>'
+
+
+def test_l1_m1_real_resume_buttons_are_read():
+    """Review MEDIUM-1: the recall words. Accented and CV-style resume buttons, a document
+    button, "Replace file" (a file word with replace) and an icon-only button whose title says
+    upload are all pickers."""
+    if not edge_available():
+        return
+    names = ["Résumé", "Upload Résumé", "Curriculum Vitae", "Add document", "Replace file", "title=Upload resume"]
+    got = _cases(_btn("Résumé"), _btn("Upload Résumé"), _btn("Curriculum Vitae"),
+                 _btn("Add document"), _btn("Replace file"),
+                 _btn('<svg width="16" height="16"></svg>', 'title="Upload resume"'))
+    missing = [n for n, ok in zip(names, got) if not ok]
+    assert not missing, f"MEDIUM-1: these resume buttons are not read: {missing}"
+
+
+def test_l1_m1_replace_or_change_alone_and_cancel_and_help_are_not_pickers():
+    """"Replace" / "Change" count only together with a file word; Cancel and Help never."""
+    if not edge_available():
+        return
+    names = ["Replace", "Change", "Cancel", "Help"]
+    got = _cases(_btn("Replace"), _btn("Change"), _btn("Cancel"), _btn("Help"))
+    wrongly = [n for n, ok in zip(names, got) if ok]
+    assert not wrongly, f"MEDIUM-1: these buttons expose the hidden file input: {wrongly}"
+
+
+# ------------------------------------------------------------------ L1 review MEDIUM-2 (a trace)
+
+SKIP_TRACE = "hidden file input skipped"
+
+
+def _trace_of(body: str) -> tuple[list, str]:
+    """(FILE fields, every trace line the read emitted): `logging` records of any logger, text
+    printed to stdout / stderr, and the page's console messages."""
+    import contextlib
+    import io
+    import logging
+    from playwright.sync_api import sync_playwright
+    from jobscraper.apply import page as PG
+
+    class _Keep(logging.Handler):
+        def __init__(self):
+            super().__init__(logging.DEBUG)
+            self.lines: list[str] = []
+
+        def emit(self, record):
+            self.lines.append(record.getMessage())
+
+    keep, root = _Keep(), logging.getLogger()
+    old_level = root.level
+    root.addHandler(keep)
+    root.setLevel(logging.DEBUG)
+    out, err, console = io.StringIO(), io.StringIO(), []
+    try:
+        with sync_playwright() as pw:
+            b = pw.chromium.launch(channel="msedge", headless=True)
+            try:
+                pg = b.new_page()
+                pg.on("console", lambda m: console.append(m.text))
+                pg.set_content(f"<!doctype html><html><body>{body}</body></html>")
+                with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+                    fields = PG.read_page(pg, scope="", sections=[], origin="", step="form")
+            finally:
+                b.close()
+    finally:
+        root.removeHandler(keep)
+        root.setLevel(old_level)
+    from jobscraper.apply.contracts import FieldType
+    return ([x for x in fields if x.field.type is FieldType.FILE],
+            " | ".join(keep.lines + console + [out.getvalue(), err.getvalue()]))
+
+
+def test_l1_m2_a_hidden_file_input_skipped_for_lack_of_a_trigger_leaves_a_trace():
+    """Review MEDIUM-2: a silent resume omission becomes a diagnosable one. Looked for in a log
+    record, printed text or a console message containing "hidden file input skipped"."""
+    if not edge_available():
+        return
+    got, trace = _trace_of(_btn("Cancel"))
+    assert not got, "precondition: a Cancel button does not make the input a file field"
+    assert SKIP_TRACE in trace.lower(), ("no trace of the skipped input", trace)
+
+
+def test_l1_m2_control_a_hidden_file_input_that_is_read_leaves_no_skip_trace():
+    if not edge_available():
+        return
+    got, trace = _trace_of(_btn("Upload resume"))
+    assert got, "precondition: an Upload resume button makes the input a file field"
+    assert SKIP_TRACE not in trace.lower(), trace
+
+
 # ------------------------------------------------------------------ pick-path cause
 
 def _pick_outcome(raiser: str):
