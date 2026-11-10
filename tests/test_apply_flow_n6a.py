@@ -221,7 +221,10 @@ def test_a_transport_failure_is_model_unavailable_naming_the_step_and_captures_n
                            transport_failed=True)
         with scripted(nav, script):
             r, _f, _s, _m = run(w, jid, nav)
-        assert r.state is S.FAILED and r.reason is R.MODEL_UNAVAILABLE and r.reason_detail == "timed out on one"
+        assert r.state is S.FAILED and r.reason is R.MODEL_UNAVAILABLE
+        # N6a F5 (Q-80): the detail names the step and the real cause; the old oracle pinned the bug
+        # ("timed out" for a model that is gone). Pinned in test_apply_q80_review_pins.py too.
+        assert r.reason_detail.endswith(" on one") and "timed out" not in r.reason_detail, r.reason_detail
         assert w.store.question_groups("all") == []
         assert "next" not in nav.calls
     finally:

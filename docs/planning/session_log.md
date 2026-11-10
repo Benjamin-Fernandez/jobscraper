@@ -63,3 +63,11 @@ One entry per session. Older handover notes end up here, so `handover.md` stays 
 - Re-review 2 → MERGE after N1/N2 (D-110, bf96b6e) and N4 (pins). int/Q-74 full suite first showed 78 failures: a semantic merge collision (Q-74 `_MONTHS` tuple shadowed by Q-44's `_MONTHS` dict in applicant.py; git merged cleanly). Fixed a93fdf4 (`_MONTH_LABELS`). N6a (6001452) merged first by agreement; resolve_ctx hunk resolved on the Q-74 side (683ba02, af11b3b).
 - Merged 1b4143b + bundle 2045f06, pushed. Python 1443/1443, vitest 635 + 1 expected fail, smoke 8774 17/17 GET + 32/32 assets. Worktrees/branches for Q-74 removed.
 - Lesson: always run the full suite on the integration tree after merging personal, even when git reports no conflicts; module-level name collisions only show at runtime.
+
+## 2026-11-08 · Q-60/M20 session (jobscraper-25): N6b, Q-80, Q-82, Q-83 merged
+- N6b merged b684d2a (review MERGE; F3-F5 → Q-92). Q-80 declarations part a50510d (D-164, D-169b). Q-82 D-170 bf664cf (one status question per label; under-answer + MEDIUM 1-4 → Q-83).
+- Q-83 D-171: architect spec 629990f, tester pins 5f4bb30 (59 rows), engineer 6bc59da (declarations.py only), d170 docstring by the tester 70d6588, review 1ff95ab MERGE WITH FOLLOW-UPS (MEDIUM-1 place/time words cover a TRUE value → Q-90). Merged branch: 1551/1551, apply_e2e 13/13, apply_flow 137/137.
+- ID ranges agreed with jobscraper-07: peer Q-84..Q-89, D-111..D-119; mine D-172..D-179, Q-90+. Peer owns Q-84 (the full suite skips Edge tests silently; gate apply merges on separate e2e/flow runs until it lands).
+- Lesson: the engineer's scope hook refuses all of `tests/`, so docstring-only test edits still go to the tester.
+- Q-80 rest on eng/Q-80-flow-fixes: tester pins first (48bdc98; 7 red on personal), engineer 366c098/1bc591f/ce8f0e4; D-172 (file trigger) and D-173 (a failed Add stays fail-closed; the engineer's log-only version rejected). Review MERGE WITH FOLLOW-UPS; M1 (delete count fail-closed, 07ed5f4) and M2 pins (aec1552) fixed before merge; M3/L1/pick-path note → Q-93.
+- Lesson: a pin that accepts "any signal" (a log line) let a fail-closed stop be removed; pins for stops should require the stop.

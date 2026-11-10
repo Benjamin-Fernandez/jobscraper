@@ -51,7 +51,7 @@ from .apply.contracts import (
     FieldType, FormField, PageOutcome, PrefillPolicy, ReasonCode, ResolveContext, SignUpOutcome,
 )
 from .apply.detect import detect
-from .apply.pagefill import fill_page
+from .apply.pagefill import ENTRY_NOTE_PREFIX, ENTRY_NOTE_TAIL, TYPED_BEFORE_STOP_NOTE, fill_page
 from .apply.plan import norm_label
 from .config import ApplyConfig, Config
 from .scrape.net import HttpClient
@@ -446,6 +446,28 @@ def apply_prefill_policy(source: str, fields: Sequence[FormField], answers: dict
 
 def _join(*notes: str) -> str:
     return "; ".join(n for n in notes if n)
+
+
+def _entry_problem(a: Any) -> str:
+    """The section note pagefill put on a row after a failed E5 Add ("another work experience
+    entry could not be added (<why>)"), else ""."""
+    note = (getattr(a, "note", "") or "")
+    i = note.find(ENTRY_NOTE_PREFIX)
+    if i < 0:
+        return ""
+    return note[i + len("E5: "):].split(ENTRY_NOTE_TAIL)[0].strip()
+
+
+def _transport_cause(outcome: PageOutcome) -> str:
+    """What the first "transport: ..." row note says (N6a F5): "model unavailable", "timed
+    out", ... so a model that died mid-attempt isn't reported as a timeout. The old wording
+    when no row carries one."""
+    for pf in outcome.fields:
+        a = outcome.answers.get(pf.field.key)
+        note = (a.note if a is not None else "") or ""
+        if note.lower().startswith("transport:"):
+            return note.split(":", 1)[1].strip().split(";")[0].strip() or "timed out"
+    return "timed out"
 
 
 def _flagged(fields: Sequence[FormField], errors: Sequence[str]) -> list[FormField]:
@@ -1138,7 +1160,9 @@ class _Run:
         nav.precheck(ctx)                                 # POSTING_CLOSED before the model or Edge
         self.check_deadline(ctx)
         services = _fill_services(self, at, ctx, now=self.now)
+        t_warm = time.monotonic()
         self.warm_up(at)
+        ctx.deadline += time.monotonic() - t_warm         # the model load is not the attempt's time (N6a F3)
 
         # opening
         at.to(S.OPENING, step="opening")
@@ -1270,7 +1294,8 @@ class _Run:
             # the attempt's time that ran out, not the model (N1; llm_fill_design §11).
             if services.deadline_left() <= 0:
                 raise ApplyFailure(ReasonCode.ERROR, f"timed out on {step}", step=step)
-            raise ApplyFailure(ReasonCode.MODEL_UNAVAILABLE, f"timed out on {step}", step=step)
+            raise ApplyFailure(ReasonCode.MODEL_UNAVAILABLE,
+                               f"{_transport_cause(outcome)} on {step}", step=step)
         if outcome.unknown_required:
             self.stage(at, page, outcome, step, applied=False)
             self.capture(at, job, outcome.fields, outcome.answers, rctx, page=True)
@@ -1278,11 +1303,13 @@ class _Run:
             label = first.field.label if first else outcome.unknown_required[0]
             raise ApplyFailure(ReasonCode.UNANSWERABLE_REQUIRED, label[:120], step=step)
         self.stage(at, page, outcome, step, applied=True)
-        bad = [by_key[k].field.label for k in outcome.fill_failed
-               if k in by_key and by_key[k].field.required]
-        if bad:
-            raise ApplyFailure(ReasonCode.VALIDATION_ERROR, ", ".join(b[:80] for b in bad[:3]),
-                               step=step)
+        req = [k for k in outcome.fill_failed if k in by_key and by_key[k].field.required]
+        # R3 F14 (D-173): a failed E5 Add is the section's problem, not a field's: say so.
+        added = next((s for s in (_entry_problem(outcome.answers.get(k)) for k in req) if s), "")
+        bad = [by_key[k].field.label for k in req if not _entry_problem(outcome.answers.get(k))]
+        if added or bad:
+            detail = "; ".join(([added] if added else []) + ([", ".join(b[:80] for b in bad[:3])] if bad else []))
+            raise ApplyFailure(ReasonCode.VALIDATION_ERROR, detail[:200], step=step)
         return step
 
     def stage(self, at: _Attempt, page: Any, outcome: PageOutcome, step: str, *,
@@ -1303,7 +1330,7 @@ class _Run:
             a = dataclasses.replace(
                 a, field_key=key, shown=a.shown if a.shown is not None else (pf.shown or None),
                 origin=a.origin or pf.origin.value, entry=a.entry or pf.group)
-            if not applied and a.status is AnswerStatus.FILLED:
+            if not applied and a.status is AnswerStatus.FILLED and TYPED_BEFORE_STOP_NOTE not in (a.note or ""):
                 a = dataclasses.replace(a, status=AnswerStatus.SKIPPED,
                                         note=_join(a.note, NOT_APPLIED_NOTE))
             at.fields[key] = f

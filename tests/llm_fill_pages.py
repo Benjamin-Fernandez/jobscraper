@@ -492,6 +492,13 @@ REVIEW_STUBS = {
             _job("Software Engineering Intern", "Example Logistics Pte Ltd", "Singapore", ["5", "2024"], ["8", "2024"],
                  "Built REST APIs in Python and Postgres for shipment tracking."),
             _job("Campus Robot League", "", "", ["", ""], ["", ""], "Built a line-following robot in C++.")]}]},
+    # Q-80 R3 re-review F12: two junk entries in one section (delete of #2 swallowed, #3 works)
+    "q80_entries3": {"title": "Work Experience (Q-80 R3 F12: two junk entries)", "body": [
+        {"section": "Work Experience", "template": _job("", "", "", ["", ""], ["", ""], ""), "entries": [
+            _job("Software Engineering Intern", "Example Logistics Pte Ltd", "Singapore", ["5", "2024"], ["8", "2024"],
+                 "Built REST APIs in Python and Postgres for shipment tracking."),
+            _job("Campus Robot League", "", "", ["", ""], ["", ""], "Built a line-following robot in C++."),
+            _job("Chess Club Treasurer", "", "", ["", ""], ["", ""], "Kept the club accounts.")]}]},
     # F6: a revealed field takes the page ordinal of a field that still exists
     "review_collide": {"title": "Audit key collision (R3 review F6)", "body": [
         {"w": "text", "label": "Favourite tool", "aid": "formField-tool1"},

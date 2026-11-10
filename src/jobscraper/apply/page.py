@@ -352,12 +352,17 @@ READER_JS = "(arg) => {" + HELPERS_JS + r"""
     return labelOf(g, containerOf(g, unit.concat([g])));
   };
   // The visible control that opens a hidden file input: a visible label for it, or a visible
-  // button next to it (same parent) that is no other field's control.
+  // button next to it (same parent) that is no other field's control and no submit/reset
+  // (review N6a F4). The parent must be a field-like container, not the form or page wrapper
+  // that also holds the Submit button.
+  const pickerButton = c => vis(c) && c.matches('button, [role="button"]') && !c.matches(CTRL) &&
+    !['submit', 'reset'].includes(c.type || '');
   const fileTrigger = el => {
     if ([...(el.labels || [])].some(vis)) return true;
     const p = el.parentElement;
-    return !!p && [...p.children].some(c => c !== el && vis(c) &&
-      (c.matches('button, [role="button"]') || (c.tagName === 'LABEL' && c.htmlFor === el.id && el.id)));
+    if (!p || p.matches('form, main, body')) return false;
+    return [...p.children].some(c => c !== el && ((pickerButton(c))
+      || (vis(c) && c.tagName === 'LABEL' && c.htmlFor === el.id && el.id)));
   };
   // A hidden file input's label: the first label in its parent that names no other control.
   const fileLabel = el => {
@@ -384,8 +389,9 @@ READER_JS = "(arg) => {" + HELPERS_JS + r"""
       const cont = containerOf(el);
       // A display:none file input is the target of a visible control (Greenhouse: an
       // "Attach" button next to it, or a label[for]); any other hidden input stays out.
-      const trigger = !(vis(el) || vis(cont)) && fileTrigger(el);
-      if (!(vis(el) || vis(cont) || trigger)) continue;
+      // A visible container alone proves nothing (N6a F4): it must hold a picker button.
+      const trigger = !vis(el) && (fileTrigger(el) || (vis(cont) && [...cont.querySelectorAll('button, [role="button"]')].some(pickerButton)));
+      if (!(vis(el) || trigger)) continue;
       // Its label is the field's own label (no label[for] points at a hidden input).
       const own = labelOf(el, cont) ? null : fileLabel(el);
       push(el, 'file', 'file', own ? { rawLabel: own } : undefined);

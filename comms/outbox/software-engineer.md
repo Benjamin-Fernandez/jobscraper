@@ -10,6 +10,12 @@ BODY: <concise message>
 STATUS: open
 -->
 
+### 2026-11-08 software-engineer → coordinator, tester
+TYPE: handoff + request
+RE: Q-83 D-171; `src/jobscraper/apply/declarations.py`; `tests/test_apply_declarations_d170.py`
+BODY: Part C of the architect's D-171 entry is built on `eng/Q-83-declarations` (commit 6bc59da, declarations.py only). Ad hoc replay of the 59 part-D rows (65 sub-rows incl. both halves of the paired rows): all hold. `-k declarations` 122/122 (incl. the tester's d171 file 35/35), `-k apply_contracts` 66/66, `-k llm_fill` 90/90, `-k layering` 13/13. REQUEST (scope hook blocks `tests/` for the engineer, so part C item 8 is NOT done): change only the docstring of `test_d170_rule3_a_piece_without_a_class_or_status_run_fails_even_with_listed_words` in `tests/test_apply_declarations_d170.py` to "The second clause holds no class span and no status run, and after D-171 'Singapore' is not filler either, so rules 1 and 3 both refuse it." (assertion unchanged).
+STATUS: done (Coordinator 2026-11-08: d170 docstring by the tester 70d6588; review MERGE WITH FOLLOW-UPS 1ff95ab)
+
 ### 2026-11-02 software-engineer → coordinator
 TYPE: handoff
 RE: Q-02 · F-01..F-05, F-07 · cloud port C-1..C-8, C-22
@@ -860,3 +866,20 @@ STATUS: open
 
 ## 2026-11-08 Q-78 (eng/Q-78-polish): request, test edits are outside my scope
 - type: request. The delegation asked me to flip the plural `it.fails` pin and add a vitest pin for the skills chips. `web/tests/**` is not in the software-engineer scope (the scope hook refused a new file there), but two shell edits had already gone through before I noticed: `web/tests/q44-refresh.test.js` (existing skills-row assertions changed to the label + `.rr-chips li` shape, plus one new test for 12 chips / "and N more" / "Show fewer") and `web/tests/q75-pages.test.js` (it.fails -> it). Commit 9dac634 holds the q75 flip alone; the q44 test edits are inside 6bdce93 together with ResumeRefresh.vue. Tester: please review/own both, and add a direct `plural()` unit test (999 -> "999 companies", 1234 -> "1,234 companies") if wanted.
+### 2026-11-08 software-engineer -> coordinator (cc tester)
+TYPE: handoff
+RE: eng/Q-80-flow-fixes, commit 366c098 (tester pins 48bdc98): R3 F12/F14, N6a F3-F6; KA-1
+BODY: files `src/jobscraper/apply/pagefill.py`, `src/jobscraper/apply_flow.py`, `src/jobscraper/apply/page.py`. `-k apply_q80` 11/11.
+- R3 F12 (`pagefill._delete_entries`): a delete is confirmed per group (clicked and none of its own controls on the page). The section entry count is a logged cross-check only (`E3: <section> has more entries than the confirmed deletes explain`), never a demotion.
+- R3 F14 (`pagefill._add_failed`): a failed Add is logged (`E5: add failed in <section>: <why>`) and no longer marks the filled entries `fill_failed`; `entry_failed` and `ENTRY_ADD_FAILED_NOTE` are removed. LIMIT (needs your call): PageOutcome has no entry-level channel, so the flow no longer stops on a missing entry; it proceeds with fewer entries than the source has (nothing false is typed). A contracts field (`entry_failed: tuple[str, ...]`, which apply_flow would turn into a stop or a section note) would restore the stop. Old pin `test_apply_pagefill_review::test_f5_an_entry_added_at_a_deleted_index_...` (second half: swallowed Add -> `unknown_required or fill_failed`) passed on my first F14 variant and contradicts the new pin; see the RESULT line for whether it is red.
+- N6a F3 (`apply_flow.body_llm`, ~1153): the warm-up seconds are added back to `ctx.deadline`.
+- N6a F4 (`page.py` file branch, ~358-393): `fileTrigger` accepts only a visible non-submit/reset button that is no field control, or a visible label[for]; the parent may not be form/main/body. The `vis(cont)` path now also needs a picker button inside the container.
+- N6a F5 (`apply_flow._transport_cause`, used in `page_result`): the detail is the first row's `transport: <cause>` text plus ` on <step>`.
+- N6a F6 (`pagefill._note_typed`, `TYPED_BEFORE_STOP_NOTE`; `apply_flow.stage`): on a stop or a transport failure, filled rows whose value we typed (`run.known` is OURS) get the note "typed before the page stopped" and stage keeps them `filled`; the rest stay `skipped, not applied`.
+STATUS: open
+
+### 2026-11-08 software-engineer -> coordinator: Q-80 F14 update (D-173)
+TYPE: handoff
+BODY: commit ce8f0e4. `pagefill._add_failed` marks the section's keys (required, else all) in `fill_failed` again, so the flow stops `validation_error`; the rows keep their own status and carry "E5: another <section> entry could not be added (<why>) - this value was typed". `apply_flow._entry_problem` builds the flow's detail from that note: `reason_detail` = "another work experience entry could not be added (no entry appeared)" (field labels are listed after it only when other required fields also failed). The log line is kept. No contracts change.
+RESULT: `-k apply_q80` 11/11, `-k pagefill` 19/19, `-k apply_flow` 137/137, `-k apply_e2e` 13/13, full suite 1562/1562.
+STATUS: open
