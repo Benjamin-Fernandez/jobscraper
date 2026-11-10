@@ -453,7 +453,7 @@ UNCLASSED_NOUNS = _toks((
     "court order", "court orders", "injunction", "injunctions", "restraining order",
     "legal proceedings", "litigation"))
 UNCLASSED_INVOLVEMENT = frozenset("""subject party involved pending outstanding named against
-    threatened current ongoing""".split())
+    threatened current currently ongoing""".split())
 UNCLASSED_MARKERS = UNCLASSED_EVENTS + UNCLASSED_NOUNS
 _UNCLASSED_FIELD_TYPES = frozenset({FieldType.DROPDOWN, FieldType.RADIO, FieldType.CHECKBOX,
                                     FieldType.MULTI_CHOICE})
