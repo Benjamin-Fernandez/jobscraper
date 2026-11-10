@@ -82,6 +82,8 @@ class Compose:
 
     def write_letter(self, text, path, fmt):
         self.letters.append((text, str(path), fmt))
+        Path(path).parent.mkdir(parents=True, exist_ok=True)
+        Path(path).write_text(text, encoding="utf-8")      # a stand-in file, so a test can see it exist
         return str(path)
 
 
@@ -193,7 +195,9 @@ def test_a_cover_letter_file_target_gets_a_letter_file_under_the_attempt_folder(
         assert text == TEXT and fmt == "docx"
         p = Path(path)
         assert p.name == "cover_letter.docx" and str(r.attempt_id) in p.parts, path
-        assert p.parts[-4:-2] == ("data", "apply") or "apply" in p.parts, path
+        # LF section 19.3: the letter sits directly in the attempt folder, <evidence root>/<attempt id>/
+        assert p.parent == w.tmp / "evidence" / str(r.attempt_id), (path, w.tmp / "evidence", r.attempt_id)
+        assert p.is_file() and p.name.startswith("cover_letter") and p.suffix in (".docx", ".txt"), path
         assert list(seen[-1][1].values()) == [path], "ctx.composed_files has the path for the upload"
 
 
