@@ -369,6 +369,11 @@ def _job(title: str, company: str, loc: str, start: list, end: list, desc: str) 
     ]
 
 
+def _opt(fields: list[dict]) -> list[dict]:
+    """The same fields with none of them required (Q-93 M3 stub)."""
+    return [{k: v for k, v in f.items() if k != "req"} for f in fields]
+
+
 def _lang(name: str, level: str) -> list[dict]:
     return [
         {"w": "listbox", "label": "Language", "aid": "formField-language", "req": True,
@@ -499,6 +504,13 @@ REVIEW_STUBS = {
                  "Built REST APIs in Python and Postgres for shipment tracking."),
             _job("Campus Robot League", "", "", ["", ""], ["", ""], "Built a line-following robot in C++."),
             _job("Chess Club Treasurer", "", "", ["", ""], ["", ""], "Kept the club accounts.")]}]},
+    # Q-93 M3 (D-174): the same two entries with no required field anywhere (a Workday Education or
+    # Languages block): a swallowed Add must still stop the attempt
+    "q93_entries_optional": {"title": "Work Experience (Q-93 M3: all optional)", "body": [
+        {"section": "Work Experience", "template": _opt(_job("", "", "", ["", ""], ["", ""], "")), "entries": [
+            _opt(_job("Software Engineering Intern", "Example Logistics Pte Ltd", "Singapore", ["5", "2024"],
+                      ["8", "2024"], "Built REST APIs in Python and Postgres for shipment tracking.")),
+            _opt(_job("Campus Robot League", "", "", ["", ""], ["", ""], "Built a line-following robot in C++."))]}]},
     # F6: a revealed field takes the page ordinal of a field that still exists
     "review_collide": {"title": "Audit key collision (R3 review F6)", "body": [
         {"w": "text", "label": "Favourite tool", "aid": "formField-tool1"},

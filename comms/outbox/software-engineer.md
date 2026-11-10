@@ -883,3 +883,12 @@ TYPE: handoff
 BODY: commit ce8f0e4. `pagefill._add_failed` marks the section's keys (required, else all) in `fill_failed` again, so the flow stops `validation_error`; the rows keep their own status and carry "E5: another <section> entry could not be added (<why>) - this value was typed". `apply_flow._entry_problem` builds the flow's detail from that note: `reason_detail` = "another work experience entry could not be added (no entry appeared)" (field labels are listed after it only when other required fields also failed). The log line is kept. No contracts change.
 RESULT: `-k apply_q80` 11/11, `-k pagefill` 19/19, `-k apply_flow` 137/137, `-k apply_e2e` 13/13, full suite 1562/1562.
 STATUS: open
+
+### 2026-11-10 software-engineer -> coordinator: Q-93 (D-174, D-175, pick-path transport cause)
+TYPE: handoff
+BODY: branch eng/Q-93-flow; files `src/jobscraper/apply_flow.py`, `src/jobscraper/apply/page.py`, `src/jobscraper/apply/pagefill.py`.
+- D-174 (`apply_flow.page_result`): any `fill_failed` row carrying the E5 section note ends the attempt `validation_error` (detail from `_entry_problem`), required or not. Other optional `fill_failed` rows still do not stop. `_add_failed` docstring updated.
+- D-175 (`page.py` `pickerButton(c, el)`, used by `fileTrigger` and the container path): a button counts only if its text or aria-label matches `\b(attach*|upload*|browse|choose|select|file(s)|resume|cv)\b` (case-insensitive) or its aria-controls equals the input's id; submit/reset/field-control exclusions kept; visible label[for] unchanged. Note: attach/upload also match their derived forms (attachment, uploading).
+- Pick-path cause (`pagefill._transport`): when no row carries a "transport:" note (every row already answered), the cause is put first on the first row's note ("transport: model unavailable; ..."). `_transport_cause` reads it unchanged; a real timeout still says "timed out". No contracts change.
+- Limit: a FILLED row can now carry a "transport: ..." note after a mid-fill pick failure; `questions` capture already skips transport-noted unanswered rows only, answered rows are unaffected.
+STATUS: open

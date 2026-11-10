@@ -47,6 +47,7 @@ Field encoding notes for the model side (lane M) and `pagefill`:
 """
 from __future__ import annotations
 
+import logging
 import random
 import re
 from dataclasses import replace as _replace
@@ -57,7 +58,8 @@ from .contracts import (
     EntryGroup, EntrySection, FieldType, FormField, Option, PageField, Value, ValueOrigin,
 )
 
-MAX_OPTIONS = 400              # LF §3.1: lists are read up to this many options
+_LOG = logging.getLogger(__name__)
+MAX_OPTIONS = 400             # LF §3.1: lists are read up to this many options
 DESCRIPTION_MAX = 300          # LF §3.1: help text cut
 OPEN_WAIT_MS = 1500            # how long a just-opened list may take to show its options
 
@@ -355,13 +357,24 @@ READER_JS = "(arg) => {" + HELPERS_JS + r"""
   // button next to it (same parent) that is no other field's control and no submit/reset
   // (review N6a F4). The parent must be a field-like container, not the form or page wrapper
   // that also holds the Submit button.
-  const pickerButton = c => vis(c) && c.matches('button, [role="button"]') && !c.matches(CTRL) &&
-    !['submit', 'reset'].includes(c.type || '');
+  // Q-93 (D-175): a button counts only if it says it picks a file (its text, aria-label or
+  // title names attach/upload/browse/choose/select/file/resume/CV/curriculum/document; "replace"
+  // and "change" only beside a file word) or points at this input (aria-controls = its id); a
+  // "Cancel" or "Help" button beside a hidden input proves nothing. Unicode-aware word edges so
+  // "Résumé" matches (the ASCII word boundary would not); an icon-only button stays out.
+  const FILE_WORDS = /(?<!\p{L})(files?|r[eé]sum[eé]|cv|documents?)(?!\p{L})/iu;
+  const PICK_WORDS = /(?<!\p{L})(attach\p{L}*|upload\p{L}*|browse|choose|select|curriculum)(?!\p{L})/iu;
+  const SWAP_WORDS = /(?<!\p{L})(replace|change)(?!\p{L})/iu;
+  const pickText = t => FILE_WORDS.test(t) || PICK_WORDS.test(t) || (SWAP_WORDS.test(t) && FILE_WORDS.test(t));
+  const pickerButton = (c, el) => vis(c) && c.matches('button, [role="button"]') && !c.matches(CTRL) &&
+    !['submit', 'reset'].includes(c.type || '') &&
+    (pickText([txt(c), c.getAttribute('aria-label') || '', c.getAttribute('title') || ''].join(' ')) ||
+     !!(el && el.id && c.getAttribute('aria-controls') === el.id));
   const fileTrigger = el => {
     if ([...(el.labels || [])].some(vis)) return true;
     const p = el.parentElement;
     if (!p || p.matches('form, main, body')) return false;
-    return [...p.children].some(c => c !== el && ((pickerButton(c))
+    return [...p.children].some(c => c !== el && ((pickerButton(c, el))
       || (vis(c) && c.tagName === 'LABEL' && c.htmlFor === el.id && el.id)));
   };
   // A hidden file input's label: the first label in its parent that names no other control.
@@ -371,6 +384,7 @@ READER_JS = "(arg) => {" + HELPERS_JS + r"""
     return l ? txt(l) : '';
   };
   const CAND = CTRL + ', input[type="file"]';
+  const skips = [];
   for (const el of root.querySelectorAll(CAND)) {
     if (done.has(el) || excluded(el)) continue;
     const tag = el.tagName, t = (el.type || '').toLowerCase(), role = el.getAttribute('role');
@@ -390,8 +404,12 @@ READER_JS = "(arg) => {" + HELPERS_JS + r"""
       // A display:none file input is the target of a visible control (Greenhouse: an
       // "Attach" button next to it, or a label[for]); any other hidden input stays out.
       // A visible container alone proves nothing (N6a F4): it must hold a picker button.
-      const trigger = !vis(el) && (fileTrigger(el) || (vis(cont) && [...cont.querySelectorAll('button, [role="button"]')].some(pickerButton)));
-      if (!(vis(el) || trigger)) continue;
+      const trigger = !vis(el) && (fileTrigger(el) || (vis(cont) && [...cont.querySelectorAll('button, [role="button"]')].some(c => pickerButton(c, el))));
+      if (!(vis(el) || trigger)) {
+        // Q-93 review M2: a hidden file input with no picker control is left out; say so (label only).
+        skips.push({ skipped: 'file', label: cleanLabel(labelOf(el, cont) || fileLabel(el) || '').slice(0, 80) });
+        continue;
+      }
       // Its label is the field's own label (no label[for] points at a hidden input).
       const own = labelOf(el, cont) ? null : fileLabel(el);
       push(el, 'file', 'file', own ? { rawLabel: own } : undefined);
@@ -459,7 +477,7 @@ READER_JS = "(arg) => {" + HELPERS_JS + r"""
     if (t === 'month') extra.options = [{ label: 'Year', value: 'year' }, { label: 'Month', value: 'month' }];
     push(el, 'text', kinds[t] || 'text', extra);
   }
-  return fields;
+  return fields.concat(skips);
 }
 """
 
@@ -683,6 +701,9 @@ def read_page(page: Any, *, scope: str = "", sections: Sequence[EntrySection] = 
     groups = [{"id": f"{s.section}#{g.index}", "title": g.title, "locator": g.locator}
               for s in sections for g in s.entries if g.locator]
     raw = page.evaluate(READER_JS, {"scope": scope, "token": token, "groups": groups}) or []
+    for r in [r for r in raw if r.get("skipped")]:           # Q-93 review M2: a trace, no applicant values
+        _LOG.info("hidden file input skipped: no picker control%s", f" ({r['label']})" if r.get("label") else "")
+    raw = [r for r in raw if not r.get("skipped")]
     site = _origin(origin)
     known = dict(known or {})
     out: list[PageField] = []
