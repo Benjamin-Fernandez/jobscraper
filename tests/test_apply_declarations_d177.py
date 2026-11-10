@@ -151,3 +151,104 @@ def test_d177_m2_rows_33_to_36_of_the_d176_table_still_hold_through_classify_fie
               "Are there any outstanding legal proceedings against you?")
     bad = [m for lab in labels if (m := _ambiguous_why(lab, FT.DROPDOWN))]
     assert not bad, "\n" + "\n".join(bad)
+
+
+# ------------------------------------------------------------ rows 40-50 and addendum 2 (the spec table)
+
+def _none_why(label, ftype, options=YN, label_only=True):
+    """classify_field gives None (tier 5) and, for choice rows, so does the label-only classify."""
+    try:
+        D, f, ctx, got = _classify_field(label, ftype, options=options)
+    except Exception as e:
+        return f"{label!r} ({ftype.name}): raised {e!r}"
+    if got is not None:
+        return f"{label!r} ({ftype.name}): classify_field gave {got!r}, expected None"
+    if label_only:
+        lab_only = D.classify(Q._n(label), "")
+        if lab_only is not None:
+            return f"{label!r}: label-only classify gave {lab_only!r}, expected None"
+    return ""
+
+
+@gated
+def test_d177_r42_disqualified_from_driving_classifies_none():
+    bad = [m for m in [_none_why("Have you ever been disqualified from driving?", FT.DROPDOWN)] if m]
+    assert not bad, "\n" + "\n".join(bad)
+
+
+@gated
+def test_d177_r45_r46_a_noun_run_without_an_involvement_word_classifies_none():
+    bad = [m for m in (_none_why("Do you have experience with court orders?", FT.RADIO),
+                       _none_why("Can you work with litigation teams?", FT.DROPDOWN)) if m]
+    assert not bad, "\n" + "\n".join(bad)
+
+
+@gated
+def test_d177_r47_r48_a_textarea_with_a_marker_classifies_none_even_with_an_involvement_word():
+    """Row 48 holds 'pending' and 'against': the label alone is AMBIGUOUS, so only the field-type gate gives None."""
+    bad = [m for m in (
+        _none_why("Describe your experience with litigation support", FT.TEXTAREA, options=(), label_only=False),
+        _none_why("Please describe any pending litigation against you", FT.TEXTAREA, options=(), label_only=False)) if m]
+    assert not bad, "\n" + "\n".join(bad)
+    label = "Please describe any pending litigation against you"
+    D = Q._D()
+    assert D.classify(Q._n(label), "") is D.AMBIGUOUS, "row 48 isolates the gate: the label alone must stay AMBIGUOUS"
+
+
+@gated
+def test_d177_r49_party_to_any_litigation_is_ambiguous_required_unknown_optional_blank():
+    label = "Are you party to any litigation?"
+    D = Q._D()
+    assert D.classify(Q._n(label), "") is D.AMBIGUOUS
+    bad = []
+    for required, want in ((True, AS.UNKNOWN), (False, AS.BLANK_OPTIONAL)):
+        f = field("q", label, FT.DROPDOWN, YN, required)
+        ctx = ctx_for(Q._prof(), employer=Q.EMPLOYER)
+        got = D.classify_field(f, ctx)
+        a = D.answer(got, f, ctx)
+        if got is not D.AMBIGUOUS or a.status is not want or a.value not in (None, "", "false"):
+            bad.append(f"required={required}: classify {got!r}, want {want.name} got {a.status.name} {a.value!r}")
+    assert not bad, "\n" + "\n".join(bad)
+
+
+@gated
+def test_d177_r50_deported_on_a_radio_is_ambiguous_and_unknown():
+    bad = [m for m in (_ambiguous_why("Have you ever been deported?", FT.RADIO),) if m]
+    assert not bad, "\n" + "\n".join(bad)
+
+
+@gated
+def test_d177_addendum2_currently_is_an_involvement_word():
+    bad = [m for m in (_ambiguous_why("Are you currently in litigation?", FT.RADIO),) if m]
+    assert not bad, "\n" + "\n".join(bad)
+
+
+# ------------------------------------------------------------ vocabulary sizes after D-177
+
+@gated
+def test_d177_vocabulary_sizes_match_the_spec():
+    from jobscraper.apply import declarations as D
+    assert len(D.UNCLASSED_EVENTS) == 7, D.UNCLASSED_EVENTS
+    assert len(D.UNCLASSED_NOUNS) == 7, D.UNCLASSED_NOUNS
+    assert len(D.UNCLASSED_MARKERS) == 14
+    assert set(D.UNCLASSED_INVOLVEMENT) == {"subject", "party", "involved", "pending", "outstanding", "named",
+                                            "against", "threatened", "current", "currently", "ongoing"}, \
+        D.UNCLASSED_INVOLVEMENT
+    # "169 per class": the class filler totals 169 across the classes, REGULATORY adds no extra
+    assert sum(len(v) for v in D._CLASS_FILLER.values()) == 169, {k.name: len(v) for k, v in D._CLASS_FILLER.items()}
+    assert len(D._CLASS_FILLER[DL.REGULATORY]) == 25, len(D._CLASS_FILLER[DL.REGULATORY])
+
+
+@gated
+def test_d177_the_twelve_director_phrases_are_regulatory_phrases():
+    from jobscraper.apply import declarations as D
+    phrases = {tuple(p) for p in D._PHRASE_TOKENS[DL.REGULATORY]}
+    want = ["disqualified as a director", "disqualified as director", "disqualified as a company director",
+            "disqualified from acting as a director", "disqualified from acting as a company director",
+            "disqualified from being a director", "disqualified from being a company director",
+            "director disqualification", "disqualified director",
+            "disqualified as a director of a company", "disqualified from acting as a director of a company",
+            "disqualified from being a director of a company"]
+    missing = [p for p in want if tuple(p.split()) not in phrases]
+    assert not missing, missing
+    assert ("disqualified",) not in phrases
