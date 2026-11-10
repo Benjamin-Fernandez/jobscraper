@@ -899,3 +899,8 @@ STATUS: open
 - Null end as ongoing downstream: `applicant.computed_facts` (empty end -> now), `applicant.py` ~1251 (education completeness), `apply/declarations.py:75`, `apply/resolve.py:847` (current employer), `apply/facts.py:765` ("present"). The tailor stage never reads profile entry dates (grep of `src/jobscraper/tailor/`); `tailor_flow` proposals already emit None for an open end.
 - Known limit: `education[].end` null is read as "no graduation date" by computed_facts (graduation_year), as before.
 - Evidence (tail lines): pagefill 19/19, locks 5/5, guards 5/5, layering 13/13, profile 98/98, applicant 115/115, q94 14/14.
+
+## handoff Q-94 review fixes (D-180, D-181), 1e5fddc
+- `apply/resolve.py`: `unrecognised_place` (closed GENERIC_PLACE_WORDS and REGION_WORDS) stops a matched `country_bool` row with note `work rights: place not recognised` (not sensitive, tier 5 not tried; locks use the same `_tier2_country_bool`). `names_other_country` stops `singapore_status.residency_status` / `work_pass` rows (enum and `yes_if`) with note `names another country`; reads country names, aliases, the D-76 all-caps rule and demonyms (COUNTRIES demonyms except Singaporean, plus emirati).
+- Not done (optional): COUNTRIES not extended, so Spain etc. stop as an unknown place.
+- Both stops can still be settled by a tier-3 owner answer (existing order: tier 3 before a tier-2 stop).
