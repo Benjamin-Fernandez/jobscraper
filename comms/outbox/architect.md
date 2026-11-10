@@ -739,4 +739,5 @@ Verify (engineer): `python tests/run_tests.py -k declarations` stays green (122 
 - No new profile key is proposed. If one is wanted later for the four AMBIGUOUS families, it defaults to null (asked), not false: they are outside D-87 and D-55.
 
 **Not done in this session:** I had no shell tool, so I made **no commits** and **did not run** `-k declarations`. The Coordinator (or the next agent with a shell) should commit on `eng/Q-90-declarations` as two commits: `docs(architecture): Q-90/Q-91 D-176 value-sensitive place and time, rule 6b, six labels` (apply_design.md + this outbox entry) and `docs(architecture): Q-92 F3/F5 spec notes` (llm_fill_design.md). No code was changed, so `-k declarations` should still give 122/122.
+Update 2026-11-10 (Coordinator, for the architect, who had no shell): Q-90 D-177 amends D-176 (§7.5 item 5): REGULATORY filler without company/companies; 12 director phrases incl. the addendum's three 'of a company'; UNCLASSED markers on choice fields only, EVENT 7 / NOUN 7 + INVOLVEMENT 11 ("currently" added by the Coordinator, addendum 2, closing residual (b)); size pins 169 per class; oracle rows 40-50, row 32 stays No.
 STATUS: open
