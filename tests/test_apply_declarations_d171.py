@@ -329,9 +329,10 @@ def test_d171_r59_a_clause_in_singapore_without_a_class_is_unknown():
 @needs("jobscraper.apply.declarations:_strip_detail_tail", "jobscraper.apply.declarations:_place_spans")
 def test_d171_vocabulary_sizes_match_the_spec():
     from jobscraper.apply import declarations as D
-    assert len(D._STATUS_FILLER) == 65, len(D._STATUS_FILLER)
+    # D-176 moved the 7 time words out of SHARED (65 -> 58); they live in `_TIME_FILLER` (pinned in the d176 file)
+    assert len(D._STATUS_FILLER) == 58, len(D._STATUS_FILLER)
     assert len(D._PLACE_ANCHORS) == 56, len(D._PLACE_ANCHORS)
     assert D._NARROWING_FILLER and sum(len(v) for v in D._NARROWING_FILLER.values()) == 7
     assert not {"singapore", "country", "countries", "jurisdiction", "jurisdictions", "elsewhere", "overseas",
                 "anywhere", "aware"} & set(D._STATUS_FILLER)
-    assert {"month", "months"} <= set(D._STATUS_FILLER)
+    assert {"month", "months"} <= set(D._TIME_FILLER) and not {"month", "months"} & set(D._STATUS_FILLER)
