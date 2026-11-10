@@ -50,7 +50,8 @@ COMPOSE_SYSTEM = (
     "must appear there. Name the employer and the role exactly as JOB gives them. Choose the RESUME facts\n"
     "that fit JOB best. Don't claim anything RESUME doesn't say: no new skills, no stronger verbs (don't\n"
     "say led, owned or managed unless RESUME does), no numbers it doesn't have. No contact details, no\n"
-    "address, no name, no placeholders like [Name]. Plain text in the first person, at most {n} words."
+    "address, no name, no placeholders like [Name]. No salutation, greeting or sign-off: start with the\n"
+    "first sentence of the body. Plain text in the first person, at most {n} words."
 )
 # The closing line of the user prompt (design 19.4 leaves its wording open): it only names the
 # reply shape the schema already enforces.
