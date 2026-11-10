@@ -25,6 +25,13 @@ _STOP_FACTS = frozenset(
     "monday tuesday wednesday thursday friday saturday sunday".split())
 _SENT_START = re.compile(r"[.!?]\s+$")
 
+# tailor_design 7.4 rule 1 ("anywhere"): a stronger-claim word that may appear in a
+# rewritten text only if the source already has it. Lowercase `[A-Za-z]+` tokens. First
+# used by the composed texts (llm_fill_design 19.5 C4, Q-45); M22's rewrite shares it.
+UPGRADE_WORDS = frozenset(
+    "led lead leading owned own owning managed manage managing architected spearheaded "
+    "directed drove headed oversaw supervised mentored championed pioneered".split())
+
 
 @dataclass
 class BulletContext:

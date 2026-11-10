@@ -34,9 +34,11 @@ from .scrape.adapters import get_adapter, html_to_text
 from .scrape.net import HttpClient
 from .store import Store, utcnow
 from .models import RawJob
-from .tailor import mapping, master as master_mod, render, rewrite, storage, terms, validate
-from .tailor.contracts import (BulletChange, IssueCode, JdTerm, MasterResume, SectionKind,
-                               TailorResult, TailorStatus, TermStatus, ValidationIssue)
+from .tailor import (compose as compose_mod, mapping, master as master_mod, render, rewrite,
+                     storage, terms, validate)
+from .tailor.contracts import (BulletChange, ComposeRequest, ComposeResult, IssueCode, JdTerm,
+                               MasterResume, SectionKind, TailorResult, TailorStatus, TermStatus,
+                               ValidationIssue)
 
 log = logging.getLogger(__name__)
 
@@ -418,6 +420,65 @@ def alias_groups(cfg: Config) -> tuple[tuple[tuple[str, ...], ...], tuple[str, .
     except Exception:
         return (), ()
     return tuple((e.canonical, *e.variants) for e in a.entries), tuple(sorted(a.ambiguous))
+
+
+# ---------------------------------------------------------------------------
+# Q-45: composed texts (cover letter, "why join"; llm_fill_design section 19, KA-4)
+# ---------------------------------------------------------------------------
+
+def compose(cfg: Config, req: ComposeRequest, *, backend, redact: Callable[..., str]) -> ComposeResult:
+    """One composed text for `req` (design 19.3/19.4), from the CACHED master only: no
+    resume parse, so a miss is `ComposeResult(ok=False, error="no master")` (run
+    `python -m jobscraper tailor` once). `redact(text, s_values)` is the apply stage's S-value
+    scrubber, passed in by apply_flow (stages don't import each other); the whole user
+    prompt goes through it. The model writes the words, `tailor.compose.check` (C1-C7)
+    decides; one retry. Never raises on a model failure (`error="transport: <kind>"`) and
+    never logs a text."""
+    m = _cached_master(cfg)
+    if m is None:
+        return ComposeResult(False, error="no master")
+    try:
+        applicant = load_applicant(cfg)
+        attested = _strings(applicant.get("attested_skills"))
+        dictionary = terms.load_dictionary(
+            cfg.aliases_path, [*_strings(applicant.get("skills")), *attested, *m.skills()])
+    except Exception as exc:    # a broken aliases file: tailoring fails the same way
+        return ComposeResult(False, error=f"setup: {type(exc).__name__}")
+    return compose_mod.compose(req, m, dictionary, backend=backend, redact=redact,
+                               attested=attested)
+
+
+def write_letter(text: str, path: str | Path, fmt: str) -> str:
+    """Write a composed letter to `path` and return it (design 19.3 step 2). `fmt` is
+    `docx` (one clean column in the tailor template's font and page, plain paragraphs,
+    no name and no contact block) or `txt` (UTF-8, blank line between paragraphs); anything
+    else is a programming error (ValueError). Paragraphs are the text's blank-line blocks,
+    or its lines when it has none. Creates the folder; the caller picks a free name."""
+    path = Path(path)
+    if fmt not in ("docx", "txt"):
+        raise ValueError(f"unknown letter format: {fmt!r}")
+    blocks = [b.strip() for b in re.split(r"\n\s*\n", text or "") if b.strip()]
+    if len(blocks) == 1:
+        blocks = [x.strip() for x in blocks[0].splitlines() if x.strip()] or blocks
+    paras = [" ".join(b.split()) for b in blocks]
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if fmt == "txt":
+        path.write_text("\n\n".join(paras) + "\n", encoding="utf-8")
+        return str(path)
+    import docx
+    from docx.shared import Cm, Pt
+    d = docx.Document()
+    sec = d.sections[0]
+    sec.page_width, sec.page_height = Cm(21.0), Cm(29.7)
+    sec.left_margin = sec.right_margin = sec.top_margin = sec.bottom_margin = Cm(2.2)
+    normal = d.styles["Normal"]
+    render._font(normal, 11)
+    normal.paragraph_format.space_after = Pt(8)
+    normal.paragraph_format.line_spacing = 1.1
+    for para in paras:
+        d.add_paragraph(para)
+    d.save(str(path))
+    return str(path)
 
 
 # ---------------------------------------------------------------------------
