@@ -152,6 +152,9 @@ def _compose(cfg, model, req=None, redact=_identity):
     return tailor_flow.compose(cfg, req or _req(), backend=model, redact=redact)
 
 
+NL1, NL2 = chr(10), chr(10) * 2
+
+
 def _codes(res) -> set[str]:
     return {i.code.value for i in res.issues}
 
@@ -256,6 +259,52 @@ def test_c3_a_skill_only_the_job_description_names_is_rejected():
         res, _m = _rejects(cfg, CLEAN + " I also have strong Kafka experience.", "fact_added")
         assert any("kafka" in i.detail.lower() for i in res.issues), [i.detail for i in res.issues]
         _rejects(cfg, CLEAN + " I am comfortable with Docker and RabbitMQ.", "fact_added")
+
+
+@needs_compose
+def test_c3_d183_a_capitalised_sentence_start_word_is_a_fact_candidate_wherever_the_sentence_starts():
+    """LF 19.4 D-183: "Stripe taught me to ship." names a company the master and the posting never
+    mention. It must be caught at the text start, after ". " and after a blank line."""
+    sentence = "Stripe taught me to ship."
+    with _world() as cfg:
+        for reply in (sentence + " " + CLEAN,                  # at the text start
+                      CLEAN + " " + sentence,                  # after ". "
+                      CLEAN + NL2 + sentence,                  # after a blank line
+                      CLEAN + NL1 + sentence):                 # after a line break
+            res, _m = _rejects(cfg, reply, "fact_added")
+            assert any(i.detail.lower() == "stripe" for i in res.issues),                 (reply[:30], [i.detail for i in res.issues])
+
+
+@needs_compose
+def test_c3_d183_ordinary_sentence_openers_pass_when_the_rest_is_clean():
+    openers = ("Building tools for people is what I enjoy.",
+               "My work on REST APIs taught me to care about reliability.",
+               "During my internship I learned a great deal.",
+               "This is why I want the role.")
+    with _world() as cfg:
+        for sentence in openers:
+            for reply in (sentence + " " + CLEAN, CLEAN + " " + sentence, CLEAN + NL2 + sentence):
+                res = _compose(cfg, FakeModel(reply))
+                assert res.ok, (sentence, sorted(_codes(res)), [i.detail for i in res.issues])
+
+
+
+@needs_compose
+def test_c3_d183_a_sentence_start_word_the_master_holds_in_lower_case_passes():
+    """The master says "pandas" in lower case; "Pandas ..." opening a sentence is the same word. On a
+    master without it, the same sentence is an added fact."""
+    sentence = "Pandas is a library I have used."
+
+    def has_pandas(d):
+        d["sections"][1]["entries"][0]["bullets"][0]["text"] += " Wrote reports with pandas."
+    with _world(edit=has_pandas) as cfg:
+        res = _compose(cfg, FakeModel(CLEAN + " " + sentence))
+        assert res.ok, (sorted(_codes(res)), [i.detail for i in res.issues])
+        res = _compose(cfg, FakeModel(sentence + " " + CLEAN))
+        assert res.ok, (sorted(_codes(res)), [i.detail for i in res.issues])
+    with _world() as cfg:
+        res, _m = _rejects(cfg, CLEAN + " " + sentence, "fact_added")
+        assert any(i.detail.lower() == "pandas" for i in res.issues), [i.detail for i in res.issues]
 
 
 @needs_compose

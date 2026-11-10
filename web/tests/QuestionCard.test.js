@@ -83,7 +83,7 @@ describe('QuestionCard: the reason chip', () => {
   })
 
   it.each([
-    ['compose_needed: off', /turn on .Write cover letters. in Settings/i],
+    ['compose_needed: off', /^Write it here for this posting\. Automatic cover letters are off \(apply\.compose in config\.yaml\)\.$/],
     ['compose_needed: failed check', /didn't pass its fact check/i],
     ['compose_needed: no master', /Run the resume tailor once/i],
     ['compose_needed: something new', /^Write it here for this posting\.$/],

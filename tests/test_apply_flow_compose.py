@@ -76,8 +76,8 @@ class Compose:
     def __init__(self, *results):
         self.results, self.calls, self.letters = list(results), [], []
 
-    def compose(self, cfg, req, *, backend, redact):
-        self.calls.append(dict(req=req, backend=backend, redact=redact))
+    def compose(self, cfg, req, *, backend, redact, timeout=None):
+        self.calls.append(dict(req=req, backend=backend, redact=redact, timeout=timeout))
         return self.results.pop(0) if len(self.results) > 1 else self.results[0]
 
     def write_letter(self, text, path, fmt):
@@ -247,6 +247,94 @@ def test_a_page_that_asks_for_the_same_text_again_ends_as_a_compose_loop_and_sen
         assert "compose loop" in r.reason_detail, r.reason_detail
         assert len(fake.calls) == 1 and len(seen) == 2, (len(fake.calls), len(seen))
         assert "next" not in nav.calls
+
+
+# ---- D-184: the compose model call is capped by the attempt's time left
+
+@contextlib.contextmanager
+def _deadline_left(seconds):
+    """The attempt deadline reads `seconds` left (patched on the fill services)."""
+    apply_flow = _imports()[1]
+    saved = apply_flow._FillServices.deadline_left
+    apply_flow._FillServices.deadline_left = lambda self: float(seconds)
+    try:
+        yield
+    finally:
+        apply_flow._FillServices.deadline_left = saved
+
+
+@needs_k3
+def test_d184_compose_is_called_with_the_attempt_time_left_as_its_timeout():
+    fake = Compose(_ok())
+    with _world() as (w, jid), _patched(fake), _page(), _deadline_left(7):
+        _run(w, jid)
+    assert len(fake.calls) == 1, "compose ran once"
+    t = fake.calls[0]["timeout"]
+    assert t is not None and 1 <= t <= 7, t
+
+
+@contextlib.contextmanager
+def _real_master(w):
+    """The real `tailor_flow.compose` needs a cached master: the case_a master, resume file stubbed."""
+    import test_tailor_compose as TC
+    from jobscraper.profile import resume_ingest
+    from jobscraper.tailor import master as master_mod
+    saved = (resume_ingest.find_resume, resume_ingest.extract_text, resume_ingest.file_hash)
+    m = master_mod.from_dict(TC._master_dict())
+    master_mod.save(w.cfg.master_resume_path, m)
+    text = chr(10).join(master_mod._leaves(m))
+    resume_ingest.find_resume = lambda d: Path(d) / "resume.pdf"
+    resume_ingest.extract_text = lambda p: text
+    resume_ingest.file_hash = lambda p: "sha256:t7"
+    try:
+        yield
+    finally:
+        resume_ingest.find_resume, resume_ingest.extract_text, resume_ingest.file_hash = saved
+
+
+class TimedModel:
+    """A backend that records the `timeout` each `complete` got and then returns or raises."""
+    name = "fakemodel"
+    model_id = "fake-model:1b"
+    available = True
+
+    def __init__(self, reply=None, error=None):
+        self.reply, self.error, self.timeouts = reply, error, []
+
+    def warm(self, keep_alive=None):
+        pass
+
+    def complete(self, system, user, max_tokens=4096, schema=None, timeout=None, *, format=None,
+                 temperature=None, seed=None, top_k=None, keep_alive=None):
+        import json
+        from jobscraper.backends import Completion
+        self.timeouts.append(timeout)
+        if self.error is not None:
+            raise self.error
+        return Completion(json.dumps({"text": self.reply}), 10, 10)
+
+
+@needs_k3
+def test_d184_the_real_compose_hands_the_backend_a_timeout_of_at_most_the_time_left():
+    N = _imports()[0]
+    model = TimedModel(reply=TEXT)
+    with _world() as (w, jid), _real_master(w), _page(), _deadline_left(7):
+        N.run(w, jid, N.FakeNav(steps=("one", "review")), model=model)
+    assert model.timeouts, "the compose model call happened"
+    assert all(t is not None and 1 <= t <= 7 for t in model.timeouts), model.timeouts
+
+
+@needs_k3
+def test_d184_a_timeout_or_transport_error_ends_model_unavailable_and_captures_nothing():
+    from jobscraper.backends import BackendError
+    N, _af, _tf, AS, AT, S, FT, R, *_ = _imports()
+    for err in (BackendError("timed out after 7s"), TimeoutError("timed out"), BackendError("connection refused")):
+        model = TimedModel(error=err)
+        with _world() as (w, jid), _real_master(w), _page(), _deadline_left(7):
+            r, *_rest = N.run(w, jid, N.FakeNav(steps=("one", "review")), model=model)
+            assert r.state is S.FAILED and r.reason is R.MODEL_UNAVAILABLE, (err, r.state, r.reason, r.reason_detail)
+            assert _captured(w) == [], "a transport failure captures nothing"
+            assert model.timeouts and all(t is not None and 1 <= t <= 7 for t in model.timeouts), model.timeouts
 
 
 if WAITING[_W0:]:
