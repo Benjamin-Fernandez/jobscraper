@@ -114,9 +114,15 @@ PHRASES: dict[DeclarationLabel, tuple[str, ...]] = {
     # `regulatory_disciplinary` states (the D-87 `non_compete` precedent).
     L.REGULATORY: ("regulatory", "disciplinary", "mas", "licence revoked", "license revoked",
                    "suspended", "censured", "investigated by",
+                   # D-177: the company word lives in the phrase, not in the class filler
+                   # (as filler it let "suspended by a company" through). Never a bare
+                   # "disqualified" (visa, job and exam disqualifications).
                    "disqualified as a director", "disqualified as director",
-                   "disqualified from acting as a director",
-                   "disqualified from being a director", "director disqualification"),
+                   "disqualified as a company director", "disqualified from acting as a director",
+                   "disqualified from acting as a company director",
+                   "disqualified from being a director",
+                   "disqualified from being a company director", "director disqualification",
+                   "disqualified director"),
     # D-87: any agreement that limits the work you can do. "subject to any
     # restrictions" is left out on purpose: work-rights questions use it.
     L.NON_COMPETE: ("non compete", "non competes", "noncompete", "non competition",
@@ -353,7 +359,7 @@ _CLASS_FILLER: dict[DeclarationLabel, frozenset[str]] = {
     L.REGULATORY: frozenset("""action actions proceedings sanction sanctions sanctioned
         investigation investigations body bodies authority authorities regulator regulators
         professional revoked penalty penalties record history licence license licences
-        licenses disciplined company companies""".split()),
+        licenses disciplined""".split()),
     # sized by the live Q-48 F1 label, which must stay No
     L.NON_COMPETE: frozenset("""agreement agreements restriction restrictions restrict
         restricts restricted obligation obligations clause clauses contract contracts
@@ -432,10 +438,28 @@ def _toks(phrases: Iterable[str]) -> tuple[tuple[str, ...], ...]:
 # when no class matched: the answer is "unknown on purpose" (never tier 5, never a guess).
 # NOT in ATTESTATION_MARKERS: `_compound_unclassified` reads that set, and "worked for
 # Acme, or have you ever been deported?" would then answer one clause.
-UNCLASSED_MARKERS = _toks((
-    "court order", "court orders", "injunction", "injunctions", "restraining order",
+# D-177 (review Q-90 MEDIUM-2): scoped two ways. (a) Choice fields only: a free-text field
+# ("Describe your experience with litigation support") is never a declaration. (b) EVENT
+# runs say the applicant went through something; NOUN runs also need an involvement word
+# ("Are you party to any litigation?" yes, "Do you have experience with court orders?" no).
+UNCLASSED_EVENTS = _toks((
     "refused entry", "denied entry", "deported", "deportation", "dismissed", "asked to resign",
-    "terminated for cause", "legal proceedings", "litigation"))
+    "terminated for cause"))
+UNCLASSED_NOUNS = _toks((
+    "court order", "court orders", "injunction", "injunctions", "restraining order",
+    "legal proceedings", "litigation"))
+UNCLASSED_INVOLVEMENT = frozenset("""subject party involved pending outstanding named against
+    threatened current ongoing""".split())
+UNCLASSED_MARKERS = UNCLASSED_EVENTS + UNCLASSED_NOUNS
+_UNCLASSED_FIELD_TYPES = frozenset({FieldType.DROPDOWN, FieldType.RADIO, FieldType.CHECKBOX,
+                                    FieldType.MULTI_CHOICE})
+
+
+def _unclassed(toks: list[str]) -> bool:
+    """D-176 / D-177: does the label ask about a history no profile key states?"""
+    return (any(_has_run(toks, r) for r in UNCLASSED_EVENTS)
+            or (bool(UNCLASSED_INVOLVEMENT & set(toks))
+                and any(_has_run(toks, r) for r in UNCLASSED_NOUNS)))
 
 _MILITARY_TOKENS, _UNSURE_TOKENS = _toks(_MILITARY), _toks(_UNSURE)
 _EXCLUDING_TOKENS, _NS_TOKENS = _toks(_EXCLUDING), _toks(_NS_TERMS)
@@ -654,11 +678,11 @@ def _nda_consent(label_toks: list[str], non_compete_spans: list[tuple[int, int]]
 
 
 def classify(label_norm: str, description_norm: str = "", employer_names: Iterable[str] = (),
-             *, raw_label: str = ""):
+             *, raw_label: str = "", field_type: Optional[FieldType] = None):
     """The declaration class of a question (§7.5), AMBIGUOUS, or None.
     `employer_names` (the employer and its aliases) and `raw_label` feed the
-    D-90 (4) employer condition; see `classify_all`. Callers with a field use
-    `classify_field`.
+    D-90 (4) employer condition; see `classify_all`. `field_type` (D-177) scopes the
+    UNCLASSED markers to choice fields. Callers with a field use `classify_field`.
 
     Built on `classify_all`. (The tier-2 rule that a one-word phrase needs a
     label of 4 tokens or fewer is not applied here: attestations are long
@@ -677,7 +701,9 @@ def classify(label_norm: str, description_norm: str = "", employer_names: Iterab
     toks = label_norm.split()
     if ATTESTATION_MARKERS & set(toks):
         return AMBIGUOUS
-    if any(_has_run(toks, r) for r in UNCLASSED_MARKERS):        # D-176 (Q-91)
+    # D-176 (Q-91), scoped by D-177: a plain `classify(label)` (no field) keeps the markers;
+    # a field of a free-text type (TEXT, TEXTAREA, ...) never gets them.
+    if (field_type is None or field_type in _UNCLASSED_FIELD_TYPES) and _unclassed(toks):
         return AMBIGUOUS
     return None
 
@@ -687,7 +713,7 @@ def classify_field(f: FormField, ctx: Optional[ResolveContext] = None):
     lock L3, the D-70 / L6 / capture checks), so the employer condition and the
     "US is the country" test see the field's real label and employer (D-90)."""
     return classify(norm_label(f.label), norm_label(f.description), employer_names_of(ctx),
-                    raw_label=f.label or "")
+                    raw_label=f.label or "", field_type=f.fit_type)
 
 
 def negated_question(label_norm: str) -> bool:
