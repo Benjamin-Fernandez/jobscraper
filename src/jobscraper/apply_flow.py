@@ -1383,7 +1383,8 @@ class _Run:
                 if not self.acfg.compose.enabled:
                     self.compose_stop(at, page, job, rctx, outcome, step, key, Q.COMPOSE_OFF)
                 res = tailor_flow.compose(self.cfg, self.compose_request(f, rctx),
-                                          backend=self.backend, redact=llm_fill.redact)
+                                          backend=self.backend, redact=llm_fill.redact,
+                                          timeout=max(1.0, services.deadline_left()))   # D-184
                 if not res.ok:
                     if (res.error or "").startswith("transport"):
                         self.stage(at, page, outcome, step, applied=False)

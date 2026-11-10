@@ -39,7 +39,7 @@ const REASONS = {
 // Hint under a compose_needed chip, by the capture note (llm_fill_design section 19.6). The
 // note is "compose_needed: <off | failed check | no master>"; any other note gets the common line.
 const COMPOSE_HINTS = {
-  off: 'Write it here for this posting, or turn on “Write cover letters” in Settings → Apply.',
+  off: 'Write it here for this posting. Automatic cover letters are off (apply.compose in config.yaml).',
   'failed check': "JobScraper's draft didn't pass its fact check. Write it here for this posting.",
   'no master': 'Run the resume tailor once, then retry.',
 }

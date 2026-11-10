@@ -426,14 +426,16 @@ def alias_groups(cfg: Config) -> tuple[tuple[tuple[str, ...], ...], tuple[str, .
 # Q-45: composed texts (cover letter, "why join"; llm_fill_design section 19, KA-4)
 # ---------------------------------------------------------------------------
 
-def compose(cfg: Config, req: ComposeRequest, *, backend, redact: Callable[..., str]) -> ComposeResult:
+def compose(cfg: Config, req: ComposeRequest, *, backend, redact: Callable[..., str],
+            timeout: Optional[float] = None) -> ComposeResult:
     """One composed text for `req` (design 19.3/19.4), from the CACHED master only: no
     resume parse, so a miss is `ComposeResult(ok=False, error="no master")` (run
     `python -m jobscraper tailor` once). `redact(text, s_values)` is the apply stage's S-value
     scrubber, passed in by apply_flow (stages don't import each other); the whole user
     prompt goes through it. The model writes the words, `tailor.compose.check` (C1-C7)
     decides; one retry. Never raises on a model failure (`error="transport: <kind>"`) and
-    never logs a text."""
+    never logs a text. `timeout` (seconds; apply_flow passes the attempt's time left, D-184)
+    caps each model call."""
     m = _cached_master(cfg)
     if m is None:
         return ComposeResult(False, error="no master")
@@ -445,7 +447,7 @@ def compose(cfg: Config, req: ComposeRequest, *, backend, redact: Callable[..., 
     except Exception as exc:    # a broken aliases file: tailoring fails the same way
         return ComposeResult(False, error=f"setup: {type(exc).__name__}")
     return compose_mod.compose(req, m, dictionary, backend=backend, redact=redact,
-                               attested=attested)
+                               attested=attested, timeout=timeout)
 
 
 def write_letter(text: str, path: str | Path, fmt: str) -> str:

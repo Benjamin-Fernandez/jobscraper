@@ -25,7 +25,7 @@ import inspect
 import json
 import logging
 import re
-from typing import Any, Callable, Iterable, Sequence
+from typing import Any, Callable, Iterable, Optional, Sequence
 
 from .contracts import (COMPOSE_VERSION, ComposeRequest, ComposeResult, IssueCode,
                         MasterResume, ValidationIssue)
@@ -69,6 +69,38 @@ _PLACEHOLDER = re.compile(r"\[[^\]\n]*\]|<[^>\n]*>|lorem|your name|company name"
 _PARA_BREAK = re.compile(r"\s*\n\s*")
 
 
+
+# D-183 (llm_fill_design 19.4): words a letter or answer may open a sentence with without
+# being a claim. A capitalised sentence-start word outside this list, the master, the JD and
+# the names JOB gives is a fact candidate ("Stripe taught me ..." -> FACT_ADDED stripe).
+COMMON_WORDS = frozenset("""
+a about above across after afterwards again against all almost also although always am among an
+and another any anyone anything are around as at away back be became because become been before
+began being believe below beside besides between beyond both bring but by came can cannot could
+current day despite did do does doing done down during each early either else enough especially
+even ever every everything far few finally first following for from further gave get getting give
+given go going gone good got great had has have having he her here hers herself him himself his
+how however i if in indeed initially instead into is it its itself just keen kept know large last
+later learned learning least led less let like likely little long made make making many may me
+meanwhile might more moreover most much must my myself need never new next no none nor not now of
+off often on once one only onto or other others our ours ourselves out over own particularly past
+per perhaps plus prior quickly rather really recently regularly since small so some someone
+something sometimes soon still strong such take taking than that the their theirs them themselves
+then there therefore these they this those though through throughout thus time to together took
+toward towards under until up upon us used using very was we well were what whatever when whenever
+where whether which while who whom whose why will with within without would yes yet you your yours
+yourself
+
+alongside applying approaching aware beginning building built collaborating completing
+contributing creating curious delivering designing developing driven eager enjoy enjoyed excited
+exploring focused found gaining gained getting growing happy helping hoping hope improving
+interested joining keen looking love managing motivated passionate practical proud pursuing
+reading real reflecting seeing seeking shipping solving starting strengthening studying
+supporting taught teaching testing thank thanks together translating trying turning understanding
+wanting working writing
+""".split())
+
+
 def schema(max_chars: int) -> dict:
     return {"type": "object", "required": ["text"],
             "properties": {"text": {"type": "string", "maxLength": int(max_chars)}}}
@@ -106,6 +138,26 @@ def _norm_company(name: str) -> list[str]:
 def _has_run(hay: Sequence[str], needle: Sequence[str]) -> bool:
     n = len(needle)
     return n > 0 and any(list(hay[i:i + n]) == list(needle) for i in range(len(hay) - n + 1))
+
+
+_OPENER = re.compile(r"(?:^|[.!?]\s+)([A-Za-z0-9][A-Za-z0-9+#]*(?:\.[A-Za-z0-9+#]+)*)")
+
+
+def _opening_words(flat: str, req: ComposeRequest, master_text: str, allowed: set[str]) -> set[str]:
+    """D-183: capitalised sentence/paragraph/line-start words (2+ letters, no digit) that are
+    neither common words nor present, in any case, in the master, the JD or the names JOB
+    gives. `validate.facts` exempts every sentence start; a composed text may not."""
+    known = {w.lower() for w in _WORD.findall(
+        " ".join([master_text, req.jd_text, req.employer, req.job_title, *req.employer_aliases]))}
+    out: set[str] = set()
+    for m in _OPENER.finditer(flat):
+        tok = m.group(1)
+        low = tok.lower()
+        letters = sum(c.isalpha() for c in tok)
+        if (tok[0].isupper() and letters >= 2 and not any(c.isdigit() for c in tok)
+                and low not in COMMON_WORDS and low not in known and low not in allowed):
+            out.add(low)
+    return out
 
 
 def _issue(code: IssueCode, detail: str = "") -> ValidationIssue:
@@ -155,7 +207,9 @@ def check(text: str, req: ComposeRequest, master_text: str, dictionary: Dictiona
 
     # A paragraph or line start reads as a sentence start (validate.facts only knows ". ").
     flat = _PARA_BREAK.sub(". ", text)
-    for tok in sorted(facts(flat, dictionary) - allowed_facts(req, master_text, dictionary, attested)):
+    allowed = allowed_facts(req, master_text, dictionary, attested)
+    claimed = set(facts(flat, dictionary)) | _opening_words(flat, req, master_text, allowed)
+    for tok in sorted(claimed - allowed):
         issues.append(_issue(IssueCode.FACT_ADDED, tok))                          # C3
 
     have = {w.lower() for w in _WORD.findall(master_text)} | _tokset(names)       # C4
@@ -225,7 +279,8 @@ def fix_line(issues: Sequence[ValidationIssue]) -> str:
 # The call
 # --------------------------------------------------------------------------
 
-def _call(backend: Any, system: str, user: str, req: ComposeRequest) -> str:
+def _call(backend: Any, system: str, user: str, req: ComposeRequest,
+          timeout: Optional[float] = None) -> str:
     """One completion under the schema; returns the reply's `text` ("" when unreadable).
     Per-call options go only to a backend that accepts them (the master-parse pattern)."""
     params = inspect.signature(backend.complete).parameters
@@ -234,6 +289,8 @@ def _call(backend: Any, system: str, user: str, req: ComposeRequest) -> str:
     for name, value in (("temperature", TEMPERATURE), ("seed", SEED), ("top_k", TOP_K)):
         if name in params:
             kw[name] = value
+    if timeout is not None and "timeout" in params:      # D-184: the attempt's time left, in seconds
+        kw["timeout"] = float(timeout)
     comp = backend.complete(system, user, 2 * req.max_words + 100, **kw)
     try:
         data = json.loads(comp.text)
@@ -245,9 +302,10 @@ def _call(backend: Any, system: str, user: str, req: ComposeRequest) -> str:
 
 def compose(req: ComposeRequest, master: MasterResume, dictionary: Dictionary, *, backend: Any,
             redact: Callable[[str, Sequence[str]], str],
-            attested: Iterable[str] = ()) -> ComposeResult:
+            attested: Iterable[str] = (), timeout: Optional[float] = None) -> ComposeResult:
     """Write, check, retry once. `redact(text, req.s_values)` is applied to the whole user
-    prompt (FIX line included) so no S value reaches the model. Never logs a text."""
+    prompt (FIX line included) so no S value reaches the model. `timeout` (seconds, D-184)
+    caps each model call; a timeout is a transport error. Never logs a text."""
     master_text = resume_text(master)
     system = system_prompt(req)
     base = user_prompt(req, master_text)
@@ -259,7 +317,7 @@ def compose(req: ComposeRequest, master: MasterResume, dictionary: Dictionary, *
         user = redact(user, req.s_values)
         h = hashlib.sha256((system + user).encode("utf-8")).hexdigest()[:16]
         try:
-            text = _call(backend, system, user, req)
+            text = _call(backend, system, user, req, timeout)
         except Exception as exc:    # any transport failure; the type name carries no personal text
             log.warning("compose: model call failed (%s)", type(exc).__name__)
             return ComposeResult(False, "", tuple(issues), model, h, attempt,
