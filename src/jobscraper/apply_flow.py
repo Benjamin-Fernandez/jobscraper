@@ -1303,9 +1303,12 @@ class _Run:
             label = first.field.label if first else outcome.unknown_required[0]
             raise ApplyFailure(ReasonCode.UNANSWERABLE_REQUIRED, label[:120], step=step)
         self.stage(at, page, outcome, step, applied=True)
-        req = [k for k in outcome.fill_failed if k in by_key and by_key[k].field.required]
-        # R3 F14 (D-173): a failed E5 Add is the section's problem, not a field's: say so.
-        added = next((s for s in (_entry_problem(outcome.answers.get(k)) for k in req) if s), "")
+        # R3 F14 (D-173, D-174): a failed E5 Add is the section's problem, not a field's: say so,
+        # and stop on it even when every field in the section is optional (fewer entries than
+        # the profile has must never be submitted). Any other optional fill_failed row is not a stop.
+        failed = [k for k in outcome.fill_failed if k in by_key]
+        added = next((s for s in (_entry_problem(outcome.answers.get(k)) for k in failed) if s), "")
+        req = [k for k in failed if by_key[k].field.required]
         bad = [by_key[k].field.label for k in req if not _entry_problem(outcome.answers.get(k))]
         if added or bad:
             detail = "; ".join(([added] if added else []) + ([", ".join(b[:80] for b in bad[:3])] if bad else []))

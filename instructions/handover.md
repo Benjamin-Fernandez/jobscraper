@@ -9,6 +9,7 @@
 - Declarations: Q-80 D-164 `question_frame` + D-169b (a50510d); Q-82 D-170 one status question per label (bf664cf); Q-83 D-171 tails / narrowing words (false value only) / place phrases / you-subject (merged 2026-11-08). Reviews: `docs/reviews/Q-80-declarations.md`, `Q-82-declarations.md`, `Q-83-declarations.md`.
 - Q-83 verified on the merged branch: Python 1551/1551, `-k apply_e2e` 13/13, `-k apply_flow` 137/137 with Edge.
 - Q-80 finished (merged 2026-11-08): R3 F12/F14, N6a F3-F6, review M1/M2 (D-172 file trigger, D-173 failed Add stays fail-closed). Review `docs/reviews/Q-80-flow-fixes.md`; follow-ups Q-93.
+- Q-93 merged 2026-11-10: D-174 (a failed Add stops even when optional), D-175 (file-picker words incl. résumé/CV/document, title; skip log line), pick-path "model unavailable". Review `docs/reviews/Q-93-flow.md`.
 
 ## Where we are
 - M19 DONE. M20: the filler is complete through N6b; what remains is the M20 gate (D-83) plus follow-ups. Workday is filled in dry runs; account creation happens only inside owner-started attempts.
