@@ -188,8 +188,7 @@ def _stopped(label, note):
 @needs(*RESOLVER)
 def test_q94_d180_an_unknown_place_or_a_region_stops_the_work_rights_label_unanswered():
     for label in ("Are you authorised to work in London?",
-                  "Are you able to work worldwide?",
-                  "Are you legally authorised to work worldwide?",
+                  "Are you legally authorised to work worldwide?",   # "able to work worldwide?" matches no row: out of D-180 scope
                   "Are you authorised to work anywhere in APAC?",
                   "Do you require visa sponsorship to work in EMEA?",
                   "Do you require visa sponsorship to work in Europe or Asia?"):
@@ -242,8 +241,23 @@ def test_q94_d181_a_singapore_residency_row_never_answers_another_countrys_citiz
 
 @gated(_D181, "resolve: D-181 names another country")
 @needs(*RESOLVER)
+def test_q94_d181_a_bare_british_citizen_label_is_never_answered_from_the_singapore_row():
+    # "Are you a British citizen?" matches no residency synonym (those need "singapore citizen", "are you a
+    # citizen" ...), so D-181's stop (matched rows only) cannot fire and the label takes the tier-5 path.
+    # Pinned: the Singapore row never answers it. The strict stop is only for labels that match a row.
+    a, _calls = _resolve_real("Are you a British citizen?")
+    assert "residency_status" not in a.rule_id + a.source and "work_pass" not in a.rule_id + a.source,         (a.rule_id, a.source)
+    assert not (a.status is AnswerStatus.FILLED and a.tier is AnswerTier.PROFILE_RULE), (a.status, a.tier)
+    # and the demonym stops a label that DOES match a residency row
+    b = _stopped("Are you a British citizen or permanent resident?", "names another country")
+    assert "residency_status" not in b.source
+
+
+@gated(_D181, "resolve: D-181 names another country")
+@needs(*RESOLVER)
 def test_q94_d181_the_singapore_and_the_no_country_citizenship_labels_still_answer_from_the_singapore_row():
     for label in ("Are you a Singapore Citizen or Permanent Resident?",
+                  "Are you a Singaporean citizen?",              # the Singapore demonym is the one that stays
                   "Are you a citizen or permanent resident?"):
         a, calls = _resolve_real(label)
         assert calls == 0, label
