@@ -192,7 +192,10 @@ describe('Update your application details (R10)', () => {
     expect(kept.text()).toContain('Kept: you edited this')
     expect(kept.text()).toContain('Mine · Tutor')
     expect(kept.find('input').exists()).toBe(false)
-    expect(panel(w).find('.rr-skills').text()).toContain('Add 2 skills from your resume: Go, Rust')
+    const skillsRow = panel(w).find('.rr-skills')
+    expect(skillsRow.find('label').text()).toBe('Add 2 skills from your resume:')
+    expect(skillsRow.findAll('.rr-chips li').map(li => li.text())).toEqual(['Go', 'Rust'])
+    expect(skillsRow.find('.rr-more-skills').exists()).toBe(false)
     expect(panel(w).find('.rr-details').text()).toContain('Not on your resume, so not added: Docker, Terraform')
   })
 
@@ -201,7 +204,30 @@ describe('Update your application details (R10)', () => {
     plan.changes.find(c => c.id === 'skills:add').op = 'replace'
     plan.changes.find(c => c.id === 'skills:add').id = 'skills:replace'
     const w = await mountProfile({ refresh: plan })
-    expect(panel(w).find('.rr-skills').text()).toContain('Replace the example skills with 2 skills from your resume: Go, Rust')
+    const row = panel(w).find('.rr-skills')
+    expect(row.find('label').text()).toBe('Replace the example skills with 2 skills from your resume:')
+    expect(row.findAll('.rr-chips li').map(li => li.text())).toEqual(['Go', 'Rust'])
+  })
+
+  it('a long skills list shows 12 chips and an "and N more" toggle that expands and collapses', async () => {
+    const plan = PLAN()
+    plan.skills.add = Array.from({ length: 30 }, (_, i) => `Skill${i + 1}`)
+    const w = await mountProfile({ refresh: plan })
+    const row = panel(w).find('.rr-skills')
+    expect(row.find('label').text()).toBe('Add 30 skills from your resume:')
+    expect(row.findAll('.rr-chips li')).toHaveLength(12)
+    const toggle = row.find('.rr-more-skills')
+    expect(toggle.text()).toBe('and 18 more')
+    expect(toggle.attributes('aria-expanded')).toBe('false')
+    // the toggle is not inside the label, so it never flips the checkbox
+    expect(row.find('label .rr-more-skills').exists()).toBe(false)
+    const before = row.find('input').element.checked
+    await toggle.trigger('click')
+    expect(row.findAll('.rr-chips li')).toHaveLength(30)
+    expect(row.find('.rr-more-skills').text()).toBe('Show fewer')
+    expect(row.find('input').element.checked).toBe(before)
+    await row.find('.rr-more-skills').trigger('click')
+    expect(row.findAll('.rr-chips li')).toHaveLength(12)
   })
 
   it('ticks what the server says is on by default, and the Save button counts the ticks', async () => {
