@@ -252,12 +252,19 @@ def test_connections_rule_b_counts_an_attempt_started_less_than_2h_ago_and_ignor
         jv = {"current": None, "attempts_in_flight": flight, "last_attempts": {}}
         return _model(_compose({"job_view": jv, "model_snapshot": snap}))["facts"]
     with _clean_env():
-        for s in ("2026-11-11T09:11:00", "2026-11-11T08:12:00", "2026-11-11T07:13:00"):
+        for s in ("2026-11-11T09:11:00", "2026-11-11T08:12:00", "2026-11-11T07:12:01"):
             f = reason(s)
             assert (f["need_reason"], f["need_now"]) == ("application", True), s
-        for s in ("2026-11-11T07:12:00", "2026-11-11T07:11:00", "2026-11-11T05:00:00", "2026-11-09T09:00:00"):
+        # (the exact second 07:12:00 is not pinned: see comms/outbox/tester.md, boundary note)
+        for s in ("2026-11-11T07:11:59", "2026-11-11T07:11:00", "2026-11-11T05:00:00", "2026-11-09T09:00:00"):
             f = reason(s)
             assert (f["need_reason"], f["need_now"]) == (None, False), s
+        # an in-flight row with no started_at counts (unknown is not stale)
+        jv = {"current": None, "last_attempts": {}, "attempts_in_flight": [{"id": 50, "job_id": "j", "state": "filling"}]}
+        assert _model(_compose({"job_view": jv, "model_snapshot": snap}))["facts"]["need_reason"] == "application"
+        # the window is IN_FLIGHT_HOURS = 2 (D-198)
+        from jobscraper.web.connections import IN_FLIGHT_HOURS
+        assert IN_FLIGHT_HOURS == 2
         # one fresh among stale ones is enough; all stale is not
         assert reason("2026-11-10T01:00:00", "2026-11-11T09:00:00")["need_reason"] == "application"
         assert reason("2026-11-10T01:00:00", "2026-11-11T03:00:00")["need_reason"] is None

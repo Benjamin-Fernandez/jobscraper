@@ -122,8 +122,11 @@ describe('ConnectionsHub: every sample state shows the right chip', () => {
     const fix = card(w, 'apply-mailbox').find('.conn-fix')
     if (item.state === 'attention' || item.state === 'not_set_up') {
       expect(fix.exists()).toBe(true)
-      expect(fix.text()).toContain('python -m jobscraper mail set-password')
-      expect(fix.text()).toContain('python -m jobscraper mail test')
+      // D-198 H1: run through run.ps1, introduced by where to run it
+      expect(fix.text()).toContain('In PowerShell, in the JobScraper folder')
+      expect(fix.text()).toContain('.\\run.ps1 mail set-password')
+      expect(fix.text()).toContain('.\\run.ps1 mail test')
+      expect(fix.text()).not.toContain('python -m jobscraper')
     } else {
       expect(fix.exists()).toBe(false)
     }
