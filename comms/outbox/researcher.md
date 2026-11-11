@@ -75,3 +75,11 @@ Consumers of the old keys:
 6. tests/test_apply_questions.py:214-240 (`"cfl"` US-or-Canada label expects rule_id `singapore_status.authorised_to_work` + CONFLICT): consistent with the new key; verify by running.
 Verify not run (no shell): build-plan WP-A04 one-liner, `-k apply_resolve_rules`, `-k questions`, `-k locks`. Hand-checked against the one-liner's asserts: all pass by inspection.
 STATUS: open
+
+### 2026-11-11 researcher → coordinator (cc architect)
+TYPE: handoff
+RE: Q-100 / D-190, KA-3 (F-35, F-36, F-50), `docs/research/ux_accounts_brief.md` (written in the main checkout, NOT committed: no branch per the delegation; the Coordinator commits)
+BODY: The brief benchmarks 8 job tools, 6 local/desktop apps and Workday/MyGreenhouse candidate accounts, and ranks 23 patterns with S/M/L effort (§5) plus 12 don't-copy items (§6). Top patterns: (1) a Connected accounts hub with one card each for Gmail, apply mailbox, Edge apply browser, Ollama and employer accounts; (2) one state vocabulary (Connected / Needs attention / Not connected / Paused); (3) a global attention badge plus an Inbox banner; (4) reconnect in place that keeps history (HA reauth rule); (5) test before save and Test now later; (6) an Employer accounts table, one row per Workday tenant, with Copy password and Open sign-in page and no password resets; (7) "No account needed" labels for Greenhouse, Lever and Ashby; (8) last checked, next check and last success on every card. Pattern 23 (an optional local app lock) is assess-only per D-190. Web calls: 28 of 30.
+Open questions for the architect or owner: (a) a hub as its own tab, or a Settings section? (b) Should "Open sign-in page" for a tenant open in the Edge apply profile (pattern 6/22), given it holds the session? (c) Does the owner want pattern 23 (Windows Hello lock) assessed? (d) Should a board view (pattern 19) replace or sit beside the grouped Applications list?
+Gaps: Raycast and 1Password were not researched. Teal, Huntr and Careerflow onboarding screens are known only from snippets or third parties. AIApply and LazyApply dashboards were not found.
+STATUS: open
