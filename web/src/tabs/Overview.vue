@@ -191,9 +191,7 @@ async function start() {
             </template>
             <template v-else-if="lastRun.state === 'failed'">
               <h3 class="next-title">Your last run {{ runStatusLabel(lastRun.run.status) }}</h3>
-              <p class="next-body muted">
-                <template v-if="failReason">{{ failReason }} </template>See what happened on the Runs tab.
-              </p>
+              <p class="next-body muted">{{ failReason ? `${failReason} ` : '' }}See what happened on the Runs tab.</p>
               <a class="button" :class="i === 0 ? 'primary' : 'ghost'" href="#/runs">Open Runs</a>
             </template>
             <template v-else>

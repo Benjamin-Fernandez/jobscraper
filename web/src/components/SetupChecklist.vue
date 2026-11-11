@@ -160,7 +160,7 @@ export const LATER_KEY = 'setup.apply.later'
           <p v-if="!withApply" class="setup-sub muted">Four steps, once. After that, new roles arrive here after every run.</p>
           <p v-else class="setup-sub muted">Find roles that fit you, then let JobScraper fill in the applications.</p>
         </div>
-        <p class="setup-progress num">{{ progress }}</p>
+        <p class="setup-progress" :class="{ num: !withApply }">{{ progress }}</p>
       </header>
 
       <div v-if="showFind" class="setup-part" data-part="find">

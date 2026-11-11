@@ -49,7 +49,12 @@ const one = computed(() => (props.items.length === 1 ? props.items[0] : null))
 const title = computed(() => (one.value
   ? `${NAMES[one.value.kind] ?? 'A connection'} needs attention.`
   : `${props.items.length} connections need attention.`))
-const line = computed(() => (one.value ? codeCopy(one.value) : null))
+// The employer-accounts summary carries its worst row's code: say it in that row's words.
+const line = computed(() => {
+  const item = one.value
+  if (!item) return null
+  return codeCopy(item) ?? (item.kind === 'employer_accounts' ? codeCopy({ ats: 'any', code: item.code }) : null)
+})
 const href = computed(() => hashFor('settings', 'accounts', one.value ? one.value.id : null))
 const action = computed(() => {
   if (!one.value) return 'Review'
@@ -76,8 +81,7 @@ export const DISMISS_KEY = 'attention.dismissed'
           <path d="M12 10v4.5M12 17.2v.3" />
         </svg>
         <p class="attention-text">
-          <strong>{{ title }}</strong>
-          <template v-if="line"> {{ line }}</template>
+          <strong>{{ title }}</strong>{{ line ? ` ${line}` : '' }}
         </p>
         <div class="attention-actions">
           <a class="button attention-go" :href="href">{{ action }}</a>
