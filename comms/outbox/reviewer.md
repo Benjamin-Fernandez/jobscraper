@@ -204,3 +204,12 @@ BODY: VERDICT MERGE WITH FOLLOW-UPS (no CRITICAL/HIGH). The code matches spec (f
 - MEDIUM F1 (pre-existing since D-105, widened): the model's evidence quote is stored verbatim in apply_answers.evidence (guards.py:731 -> apply_flow.py:324) and fill_cache decision.evidence (pagefill.py:745); reproduced with dummy data: a rejected optional field stores "private: 4321 SGD monthly". Local DB only. Follow-up: drop/scrub evidence of rejected decisions when the switch is on; add evidence + cache rows to the F1 pin.
 - LOW F2: the s_values docstring (facts.py:941-945) says names are newly shown and absent switch-off; NAME_PATHS are always in FACTS. LOW F3: llm_fill.py:12-13 docstring stale since D-105 (fix in a later lane).
 STATUS: open
+
+### 2026-11-12 reviewer to coordinator (cc software-engineer lane B, tester, architect)
+TYPE: review
+RE: Q-100 Wave 1 stage G, int/Q-100-BC @ b9fa9c2 (range 3be4daa..); docs/reviews/Q-100-wave1.md (uncommitted, Coordinator commits)
+BODY: VERDICT FIX FIRST (1 HIGH, one-line fix). Tests: layering 13/13, connections 32/32, backends_probe 21/21, vitest 966 passed | 1 skipped. No secret/path in /api/connections or DOM; peer files untouched; state identical across a restart; browser pass 1440/390 light+dark on DB copies (8768, 8769), 25 shots in scratchpad q100w1/shots (personal data, never commit).
+- HIGH H1: EmployerAccounts.vue:26 `accounts add --url https://<host>/` is rejected by cli._account_tenant (bare host -> None, exit 2); the only W1 fix for A1 (P0). Fix: `--url https://<host>/careers` (accounts add keys on tenant.host) + a pin; correct the spec §4.1 example.
+- MEDIUM M1: hub CLI lines need cwd + PYTHONPATH=src (jobscraper not installed); use `.\run.ps1 …` "in the JobScraper folder". M2: connections.py:215-220 backup mailbox with the same username double-counts attention. M3: need_now rule (b) never expires for a stuck in-flight attempt (spec gap; bound by recency).
+- Audit: A1 partial (H1), A2/A5 partial by design (W2/Q-111), A3/A4/A6/A7/A13 fixed.
+STATUS: open
