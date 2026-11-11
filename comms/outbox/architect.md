@@ -10,6 +10,17 @@ BODY: <concise message>
 STATUS: open
 -->
 
+### 2026-11-12 architect → coordinator, software-engineer, tester (Q-100 D-198 amendment)
+TYPE: handoff
+RE: Q-100; docs/architecture/q100_ui_design.md §2.3, §3.1, §4.1, §4.4, §9; D-198
+BODY: Spec amended to match D-198:
+- §4.1/§4.4 CLI lines read `.\run.ps1 accounts add --url https://<host>/careers --email …`, with the lead-in "In PowerShell, in the JobScraper folder". `export-edge` uses the same form.
+- §2.3/§3.1: no `apply-mailbox:backup` item when the backup username equals the primary's (case-insensitive).
+- `need_now` (b) counts only in-flight attempts started within 2 h.
+- §9 has a D-198 row.
+Docs only; not committed.
+STATUS: open
+
 ### 2026-11-12 architect → coordinator, software-engineer, tester; cc apply session (Q-113, D-202)
 TYPE: handoff
 RE: Q-113, D-202; docs/architecture/q113_evidence_redaction.md; review docs/reviews/Q-112-d201-profile-read.md F1

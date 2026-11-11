@@ -70,7 +70,7 @@ Setup steps (§4.2) draw the same states as done / to do / "Couldn't check". `do
 | | `state = ok`, timer running (`timer_running`, `web/mailsync.py:137-139`) | connected · `ok` | none |
 | | `state = ok`, `mail_status.enabled` true, timer not running | connected · `timer_off` (A9) | none |
 | Gmail (none) | no `mail_accounts` rows | not_set_up · `none` (Optional) | Connect Gmail |
-| Application mailbox | host and username set, vault entry present | connected · `ok` | none (Test: W2) |
+| Application mailbox (an `apply-mailbox:backup` item exists only when `apply.mail_backup.username` is set and differs from the primary's, compared case-insensitively; D-198 M2) | host and username set, vault entry present | connected · `ok` | none (Test: W2) |
 | | username set, no vault entry | attention · `no_password` | W1: CLI command; W2: Enter app password |
 | | username unset | not_set_up · `none` (Optional) | W1: CLI command; W2: Set up |
 | Employer account (`ats_accounts` row, `store.py:217-227`) | `created` / `verified`, password present, `last_signin_ok ≠ 0` | connected · `ok` / `verified` | none |
@@ -91,7 +91,7 @@ Setup steps (§4.2) draw the same states as done / to do / "Couldn't check". `do
 
 **`need_now` (exact rule).** It is true if any of the following holds. None of these needs new SQL.
 - (a) `app.state.jobs.current(tail=0)` has `state = "running"` and a `kind` other than `mailtest`. Every other kind can call the model.
-- (b) `store.attempts_in_flight()` (`store.py:1443`) is non-empty.
+- (b) `store.attempts_in_flight()` (`store.py:1443`) has a row whose `started_at` is within the last 2 h. Older in-flight rows are stale and ignored (D-198 M3).
 - (c) `store.last_attempts()` (`store.py:1431-1441`) has a row with `reason_code = "model_unavailable"` and `finished_at` within the last 24 h.
 - (d) any `mail_accounts.last_counts_json` (`store.py:343`) has `pending_model > 0` (`COUNT_KEYS`, `mailstatus/contracts.py:330-331`).
 
@@ -104,7 +104,7 @@ Applicant readiness and the apply mode are **not** hub items: Settings → Apply
 ```jsonc
 { "version": 1, "checked_at": "2026-11-11T09:12:00",    // UTC, store.TIME_FMT
   "attention": 1,                       // server-side count of state "attention" (doctor; the badge uses §2.2)
-  "items": [ { "id": "gmail:3" | "apply-mailbox" | "apply-mailbox:backup" | "employer-accounts" | "edge" | "model",
+  "items": [ { "id": "gmail:3" | "apply-mailbox" | "apply-mailbox:backup" /* only when the backup username differs from the primary's, case-insensitive (D-198 M2) */ | "employer-accounts" | "edge" | "model",
       "kind": "gmail" | "apply_mailbox" | "employer_accounts" | "edge" | "model",
       "state": "connected" | "attention" | "neutral" | "not_set_up" | "paused" | "checking",
       "code": "ok", "message": null,    // message: Gmail only, SYNC_TEXTS copy (§3.2)
@@ -193,7 +193,7 @@ Everything JobScraper signs in to. Passwords stay in Windows Credential Manager 
 ```
 - **The Gmail card** has one header for all its `gmail:<id>` items. The chip shows the worst state. With one mailbox the line is that item's summary; with several it reads "{k} of {n} mailboxes need attention". The per-mailbox reason stays only in MailCard's row, so it is not shown twice (minor 8).
 - **Employer status column:** state chip · "Verified" / "Not verified" from `verified_at` (m4). At 390 px each row is one block.
-- **"See how to fix ▾"** shows the exact CLI line, for example `python -m jobscraper accounts add --url https://acme.wd3.myworkdayjobs.com/ --email you@…`. The CLI prompts for the password; nothing is copied automatically.
+- **"See how to fix ▾"** shows "In PowerShell, in the JobScraper folder:" and then the exact command, for example `.\run.ps1 accounts add --url https://acme.wd3.myworkdayjobs.com/careers --email you@…`. The URL is `https://<tenant_host>/careers`, because the CLI's Workday matcher rejects a bare host (D-198 H1). The CLI prompts for the password; nothing is copied automatically. Every CLI line in §4.1 and §4.4 uses the same `.\run.ps1 …` form and the same lead-in (D-198 M1).
 - **Activity links (m3):** the Gmail card links to Applications ("See status changes from email"). Per-row attempt links need a job lookup and wait for W2.
 
 ### 4.2 First-run setup: two parts (A4, A6, A7)
@@ -255,7 +255,7 @@ Row by row:
 | Employer `password_missing` | "The password is missing from Windows Credential Manager." |
 | Employer `unconfirmed` | "Not confirmed. The sign-up may not have finished; JobScraper signs in with it next time." |
 | Employer empty | "No employer accounts yet. JobScraper creates one only when an application on a Workday site needs it, and lists it here." |
-| Reading a password | "To see a password, open Windows Credential Manager (Windows asks for your password first), or run `accounts export-edge` to import them into Edge." |
+| Reading a password | "To see a password, open Windows Credential Manager (Windows asks for your password first), or, in PowerShell in the JobScraper folder, run `.\run.ps1 accounts export-edge` to import them into Edge." |
 | Browser not set up | "Created the first time an application runs. Sign-ins you make there are kept between restarts." |
 | Browser `in_use` | "In use by an application right now." |
 | AI `ai_off` | "Local AI is off in config.yaml (budget.enable_llm). Runs still work; screening and auto-apply wait for it." |
@@ -387,3 +387,4 @@ No real account is created or used.
 | Res m4 | Verified / Not verified in the status column. "Used by N applications" waits for W2 (needs a query) |
 | Res m5 | W2 G6 default target: the tenant's sign-in page or `about:blank` |
 | Res m6 | Human-check copy (§4.3) |
+| Wave 1 review (D-198, `docs/reviews/Q-100-wave1.md`) | H1: fix command uses `https://<host>/careers`. M1: commands shown as `.\run.ps1 …` with "In PowerShell, in the JobScraper folder" (§4.1, §4.4). M2: no `apply-mailbox:backup` item when the backup username equals the primary's, compared case-insensitively (§2.3, §3.1). M3: `need_now` (b) counts only attempts started within 2 h (§2.3) |
