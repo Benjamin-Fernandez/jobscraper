@@ -920,9 +920,32 @@ def _tier2(f: FormField, label_norm: str, ctx: ResolveContext,
     return t2
 
 
+# D-181 (Q-94 review F2): these profile facts are about Singapore, so a row on them never
+# answers a label that names another country ("Are you a US citizen or permanent resident?").
+SG_ONLY_KEYS = frozenset({"singapore_status.residency_status", "singapore_status.work_pass"})
+OTHER_COUNTRY_NOTE = "names another country"
+
+
+_DEMONYM_PHRASES = [(code, tuple(tokens(d))) for code, (_n, d) in COUNTRIES.items()
+                    if code != "SG" and tokens(d)]
+_DEMONYM_PHRASES.append(("AE", ("emirati",)))        # AE is an alias-only country (no COUNTRIES row)
+
+
+def names_other_country(label_norm: str, label: str, ctx: ResolveContext) -> bool:
+    """D-181: the label names a country other than SG, by name or alias
+    (`label_countries`, incl. the D-76 all-caps rule) or by demonym ("a Canadian
+    citizen"). Demonyms count here only because the answer is a stop, not a value."""
+    if label_countries(label_norm, label, ctx.job_country or "SG") - {"SG"}:
+        return True
+    toks = label_norm.split()
+    return any(contains_run(toks, list(ph)) for _c, ph in _DEMONYM_PHRASES)
+
+
 def _tier2_one(f: FormField, label_norm: str, ctx: ResolveContext, r: Rule) -> _Tier2:
     if r.kind == "country_bool":
         return _tier2_country_bool(f, label_norm, ctx, r)
+    if (r.parent or r.key) in SG_ONLY_KEYS and names_other_country(label_norm, f.label, ctx):
+        return _Tier2(stop=_Stop(OTHER_COUNTRY_NOTE))
     if r.is_virtual:
         # §7.3.3 yes_if: a Yes/No question answered from the parent enum.
         value = profile_value(ctx.profile, r.parent)
@@ -948,6 +971,28 @@ def _tier2_one(f: FormField, label_norm: str, ctx: ResolveContext, r: Rule) -> _
 
 
 WORK_RIGHTS_CONFLICT = "work rights differ"     # the note capture reads as reason `conflict`
+UNKNOWN_PLACE_NOTE = "work rights: place not recognised"
+# D-180 (Q-94 review F1): the job's country answers a label only when it names no place or a
+# generic one. Both sets are closed; an unknown place is never mapped to the job's country.
+GENERIC_PLACE_WORDS = frozenset({"this", "the", "our", "your", "a", "an", "any", "which",
+                                 "where", "its", "their", "singapore"})
+REGION_WORDS = ("worldwide", "globally", "global", "anywhere", "abroad", "overseas",
+                "internationally", "international", "apac", "asia", "asean", "emea", "latam",
+                "americas", "middle east", "africa", "oceania", "southeast asia",
+                "south east asia")
+
+
+def unrecognised_place(label_norm: str, named: set[str]) -> bool:
+    """D-180: True when a work-rights label points at a place the program cannot
+    map to a country: a region word (whatever else it names), or, with no country
+    named, "in" / "within" followed by a word outside GENERIC_PLACE_WORDS."""
+    toks = label_norm.split()
+    if any(contains_run(toks, w.split()) for w in REGION_WORDS):
+        return True
+    if named:
+        return False
+    return any(t in ("in", "within") and i + 1 < len(toks) and toks[i + 1] not in GENERIC_PLACE_WORDS
+               for i, t in enumerate(toks))
 
 
 def work_rights_countries(label_norm: str, ctx: ResolveContext, label: str = "") -> list[str]:
@@ -975,6 +1020,8 @@ def _tier2_country_bool(f: FormField, label_norm: str, ctx: ResolveContext,
     # "Can you work in the US without sponsorship?": authorised and needs none.
     without = (which == "authorised_to_work" and "without" in toks
                and bool(toks & {"sponsor", "sponsorship", "visa"}))
+    if unrecognised_place(label_norm, label_countries(label_norm, f.label, ctx.job_country or "SG")):
+        return _Tier2(stop=_Stop(UNKNOWN_PLACE_NOTE))
     countries = work_rights_countries(label_norm, ctx, f.label)
     values: dict[str, tuple[bool, str]] = {}
     for c in countries:

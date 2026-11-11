@@ -893,6 +893,18 @@ BODY: branch eng/Q-93-flow; files `src/jobscraper/apply_flow.py`, `src/jobscrape
 - Limit: a FILLED row can now carry a "transport: ..." note after a mid-fill pick failure; `questions` capture already skips transport-noted unanswered rows only, answered rows are unaffected.
 STATUS: open
 
+## handoff Q-94 (gate prep: R3 F11 + Q-43), branch eng/Q-94-gate-prep
+- a2e2c34 refactor(apply): `L1_KEPT_NOTE` now defined once in `apply/locks.py` (used by `locks` itself); `FACT_SOURCES` defined once in `apply/guards.py` (replaces the three inline tuples there). `pagefill` aliases both (`K.L1_KEPT_NOTE`, `G.FACT_SOURCES`; names kept, so importers are unchanged). No behaviour change.
+- 634f9c1 fix(profile): `applicant.normalise` turns an `experience[]`/`education[]` `end` of present/current/now/ongoing/to date (any case, spaces trimmed) into None (`_is_open_end`). Runs in load, validate and save, idempotent.
+- Null end as ongoing downstream: `applicant.computed_facts` (empty end -> now), `applicant.py` ~1251 (education completeness), `apply/declarations.py:75`, `apply/resolve.py:847` (current employer), `apply/facts.py:765` ("present"). The tailor stage never reads profile entry dates (grep of `src/jobscraper/tailor/`); `tailor_flow` proposals already emit None for an open end.
+- Known limit: `education[].end` null is read as "no graduation date" by computed_facts (graduation_year), as before.
+- Evidence (tail lines): pagefill 19/19, locks 5/5, guards 5/5, layering 13/13, profile 98/98, applicant 115/115, q94 14/14.
+
+## handoff Q-94 review fixes (D-180, D-181), 1e5fddc
+- `apply/resolve.py`: `unrecognised_place` (closed GENERIC_PLACE_WORDS and REGION_WORDS) stops a matched `country_bool` row with note `work rights: place not recognised` (not sensitive, tier 5 not tried; locks use the same `_tier2_country_bool`). `names_other_country` stops `singapore_status.residency_status` / `work_pass` rows (enum and `yes_if`) with note `names another country`; reads country names, aliases, the D-76 all-caps rule and demonyms (COUNTRIES demonyms except Singaporean, plus emirati).
+- Not done (optional): COUNTRIES not extended, so Spain etc. stop as an unknown place.
+- Both stops can still be settled by a tier-3 owner answer (existing order: tier 3 before a tier-2 stop).
+
 ### 2026-11-10 software-engineer -> coordinator/tester: Q-45 WP-K1 compose call and checks (KA-4)
 TYPE: handoff
 BODY: branch eng/Q-45-compose, commit 550decd; files `src/jobscraper/tailor/compose.py` (new), `src/jobscraper/tailor/validate.py` (`UPGRADE_WORDS` only), `src/jobscraper/tailor_flow.py` (T-block). No contracts or config change; `apply.compose.enabled` untouched (K3).

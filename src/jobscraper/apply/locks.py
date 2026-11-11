@@ -39,6 +39,8 @@ COVER_RE = re.compile(r"cover\s*letter|motivation(al)?\s+letter", re.I)
 # L8 (Q-45, llm_fill_design §19): the audit row of a composed text.
 COMPOSE_RULE_ID = "compose:v1"          # = tailor.contracts.COMPOSE_VERSION (stages don't import each other)
 COMPOSE_CONFIDENCE = 0.9
+# The note on an L1 row whose file is already ours; `pagefill` skips re-uploading on it (R3 F11).
+L1_KEPT_NOTE = "L1: kept, uploaded in this attempt"
 TRANSCRIPT_RE = re.compile(r"transcript", re.I)
 # L2: a label that asks for an email (a one-token phrase: labels of 4 tokens or fewer).
 EMAIL_PHRASE = ("email",)
@@ -111,7 +113,7 @@ def _file_lock(pf: PageField, rctx: ResolveContext, uploaded: Mapping[str, str],
             return _unknown(pf, "L1: no resume file")
         shown = _shown_name(pf)
         if shown and shown in uploaded:
-            note = "L1: kept, uploaded in this attempt"
+            note = L1_KEPT_NOTE
         elif shown:
             note = "L1: replace the attachment (not uploaded in this attempt)"
         else:

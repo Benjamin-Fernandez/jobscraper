@@ -1,0 +1,18 @@
+<!-- Q-94 (Q-46 e) flow oracle: like stay.html, and the page counts every press of Next in body.dataset.nextClicks. Next does nothing and shows no error. Synthetic. -->
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Example Employer Careers</title></head>
+<body>
+<main><div data-automation-id="applyFlowPage">
+<h2 data-automation-id="jobTitleHeading">Example Role (REQ-0000)</h2><div data-automation-id="progressBar"><div data-automation-id="progressBarActiveStep"><span class="sr-only">current step 2 of 7</span>My Information</div></div>
+<h3>My Information</h3>
+<div data-automation-id="formField-legalName--firstName"><label for="input-9"><span>Given Name(s)<abbr title="required">*</abbr></span></label><div><div><input type="text" id="input-9" name="legalName--firstName" aria-required="true" value=""></div></div></div>
+</div>
+<div data-automation-id="pageFooter"><button type="button" data-automation-id="pageFooterBackButton">Back</button>
+<button type="button" data-automation-id="pageFooterNextButton">Save and Continue</button></div></main>
+<script>
+document.body.dataset.nextClicks = '0';
+document.querySelector('[data-automation-id="pageFooterNextButton"]').addEventListener('click', () => {
+  document.body.dataset.nextClicks = String(Number(document.body.dataset.nextClicks) + 1);
+});
+</script>
+</body></html>

@@ -61,3 +61,17 @@ BODY: `config/mail_rules.yaml` v1 is written (187 lines, ASCII, schema MS §6.1 
    (c) The account gate holds the phrase "confirm your email" (not the bare word). Confirm that this fits MS §6.2.
 5. **K entries** (unverified domains and the new additions) are listed in brief Appendix A.2.
 STATUS: open
+
+### 2026-11-10 researcher → coordinator (cc tester, software-engineer)
+TYPE: handoff
+RE: Q-94 / WP-A04 (D-75, F-32, F-33), `config/questions.yaml`, branch `eng/Q-94-gate-prep` (NOT committed: this agent has no shell)
+BODY: The four rows `singapore_status.authorised_to_work.SG/.US` and `requires_sponsorship.SG/.US` are replaced by two `kind: country_bool` rows keyed `singapore_status.authorised_to_work` and `singapore_status.requires_sponsorship`. Synonyms = the QD 8.3 minimum set plus every phrase of the four old rows (country-suffixed phrases kept). No country excludes. `without ...` phrases only on the authorised row; sponsorship row `exclude: [without]`. Residency and work-pass rows untouched (one comment updated: `requires_sponsorship.SG` -> `requires_sponsorship, D-75`); "require an employment pass" stays on the sponsorship row, so the line-338 behaviour holds.
+Consumers of the old keys:
+1. src/jobscraper/apply/locks.py:179-184 (L4, `country_bool` branch -> `resolve._tier2_country_bool`): works with the new keys. locks.py:44,151-162,185-188 (`WORK_RIGHTS_PREFIXES` / `_work_rights_bool`, per-country rows) is now reached only by fixtures still using per-country keys (tests/fixtures/apply/questions.sample.yaml:5,10); harmless, optional cleanup later.
+2. src/jobscraper/apply/resolve.py:63-64 (`COUNTRY_BOOL_KEYS`), 317-322 (loader), 924-925, 968-992 (`_tier2_country_bool`, `which = r.key.rsplit(".",1)[1]`): built for the new keys (WP-P9). No change.
+3. src/jobscraper/apply/facts.py:454-461: handles profile paths `...authorised_to_work.<CC>`; `rule_match` now returns None for those paths (rule key has no country), so the value comes from `work_right` and `_kind`. Should still work; not run.
+4. src/jobscraper/applicant.py:121 REQUIRED_PATHS already uses the map keys (WP-P9). No change.
+5. TEST THAT WILL BREAK (tester scope): tests/test_apply_resolve_excludes.py:21,33-35 (`SG_KEY = "singapore_status.authorised_to_work.SG"`, `_sg_rule()` does `next(...)` over the real file -> StopIteration in tests at lines 57, 67, 81). This Q-29 pin tests the country excludes that D-75 removes by design. Needs: either point the three real-file tests at the new `singapore_status.authorised_to_work` row and assert the UK label resolves via `label_countries` to UK (not SG), or drop them (the two synthetic `_rule` tests at lines 38, 48 stay valid).
+6. tests/test_apply_questions.py:214-240 (`"cfl"` US-or-Canada label expects rule_id `singapore_status.authorised_to_work` + CONFLICT): consistent with the new key; verify by running.
+Verify not run (no shell): build-plan WP-A04 one-liner, `-k apply_resolve_rules`, `-k questions`, `-k locks`. Hand-checked against the one-liner's asserts: all pass by inspection.
+STATUS: open

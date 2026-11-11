@@ -452,7 +452,7 @@ In a label written entirely in capitals, a bare `US` yields both `US` and `ctx.j
 | Cold model load | ~33 s first call | hidden by `backends.warm(backend, keep_alive)` at attempt start |
 | Page, 1–15 fields | 2–10 s | `page_timeout_s` 120 per call |
 | Page, 47–54 fields | 47–54 s | chunked per entry (each ≤ ~20 s) |
-| Follow-ups | ~1–2 s each | ≤ `max_followups` (25) per attempt; beyond → unknown |
+| Follow-ups | ~1–2 s each | ≤ `max_followups` (25) per page (`CallLog` is per `fill_page`; D-178, R3 F7: the attempt deadline bounds the total); beyond → unknown |
 | Greenhouse attempt | — | ≤ 4 min typical (NF-07 kept), `attempt_timeout_s` 420 |
 | Workday attempt | — | ~5–6 min, `attempt_timeout_workday_s` 900 (D-81); both measured at the gate |
 
