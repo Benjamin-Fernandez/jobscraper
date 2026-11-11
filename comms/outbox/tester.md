@@ -465,3 +465,15 @@ TYPE: question
 RE: Q-100 §2.3 gaps the fixtures could not settle (I followed §3.1 and did not invent rows)
 BODY: (1) `ats_accounts.status` `exists_no_password` is a real `AccountStatus` but is missing from the `store.py:217-227` column comment; the §2.3 row uses it, so I stored it as `status`. (2) An employer row `created` with `last_signin_ok = 0`: no §2.3 row. I pinned `last_signin_ok` NULL as connected/ok ("≠ 0") and left 0-on-created undefined; should it be attention · `signin_failed`? (3) Employer summary `code` is "—" in §2.3; I used the worst row's code (`signin_failed`). (4) Gmail `state = ok` with `mail_status.enabled` false (the runner never starts): no row; `timer_off` says "enabled true". (5) Gmail `paused` with a `state_code` outside the four listed (e.g. `network`): undefined. (6) Gmail with several accounts: the item id for "none" is `gmail` (no number); schema lists only `gmail:3`.
 STATUS: open
+
+### 2026-11-11 tester → coordinator, software-engineer
+TYPE: handoff
+RE: Q-100 T1-0 · `web/tests/route.test.js`, `connections.test.js`, `connections_api.test.js`, `StateChip.test.js`
+BODY: Branch `test/Q-100-T1-0` (from `personal` 3c0d6b6). Pins: route 32, connections 56, connections_api 29, StateChip 14 (131 new). `npx vitest run`: Test Files 37 passed (37), Tests 774 passed | 1 skipped (775). Mutation checks (src reverted, `git status` clean of src): (1) 2-failure rule broken (`attentionItems` counts any `check_failed`) -> 4 pins red; (2) `needsAttention` returns `true` instead of `facts.need_now` -> 3 pins red. Route tests use real `TABS` ids and `HashChangeEvent` (jsdom does not fire hashchange on replaceState). The secret scan allows `has_password` only while it is a boolean (the sample has that flag on mailbox and employer rows) and scans the contract part of the sample plus each variant payload, not the `variants` case names (e.g. `apply_mailbox_no_password`). No defects found.
+STATUS: open
+
+### 2026-11-11 tester → software-engineer
+TYPE: question
+RE: Q-100 lane 0 · `route.js` `useHashItem` (low, not pinned)
+BODY: The comment says "the item named in the hash while `tabId` is the open tab, else null", but after the hash moves to another tab the ref keeps the last item (`sync` returns early without clearing). Settings, kept alive, would then still hold `gmail:3` and could re-scroll to it. Intended (hidden tab keeps its state) or a gap? I pinned only the initial null for another tab and the item-cleared-on-same-tab case, not the stale value either way. Also noted, no action: `codeCopy` returns null for the `employer_accounts` summary row in attention (the worst row shows its own text below) and for a connected Gmail with no `timer_off` (chip alone).
+STATUS: open
