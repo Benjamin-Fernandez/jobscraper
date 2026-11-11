@@ -18,7 +18,7 @@ const lines = computed(() => props.job?.log ?? [])
 
 const summary = computed(() => {
   const j = props.job
-  if (!j || state.value === 'idle') return 'Nothing has run since the web app started.'
+  if (!j || state.value === 'idle') return 'No job is running. Past runs are in the Runs tab.'
   const what = KIND[j.kind] ?? 'Job'
   if (state.value === 'running') return `${what} running since ${when(j.started_at)}`
   if (state.value === 'succeeded') return `${what} finished ${when(j.finished_at)}`
