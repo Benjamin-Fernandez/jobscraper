@@ -20,7 +20,7 @@ export class ApiError extends Error {
   }
 }
 
-async function request(path, init) {
+export async function request(path, init) {
   const res = await fetch(BASE + path, init)
   if (!res.ok) {
     let detail = ''

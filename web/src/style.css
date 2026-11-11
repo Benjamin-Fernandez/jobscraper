@@ -98,6 +98,25 @@
   --page-w: 76rem;
   --gutter: 16px;
   --header-h: 3.5rem;
+  /* Q-100: the smallest touch target; new controls reach it under 640px. */
+  --touch-min: 44px;
+  /* Q-100: height of the fixed bottom bar under 640px (set there); 0 wider, so
+     `calc(var(--bottom-nav-h) + env(safe-area-inset-bottom))` is safe everywhere. */
+  --bottom-nav-h: 0px;
+
+  /* Q-100: connection state chips (StateChip.vue). Each tone is a colour pair
+     taken from the tokens above, so both themes follow without a second list.
+     The words on the chip carry the meaning; the tone only helps. */
+  --state-connected-fg: var(--ok);
+  --state-connected-bg: var(--ok-soft);
+  --state-attention-fg: var(--warn);
+  --state-attention-bg: var(--warn-soft);
+  --state-not-set-up-fg: var(--text-2);
+  --state-not-set-up-bg: var(--surface-2);
+  --state-paused-fg: var(--muted);
+  --state-paused-bg: transparent;
+  --state-checking-fg: var(--accent);
+  --state-checking-bg: var(--accent-soft);
 
   font-family: var(--font);
   font-size: var(--text-md);
@@ -198,7 +217,7 @@
 /* The phone header is two rows (brand, then tabs). */
 @media (max-width: 640px) {
   /* A phone-width window gets 44px controls even when the pointer reports as fine (Q-78 G31). */
-  :root { --header-h: 5.3rem; --control-h: 2.75rem; }
+  :root { --header-h: 5.3rem; --control-h: 2.75rem; --bottom-nav-h: 3.5rem; }
 }
 
 /* Touch screens get larger targets. */
@@ -465,6 +484,69 @@ textarea { padding: var(--space-2) var(--space-3); line-height: var(--leading); 
 .tag.needed { color: var(--warn); background: var(--warn-soft); border-color: color-mix(in srgb, var(--warn) 35%, transparent); }
 .tag.private { color: var(--stage-saved); background: var(--stage-saved-soft); border-color: color-mix(in srgb, var(--stage-saved) 30%, transparent); }
 .tag.resume { color: var(--accent); background: var(--accent-soft); border-color: color-mix(in srgb, var(--accent) 30%, transparent); }
+
+/* A connection's state in words (Q-100, StateChip.vue): Connected, Needs attention,
+   Not set up, Paused, Checking. A dot before the words repeats the tone as a shape
+   (filled, ring, half), so colour is never the only cue. `neutral` is drawn as not-set-up. */
+.state-chip {
+  --chip-fg: var(--state-not-set-up-fg);
+  --chip-bg: var(--state-not-set-up-bg);
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  position: relative;
+  font: inherit;
+  font-size: var(--text-xs);
+  font-weight: 600;
+  line-height: 1.7;
+  padding: 0 var(--space-2);
+  border-radius: 999px;
+  white-space: nowrap;
+  color: var(--chip-fg);
+  background: var(--chip-bg);
+  border: 1px solid color-mix(in srgb, var(--chip-fg) 35%, transparent);
+}
+.state-chip::before {
+  content: '';
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 50%;
+  background: currentColor;
+  flex: none;
+}
+.state-chip[data-tone='connected'] { --chip-fg: var(--state-connected-fg); --chip-bg: var(--state-connected-bg); }
+.state-chip[data-tone='attention'] { --chip-fg: var(--state-attention-fg); --chip-bg: var(--state-attention-bg); }
+.state-chip[data-tone='not_set_up'], .state-chip[data-tone='neutral'] { --chip-fg: var(--state-not-set-up-fg); --chip-bg: var(--state-not-set-up-bg); }
+.state-chip[data-tone='neutral']::before, .state-chip[data-tone='not_set_up']::before { background: transparent; border: 1.5px solid currentColor; }
+.state-chip[data-tone='paused'] { --chip-fg: var(--state-paused-fg); --chip-bg: var(--state-paused-bg); border-color: var(--border-strong); }
+.state-chip[data-tone='paused']::before { background: linear-gradient(90deg, currentColor 50%, transparent 50%); border: 1.5px solid currentColor; }
+.state-chip[data-tone='checking'] { --chip-fg: var(--state-checking-fg); --chip-bg: var(--state-checking-bg); }
+.state-chip[data-tone='checking']::before { background: transparent; border: 1.5px dotted currentColor; }
+/* Clickable chip: the look stays small, the hit area reaches --touch-min. */
+.state-chip.is-action { cursor: pointer; }
+.state-chip.is-action::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: max(100%, var(--touch-min));
+  height: max(100%, var(--touch-min));
+  transform: translate(-50%, -50%);
+}
+
+/* A command or path the owner has to read or copy: it wraps instead of widening the
+   page (a phone is 390px wide). */
+.code-wrap {
+  font-family: var(--mono);
+  font-size: var(--text-sm);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: var(--space-1) var(--space-2);
+}
 
 .icon { flex: none; display: inline-block; vertical-align: middle; }
 
