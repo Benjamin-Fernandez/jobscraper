@@ -23,6 +23,7 @@ import test_q74_model_sees_sensitive as base  # noqa: E402
 from llm_fill_support import FIX, FakeFillBackend  # noqa: E402
 from questions_support import StubBackend  # noqa: E402
 
+from jobscraper import applicant  # noqa: E402
 from jobscraper.apply import facts as F, guards as G, llm_fill as L, locks  # noqa: E402
 from jobscraper.apply.contracts import (  # noqa: E402
     AnswerStatus, FieldType as FT, FillSource, ModelDecision,
@@ -88,11 +89,29 @@ def test_hook_a_the_catalogue_value_is_filled_only_with_the_flag_and_the_ref_sta
     assert on.keys() == off.keys()
 
 
-def test_hook_a_extra_answers_never_reach_the_prompt_even_with_the_flag_on():
+def _sensitive_extra_profile(value="zzzextra"):
+    """A profile with one VALID sensitive text `extra` entry (labels + kind, so tier 3 and FACTS take it)."""
     p = base.s_profile()
-    p["extra"] = {"pet": {"label": "Pet", "value": "zzzextra", "sensitive": True}}
-    ctx = dataclasses.replace(T.rctx(p), model_sees_sensitive=True)
-    assert "zzzextra" not in _prompt(ctx)
+    p["extra"] = {"pet": {"labels": ["Favourite plant"], "kind": "text", "title": "Plant",
+                          "value": value, "sensitive": True}}
+    return p
+
+
+def test_hook_a_d201_a_sensitive_extra_answer_is_in_facts_with_the_flag_on_and_nowhere_with_it_off():
+    """D-201 (b), the flipped pin: the old entry (`label`, no `kind`) was invalid and dropped, so it passed
+    empty. This one is accepted by `facts._extra_usable` (asserted), so the pin cannot pass vacuously."""
+    p = _sensitive_extra_profile()
+    on = dataclasses.replace(T.rctx(p), model_sees_sensitive=True)
+    off = dataclasses.replace(T.rctx(p), model_sees_sensitive=False)
+    assert not applicant.extra_entry_errors("pet", p["extra"]["pet"]), "precondition: a valid entry"
+    assert F._extra_usable("pet", p["extra"]["pet"], on, F.other_employers(on)) is not None, "precondition"
+    fact = {f.ref: f for f in _facts(on)}["extra:pet"]
+    assert fact.private and fact.value == "zzzextra", "private stays True, the value is shown"
+    assert "extra:pet | Plant | private: zzzextra" in F.facts_text(_facts(on), show_private=True)
+    assert "private: zzzextra" in _prompt(on)
+    ref_off = {f.ref: f for f in _facts(off)}["extra:pet"]
+    assert ref_off.private and ref_off.value == "" and ref_off.is_set, "flag off: the fact is there, no value"
+    assert "zzzextra" not in _prompt(off), "flag off: the value is nowhere in the prompt"
 
 
 def test_hook_a_show_private_without_a_value_keeps_the_set_marker():
@@ -209,6 +228,20 @@ def test_hook_c_a_quote_the_posting_also_holds_is_not_blocked():
     assert a.status is AnswerStatus.FILLED, (a.status, a.note)
 
 
+def test_hook_d201_account_email_is_shown_with_the_flag_on_and_the_cache_key_moves_off_the_d105_marker():
+    """D-201 (b)/(f3): `standing:account_email` prints `private: <value>` with the flag on, none with it off;
+    the flag-on `inputs_hash` differs from the flag-off one and from the D-105 marker's hash."""
+    on, off = _ctx(True), _ctx(False)
+    assert on.account_email
+    line = f"standing:account_email | Email address of this application | private: {on.account_email}"
+    assert line in F.facts_text(_facts(on), show_private=True)
+    assert on.account_email in _prompt(on) and on.account_email not in _prompt(off)
+    assert {f.ref: f for f in _facts(on)}["standing:account_email"].private is True
+    h_on, h_off = F.inputs_hash("resume", "jd", sees_private=True), F.inputs_hash("resume", "jd", sees_private=False)
+    d105 = F._sha16("resume" + "\n\x1e\n" + "jd" + "\n\x1e\x1dprivate-visible")      # the D-105 recipe, old marker
+    assert h_on != h_off and h_on != d105, "a flag-on fill cached under D-105 re-runs once"
+
+
 # ------------------------------------------------------------------ (d) the cache key
 
 def test_hook_d_flipping_the_flag_changes_inputs_hash_and_off_is_the_old_hash():
@@ -217,3 +250,138 @@ def test_hook_d_flipping_the_flag_changes_inputs_hash_and_off_is_the_old_hash():
     assert F.inputs_hash("resume", "jd", sees_private=True) != old
     assert F.inputs_hash("resume", "jd", sees_private=True) == F.inputs_hash("resume", "jd", sees_private=True)
     assert F.inputs_hash("resume2", "jd", sees_private=True) != F.inputs_hash("resume", "jd", sees_private=True)
+
+
+# ------------------------------------------------------------------ D-201 pins: F1 redaction, F2 tier-5 salary, G7
+
+DISTINCT = ("Zyxquill", "Vandermoot", "Quillo", "xe/xem", "Plumbago-7731")     # string leaves newly readable
+SALARY = "987654"                                                                 # a number: not redacted by design
+WHY = "Describe a project you are proud of"
+
+
+def _d201_profile() -> dict:
+    """Dummy applicant with every newly readable leaf set to a distinctive value (nothing real)."""
+    from apply_flow_support import sample_profile
+    p = sample_profile()
+    p["identity"].update(legal_first_name="Zyxquill", legal_last_name="Vandermoot", preferred_name="Quillo",
+                         pronouns="xe/xem", name_order="surname_first")
+    p["pay"]["current_salary"] = {"amount": int(SALARY), "currency": "SGD", "period": "annual"}
+    p["pay"]["months_per_year"] = 14
+    p["consents"] = dict(privacy_consent=True, data_retention_consent=True, talent_pool_opt_in=True,
+                         certify_true=True)
+    p["extra"] = {"plant": {"labels": ["Favourite plant"], "kind": "text", "title": "Plant",
+                            "value": "Plumbago-7731", "sensitive": True}}
+    return p
+
+
+def _d201_run_page():
+    """One llm_fill page through the N6a harness (`fill_page` is a script that runs the real `llm_fill.ask` +
+    `guards.decide`; local fake backend, flag effective). The model quotes every newly readable value as its
+    evidence, which G3 rejects. Returns (inner backend, seen, result, log, audit rows)."""
+    import test_apply_flow_n6a as N
+    import test_q79_body_llm_sees_sensitive as Q79
+    from jobscraper import apply_flow
+    reply = {"kind": "page", "repeat": True, "reply": {f"|{WHY}": {
+        "source": "resume", "ref": "", "value": "I built Zyxquill Vandermoot's Plumbago-7731 tool",
+        "evidence": "Zyxquill Vandermoot Quillo xe/xem Plumbago-7731 " + SALARY}}}
+    inner = FakeFillBackend(replies=[reply])
+    seen = {}
+
+    def fake(page, nav_, ctx, rctx, services):
+        step = nav_.step_id(page, ctx)
+        if step == "review":
+            return N.outcome(step, [])
+        seen["flag"] = rctx.model_sees_sensitive
+        pfs = [T.pf("k", WHY, FT.TEXTAREA, required=True)]
+        facts = F.fact_catalogue(rctx.profile, rctx, today=T.TODAY)
+        stats = L.CallLog()
+        decisions = L.ask(services.backend, L.Chunk("one:k", None, tuple(pfs)), facts, rctx, step_title="Step",
+                          s_values=[], cfg=services.cfg, stats=stats)
+        rules = T.rules()
+        lk = locks.lock_page(pfs, rctx, rules, today=T.TODAY, uploaded={})
+        out = G.decide(pfs, lk, decisions, facts, rctx, matches={}, second=lambda pf: None, today=T.TODAY,
+                       rules=rules, model=services.model, prompt_hashes=stats.prompt_hashes)
+        services.log("stand-in leak: " + " ".join(DISTINCT))
+        return N.outcome(step, pfs, answers=out.answers)
+
+    w, jid = N.world(profile=_d201_profile())
+    saved, apply_flow.fill_page = apply_flow.fill_page, fake
+    try:
+        r, _f, say, _m = N.run(w, jid, N.FakeNav(("one", "review")), Q79.LocalFill(inner=inner),
+                               apply_over={"model_sees_sensitive": True})
+        rows = w.store.answers(r.attempt_id)
+    finally:
+        apply_flow.fill_page = saved
+        w.close()
+    assert seen.get("flag") is True and inner.calls, "precondition: the flag is effective and the model ran"
+    prompt = Q79.user_text(inner)
+    for m in DISTINCT + (SALARY,):
+        assert m in prompt, f"precondition: the model reads {m!r}"
+    assert rows, "the audit rows exist"
+    return inner, seen, r, say, rows
+
+
+def test_d201_f1_no_newly_readable_value_reaches_the_job_log_or_the_audit_notes():
+    """F1 (review): flag effective, one llm_fill page (`_d201_run_page`). The model reads every value (the
+    precondition); the job log, the result detail and the audit `note`, `source`, `prompt_hash` and `rule_id`
+    hold none. The audit `evidence` column is the known gap Q-113 (next test).
+    `debug_dump` is a config key only: nothing in src/ writes a dump, so there is no dump to assert on.
+    A deliberate log line naming the string values stands in for any leak: `_Log` must scrub it."""
+    _inner, _seen, r, say, rows = _d201_run_page()
+    haystack = {"log": say.text, "result": str(r.reason_detail or "")}
+    for i, x in enumerate(rows):
+        for k in ("note", "source", "prompt_hash", "rule_id"):
+            haystack[f"audit row {i} column {k}"] = str(x.get(k) or "")
+    leaks = [f"{what} holds {m[:3]!r}..." for what, text in haystack.items() for m in DISTINCT + (SALARY,)
+             if m in text]                       # never print a whole value
+    assert not leaks, leaks
+    assert "[redacted]" in say.text, "the stand-in leak line was scrubbed, not dropped"
+
+
+def test_d201_known_gap_q113_a_rejected_quote_is_stored_verbatim_in_evidence():
+    """Known gap Q-113 (review docs/reviews/Q-112-d201-profile-read.md F1): flip this to 'evidence holds no
+    newly readable value' when Q-113 lands; the same applies to the fill_cache row's evidence.
+    Today a quote G3 rejects is still kept verbatim (up to 240 chars) in `apply_answers.evidence`."""
+    _inner, _seen, _r, _say, rows = _d201_run_page()
+    row = rows[0]
+    assert row["status"] == "ungrounded" and str(row["note"]).startswith("G3"), (row["status"], row["note"])
+    ev = str(row["evidence"] or "")
+    for m in DISTINCT + (SALARY,):
+        assert m in ev, f"today's behaviour: the rejected quote keeps {m[:3]!r}... in evidence"
+
+
+def test_d201_f2_tier5_salary_text_is_never_filled_from_the_current_salary():
+    """F2 (review): flag on, the model can now read `pay.current_salary`. "Expected salary" is the program's
+    (tier 2, `pay.expected_salary`); a free-text compensation question that reaches tier 5 ends ungrounded
+    even when the model returns exactly the current amount. Distinct amounts for expected and current."""
+    from questions_support import field
+    p = base.s_profile()
+    p["pay"]["expected_salary"] = {"amount": 41234, "currency": "SGD", "period": "monthly", "negotiable": True}
+    p["pay"]["current_salary"] = {"amount": 38765, "currency": "SGD", "period": "monthly"}
+    reply = [{"text": "38765"}] * 2
+    a, be, _ = base.resolve_one(field("a", "What is your expected salary?", FT.TEXT), on=True, replies=reply, p=p)
+    assert a.status is AnswerStatus.FILLED and a.source == "profile:pay.expected_salary"
+    assert "41234" in str(a.value) and "38765" not in str(a.value) and not be.calls
+    f5 = field("b", "Tell us about your compensation", FT.TEXTAREA)
+    a, be, _ = base.resolve_one(f5, on=True, replies=reply, p=p)
+    assert be.calls and "38765" in be.calls[0]["user"], "precondition: tier 5 reaches the model, which now reads it"
+    assert a.tier.name == "LLM" and a.status is AnswerStatus.UNGROUNDED and a.value is None, (a.status, a.note)
+    a, be, _ = base.resolve_one(f5, on=False, replies=reply, p=p)
+    assert be.calls and "38765" not in be.calls[0]["user"], "flag off: the model never reads it"
+
+
+def test_d201_g7_a_private_extra_fact_cited_for_an_s_labelled_field_ends_unknown():
+    """G7 with the flag on: the model now sees the sensitive `extra` value, but citing it for a pronouns question is
+    still refused (`fact.private and ns == "profile"` is the only private route), so nothing is filled."""
+    p = base.s_profile()
+    p["extra"] = {"pet": {"labels": ["Favourite plant", "Garden hobby"], "kind": "text", "title": "Pronouns",
+                          "value": "Plumbago-7731", "sensitive": True}}
+    ctx = dataclasses.replace(T.rctx(p), model_sees_sensitive=True)
+    fields = [T.pf("k", "Which pronouns do you use?", FT.TEXT, required=True)]
+    rules = T.rules()
+    lk = locks.lock_page(fields, ctx, rules, today=T.TODAY, uploaded={})
+    d = [ModelDecision(field_key="k", source=FillSource.EXTRA, ref="extra:pet", value="Plumbago-7731")]
+    out = G.decide(fields, lk, d, _facts(ctx), ctx, matches={}, second=lambda pf: None, today=T.TODAY, rules=rules)
+    a = out.answers["k"]
+    assert {f.ref: f for f in _facts(ctx)}["extra:pet"].value == "Plumbago-7731", "precondition: the value is shown"
+    assert a.status is AnswerStatus.UNKNOWN and a.note.startswith("G7") and a.value is None, (a.status, a.note)
