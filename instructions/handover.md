@@ -12,19 +12,20 @@
 - Q-93 merged 2026-11-10: D-174 (a failed Add stops even when optional), D-175 (file-picker words incl. résumé/CV/document, title; skip log line), pick-path "model unavailable". Review `docs/reviews/Q-93-flow.md`.
 - Q-90/Q-91 merged 2026-11-10: D-176 (place/time words only for a false value, rule 6b other party, found guilty, director disqualification) + D-177 (no company filler, unclassed markers on choice fields only, noun runs need an involvement word). Review `docs/reviews/Q-90-declarations.md`. Q-92 F3/F5 spec notes done.
 - Q-94 gate prep merged 2026-11-10: WP-A04 work-rights `country_bool` rows; D-180 an unknown place or region stops a work-rights label; D-181 Singapore rows never answer another country (names, all-caps, demonyms); Q-43 "Present" end; R3 F7 (D-178) / F11; Q-46 e pinned. Review `docs/reviews/Q-94-gate-prep.md`; follow-ups Q-95.
+- Q-45 compose merged 2026-11-11: a required cover letter / "why us" field is written by the tailor's compose call from the master resume + JD, checked C1-C7 (D-183 sentence-start names too), filled and audited; `apply.compose.enabled` is **off** by default, so the field is captured as a question instead. Review `docs/reviews/Q-45-compose.md`; follow-ups Q-96 (card hint by note), Q-97 (LOWs, Edge fixture).
 
 ## Where we are
 - M19 DONE. M20: the filler is complete through N6b; what remains is the M20 gate (D-83) plus follow-ups. Workday is filled in dry runs; account creation happens only inside owner-started attempts.
 - Owner declarations are all false (D-87), plus `willing_to_sign_nda: true`, `government_employment: false`.
 
 ## Next 1–3 actions
-1. M20 gate (D-83): owner-watched dry runs, then 5 Greenhouse dry runs whose audits are read row by row. Needs the owner and Ollama; on the first one check Q-92 F4 (resume-name check on a real Workday review page) and Q-93 (the M1 delete count).
-2. Q-45 compose (eng/Q-45-compose): K1 + T7 done, K2 in build, then K3 (`apply.compose`, the §19.3 loop) and a KA-4 review; web card copy needs a bundle build after merge. Then the entry-level `PageOutcome` channel (D-173) at the next contract version.
+1. M20 gate (D-83): owner-watched dry runs, then 5 Greenhouse dry runs whose audits are read row by row. Needs the owner and Ollama; on the first one check Q-92 F4 (resume-name check on a real Workday review page) and Q-93 (the M1 delete count); Q-95 (a): a bare other-country citizenship question waits as a Private question. If a posting asks for a cover letter, try one dry run with `apply.compose.enabled: true` and read the composed text against the resume.
+2. Entry-level `PageOutcome` channel (D-173) at the next contract version; Q-93 L2 residual; Q-95 (c) dead code; Q-96/Q-97.
 3. Backlog: R3 F7/F11, Q-46 e, Q-45 compose_needed, Q-47, Q-43, Q-34, Q-32, Q-27, A04, Q-15.
 
 ## Watch out
 - **The full suite skips the Edge tests silently** (a leaked asyncio loop; `edge_available()` caches the failure). Until the peer's Q-84 lands, gate every apply merge on separate `-k apply_e2e` and `-k apply_flow` runs.
-- IDs: mine are Q-80..Q-83, Q-90..Q-93 (next Q-96) and D-150..D-189 (next D-182; D-180..D-189 reserved 2026-11-10); the peer has Q-73..Q-79, Q-84..Q-89, D-100..D-119. Re-read queue/status before taking one. Message jobscraper-07 before merging into personal or building the bundle.
+- IDs: mine are Q-80..Q-83, Q-90..Q-93 (next Q-98) and D-150..D-189 (next D-186); the peer has Q-73..Q-79, Q-84..Q-89, D-100..D-119. Re-read queue/status before taking one. Message jobscraper-07 before merging into personal or building the bundle.
 - Always run the full suite on the integration tree after merging personal: name collisions (Q-74 `_MONTHS`) show only at runtime.
 - The engineer's scope hook refuses `tests/`: route test edits (even docstrings) to the tester.
 - Before every push: deny-list scan, including req ids and employer names from real mail. Live app 8765; dev 8768/8769 with a DB copy.

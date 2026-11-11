@@ -172,6 +172,12 @@ apply:
     max_followups: 25
     max_reveal_rounds: 2     # re-reads after an answer revealed new fields
     debug_dump: false        # true: data/apply/<id>/prompts/NN.json (local, gitignored)
+  compose:                   # Q-45 (llm_fill_design section 19): owner opt-in
+    enabled: false           # true: the local model writes cover letters / "why join" answers
+                             # from your master resume (fact-checked); false: they become questions
+    letter_max_words: 250
+    answer_max_words: 120
+    file_format: docx        # docx | txt, for a cover-letter upload
   mail:
     host: imap.gmail.com
     port: 993

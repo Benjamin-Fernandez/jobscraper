@@ -39,7 +39,7 @@ from dataclasses import dataclass, field as dc_field, replace
 from typing import Any, Callable, Iterable, Mapping, Optional, Sequence, Union
 
 from .. import applicant
-from . import declarations, facts as F, resolve
+from . import declarations, facts as F, questions, resolve
 from .contracts import (
     CHOICE_TYPES, EMPLOYER_SPECIFIC_DECLARATIONS, TRUSTED_ORIGINS, Answer, AnswerStatus,
     AnswerTier, EntrySection, Fact, FieldType, FillSource, ModelDecision, PageField,
@@ -613,7 +613,10 @@ def _grounded(c: _Ctx, pf: PageField, value: Any, d: ModelDecision) -> Optional[
         return "G6: quote outside the entry" if pf.group else "G3: quote not in the source"
     if is_choice(pf):
         return None
-    compose = pf.field.type is FieldType.TEXTAREA and not pf.group and d.source is not FillSource.KEEP
+    # §7 G3: the compose rule is for the other free TEXTAREAs ("Describe a project ...");
+    # a compose target (§19.1) is the tailor's (L8) and never reaches this route.
+    compose = (pf.field.type is FieldType.TEXTAREA and not pf.group and d.source is not FillSource.KEEP
+               and not questions.compose_needed(pf.field, pf.group))
     if compose:
         limit = pf.field.max_length or (resolve.COVER_LETTER_LIMIT if COVER_RE.search(pf.field.label)
                                         else resolve.TEXT_LIMITS[FieldType.TEXTAREA])

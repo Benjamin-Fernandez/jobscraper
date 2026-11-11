@@ -8,8 +8,8 @@ in the prompt only as context. An UNKNOWN lock is final too: the field is captur
 question (or stops the attempt), and it never goes to the model (ADR-0003 fail closed).
 
 Order per field (review M1, F-32): L1 resume file, L2 email, L4/L5 work rights and
-sensitive rows, L6 the owner's `extra` answers, L3/L7 declarations. An UNKNOWN from
-L4/L5 consults L6 before it stands; L3/L7 run after L6 had nothing, so an
+sensitive rows, L6 the owner's `extra` answers, L8 composed texts (Q-45, §19), L3/L7
+declarations. An UNKNOWN from L4/L5 consults L6 before it stands; L3/L7 run after L6 had nothing, so an
 `attestation_unclear` the owner answers in Profile resolves on the retry through L6.
 
 Pure: no browser, no model, no store, no log. The resolver's tiers 2-4 do the mapping
@@ -23,18 +23,22 @@ import re
 from typing import Any, Mapping, Optional, Sequence
 
 from .. import applicant
-from . import declarations, facts, resolve
+from . import declarations, facts, questions, resolve
 from .contracts import (
-    Answer, AnswerStatus, AnswerTier, Canonical, FieldType, PageField, ResolveContext,
+    Answer, AnswerSource, AnswerStatus, AnswerTier, Canonical, FieldType, PageField,
+    ResolveContext,
 )
 from .plan import contains_run, norm_label, qualified_label, tokens
 
 # L1 (H6): what makes a FILE input the resume slot, and what never does.
 RESUME_RE = re.compile(r"r[eé]sum[eé]|\bcv\b|curriculum", re.I)
 RESUME_PAGE_RE = re.compile(r"r[eé]sum[eé]|\bcv\b|drop (off )?your|autofill", re.I)
-NOT_RESUME_RE = re.compile(r"cover\s*letter|transcript|portfolio|certificate|writing sample|"
+NOT_RESUME_RE = re.compile(r"cover\s*letter|motivation(al)?\s+letter|transcript|portfolio|certificate|writing sample|"
                            r"photo|passport|identity|\bid\b", re.I)
-COVER_RE = re.compile(r"cover\s*letter", re.I)
+COVER_RE = re.compile(r"cover\s*letter|motivation(al)?\s+letter", re.I)
+# L8 (Q-45, llm_fill_design §19): the audit row of a composed text.
+COMPOSE_RULE_ID = "compose:v1"          # = tailor.contracts.COMPOSE_VERSION (stages don't import each other)
+COMPOSE_CONFIDENCE = 0.9
 # The note on an L1 row whose file is already ours; `pagefill` skips re-uploading on it (R3 F11).
 L1_KEPT_NOTE = "L1: kept, uploaded in this attempt"
 TRANSCRIPT_RE = re.compile(r"transcript", re.I)
@@ -95,7 +99,9 @@ def is_unknown(a: Answer) -> bool:
 # ---------------------------------------------------------------- L1, L1b
 
 def _file_lock(pf: PageField, rctx: ResolveContext, uploaded: Mapping[str, str], *,
-               single_file: bool, page_text: str) -> Answer:
+               single_file: bool, page_text: str, composed: Optional[Mapping[str, str]] = None,
+               files: Optional[Mapping[str, str]] = None,
+               audit: Optional[Mapping[str, str]] = None) -> Answer:
     """L1 (H6, TR-8) and L1b: every FILE field is settled here; none reaches the model."""
     f = pf.field
     own = " ".join((f.label, f.section, f.description, pf.group_title))
@@ -120,13 +126,48 @@ def _file_lock(pf: PageField, rctx: ResolveContext, uploaded: Mapping[str, str],
             return _filled(pf, path.strip(), AnswerTier.FIELD_MAP, "field_map:transcript",
                            rule_id="transcript")
         return _unknown(pf, "L1b: no transcript file", rule_id="documents.transcript")
-    if COVER_RE.search(own):
-        if f.required:
-            # L1b: a required cover letter is composed by one model call and uploaded;
-            # that call is not part of the lock pre-pass (see comms: lane M question).
-            return _unknown(pf, "L1b: cover letter not composed")
-        return _unknown(pf, "cover letter is optional")
+    if COVER_RE.search(own) or questions.compose_needed(f, pf.group):
+        # L1b / L8: a cover-letter FILE is a compose target (§19.1). Only a REQUIRED one is
+        # composed; an optional one stays blank (rule 8). The composing itself is apply_flow's
+        # separate call (§19.3) and is not part of this pre-pass.
+        return _compose_lock(pf, composed, audit, files) if f.required else _unknown(
+            pf, "cover letter is optional")
     return _unknown(pf, "L1b: no file for this upload")
+
+
+# ---------------------------------------------------------------- L8
+
+def _composed_for(pf: PageField, table: Optional[Mapping[str, str]],
+                  audit: Optional[Mapping[str, str]]) -> str:
+    """The entry for this field in a `ctx.composed`-style table, keyed by the audit key
+    (contracts `AttemptContext.composed`) or the reader key. "" when there is none."""
+    if not table:
+        return ""
+    key = pf.field.key
+    return str(table.get((audit or {}).get(key, "")) or table.get(key) or "")
+
+
+def _compose_lock(pf: PageField, composed: Optional[Mapping[str, str]],
+                  audit: Optional[Mapping[str, str]], files: Optional[Mapping[str, str]] = None
+                  ) -> Answer:
+    """L8: a REQUIRED compose target (§19.1). A text in `composed` is final: FILLED, tier
+    LLM, source `composed`, rule `compose:v1`, confidence 0.9, value = the whole text (for a
+    FILE too: the note names the file, and `composed_files` has the path to upload). No
+    text: UNKNOWN, note `compose_needed: off`; pagefill (K3) turns that into
+    `PageOutcome.compose_needed` when composing is on or the owner has an answer, and
+    apply_flow rewrites the note to `failed check` / `no master` when it could not write."""
+    text = _composed_for(pf, composed, audit)
+    if not text.strip():
+        return _unknown(pf, f"{questions.COMPOSE_NOTE}: {questions.COMPOSE_OFF}")
+    note = ""
+    if pf.field.type is FieldType.FILE:
+        path = _composed_for(pf, files, audit)
+        if not path:
+            return _unknown(pf, f"{questions.COMPOSE_NOTE}: {questions.COMPOSE_OFF}")
+        note = "composed file: " + os.path.basename(path)
+    return _stamp(Answer(field_key=pf.field.key, value=text, tier=AnswerTier.LLM,
+                         source=AnswerSource.COMPOSED.value, confidence=COMPOSE_CONFIDENCE,
+                         status=AnswerStatus.FILLED, rule_id=COMPOSE_RULE_ID, note=note), pf)
 
 
 # ---------------------------------------------------------------- L2
@@ -233,15 +274,21 @@ def _declaration_lock(pf: PageField, label_norm: str, rctx: ResolveContext) -> O
 
 def lock_field(pf: PageField, rctx: ResolveContext, rules: Any, *, today: str = "",
                uploaded: Optional[Mapping[str, str]] = None, single_file: bool = False,
-               page_text: str = "", qualified: str = "") -> Optional[Answer]:
-    """One field through L1, L2, L4/L5, L6, L3/L7. None = not locked (the model's)."""
+               page_text: str = "", qualified: str = "",
+               composed: Optional[Mapping[str, str]] = None,
+               composed_files: Optional[Mapping[str, str]] = None,
+               audit: Optional[Mapping[str, str]] = None) -> Optional[Answer]:
+    """One field through L1, L2, L4/L5, L6, L8, L3/L7. None = not locked (the model's).
+    `composed` / `composed_files` are `AttemptContext.composed` / `.composed_files` (audit key
+    -> text / file; `audit` maps a reader key to its audit key, else the reader key is used)."""
     f = pf.field
     if f.type is FieldType.HIDDEN:
         return _stamp(Answer(field_key=f.key, value=None, tier=AnswerTier.NONE, source="",
                              confidence=0.0, status=AnswerStatus.SKIPPED, note="hidden"), pf)
     if f.type is FieldType.FILE:
         return _file_lock(pf, rctx, uploaded or {}, single_file=single_file,
-                          page_text=page_text)
+                          page_text=page_text, composed=composed, files=composed_files,
+                          audit=audit)
     a = _email_lock(pf, rctx)
     if a is not None:
         return a
@@ -249,11 +296,17 @@ def lock_field(pf: PageField, rctx: ResolveContext, rules: Any, *, today: str = 
     held = _rule_lock(pf, label_norm, rctx, rules)
     if held is not None and held.status is AnswerStatus.FILLED:
         return held
-    owner, _note = resolve.extra_answer(f, qualified or label_norm, rctx)
+    # A compose target's owner answer is saved per posting under the compose label (§19.2).
+    target = f.type is FieldType.TEXTAREA and questions.compose_needed(f, pf.group)
+    owner, _note = resolve.extra_answer(
+        f, questions.compose_label(f, rctx) if target else (qualified or label_norm), rctx)
     if owner is not None:
         return _stamp(owner, pf)
     if held is not None:
         return held
+    if target:                                 # L8: never the model, never a declaration
+        return _compose_lock(pf, composed, audit) if f.required else _unknown(
+            pf, "compose target is optional")
     return _declaration_lock(pf, label_norm, rctx)
 
 
@@ -271,17 +324,22 @@ def qualified_labels(fields: Sequence[PageField]) -> dict[str, str]:
 
 
 def lock_page(fields: list[PageField], rctx: ResolveContext, rules: Any, *, today: str,
-              uploaded: dict[str, str], page_text: str = "") -> dict[str, Answer]:
+              uploaded: dict[str, str], page_text: str = "",
+              composed: Optional[Mapping[str, str]] = None,
+              composed_files: Optional[Mapping[str, str]] = None,
+              audit: Optional[Mapping[str, str]] = None) -> dict[str, Answer]:
     """Every locked field's final Answer, keyed by reader key (§4). Fields not in the
     result are open: the model is asked about them. `page_text` (the step's visible
-    text) feeds L1's one-FILE clause only; it is optional so the pinned call works."""
+    text) feeds L1's one-FILE clause only; it is optional so the pinned call works. `composed`,
+    `composed_files`, `audit` feed L8 (Q-45): optional too, so every existing call is unchanged."""
     files = [pf for pf in fields if pf.field.type is FieldType.FILE]
     quals = qualified_labels(fields)
     out: dict[str, Answer] = {}
     for pf in fields:
         a = lock_field(pf, rctx, rules, today=today, uploaded=uploaded or {},
                        single_file=len(files) == 1, page_text=page_text,
-                       qualified=quals.get(pf.field.key, ""))
+                       qualified=quals.get(pf.field.key, ""), composed=composed,
+                       composed_files=composed_files, audit=audit)
         if a is not None:
             out[pf.field.key] = a
     return out

@@ -28,7 +28,7 @@ from dataclasses import dataclass, field as dc_field
 from typing import Any, Iterable, Mapping, NamedTuple, Optional, Sequence
 
 from ..backends import BackendError
-from . import facts as F, guards, resolve
+from . import facts as F, guards, questions, resolve
 from .contracts import (
     CHOICE_TYPES, Answer, AnswerStatus, Fact, FieldType, FillSource, ModelDecision, PageField,
     ResolveContext,
@@ -166,7 +166,8 @@ def _withhold(pf: PageField, s_values: Sequence[str]) -> bool:
 def chunks(fields: Sequence[PageField], matches: Mapping[str, Optional[str]], max_fields: int,
            *, locked: Iterable[str] = ()) -> list[Chunk]:
     """§6.1: each matched entry group is one chunk; the other open fields go in chunks of
-    ≤ max_fields, in page order. FILE fields and fields of unmatched groups (junk, E3)
+    ≤ max_fields, in page order. FILE fields, compose targets (a cover letter or "why join"
+    text, §19.1: the tailor writes those, L8) and fields of unmatched groups (junk, E3)
     never reach the model. A locked field rides along as context in its group's chunk
     (outside groups: the chunk of the open field before it, else the first)."""
     lk = set(locked or ())
@@ -175,7 +176,7 @@ def chunks(fields: Sequence[PageField], matches: Mapping[str, Optional[str]], ma
     groups: dict[str, list[PageField]] = {}
     plain: list[PageField] = []
     for pf in fields:
-        if pf.field.type is FieldType.FILE:
+        if pf.field.type is FieldType.FILE or questions.compose_needed(pf.field, pf.group):
             continue
         if pf.group:
             if matches.get(pf.group):

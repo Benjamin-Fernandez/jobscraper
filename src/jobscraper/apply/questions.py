@@ -215,11 +215,18 @@ TRANSPORT_NOTES = ("transport", "model: unavailable", "model_unavailable")
 _TAG = re.compile(r"^(G\d+|L\d+|E\d+)")
 _INDEX = re.compile(r"\[\d+\]")
 
-# D-86 interim (review F9): until a compose WP exists (Q-45), a required cover letter or
-# "why join" text the program can't fill stops the attempt and is captured per job with
-# reason `compose_needed` (contracts v5, llm_fill_design §19), so the owner sees why.
+# Composed texts (D-86 F9, Q-45 llm_fill_design §19): a required cover letter or "why join"
+# text the program can't fill stops the attempt and is captured per job with reason
+# `compose_needed` (contracts v5). The note says why nothing was written, and the card's
+# hint (§19.6) follows it: `compose_needed: off` (composing is off and the owner has no
+# answer), `compose_needed: failed check` (the draft failed C1-C7 twice), `compose_needed:
+# no master` (the master resume isn't parsed yet).
 COMPOSE_NEEDED = QuestionReason.COMPOSE_NEEDED
 COMPOSE_NOTE = "compose_needed"
+COMPOSE_OFF = "off"
+COMPOSE_FAILED = "failed check"
+COMPOSE_NO_MASTER = "no master"
+COMPOSE_NOTES = (COMPOSE_OFF, COMPOSE_FAILED, COMPOSE_NO_MASTER)
 _COVER = re.compile(r"\bcover\s*letter\b|\bmotivation(al)?\s+letter\b", re.I)
 _MOTIVE = re.compile(r"\bwhy\b.{0,60}\b(join|work|apply|applying|interested|want|choose|chose)\b"
                      r"|\bmotivat(e|es|ed|ion)\b|\bwhat\s+(interests|attracts|excites)\s+you\b",
@@ -234,6 +241,34 @@ def compose_needed(f: FormField, group: str = "") -> bool:
         return bool(_COVER.search(text))
     return f.type is FieldType.TEXTAREA and not group and bool(
         _COVER.search(text) or _MOTIVE.search(f.label))
+
+
+def compose_kind(f: FormField) -> str:
+    """`letter` for a FILE or a cover-letter label, else `answer` (§19.3 step 1)."""
+    return "letter" if f.type is FieldType.FILE or _COVER.search(f"{f.label} {f.description}")         else "answer"
+
+
+def owner_compose_text(f: FormField, ctx: ResolveContext) -> str:
+    """The owner's saved answer for this posting's compose label (L6, §19.2), else ""."""
+    ans, _note = resolve.extra_answer(f, compose_label(f, ctx), ctx)
+    value = getattr(ans, "value", None)
+    return value.strip() if isinstance(value, str) else ""
+
+
+def compose_note(note: str) -> str:
+    """The capture note of a compose target: `compose_needed: <why>`. A lock's note may
+    already carry the prefix (L8, apply_flow's failure notes); an empty one means `off`
+    (nothing was written because composing is off)."""
+    why = (note or "").strip()
+    if why.startswith(COMPOSE_NOTE):
+        why = why[len(COMPOSE_NOTE):].lstrip(": ").strip()
+    return f"{COMPOSE_NOTE}: {why or COMPOSE_OFF}"[:NOTE_MAX]
+
+
+def compose_label(f: FormField, ctx: ResolveContext) -> str:
+    """The qualified label a compose target is captured, saved (L6) and matched under:
+    `<label> | compose @<employer>#<sha8(jd)>`, so one job's answer never fits another."""
+    return _compose_label(f, ctx)
 
 
 def _compose_label(f: FormField, ctx: ResolveContext) -> str:
@@ -331,7 +366,7 @@ def capture_page(fields: Sequence[Any], answers: Mapping[str, Answer], ctx: Reso
                 field_type=f.type, required=True, sensitive=False,
                 description=(f.description or "")[:DESCRIPTION_MAX], step=f.step,
                 ats=ctx.ats, employer_norm=employer,
-                note=f"{COMPOSE_NOTE}: {a.note or ''}"[:NOTE_MAX]))
+                note=compose_note(a.note)))
             continue
         if f.type in NOT_CAPTURED_TYPES:
             continue

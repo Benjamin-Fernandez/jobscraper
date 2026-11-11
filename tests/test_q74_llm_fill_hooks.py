@@ -46,7 +46,7 @@ def _facts(ctx):
     return F.fact_catalogue(ctx.profile, ctx, today=T.TODAY)
 
 
-def _prompt(ctx, label="Why do you want to work here?"):
+def _prompt(ctx, label="Describe a project you are proud of"):
     """The llm_fill user prompt as pagefill builds it: nothing is redacted when the flag is on
     (`run.sv_prompt` is []), the full S list when it is off."""
     pf = T.pf("k", label, FT.TEXTAREA, required=True)
@@ -55,7 +55,7 @@ def _prompt(ctx, label="Why do you want to work here?"):
 
 
 def _decide(ctx, value, evidence, source=FillSource.RESUME):
-    fields = [T.pf("k", "Why do you want to work here?", FT.TEXTAREA, required=True)]
+    fields = [T.pf("k", "Describe a project you are proud of", FT.TEXTAREA, required=True)]
     rules = T.rules()
     lk = locks.lock_page(fields, ctx, rules, today=T.TODAY, uploaded={})
     d = [ModelDecision(field_key="k", source=source, value=value, evidence=evidence)]

@@ -34,8 +34,16 @@ const REASONS = {
   no_option_fits: "Your saved answer isn't one of this form's options",
   attestation_unclear: "A declaration JobScraper couldn't classify",
   conflict: 'Your work rights differ between the countries asked',
-  compose_needed: "Needs a cover letter or motivation text JobScraper can't write yet",
+  compose_needed: 'Needs a cover letter or motivation text written for this job',
 }
+// Hint under a compose_needed chip, by the capture note (llm_fill_design section 19.6). The
+// note is "compose_needed: <off | failed check | no master>"; any other note gets the common line.
+const COMPOSE_HINTS = {
+  off: 'Write it here for this posting. Automatic cover letters are off (apply.compose in config.yaml).',
+  'failed check': "JobScraper's draft didn't pass its fact check. Write it here for this posting.",
+  'no master': 'Run the resume tailor once, then retry.',
+}
+const COMPOSE_HINT_DEFAULT = 'Write it here for this posting.'
 // Fields that are one control per value; the rest fall back to the question's own kind.
 const NOT_FOR_GAP = new Set(['entries', 'fixed', 'salary', 'country_bool_map'])
 const TYPED = new Set(['text', 'email', 'url', 'digits', 'phone_cc', 'country', 'int', 'number', 'list_text', 'list_url'])
@@ -51,6 +59,13 @@ const cur = computed(() => g.value.current ?? {})
 const reason = computed(() => {
   const code = g.value.reason ?? variants.value.find(v => v.reason)?.reason
   return REASONS[code] ?? ''
+})
+const hint = computed(() => {
+  const code = g.value.reason ?? variants.value.find(v => v.reason)?.reason
+  if (code !== 'compose_needed') return ''
+  const note = String(g.value.note ?? variants.value.find(v => v.note)?.note ?? '')
+    .replace(/^compose_needed:\s*/, '').trim()
+  return COMPOSE_HINTS[note] ?? COMPOSE_HINT_DEFAULT
 })
 const meta = computed(() => {
   const asked = employers.value.length ? `Asked by ${employers.value.join(', ')}` : ''
@@ -141,6 +156,7 @@ function save() {
       <span v-if="group.sensitive" class="tag private" :title="PRIVATE_SENTENCE">{{ PRIVATE }}</span>
       <span v-if="reason && !answered" class="chip q-reason">{{ reason }}</span>
     </header>
+    <p v-if="hint && !answered" class="q-hint muted">{{ hint }}</p>
     <p v-if="meta" class="q-meta muted">{{ meta }}</p>
     <p v-if="group.description" class="q-desc muted">{{ group.description }}</p>
     <p v-if="group.target_path" class="q-gap">This is your profile's {{ gapLabel }}. Your answer is saved there.</p>
@@ -205,7 +221,7 @@ function save() {
 .q-head { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-2) var(--space-3); }
 .q-title { margin: 0; font-size: var(--text-md); font-weight: 650; }
 .q-reason { background: var(--warn-soft); color: var(--warn); border-color: color-mix(in srgb, var(--warn) 30%, transparent); }
-.q-meta, .q-desc { margin: 0; font-size: var(--text-sm); }
+.q-meta, .q-desc, .q-hint { margin: 0; font-size: var(--text-sm); }
 .q-gap, .q-also, .q-label { margin: 0; font-size: var(--text-sm); color: var(--text-2); overflow-wrap: anywhere; }
 .q-label { font-style: italic; }
 .q-answer, .q-picker { display: grid; gap: var(--space-1); }

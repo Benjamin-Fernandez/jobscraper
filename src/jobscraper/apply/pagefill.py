@@ -49,9 +49,10 @@ from . import guards as G
 from . import llm_fill as L
 from . import locks as K
 from . import page as P
+from . import questions as Q
 from . import widgets as W
 from .contracts import (
-    Answer, AnswerStatus, AnswerTier, AttemptContext, EntrySection, FieldType, FillSource,
+    Answer, AnswerSource, AnswerStatus, AnswerTier, AttemptContext, EntrySection, FieldType, FillSource,
     ModelDecision, PageField, PageOutcome, ResolveContext, ValueOrigin,
 )
 
@@ -151,7 +152,12 @@ def fill_page(page: Any, nav: Any, ctx: AttemptContext, rctx: ResolveContext, se
         decision = _decide(run, fields, run.sections, {})
         # 7. a required unknown: nothing on the page has been changed (M9, TR-7)
         if decision.unknown_required:
-            return _outcome(run, unknown=decision.unknown_required)
+            pending, unknown = _compose_split(run, decision.unknown_required)
+            if unknown:
+                return _outcome(run, unknown=unknown)
+            # 7b. only compose targets are missing a text (§19.2): nothing on the page has been
+            # changed; apply_flow writes the texts and calls fill_page again on this step
+            return _outcome(run, compose=pending)
         # 8. classify before the first keystroke (M6), then the deadline
         services.classify(page)
         _time_left(run)
@@ -226,7 +232,9 @@ def _decide(run: _Run, fields: Sequence[PageField], sections: Sequence[EntrySect
     matches.update(forced)
     # 3. locks (final; the model never sees a locked field as a question)
     locked = K.lock_page(fields, run.rctx, run.services.rules, today=run.today,
-                         uploaded=run.ctx.uploaded, page_text=P.page_text(run.page, run.scope))
+                         uploaded=run.ctx.uploaded, page_text=P.page_text(run.page, run.scope),
+                         composed=run.ctx.composed, composed_files=run.ctx.composed_files,
+                         audit=run.audit)
     quals = K.qualified_labels(fields)
     for pf in fields:
         run.sigs[pf.field.key] = F.field_sig(pf, quals.get(pf.field.key, ""), key=run.hkey)
@@ -428,6 +436,8 @@ def _apply_one(run: _Run, key: str, ans: Answer, reset: bool) -> None:
         if ans.note == L1_KEPT_NOTE:
             return
         path = str(ans.value or "")
+        if ans.source == AnswerSource.COMPOSED.value:     # K3: the value is the letter's text (§19.5)
+            path = _composed_path(run, key)
         r = W.fill_field(run.page, pf, path, force=True)          # H6: replace what we didn't upload
         try:
             digest = hashlib.sha256(Path(path).read_bytes()).hexdigest() if r.ok else ""
@@ -568,7 +578,9 @@ def _corrective(run: _Run) -> None:
     run.corrected |= {pf.field.key for pf in fields}      # F8: their first decision is not cached
     fields = [pf if pf.error else _replace(pf, error=errors.get(pf.field.key) or "not accepted") for pf in fields]
     locked = K.lock_page(fields, run.rctx, run.services.rules, today=run.today,
-                         uploaded=run.ctx.uploaded, page_text=P.page_text(run.page, run.scope))
+                         uploaded=run.ctx.uploaded, page_text=P.page_text(run.page, run.scope),
+                         composed=run.ctx.composed, composed_files=run.ctx.composed_files,
+                         audit=run.audit)
     open_ = [pf for pf in fields if pf.field.key not in locked and pf.field.type is not FieldType.FILE]
     decisions = [run.decisions[pf.field.key] for pf in fields if pf.field.key in run.decisions]
     if open_:
@@ -743,7 +755,33 @@ def _mark(run: _Run, key: str, origin: ValueOrigin) -> None:
         run.known[run.audit[key]] = origin
 
 
-def _outcome(run: _Run, *, unknown: Sequence[str] = ()) -> PageOutcome:
+def _composed_path(run: _Run, key: str) -> str:
+    """The file written from a composed text: `ctx.composed_files` is keyed by audit key."""
+    files = run.ctx.composed_files or {}
+    return str(files.get(run.audit.get(key, "")) or files.get(key) or "")
+
+
+def _compose_split(run: _Run, keys: Sequence[str]) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    """(compose keys, other unknown keys) among a stop's required unknowns (§19.2). A compose
+    target is pending when its lock left it unwritten (`compose_needed` note) and either
+    `apply.compose.enabled` (`services.compose_enabled`) or it is a FILE target with an owner
+    answer (the answer becomes the letter). Otherwise it stays a plain unknown: captured as
+    `compose_needed: off`."""
+    on = bool(getattr(run.services, "compose_enabled", False))
+    pending, other = [], []
+    for k in keys:
+        pf, a = run.fields.get(k), run.answers.get(k)
+        target = (pf is not None and a is not None and Q.compose_needed(pf.field, pf.group)
+                  and (a.note or "").startswith(Q.COMPOSE_NOTE))
+        if target and (on or (pf.field.type is FieldType.FILE
+                              and Q.owner_compose_text(pf.field, run.rctx))):
+            pending.append(k)
+        else:
+            other.append(k)
+    return tuple(pending), tuple(other)
+
+
+def _outcome(run: _Run, *, unknown: Sequence[str] = (), compose: Sequence[str] = ()) -> PageOutcome:
     # 13. the decision cache, on a finished page AND on a stop: the retry after the owner
     # answers the captured question replays every other decision (§13.3). Never on a
     # transport failure (`_transport`).
@@ -765,7 +803,8 @@ def _outcome(run: _Run, *, unknown: Sequence[str] = ()) -> PageOutcome:
     fields = [run.fields[k] for k in run.order if k in run.fields]
     return PageOutcome(step=run.step, fields=fields, answers=answers, unknown_required=tuple(unknown),
                        fill_failed=tuple(failed), model_calls=run.stats.calls,
-                       model_seconds=round(run.stats.seconds, 3), transport_failed=False)
+                       model_seconds=round(run.stats.seconds, 3), transport_failed=False,
+                       compose_needed=tuple(compose))
 
 
 def _note_typed(run: _Run, answers: dict) -> None:

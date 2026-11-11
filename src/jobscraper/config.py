@@ -77,6 +77,17 @@ class ApplyMailConfig:
 
 
 @dataclass(frozen=True)
+class ComposeConfig:
+    """`apply.compose` (llm_fill_design section 13.4, 19, Q-45): the owner's opt-in to have the
+    local model write a cover letter or a "why join" answer from the master resume.
+    Off by default: a required target is then captured as a question. Nothing personal."""
+    enabled: bool = False
+    letter_max_words: int = 250
+    answer_max_words: int = 120
+    file_format: str = "docx"               # docx | txt, for a cover-letter upload
+
+
+@dataclass(frozen=True)
 class LlmFillConfig:
     """`apply.llm_fill` (llm_fill_design §13.4, D-78): the local model that fills
     every page. Nothing here is personal; prompts never hold S values unless D-105
@@ -124,6 +135,7 @@ class ApplyConfig:
     # S values are never logged and code-decided answers stay code-decided either way.
     model_sees_sensitive: bool = False
     llm_fill: LlmFillConfig = LlmFillConfig()
+    compose: ComposeConfig = ComposeConfig()      # Q-45: composed texts, off by default
     mail: ApplyMailConfig = ApplyMailConfig()
     # D-70 §11.5: the mailbox for contact.backup_email; host "" = the same mailbox as `mail`.
     mail_backup: ApplyMailConfig = ApplyMailConfig(host="")
@@ -137,8 +149,9 @@ class ApplyConfig:
         def block(key: str) -> dict[str, Any]:
             return raw.get(key) if isinstance(raw.get(key), dict) else {}
         backup = {"host": "", **block("mail_backup")}
-        return cls(**_coerce(cls, raw, skip={"mail", "mail_backup", "llm_fill"}),
+        return cls(**_coerce(cls, raw, skip={"mail", "mail_backup", "llm_fill", "compose"}),
                    llm_fill=LlmFillConfig(**_coerce(LlmFillConfig, block("llm_fill"))),
+                   compose=ComposeConfig(**_coerce(ComposeConfig, block("compose"))),
                    mail=ApplyMailConfig(**_coerce(ApplyMailConfig, block("mail"))),
                    mail_backup=ApplyMailConfig(**_coerce(ApplyMailConfig, backup)))
 

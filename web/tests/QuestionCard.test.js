@@ -76,6 +76,29 @@ describe('QuestionCard: the reason chip', () => {
     expect(chip.text()).not.toBe('compose_needed')
   })
 
+  it('compose_needed shows the exact chip text and, with no note, the generic hint (WP-K2, LF section 19.6)', () => {
+    const w = mount(QuestionCard, { props: { group: group({ reason: 'compose_needed' }) } })
+    expect(w.find('.q-reason').text()).toBe('Needs a cover letter or motivation text written for this job')
+    expect(w.find('.q-hint').text()).toBe('Write it here for this posting.')
+  })
+
+  it.each([
+    ['compose_needed: off', /^Write it here for this posting\. Automatic cover letters are off \(apply\.compose in config\.yaml\)\.$/],
+    ['compose_needed: failed check', /didn't pass its fact check/i],
+    ['compose_needed: no master', /Run the resume tailor once/i],
+    ['compose_needed: something new', /^Write it here for this posting\.$/],
+  ])('the compose_needed note %j picks its hint', (note, text) => {
+    const w = mount(QuestionCard, { props: { group: group({ reason: 'compose_needed', note }) } })
+    expect(w.find('.q-hint').text()).toMatch(text)
+  })
+
+  it('no hint for another reason, nor while editing a saved answer', () => {
+    expect(mount(QuestionCard, { props: { group: group({ reason: 'no_rule', note: 'compose_needed: off' }) } })
+      .find('.q-hint').exists()).toBe(false)
+    expect(mount(QuestionCard, { props: { group: group({ reason: 'compose_needed' }), answered: true } })
+      .find('.q-hint').exists()).toBe(false)
+  })
+
   it.each([
     ['no_rule', /not in your profile/i],
     ['ungrounded', /couldn't be checked/i],

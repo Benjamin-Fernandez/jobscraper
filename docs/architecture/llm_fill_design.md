@@ -663,8 +663,15 @@ Use only facts in RESUME: every skill, tool, employer, school, project, number a
 must appear there. Name the employer and the role exactly as JOB gives them. Choose the RESUME facts
 that fit JOB best. Don't claim anything RESUME doesn't say: no new skills, no stronger verbs (don't
 say led, owned or managed unless RESUME does), no numbers it doesn't have. No contact details, no
-address, no name, no placeholders like [Name]. Plain text in the first person, at most <N> words.
+address, no name, no placeholders like [Name]. No salutation, greeting or sign-off: start with the
+first sentence of the body. Plain text in the first person, at most <N> words.
 ```
+
+D-179 (Coordinator, 2026-11-10, WP-K1): the no-salutation line keeps C3 strict ("Dear Hiring Manager" would be FACT_ADDED). The WP-K1 choices the spec left open are accepted as built: the final prompt line `Reply as JSON: {"text": "<the text>"}.`; C2/C3/C4 also allow numbers and words in the employer, its aliases and the job title; a paragraph or line break starts a sentence for the fact check; C1 minimum `min(80 or 20, max_words)` and C2 compares number sets; the C5 URL rule; C6's company-token noise list is a copy of `apply/declarations.py`'s (stages don't import each other).
+
+D-183 (Coordinator, 2026-11-10, Q-45 review M1): C3 also reads a sentence-start word. In a composed text, a capitalised word at a sentence, paragraph or line start (2+ letters, no digit) is a fact candidate unless its lower-case form is a common word (a fixed list in `tailor/compose.py`: function words, pronouns, common verbs, adverbs and adjectives a letter opens with) or appears, in any case, in the master, the JD, the employer, its aliases or the job title. "Stripe taught me…" → `FACT_ADDED` `stripe`; "Building tools…", "My", "During" pass. A false positive fails closed (capture, the owner writes it). The resume tailor's bullet check is unchanged.
+
+D-184 (Coordinator, 2026-11-10, Q-45 review M3): the compose model call passes `timeout = max(1, services.deadline_left())` (seconds) to the backend (`backends.complete(..., timeout=)` already caps below the transport's own). A timeout is a transport error → `model_unavailable`, nothing captured, as for any other transport failure.
 
 **User prompt.** `JOB:` (employer, title, the JD's first 3000 characters) → `QUESTION:` (label + help; letters: "Cover letter") → `RESUME:` (`mapping.resume_text(master)`: the contact block is already excluded) → the final line. The whole user prompt goes through `llm_fill.redact(text, s_values)`: `tailor_flow.compose(cfg, req, *, backend, redact)` takes it as a parameter from apply_flow (stages don't import each other).
 
@@ -697,7 +704,7 @@ address, no name, no placeholders like [Name]. Plain text in the first person, a
 
 - **Chip (QuestionCard):** "Needs a cover letter or motivation text written for this job". This replaces the interim "…JobScraper can't write yet".
 - **Hint by note:**
-  - `off`: "Write it here for this posting, or turn on “Write cover letters” in Settings → Apply."
+  - `off`: "Write it here for this posting. Automatic cover letters are off (apply.compose in config.yaml)." (D-185, 2026-11-10, Q-45 review M4: there is no Settings toggle; a toggle, if wanted, comes with Q-96.)
   - `failed check`: "JobScraper's draft didn't pass its fact check. Write it here for this posting."
   - `no master`: "Run the resume tailor once, then retry."
 - The answer is saved per posting (qualified compose label), so it is never reused for another job.
