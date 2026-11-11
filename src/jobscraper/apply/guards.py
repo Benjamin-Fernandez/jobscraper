@@ -58,6 +58,20 @@ MIN_EVIDENCE = 3
 # Sources the program knows as fact (not the model's guess); `pagefill` imports this (R3 F11).
 FACT_SOURCES = frozenset({FillSource.PROFILE, FillSource.EXTRA, FillSource.STANDING})
 
+
+def quote_checked(a: Answer) -> bool:
+    """D-202 (Q-113, storage only; no guard calls it): did the guards check this Answer's
+    quote and did the field take a value? True only for the resume/job route after G3 and
+    the grounded keep: the Answer carries its own non-empty `evidence`, a value status and
+    not the trusted-keep confidence (G8 keeps the site's value without reading the quote).
+    Such a quote is resume, posting or non-private-fact text, so the audit row and the
+    decision cache store it verbatim (a replay re-reads it in G3); every other quote is
+    stored redacted (`pagefill.stored_quote`)."""
+    return (bool(a.evidence)
+            and a.status in (AnswerStatus.FILLED, AnswerStatus.PREFILLED, AnswerStatus.FILL_FAILED)
+            and a.confidence != CONF_KEEP_TRUSTED)
+
+
 # Module constants (TR-10), all matched on whole words / token runs.
 LEVEL_SYNONYMS: tuple[tuple[str, ...], ...] = (
     ("native", "fluent", "bilingual", "mother tongue", "expert", "advanced", "full professional"),
