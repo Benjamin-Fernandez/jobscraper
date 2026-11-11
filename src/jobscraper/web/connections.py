@@ -314,29 +314,44 @@ def _edge_item(cfg: Any, current: dict[str, Any], attempts: Optional[dict[str, A
 
 # ---------------------------------------------------------------- model
 
-def need_now(current: dict[str, Any], in_flight: Optional[list],
-             attempts: Optional[dict[str, Any]], mail_rows: Optional[list[dict[str, Any]]],
-             recent: str) -> bool:
-    """§2.3 `need_now`: something is waiting on the model right now."""
+def pending_mail(mail_rows: Optional[list[dict[str, Any]]]) -> int:
+    """Messages waiting for the model, summed over every mailbox's last counts."""
+    return sum(max(0, _counts(r.get("last_counts_json")).get("pending_model", 0))
+               for r in mail_rows or [])
+
+
+def need_reason(current: dict[str, Any], in_flight: Optional[list],
+                attempts: Optional[dict[str, Any]], mail_rows: Optional[list[dict[str, Any]]],
+                recent: str) -> Optional[str]:
+    """What is waiting on the model right now (§2.3 `need_now`, D-196): the first
+    rule that holds, in order a to d, as "run" | "application" | "mail"; None
+    when nothing is. Fixed words only, for the §4.4 copy."""
     # (a) a running background job of any kind but the mailbox test
     if current.get("state") == "running" and current.get("kind") not in (None, "mailtest"):
-        return True
+        return "run"
     # (b) an apply attempt in flight
     if in_flight:
-        return True
+        return "application"
     # (c) an attempt ended model_unavailable in the last 24 h
     for r in (attempts or {}).values():
         if (r.get("reason_code") == "model_unavailable" and r.get("finished_at")
                 and str(r["finished_at"]) >= recent):
-            return True
+            return "application"
     # (d) a mailbox has messages waiting for the model
-    for r in mail_rows or []:
-        if _counts(r.get("last_counts_json")).get("pending_model", 0) > 0:
-            return True
-    return False
+    if pending_mail(mail_rows) > 0:
+        return "mail"
+    return None
 
 
-def _model_item(cfg: Any, snapshot: Optional[dict[str, Any]], need: bool) -> dict[str, Any]:
+def need_now(current: dict[str, Any], in_flight: Optional[list],
+             attempts: Optional[dict[str, Any]], mail_rows: Optional[list[dict[str, Any]]],
+             recent: str) -> bool:
+    """§2.3 `need_now`: something is waiting on the model right now."""
+    return need_reason(current, in_flight, attempts, mail_rows, recent) is not None
+
+
+def _model_item(cfg: Any, snapshot: Optional[dict[str, Any]], reason: Optional[str],
+                n_mail: int) -> dict[str, Any]:
     """`snapshot` is `ModelHealth.snapshot()`: the last probe, or None before the
     first answer. "off" and "misconfigured" are read from config here too, so a
     cached probe never hides a config change."""
@@ -349,7 +364,9 @@ def _model_item(cfg: Any, snapshot: Optional[dict[str, Any]], need: bool) -> dic
     local = backends.is_local_config(budget)
     facts = {"backend": snapshot.get("backend") or str(budget.get("backend") or "ollama"),
              "model": snapshot.get("model") or str(budget.get("ollama_model") or ""),
-             "local": local, "need_now": need}
+             "local": local, "need_now": reason is not None,
+             "need_reason": reason, "pending_mail": n_mail}
+    need = reason is not None
     # Only a remote Ollama (D-107) is not "this PC"; off/misconfigured run nothing elsewhere.
     remote = not configured and not local
     kw = {"stored_in": None if remote else "this_pc", "facts": facts,
@@ -413,7 +430,8 @@ def compose(cfg: Any, store: Any, mail_runner_view: dict[str, Any],
              + _mailbox_items(cfg, store, vault_has)
              + [_edge_item(cfg, job, attempts, lockfile_busy, profile_dir_exists),
                 _model_item(cfg, model_snapshot,
-                            need_now(job, in_flight, attempts, mail_rows, recent)),
+                            need_reason(job, in_flight, attempts, mail_rows, recent),
+                            pending_mail(mail_rows)),
                 employer_item])
     for item in items:
         # Never configured: the chip reads "Optional", and nothing is stored yet
