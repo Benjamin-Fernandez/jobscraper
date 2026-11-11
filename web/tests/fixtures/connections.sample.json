@@ -1,0 +1,2002 @@
+{
+ "_doc": [
+  "Mock of GET /api/connections, schema v1 (docs/architecture/q100_ui_design.md section 3.1). Fake values only; no secret anywhere.",
+  "'items' + 'employer_accounts' + 'no_account_needed' (with version, checked_at, attention) form one valid v1 response. gmail:1..gmail:12 stand for twelve mailboxes, one per Gmail case of section 2.3; the singleton kinds (apply-mailbox, apply-mailbox:backup, employer-accounts, edge, model) show one state each here.",
+  "'variants' is NOT part of the contract (the app must ignore it). It holds one entry per case name of tests/fixtures/connections_rows.json (same names), each {section_2_3_row, expect, item | employer_account}. Swap a variant's item into 'items' (same id) to render any state.",
+  "'attention' counts items of state attention in 'items' (the server-side count; the badge uses section 2.2). 'message' is set for Gmail only (SYNC_TEXTS copy). stored_in for employer accounts and mailboxes is credential_manager, for the model this_pc (assumed values)."
+ ],
+ "version": 1,
+ "checked_at": "2026-11-11T09:12:00",
+ "attention": 8,
+ "items": [
+  {
+   "id": "gmail:1",
+   "kind": "gmail",
+   "state": "paused",
+   "code": "switched_off",
+   "message": null,
+   "optional": true,
+   "stored_in": "credential_manager",
+   "checked_at": "2026-11-11T09:10:00",
+   "next_check_at": "2026-11-11T09:20:00",
+   "last_ok_at": "2026-11-11T09:10:00",
+   "retry_after": null,
+   "facts": {
+    "address": "owner1@example.com",
+    "enabled": false,
+    "shared_with_apply": false,
+    "counts": {
+     "scanned": 42,
+     "duplicates": 3,
+     "skipped": 30,
+     "bodies": 9,
+     "matched": 6,
+     "applied": 2,
+     "suggested": 1,
+     "unmatched": 3,
+     "pending_model": 0,
+     "model_calls": 4,
+     "errors": 0
+    },
+    "consent_current": true
+   }
+  },
+  {
+   "id": "gmail:2",
+   "kind": "gmail",
+   "state": "attention",
+   "code": "consent",
+   "message": null,
+   "optional": true,
+   "stored_in": "credential_manager",
+   "checked_at": "2026-11-11T09:10:00",
+   "next_check_at": "2026-11-11T09:20:00",
+   "last_ok_at": "2026-11-11T09:10:00",
+   "retry_after": null,
+   "facts": {
+    "address": "owner2@example.com",
+    "enabled": true,
+    "shared_with_apply": false,
+    "counts": {
+     "scanned": 42,
+     "duplicates": 3,
+     "skipped": 30,
+     "bodies": 9,
+     "matched": 6,
+     "applied": 2,
+     "suggested": 1,
+     "unmatched": 3,
+     "pending_model": 0,
+     "model_calls": 4,
+     "errors": 0
+    },
+    "consent_current": false
+   }
+  },
+  {
+   "id": "gmail:3",
+   "kind": "gmail",
+   "state": "attention",
+   "code": "login_refused",
+   "message": "Paused: Gmail refused the app password. It may have been revoked, which happens when you change your Google password. Create a new app password and enter it here.",
+   "optional": true,
+   "stored_in": "credential_manager",
+   "checked_at": "2026-11-11T09:10:00",
+   "next_check_at": "2026-11-11T09:20:00",
+   "last_ok_at": "2026-11-10T09:00:00",
+   "retry_after": null,
+   "facts": {
+    "address": "owner3@example.com",
+    "enabled": true,
+    "shared_with_apply": false,
+    "counts": {
+     "scanned": 42,
+     "duplicates": 3,
+     "skipped": 30,
+     "bodies": 9,
+     "matched": 6,
+     "applied": 2,
+     "suggested": 1,
+     "unmatched": 3,
+     "pending_model": 0,
+     "model_calls": 4,
+     "errors": 0
+    },
+    "consent_current": true
+   }
+  },
+  {
+   "id": "gmail:4",
+   "kind": "gmail",
+   "state": "attention",
+   "code": "app_password_required",
+   "message": "Paused: Gmail needs an app password, not your Google password. Create one at myaccount.google.com/apppasswords.",
+   "optional": true,
+   "stored_in": "credential_manager",
+   "checked_at": "2026-11-11T09:10:00",
+   "next_check_at": "2026-11-11T09:20:00",
+   "last_ok_at": "2026-11-10T09:00:00",
+   "retry_after": null,
+   "facts": {
+    "address": "owner4@example.com",
+    "enabled": true,
+    "shared_with_apply": false,
+    "counts": {
+     "scanned": 42,
+     "duplicates": 3,
+     "skipped": 30,
+     "bodies": 9,
+     "matched": 6,
+     "applied": 2,
+     "suggested": 1,
+     "unmatched": 3,
+     "pending_model": 0,
+     "model_calls": 4,
+     "errors": 0
+    },
+    "consent_current": true
+   }
+  },
+  {
+   "id": "gmail:5",
+   "kind": "gmail",
+   "state": "attention",
+   "code": "web_login_required",
+   "message": "Paused: Google blocked the sign-in as unusual. Sign in to Gmail in your browser, then click Check now.",
+   "optional": true,
+   "stored_in": "credential_manager",
+   "checked_at": "2026-11-11T09:10:00",
+   "next_check_at": "2026-11-11T09:20:00",
+   "last_ok_at": "2026-11-10T09:00:00",
+   "retry_after": null,
+   "facts": {
+    "address": "owner5@example.com",
+    "enabled": true,
+    "shared_with_apply": false,
+    "counts": {
+     "scanned": 42,
+     "duplicates": 3,
+     "skipped": 30,
+     "bodies": 9,
+     "matched": 6,
+     "applied": 2,
+     "suggested": 1,
+     "unmatched": 3,
+     "pending_model": 0,
+     "model_calls": 4,
+     "errors": 0
+    },
+    "consent_current": true
+   }
+  },
+  {
+   "id": "gmail:6",
+   "kind": "gmail",
+   "state": "attention",
+   "code": "not_set_up",
+   "message": "Paused: no app password is stored for this mailbox. Enter it again to continue.",
+   "optional": true,
+   "stored_in": "credential_manager",
+   "checked_at": "2026-11-11T09:10:00",
+   "next_check_at": "2026-11-11T09:20:00",
+   "last_ok_at": "2026-11-10T09:00:00",
+   "retry_after": null,
+   "facts": {
+    "address": "owner6@example.com",
+    "enabled": true,
+    "shared_with_apply": false,
+    "counts": {
+     "scanned": 42,
+     "duplicates": 3,
+     "skipped": 30,
+     "bodies": 9,
+     "matched": 6,
+     "applied": 2,
+     "suggested": 1,
+     "unmatched": 3,
+     "pending_model": 0,
+     "model_calls": 4,
+     "errors": 0
+    },
+    "consent_current": true
+   }
+  },
+  {
+   "id": "gmail:7",
+   "kind": "gmail",
+   "state": "connected",
+   "code": "retrying",
+   "message": "Couldn't reach Gmail. JobScraper will try again later.",
+   "optional": true,
+   "stored_in": "credential_manager",
+   "checked_at": "2026-11-11T09:10:00",
+   "next_check_at": "2026-11-11T09:20:00",
+   "last_ok_at": "2026-11-11T03:00:00",
+   "retry_after": "2026-11-11T09:30:00",
+   "facts": {
+    "address": "owner7@example.com",
+    "enabled": true,
+    "shared_with_apply": false,
+    "counts": {
+     "scanned": 42,
+     "duplicates": 3,
+     "skipped": 30,
+     "bodies": 9,
+     "matched": 6,
+     "applied": 2,
+     "suggested": 1,
+     "unmatched": 3,
+     "pending_model": 0,
+     "model_calls": 4,
+     "errors": 0
+    },
+    "consent_current": true
+   }
+  },
+  {
+   "id": "gmail:8",
+   "kind": "gmail",
+   "state": "connected",
+   "code": "retrying",
+   "message": "Gmail asked JobScraper to slow down. It will try again in an hour.",
+   "optional": true,
+   "stored_in": "credential_manager",
+   "checked_at": "2026-11-11T09:10:00",
+   "next_check_at": "2026-11-11T09:20:00",
+   "last_ok_at": "2026-11-10T20:00:00",
+   "retry_after": "2026-11-11T10:12:00",
+   "facts": {
+    "address": "owner8@example.com",
+    "enabled": true,
+    "shared_with_apply": false,
+    "counts": {
+     "scanned": 42,
+     "duplicates": 3,
+     "skipped": 30,
+     "bodies": 9,
+     "matched": 6,
+     "applied": 2,
+     "suggested": 1,
+     "unmatched": 3,
+     "pending_model": 0,
+     "model_calls": 4,
+     "errors": 0
+    },
+    "consent_current": true
+   }
+  },
+  {
+   "id": "gmail:9",
+   "kind": "gmail",
+   "state": "attention",
+   "code": "network",
+   "message": "Couldn't reach Gmail. JobScraper will try again later.",
+   "optional": true,
+   "stored_in": "credential_manager",
+   "checked_at": "2026-11-11T09:10:00",
+   "next_check_at": "2026-11-11T09:20:00",
+   "last_ok_at": "2026-11-09T09:00:00",
+   "retry_after": "2026-11-11T09:30:00",
+   "facts": {
+    "address": "owner9@example.com",
+    "enabled": true,
+    "shared_with_apply": false,
+    "counts": {
+     "scanned": 42,
+     "duplicates": 3,
+     "skipped": 30,
+     "bodies": 9,
+     "matched": 6,
+     "applied": 2,
+     "suggested": 1,
+     "unmatched": 3,
+     "pending_model": 0,
+     "model_calls": 4,
+     "errors": 0
+    },
+    "consent_current": true
+   }
+  },
+  {
+   "id": "gmail:10",
+   "kind": "gmail",
+   "state": "attention",
+   "code": "rate_limited",
+   "message": "Gmail asked JobScraper to slow down. It will try again in an hour.",
+   "optional": true,
+   "stored_in": "credential_manager",
+   "checked_at": "2026-11-11T09:10:00",
+   "next_check_at": "2026-11-11T09:20:00",
+   "last_ok_at": null,
+   "retry_after": "2026-11-11T10:12:00",
+   "facts": {
+    "address": "owner10@example.com",
+    "enabled": true,
+    "shared_with_apply": false,
+    "counts": null,
+    "consent_current": true
+   }
+  },
+  {
+   "id": "gmail:11",
+   "kind": "gmail",
+   "state": "connected",
+   "code": "ok",
+   "message": null,
+   "optional": true,
+   "stored_in": "credential_manager",
+   "checked_at": "2026-11-11T09:10:00",
+   "next_check_at": "2026-11-11T09:20:00",
+   "last_ok_at": "2026-11-11T09:10:00",
+   "retry_after": null,
+   "facts": {
+    "address": "owner11@example.com",
+    "enabled": true,
+    "shared_with_apply": false,
+    "counts": {
+     "scanned": 42,
+     "duplicates": 3,
+     "skipped": 30,
+     "bodies": 9,
+     "matched": 6,
+     "applied": 2,
+     "suggested": 1,
+     "unmatched": 3,
+     "pending_model": 0,
+     "model_calls": 4,
+     "errors": 0
+    },
+    "consent_current": true
+   }
+  },
+  {
+   "id": "gmail:12",
+   "kind": "gmail",
+   "state": "connected",
+   "code": "timer_off",
+   "message": null,
+   "optional": true,
+   "stored_in": "credential_manager",
+   "checked_at": "2026-11-11T09:10:00",
+   "next_check_at": null,
+   "last_ok_at": "2026-11-11T09:10:00",
+   "retry_after": null,
+   "facts": {
+    "address": "owner12@example.com",
+    "enabled": true,
+    "shared_with_apply": false,
+    "counts": {
+     "scanned": 42,
+     "duplicates": 3,
+     "skipped": 30,
+     "bodies": 9,
+     "matched": 6,
+     "applied": 2,
+     "suggested": 1,
+     "unmatched": 3,
+     "pending_model": 0,
+     "model_calls": 4,
+     "errors": 0
+    },
+    "consent_current": true
+   }
+  },
+  {
+   "id": "apply-mailbox",
+   "kind": "apply_mailbox",
+   "state": "connected",
+   "code": "ok",
+   "message": null,
+   "optional": false,
+   "stored_in": "credential_manager",
+   "checked_at": null,
+   "next_check_at": null,
+   "last_ok_at": null,
+   "retry_after": null,
+   "facts": {
+    "host": "imap.gmail.com",
+    "port": 993,
+    "username": "apply@example.com",
+    "has_password": true,
+    "backup_separate": false
+   }
+  },
+  {
+   "id": "apply-mailbox:backup",
+   "kind": "apply_mailbox",
+   "state": "not_set_up",
+   "code": "none",
+   "message": null,
+   "optional": true,
+   "stored_in": null,
+   "checked_at": null,
+   "next_check_at": null,
+   "last_ok_at": null,
+   "retry_after": null,
+   "facts": {
+    "host": "",
+    "port": 993,
+    "username": "",
+    "has_password": false,
+    "backup_separate": false
+   }
+  },
+  {
+   "id": "employer-accounts",
+   "kind": "employer_accounts",
+   "state": "attention",
+   "code": "signin_failed",
+   "message": null,
+   "optional": true,
+   "stored_in": "credential_manager",
+   "checked_at": null,
+   "next_check_at": null,
+   "last_ok_at": null,
+   "retry_after": null,
+   "facts": {
+    "total": 8,
+    "attention": 3
+   }
+  },
+  {
+   "id": "edge",
+   "kind": "edge",
+   "state": "connected",
+   "code": "ok",
+   "message": null,
+   "optional": false,
+   "stored_in": "edge_profile",
+   "checked_at": null,
+   "next_check_at": null,
+   "last_ok_at": null,
+   "retry_after": null,
+   "facts": {
+    "exists": true,
+    "in_use": false,
+    "sync": false,
+    "last_used_at": "2026-11-10T14:00:00"
+   }
+  },
+  {
+   "id": "model",
+   "kind": "model",
+   "state": "connected",
+   "code": "ok",
+   "message": null,
+   "optional": false,
+   "stored_in": "this_pc",
+   "checked_at": "2026-11-11T09:12:00",
+   "next_check_at": null,
+   "last_ok_at": null,
+   "retry_after": null,
+   "facts": {
+    "backend": "ollama",
+    "model": "example-model:8b",
+    "local": true,
+    "need_now": false
+   }
+  }
+ ],
+ "employer_accounts": [
+  {
+   "id": 11,
+   "ats": "workday",
+   "tenant_host": "acme.wd3.myworkdayjobs.com",
+   "email": "owner+11@example.com",
+   "status": "created",
+   "state": "connected",
+   "code": "ok",
+   "has_password": true,
+   "created_at": "2026-11-08T10:00:00",
+   "verified_at": null,
+   "last_signin_at": "2026-11-10T10:00:00",
+   "last_signin_ok": true,
+   "exported_to_edge_at": null,
+   "created_by_attempt": 51
+  },
+  {
+   "id": 12,
+   "ats": "workday",
+   "tenant_host": "acme.wd3.myworkdayjobs.com",
+   "email": "owner+12@example.com",
+   "status": "created",
+   "state": "connected",
+   "code": "ok",
+   "has_password": true,
+   "created_at": "2026-11-08T10:00:00",
+   "verified_at": null,
+   "last_signin_at": "2026-11-10T10:00:00",
+   "last_signin_ok": null,
+   "exported_to_edge_at": null,
+   "created_by_attempt": 52
+  },
+  {
+   "id": 13,
+   "ats": "workday",
+   "tenant_host": "acme.wd3.myworkdayjobs.com",
+   "email": "owner+13@example.com",
+   "status": "verified",
+   "state": "connected",
+   "code": "verified",
+   "has_password": true,
+   "created_at": "2026-11-08T10:00:00",
+   "verified_at": "2026-11-09T10:00:00",
+   "last_signin_at": "2026-11-10T10:00:00",
+   "last_signin_ok": true,
+   "exported_to_edge_at": null,
+   "created_by_attempt": 53
+  },
+  {
+   "id": 14,
+   "ats": "workday",
+   "tenant_host": "acme.wd3.myworkdayjobs.com",
+   "email": "owner+14@example.com",
+   "status": "signin_failed",
+   "state": "attention",
+   "code": "signin_failed",
+   "has_password": true,
+   "created_at": "2026-11-08T10:00:00",
+   "verified_at": null,
+   "last_signin_at": "2026-11-10T10:00:00",
+   "last_signin_ok": false,
+   "exported_to_edge_at": null,
+   "created_by_attempt": 54
+  },
+  {
+   "id": 15,
+   "ats": "workday",
+   "tenant_host": "acme.wd3.myworkdayjobs.com",
+   "email": "owner+15@example.com",
+   "status": "exists_no_password",
+   "state": "attention",
+   "code": "exists_no_password",
+   "has_password": false,
+   "created_at": "2026-11-08T10:00:00",
+   "verified_at": null,
+   "last_signin_at": null,
+   "last_signin_ok": null,
+   "exported_to_edge_at": null,
+   "created_by_attempt": 55
+  },
+  {
+   "id": 16,
+   "ats": "workday",
+   "tenant_host": "acme.wd3.myworkdayjobs.com",
+   "email": "owner+16@example.com",
+   "status": "created",
+   "state": "attention",
+   "code": "password_missing",
+   "has_password": false,
+   "created_at": "2026-11-08T10:00:00",
+   "verified_at": null,
+   "last_signin_at": "2026-11-10T10:00:00",
+   "last_signin_ok": true,
+   "exported_to_edge_at": null,
+   "created_by_attempt": 56
+  },
+  {
+   "id": 17,
+   "ats": "workday",
+   "tenant_host": "acme.wd3.myworkdayjobs.com",
+   "email": "owner+17@example.com",
+   "status": "creating",
+   "state": "neutral",
+   "code": "unconfirmed",
+   "has_password": true,
+   "created_at": "2026-11-08T10:00:00",
+   "verified_at": null,
+   "last_signin_at": null,
+   "last_signin_ok": null,
+   "exported_to_edge_at": null,
+   "created_by_attempt": 57
+  },
+  {
+   "id": 18,
+   "ats": "workday",
+   "tenant_host": "acme.wd3.myworkdayjobs.com",
+   "email": "owner+18@example.com",
+   "status": "unknown",
+   "state": "neutral",
+   "code": "unconfirmed",
+   "has_password": true,
+   "created_at": "2026-11-08T10:00:00",
+   "verified_at": null,
+   "last_signin_at": null,
+   "last_signin_ok": null,
+   "exported_to_edge_at": null,
+   "created_by_attempt": 58
+  }
+ ],
+ "no_account_needed": [
+  "greenhouse",
+  "lever",
+  "ashby"
+ ],
+ "variants": {
+  "gmail_switched_off": {
+   "section_2_3_row": "Gmail mailbox: enabled = 0",
+   "expect": {
+    "id": "gmail:1",
+    "state": "paused",
+    "code": "switched_off"
+   },
+   "item": {
+    "id": "gmail:1",
+    "kind": "gmail",
+    "state": "paused",
+    "code": "switched_off",
+    "message": null,
+    "optional": true,
+    "stored_in": "credential_manager",
+    "checked_at": "2026-11-11T09:10:00",
+    "next_check_at": "2026-11-11T09:20:00",
+    "last_ok_at": "2026-11-11T09:10:00",
+    "retry_after": null,
+    "facts": {
+     "address": "owner1@example.com",
+     "enabled": false,
+     "shared_with_apply": false,
+     "counts": {
+      "scanned": 42,
+      "duplicates": 3,
+      "skipped": 30,
+      "bodies": 9,
+      "matched": 6,
+      "applied": 2,
+      "suggested": 1,
+      "unmatched": 3,
+      "pending_model": 0,
+      "model_calls": 4,
+      "errors": 0
+     },
+     "consent_current": true
+    }
+   }
+  },
+  "gmail_consent": {
+   "section_2_3_row": "Gmail mailbox: consent_version != CONSENT_VERSION",
+   "expect": {
+    "id": "gmail:2",
+    "state": "attention",
+    "code": "consent"
+   },
+   "item": {
+    "id": "gmail:2",
+    "kind": "gmail",
+    "state": "attention",
+    "code": "consent",
+    "message": null,
+    "optional": true,
+    "stored_in": "credential_manager",
+    "checked_at": "2026-11-11T09:10:00",
+    "next_check_at": "2026-11-11T09:20:00",
+    "last_ok_at": "2026-11-11T09:10:00",
+    "retry_after": null,
+    "facts": {
+     "address": "owner2@example.com",
+     "enabled": true,
+     "shared_with_apply": false,
+     "counts": {
+      "scanned": 42,
+      "duplicates": 3,
+      "skipped": 30,
+      "bodies": 9,
+      "matched": 6,
+      "applied": 2,
+      "suggested": 1,
+      "unmatched": 3,
+      "pending_model": 0,
+      "model_calls": 4,
+      "errors": 0
+     },
+     "consent_current": false
+    }
+   }
+  },
+  "gmail_paused_login_refused": {
+   "section_2_3_row": "Gmail mailbox: state = paused with state_code login_refused",
+   "expect": {
+    "id": "gmail:3",
+    "state": "attention",
+    "code": "login_refused"
+   },
+   "item": {
+    "id": "gmail:3",
+    "kind": "gmail",
+    "state": "attention",
+    "code": "login_refused",
+    "message": "Paused: Gmail refused the app password. It may have been revoked, which happens when you change your Google password. Create a new app password and enter it here.",
+    "optional": true,
+    "stored_in": "credential_manager",
+    "checked_at": "2026-11-11T09:10:00",
+    "next_check_at": "2026-11-11T09:20:00",
+    "last_ok_at": "2026-11-10T09:00:00",
+    "retry_after": null,
+    "facts": {
+     "address": "owner3@example.com",
+     "enabled": true,
+     "shared_with_apply": false,
+     "counts": {
+      "scanned": 42,
+      "duplicates": 3,
+      "skipped": 30,
+      "bodies": 9,
+      "matched": 6,
+      "applied": 2,
+      "suggested": 1,
+      "unmatched": 3,
+      "pending_model": 0,
+      "model_calls": 4,
+      "errors": 0
+     },
+     "consent_current": true
+    }
+   }
+  },
+  "gmail_paused_app_password_required": {
+   "section_2_3_row": "Gmail mailbox: state = paused with state_code app_password_required",
+   "expect": {
+    "id": "gmail:4",
+    "state": "attention",
+    "code": "app_password_required"
+   },
+   "item": {
+    "id": "gmail:4",
+    "kind": "gmail",
+    "state": "attention",
+    "code": "app_password_required",
+    "message": "Paused: Gmail needs an app password, not your Google password. Create one at myaccount.google.com/apppasswords.",
+    "optional": true,
+    "stored_in": "credential_manager",
+    "checked_at": "2026-11-11T09:10:00",
+    "next_check_at": "2026-11-11T09:20:00",
+    "last_ok_at": "2026-11-10T09:00:00",
+    "retry_after": null,
+    "facts": {
+     "address": "owner4@example.com",
+     "enabled": true,
+     "shared_with_apply": false,
+     "counts": {
+      "scanned": 42,
+      "duplicates": 3,
+      "skipped": 30,
+      "bodies": 9,
+      "matched": 6,
+      "applied": 2,
+      "suggested": 1,
+      "unmatched": 3,
+      "pending_model": 0,
+      "model_calls": 4,
+      "errors": 0
+     },
+     "consent_current": true
+    }
+   }
+  },
+  "gmail_paused_web_login_required": {
+   "section_2_3_row": "Gmail mailbox: state = paused with state_code web_login_required",
+   "expect": {
+    "id": "gmail:5",
+    "state": "attention",
+    "code": "web_login_required"
+   },
+   "item": {
+    "id": "gmail:5",
+    "kind": "gmail",
+    "state": "attention",
+    "code": "web_login_required",
+    "message": "Paused: Google blocked the sign-in as unusual. Sign in to Gmail in your browser, then click Check now.",
+    "optional": true,
+    "stored_in": "credential_manager",
+    "checked_at": "2026-11-11T09:10:00",
+    "next_check_at": "2026-11-11T09:20:00",
+    "last_ok_at": "2026-11-10T09:00:00",
+    "retry_after": null,
+    "facts": {
+     "address": "owner5@example.com",
+     "enabled": true,
+     "shared_with_apply": false,
+     "counts": {
+      "scanned": 42,
+      "duplicates": 3,
+      "skipped": 30,
+      "bodies": 9,
+      "matched": 6,
+      "applied": 2,
+      "suggested": 1,
+      "unmatched": 3,
+      "pending_model": 0,
+      "model_calls": 4,
+      "errors": 0
+     },
+     "consent_current": true
+    }
+   }
+  },
+  "gmail_paused_not_set_up": {
+   "section_2_3_row": "Gmail mailbox: state = paused with state_code not_set_up",
+   "expect": {
+    "id": "gmail:6",
+    "state": "attention",
+    "code": "not_set_up"
+   },
+   "item": {
+    "id": "gmail:6",
+    "kind": "gmail",
+    "state": "attention",
+    "code": "not_set_up",
+    "message": "Paused: no app password is stored for this mailbox. Enter it again to continue.",
+    "optional": true,
+    "stored_in": "credential_manager",
+    "checked_at": "2026-11-11T09:10:00",
+    "next_check_at": "2026-11-11T09:20:00",
+    "last_ok_at": "2026-11-10T09:00:00",
+    "retry_after": null,
+    "facts": {
+     "address": "owner6@example.com",
+     "enabled": true,
+     "shared_with_apply": false,
+     "counts": {
+      "scanned": 42,
+      "duplicates": 3,
+      "skipped": 30,
+      "bodies": 9,
+      "matched": 6,
+      "applied": 2,
+      "suggested": 1,
+      "unmatched": 3,
+      "pending_model": 0,
+      "model_calls": 4,
+      "errors": 0
+     },
+     "consent_current": true
+    }
+   }
+  },
+  "gmail_error_recent": {
+   "section_2_3_row": "Gmail mailbox: state error, last_ok_at within 24 h",
+   "expect": {
+    "id": "gmail:7",
+    "state": "connected",
+    "code": "retrying"
+   },
+   "item": {
+    "id": "gmail:7",
+    "kind": "gmail",
+    "state": "connected",
+    "code": "retrying",
+    "message": "Couldn't reach Gmail. JobScraper will try again later.",
+    "optional": true,
+    "stored_in": "credential_manager",
+    "checked_at": "2026-11-11T09:10:00",
+    "next_check_at": "2026-11-11T09:20:00",
+    "last_ok_at": "2026-11-11T03:00:00",
+    "retry_after": "2026-11-11T09:30:00",
+    "facts": {
+     "address": "owner7@example.com",
+     "enabled": true,
+     "shared_with_apply": false,
+     "counts": {
+      "scanned": 42,
+      "duplicates": 3,
+      "skipped": 30,
+      "bodies": 9,
+      "matched": 6,
+      "applied": 2,
+      "suggested": 1,
+      "unmatched": 3,
+      "pending_model": 0,
+      "model_calls": 4,
+      "errors": 0
+     },
+     "consent_current": true
+    }
+   }
+  },
+  "gmail_backoff_recent": {
+   "section_2_3_row": "Gmail mailbox: state backoff, last_ok_at within 24 h",
+   "expect": {
+    "id": "gmail:8",
+    "state": "connected",
+    "code": "retrying"
+   },
+   "item": {
+    "id": "gmail:8",
+    "kind": "gmail",
+    "state": "connected",
+    "code": "retrying",
+    "message": "Gmail asked JobScraper to slow down. It will try again in an hour.",
+    "optional": true,
+    "stored_in": "credential_manager",
+    "checked_at": "2026-11-11T09:10:00",
+    "next_check_at": "2026-11-11T09:20:00",
+    "last_ok_at": "2026-11-10T20:00:00",
+    "retry_after": "2026-11-11T10:12:00",
+    "facts": {
+     "address": "owner8@example.com",
+     "enabled": true,
+     "shared_with_apply": false,
+     "counts": {
+      "scanned": 42,
+      "duplicates": 3,
+      "skipped": 30,
+      "bodies": 9,
+      "matched": 6,
+      "applied": 2,
+      "suggested": 1,
+      "unmatched": 3,
+      "pending_model": 0,
+      "model_calls": 4,
+      "errors": 0
+     },
+     "consent_current": true
+    }
+   }
+  },
+  "gmail_error_stale": {
+   "section_2_3_row": "Gmail mailbox: state error, last_ok_at older than 24 h",
+   "expect": {
+    "id": "gmail:9",
+    "state": "attention",
+    "code": "network"
+   },
+   "item": {
+    "id": "gmail:9",
+    "kind": "gmail",
+    "state": "attention",
+    "code": "network",
+    "message": "Couldn't reach Gmail. JobScraper will try again later.",
+    "optional": true,
+    "stored_in": "credential_manager",
+    "checked_at": "2026-11-11T09:10:00",
+    "next_check_at": "2026-11-11T09:20:00",
+    "last_ok_at": "2026-11-09T09:00:00",
+    "retry_after": "2026-11-11T09:30:00",
+    "facts": {
+     "address": "owner9@example.com",
+     "enabled": true,
+     "shared_with_apply": false,
+     "counts": {
+      "scanned": 42,
+      "duplicates": 3,
+      "skipped": 30,
+      "bodies": 9,
+      "matched": 6,
+      "applied": 2,
+      "suggested": 1,
+      "unmatched": 3,
+      "pending_model": 0,
+      "model_calls": 4,
+      "errors": 0
+     },
+     "consent_current": true
+    }
+   }
+  },
+  "gmail_backoff_never_ok": {
+   "section_2_3_row": "Gmail mailbox: state backoff, last_ok_at null",
+   "expect": {
+    "id": "gmail:10",
+    "state": "attention",
+    "code": "rate_limited"
+   },
+   "item": {
+    "id": "gmail:10",
+    "kind": "gmail",
+    "state": "attention",
+    "code": "rate_limited",
+    "message": "Gmail asked JobScraper to slow down. It will try again in an hour.",
+    "optional": true,
+    "stored_in": "credential_manager",
+    "checked_at": "2026-11-11T09:10:00",
+    "next_check_at": "2026-11-11T09:20:00",
+    "last_ok_at": null,
+    "retry_after": "2026-11-11T10:12:00",
+    "facts": {
+     "address": "owner10@example.com",
+     "enabled": true,
+     "shared_with_apply": false,
+     "counts": null,
+     "consent_current": true
+    }
+   }
+  },
+  "gmail_ok_timer_running": {
+   "section_2_3_row": "Gmail mailbox: state ok, timer running",
+   "expect": {
+    "id": "gmail:11",
+    "state": "connected",
+    "code": "ok"
+   },
+   "item": {
+    "id": "gmail:11",
+    "kind": "gmail",
+    "state": "connected",
+    "code": "ok",
+    "message": null,
+    "optional": true,
+    "stored_in": "credential_manager",
+    "checked_at": "2026-11-11T09:10:00",
+    "next_check_at": "2026-11-11T09:20:00",
+    "last_ok_at": "2026-11-11T09:10:00",
+    "retry_after": null,
+    "facts": {
+     "address": "owner11@example.com",
+     "enabled": true,
+     "shared_with_apply": false,
+     "counts": {
+      "scanned": 42,
+      "duplicates": 3,
+      "skipped": 30,
+      "bodies": 9,
+      "matched": 6,
+      "applied": 2,
+      "suggested": 1,
+      "unmatched": 3,
+      "pending_model": 0,
+      "model_calls": 4,
+      "errors": 0
+     },
+     "consent_current": true
+    }
+   }
+  },
+  "gmail_ok_timer_off": {
+   "section_2_3_row": "Gmail mailbox: state ok, mail_status.enabled true, timer not running",
+   "expect": {
+    "id": "gmail:12",
+    "state": "connected",
+    "code": "timer_off"
+   },
+   "item": {
+    "id": "gmail:12",
+    "kind": "gmail",
+    "state": "connected",
+    "code": "timer_off",
+    "message": null,
+    "optional": true,
+    "stored_in": "credential_manager",
+    "checked_at": "2026-11-11T09:10:00",
+    "next_check_at": null,
+    "last_ok_at": "2026-11-11T09:10:00",
+    "retry_after": null,
+    "facts": {
+     "address": "owner12@example.com",
+     "enabled": true,
+     "shared_with_apply": false,
+     "counts": {
+      "scanned": 42,
+      "duplicates": 3,
+      "skipped": 30,
+      "bodies": 9,
+      "matched": 6,
+      "applied": 2,
+      "suggested": 1,
+      "unmatched": 3,
+      "pending_model": 0,
+      "model_calls": 4,
+      "errors": 0
+     },
+     "consent_current": true
+    }
+   }
+  },
+  "gmail_none": {
+   "section_2_3_row": "Gmail (none): no mail_accounts rows",
+   "expect": {
+    "id": "gmail",
+    "state": "not_set_up",
+    "code": "none"
+   },
+   "item": {
+    "id": "gmail",
+    "kind": "gmail",
+    "state": "not_set_up",
+    "code": "none",
+    "message": null,
+    "optional": true,
+    "stored_in": null,
+    "checked_at": null,
+    "next_check_at": null,
+    "last_ok_at": null,
+    "retry_after": null,
+    "facts": {}
+   }
+  },
+  "apply_mailbox_ok": {
+   "section_2_3_row": "Application mailbox: host and username set, vault entry present",
+   "expect": {
+    "id": "apply-mailbox",
+    "state": "connected",
+    "code": "ok"
+   },
+   "item": {
+    "id": "apply-mailbox",
+    "kind": "apply_mailbox",
+    "state": "connected",
+    "code": "ok",
+    "message": null,
+    "optional": false,
+    "stored_in": "credential_manager",
+    "checked_at": null,
+    "next_check_at": null,
+    "last_ok_at": null,
+    "retry_after": null,
+    "facts": {
+     "host": "imap.gmail.com",
+     "port": 993,
+     "username": "apply@example.com",
+     "has_password": true,
+     "backup_separate": false
+    }
+   }
+  },
+  "apply_mailbox_no_password": {
+   "section_2_3_row": "Application mailbox: username set, no vault entry",
+   "expect": {
+    "id": "apply-mailbox",
+    "state": "attention",
+    "code": "no_password"
+   },
+   "item": {
+    "id": "apply-mailbox",
+    "kind": "apply_mailbox",
+    "state": "attention",
+    "code": "no_password",
+    "message": null,
+    "optional": false,
+    "stored_in": "credential_manager",
+    "checked_at": null,
+    "next_check_at": null,
+    "last_ok_at": null,
+    "retry_after": null,
+    "facts": {
+     "host": "imap.gmail.com",
+     "port": 993,
+     "username": "apply@example.com",
+     "has_password": false,
+     "backup_separate": false
+    }
+   }
+  },
+  "apply_mailbox_unset": {
+   "section_2_3_row": "Application mailbox: username unset",
+   "expect": {
+    "id": "apply-mailbox",
+    "state": "not_set_up",
+    "code": "none"
+   },
+   "item": {
+    "id": "apply-mailbox",
+    "kind": "apply_mailbox",
+    "state": "not_set_up",
+    "code": "none",
+    "message": null,
+    "optional": true,
+    "stored_in": null,
+    "checked_at": null,
+    "next_check_at": null,
+    "last_ok_at": null,
+    "retry_after": null,
+    "facts": {
+     "host": "imap.gmail.com",
+     "port": 993,
+     "username": "",
+     "has_password": false,
+     "backup_separate": false
+    }
+   }
+  },
+  "apply_mailbox_backup_ok": {
+   "section_2_3_row": "Application mailbox, backup id (not a separate 2.3 row): host and username set, vault entry present",
+   "expect": {
+    "id": "apply-mailbox:backup",
+    "state": "connected",
+    "code": "ok"
+   },
+   "item": {
+    "id": "apply-mailbox:backup",
+    "kind": "apply_mailbox",
+    "state": "connected",
+    "code": "ok",
+    "message": null,
+    "optional": true,
+    "stored_in": "credential_manager",
+    "checked_at": null,
+    "next_check_at": null,
+    "last_ok_at": null,
+    "retry_after": null,
+    "facts": {
+     "host": "imap.example.com",
+     "port": 993,
+     "username": "backup@example.com",
+     "has_password": true,
+     "backup_separate": true
+    }
+   }
+  },
+  "apply_mailbox_backup_unset": {
+   "section_2_3_row": "Application mailbox, backup id: username unset",
+   "expect": {
+    "id": "apply-mailbox:backup",
+    "state": "not_set_up",
+    "code": "none"
+   },
+   "item": {
+    "id": "apply-mailbox:backup",
+    "kind": "apply_mailbox",
+    "state": "not_set_up",
+    "code": "none",
+    "message": null,
+    "optional": true,
+    "stored_in": null,
+    "checked_at": null,
+    "next_check_at": null,
+    "last_ok_at": null,
+    "retry_after": null,
+    "facts": {
+     "host": "",
+     "port": 993,
+     "username": "",
+     "has_password": false,
+     "backup_separate": false
+    }
+   }
+  },
+  "employer_created_ok": {
+   "section_2_3_row": "Employer account: created, password present, last_signin_ok != 0",
+   "expect": {
+    "id": "account:11",
+    "state": "connected",
+    "code": "ok"
+   },
+   "employer_account": {
+    "id": 11,
+    "ats": "workday",
+    "tenant_host": "acme.wd3.myworkdayjobs.com",
+    "email": "owner+11@example.com",
+    "status": "created",
+    "state": "connected",
+    "code": "ok",
+    "has_password": true,
+    "created_at": "2026-11-08T10:00:00",
+    "verified_at": null,
+    "last_signin_at": "2026-11-10T10:00:00",
+    "last_signin_ok": true,
+    "exported_to_edge_at": null,
+    "created_by_attempt": 51
+   }
+  },
+  "employer_created_signin_unset": {
+   "section_2_3_row": "Employer account: created, password present, last_signin_ok null (null != 0 reads as ok)",
+   "expect": {
+    "id": "account:12",
+    "state": "connected",
+    "code": "ok"
+   },
+   "employer_account": {
+    "id": 12,
+    "ats": "workday",
+    "tenant_host": "acme.wd3.myworkdayjobs.com",
+    "email": "owner+12@example.com",
+    "status": "created",
+    "state": "connected",
+    "code": "ok",
+    "has_password": true,
+    "created_at": "2026-11-08T10:00:00",
+    "verified_at": null,
+    "last_signin_at": "2026-11-10T10:00:00",
+    "last_signin_ok": null,
+    "exported_to_edge_at": null,
+    "created_by_attempt": 52
+   }
+  },
+  "employer_verified": {
+   "section_2_3_row": "Employer account: verified, password present, last_signin_ok != 0",
+   "expect": {
+    "id": "account:13",
+    "state": "connected",
+    "code": "verified"
+   },
+   "employer_account": {
+    "id": 13,
+    "ats": "workday",
+    "tenant_host": "acme.wd3.myworkdayjobs.com",
+    "email": "owner+13@example.com",
+    "status": "verified",
+    "state": "connected",
+    "code": "verified",
+    "has_password": true,
+    "created_at": "2026-11-08T10:00:00",
+    "verified_at": "2026-11-09T10:00:00",
+    "last_signin_at": "2026-11-10T10:00:00",
+    "last_signin_ok": true,
+    "exported_to_edge_at": null,
+    "created_by_attempt": 53
+   }
+  },
+  "employer_signin_failed": {
+   "section_2_3_row": "Employer account: signin_failed",
+   "expect": {
+    "id": "account:14",
+    "state": "attention",
+    "code": "signin_failed"
+   },
+   "employer_account": {
+    "id": 14,
+    "ats": "workday",
+    "tenant_host": "acme.wd3.myworkdayjobs.com",
+    "email": "owner+14@example.com",
+    "status": "signin_failed",
+    "state": "attention",
+    "code": "signin_failed",
+    "has_password": true,
+    "created_at": "2026-11-08T10:00:00",
+    "verified_at": null,
+    "last_signin_at": "2026-11-10T10:00:00",
+    "last_signin_ok": false,
+    "exported_to_edge_at": null,
+    "created_by_attempt": 54
+   }
+  },
+  "employer_exists_no_password": {
+   "section_2_3_row": "Employer account: exists_no_password",
+   "expect": {
+    "id": "account:15",
+    "state": "attention",
+    "code": "exists_no_password"
+   },
+   "employer_account": {
+    "id": 15,
+    "ats": "workday",
+    "tenant_host": "acme.wd3.myworkdayjobs.com",
+    "email": "owner+15@example.com",
+    "status": "exists_no_password",
+    "state": "attention",
+    "code": "exists_no_password",
+    "has_password": false,
+    "created_at": "2026-11-08T10:00:00",
+    "verified_at": null,
+    "last_signin_at": null,
+    "last_signin_ok": null,
+    "exported_to_edge_at": null,
+    "created_by_attempt": 55
+   }
+  },
+  "employer_password_missing": {
+   "section_2_3_row": "Employer account: created / verified with no vault entry",
+   "expect": {
+    "id": "account:16",
+    "state": "attention",
+    "code": "password_missing"
+   },
+   "employer_account": {
+    "id": 16,
+    "ats": "workday",
+    "tenant_host": "acme.wd3.myworkdayjobs.com",
+    "email": "owner+16@example.com",
+    "status": "created",
+    "state": "attention",
+    "code": "password_missing",
+    "has_password": false,
+    "created_at": "2026-11-08T10:00:00",
+    "verified_at": null,
+    "last_signin_at": "2026-11-10T10:00:00",
+    "last_signin_ok": true,
+    "exported_to_edge_at": null,
+    "created_by_attempt": 56
+   }
+  },
+  "employer_creating": {
+   "section_2_3_row": "Employer account: creating",
+   "expect": {
+    "id": "account:17",
+    "state": "neutral",
+    "code": "unconfirmed"
+   },
+   "employer_account": {
+    "id": 17,
+    "ats": "workday",
+    "tenant_host": "acme.wd3.myworkdayjobs.com",
+    "email": "owner+17@example.com",
+    "status": "creating",
+    "state": "neutral",
+    "code": "unconfirmed",
+    "has_password": true,
+    "created_at": "2026-11-08T10:00:00",
+    "verified_at": null,
+    "last_signin_at": null,
+    "last_signin_ok": null,
+    "exported_to_edge_at": null,
+    "created_by_attempt": 57
+   }
+  },
+  "employer_unknown": {
+   "section_2_3_row": "Employer account: unknown",
+   "expect": {
+    "id": "account:18",
+    "state": "neutral",
+    "code": "unconfirmed"
+   },
+   "employer_account": {
+    "id": 18,
+    "ats": "workday",
+    "tenant_host": "acme.wd3.myworkdayjobs.com",
+    "email": "owner+18@example.com",
+    "status": "unknown",
+    "state": "neutral",
+    "code": "unconfirmed",
+    "has_password": true,
+    "created_at": "2026-11-08T10:00:00",
+    "verified_at": null,
+    "last_signin_at": null,
+    "last_signin_ok": null,
+    "exported_to_edge_at": null,
+    "created_by_attempt": 58
+   }
+  },
+  "employer_summary_worst": {
+   "section_2_3_row": "Employer accounts (summary): worst row state",
+   "expect": {
+    "id": "employer-accounts",
+    "state": "attention",
+    "code": "signin_failed"
+   },
+   "item": {
+    "id": "employer-accounts",
+    "kind": "employer_accounts",
+    "state": "attention",
+    "code": "signin_failed",
+    "message": null,
+    "optional": true,
+    "stored_in": "credential_manager",
+    "checked_at": null,
+    "next_check_at": null,
+    "last_ok_at": null,
+    "retry_after": null,
+    "facts": {
+     "total": 8,
+     "attention": 3
+    }
+   }
+  },
+  "employer_summary_none": {
+   "section_2_3_row": "Employer accounts (summary): 0 rows",
+   "expect": {
+    "id": "employer-accounts",
+    "state": "not_set_up",
+    "code": "none"
+   },
+   "item": {
+    "id": "employer-accounts",
+    "kind": "employer_accounts",
+    "state": "not_set_up",
+    "code": "none",
+    "message": null,
+    "optional": true,
+    "stored_in": null,
+    "checked_at": null,
+    "next_check_at": null,
+    "last_ok_at": null,
+    "retry_after": null,
+    "facts": {
+     "total": 0,
+     "attention": 0
+    }
+   }
+  },
+  "edge_missing": {
+   "section_2_3_row": "Apply browser: profile_dir missing",
+   "expect": {
+    "id": "edge",
+    "state": "not_set_up",
+    "code": "none"
+   },
+   "item": {
+    "id": "edge",
+    "kind": "edge",
+    "state": "not_set_up",
+    "code": "none",
+    "message": null,
+    "optional": true,
+    "stored_in": "edge_profile",
+    "checked_at": null,
+    "next_check_at": null,
+    "last_ok_at": null,
+    "retry_after": null,
+    "facts": {
+     "exists": false,
+     "in_use": false,
+     "sync": false,
+     "last_used_at": null
+    }
+   }
+  },
+  "edge_in_use_job": {
+   "section_2_3_row": "Apply browser: web job manager runs an apply job",
+   "expect": {
+    "id": "edge",
+    "state": "connected",
+    "code": "in_use"
+   },
+   "item": {
+    "id": "edge",
+    "kind": "edge",
+    "state": "connected",
+    "code": "in_use",
+    "message": null,
+    "optional": false,
+    "stored_in": "edge_profile",
+    "checked_at": null,
+    "next_check_at": null,
+    "last_ok_at": null,
+    "retry_after": null,
+    "facts": {
+     "exists": true,
+     "in_use": true,
+     "sync": false,
+     "last_used_at": "2026-11-10T14:00:00"
+    }
+   }
+  },
+  "edge_in_use_lockfile": {
+   "section_2_3_row": "Apply browser: lockfile exists and cannot be opened",
+   "expect": {
+    "id": "edge",
+    "state": "connected",
+    "code": "in_use"
+   },
+   "item": {
+    "id": "edge",
+    "kind": "edge",
+    "state": "connected",
+    "code": "in_use",
+    "message": null,
+    "optional": false,
+    "stored_in": "edge_profile",
+    "checked_at": null,
+    "next_check_at": null,
+    "last_ok_at": null,
+    "retry_after": null,
+    "facts": {
+     "exists": true,
+     "in_use": true,
+     "sync": false,
+     "last_used_at": "2026-11-10T14:00:00"
+    }
+   }
+  },
+  "edge_ok": {
+   "section_2_3_row": "Apply browser: dir present, free",
+   "expect": {
+    "id": "edge",
+    "state": "connected",
+    "code": "ok"
+   },
+   "item": {
+    "id": "edge",
+    "kind": "edge",
+    "state": "connected",
+    "code": "ok",
+    "message": null,
+    "optional": false,
+    "stored_in": "edge_profile",
+    "checked_at": null,
+    "next_check_at": null,
+    "last_ok_at": null,
+    "retry_after": null,
+    "facts": {
+     "exists": true,
+     "in_use": false,
+     "sync": false,
+     "last_used_at": "2026-11-10T14:00:00"
+    }
+   }
+  },
+  "model_ai_off_enable_llm": {
+   "section_2_3_row": "Local AI: budget.enable_llm false",
+   "expect": {
+    "id": "model",
+    "state": "paused",
+    "code": "ai_off"
+   },
+   "item": {
+    "id": "model",
+    "kind": "model",
+    "state": "paused",
+    "code": "ai_off",
+    "message": null,
+    "optional": false,
+    "stored_in": "this_pc",
+    "checked_at": null,
+    "next_check_at": null,
+    "last_ok_at": null,
+    "retry_after": null,
+    "facts": {
+     "backend": "ollama",
+     "model": "example-model:8b",
+     "local": true,
+     "need_now": false
+    }
+   }
+  },
+  "model_ai_off_backend": {
+   "section_2_3_row": "Local AI: backend off",
+   "expect": {
+    "id": "model",
+    "state": "paused",
+    "code": "ai_off"
+   },
+   "item": {
+    "id": "model",
+    "kind": "model",
+    "state": "paused",
+    "code": "ai_off",
+    "message": null,
+    "optional": false,
+    "stored_in": "this_pc",
+    "checked_at": null,
+    "next_check_at": null,
+    "last_ok_at": null,
+    "retry_after": null,
+    "facts": {
+     "backend": "off",
+     "model": "",
+     "local": false,
+     "need_now": false
+    }
+   }
+  },
+  "model_misconfigured": {
+   "section_2_3_row": "Local AI: unknown backend",
+   "expect": {
+    "id": "model",
+    "state": "attention",
+    "code": "misconfigured"
+   },
+   "item": {
+    "id": "model",
+    "kind": "model",
+    "state": "attention",
+    "code": "misconfigured",
+    "message": null,
+    "optional": false,
+    "stored_in": "this_pc",
+    "checked_at": "2026-11-11T09:12:00",
+    "next_check_at": null,
+    "last_ok_at": null,
+    "retry_after": null,
+    "facts": {
+     "backend": "mystery",
+     "model": "",
+     "local": false,
+     "need_now": false
+    }
+   }
+  },
+  "model_ok": {
+   "section_2_3_row": "Local AI: probe ok",
+   "expect": {
+    "id": "model",
+    "state": "connected",
+    "code": "ok"
+   },
+   "item": {
+    "id": "model",
+    "kind": "model",
+    "state": "connected",
+    "code": "ok",
+    "message": null,
+    "optional": false,
+    "stored_in": "this_pc",
+    "checked_at": "2026-11-11T09:12:00",
+    "next_check_at": null,
+    "last_ok_at": null,
+    "retry_after": null,
+    "facts": {
+     "backend": "ollama",
+     "model": "example-model:8b",
+     "local": true,
+     "need_now": false
+    }
+   }
+  },
+  "model_unreachable_need_now": {
+   "section_2_3_row": "Local AI: probe unreachable and need_now",
+   "expect": {
+    "id": "model",
+    "state": "attention",
+    "code": "unreachable"
+   },
+   "item": {
+    "id": "model",
+    "kind": "model",
+    "state": "attention",
+    "code": "unreachable",
+    "message": null,
+    "optional": false,
+    "stored_in": "this_pc",
+    "checked_at": "2026-11-11T09:12:00",
+    "next_check_at": null,
+    "last_ok_at": null,
+    "retry_after": null,
+    "facts": {
+     "backend": "ollama",
+     "model": "example-model:8b",
+     "local": true,
+     "need_now": true
+    }
+   }
+  },
+  "model_missing_need_now": {
+   "section_2_3_row": "Local AI: probe model_missing and need_now",
+   "expect": {
+    "id": "model",
+    "state": "attention",
+    "code": "model_missing"
+   },
+   "item": {
+    "id": "model",
+    "kind": "model",
+    "state": "attention",
+    "code": "model_missing",
+    "message": null,
+    "optional": false,
+    "stored_in": "this_pc",
+    "checked_at": "2026-11-11T09:12:00",
+    "next_check_at": null,
+    "last_ok_at": null,
+    "retry_after": null,
+    "facts": {
+     "backend": "ollama",
+     "model": "example-model:8b",
+     "local": true,
+     "need_now": true
+    }
+   }
+  },
+  "model_unreachable_idle": {
+   "section_2_3_row": "Local AI: probe unreachable, not need_now",
+   "expect": {
+    "id": "model",
+    "state": "neutral",
+    "code": "unreachable"
+   },
+   "item": {
+    "id": "model",
+    "kind": "model",
+    "state": "neutral",
+    "code": "unreachable",
+    "message": null,
+    "optional": false,
+    "stored_in": "this_pc",
+    "checked_at": "2026-11-11T09:12:00",
+    "next_check_at": null,
+    "last_ok_at": null,
+    "retry_after": null,
+    "facts": {
+     "backend": "ollama",
+     "model": "example-model:8b",
+     "local": true,
+     "need_now": false
+    }
+   }
+  },
+  "model_missing_idle": {
+   "section_2_3_row": "Local AI: probe model_missing, not need_now",
+   "expect": {
+    "id": "model",
+    "state": "neutral",
+    "code": "model_missing"
+   },
+   "item": {
+    "id": "model",
+    "kind": "model",
+    "state": "neutral",
+    "code": "model_missing",
+    "message": null,
+    "optional": false,
+    "stored_in": "this_pc",
+    "checked_at": "2026-11-11T09:12:00",
+    "next_check_at": null,
+    "last_ok_at": null,
+    "retry_after": null,
+    "facts": {
+     "backend": "ollama",
+     "model": "example-model:8b",
+     "local": true,
+     "need_now": false
+    }
+   }
+  },
+  "model_probing": {
+   "section_2_3_row": "Local AI: no probe result yet",
+   "expect": {
+    "id": "model",
+    "state": "checking",
+    "code": "probing"
+   },
+   "item": {
+    "id": "model",
+    "kind": "model",
+    "state": "checking",
+    "code": "probing",
+    "message": null,
+    "optional": false,
+    "stored_in": "this_pc",
+    "checked_at": null,
+    "next_check_at": null,
+    "last_ok_at": null,
+    "retry_after": null,
+    "facts": {
+     "backend": "ollama",
+     "model": "example-model:8b",
+     "local": true,
+     "need_now": false
+    }
+   }
+  },
+  "need_now_a_job_running": {
+   "section_2_3_row": "need_now (a): running job of a kind other than mailtest",
+   "expect": {
+    "id": "model",
+    "state": "attention",
+    "code": "unreachable"
+   },
+   "item": {
+    "id": "model",
+    "kind": "model",
+    "state": "attention",
+    "code": "unreachable",
+    "message": null,
+    "optional": false,
+    "stored_in": "this_pc",
+    "checked_at": "2026-11-11T09:12:00",
+    "next_check_at": null,
+    "last_ok_at": null,
+    "retry_after": null,
+    "facts": {
+     "backend": "ollama",
+     "model": "example-model:8b",
+     "local": true,
+     "need_now": true
+    }
+   }
+  },
+  "need_now_a_mailtest_does_not_count": {
+   "section_2_3_row": "need_now (a) negative: running mailtest job",
+   "expect": {
+    "id": "model",
+    "state": "neutral",
+    "code": "unreachable"
+   },
+   "item": {
+    "id": "model",
+    "kind": "model",
+    "state": "neutral",
+    "code": "unreachable",
+    "message": null,
+    "optional": false,
+    "stored_in": "this_pc",
+    "checked_at": "2026-11-11T09:12:00",
+    "next_check_at": null,
+    "last_ok_at": null,
+    "retry_after": null,
+    "facts": {
+     "backend": "ollama",
+     "model": "example-model:8b",
+     "local": true,
+     "need_now": false
+    }
+   }
+  },
+  "need_now_b_attempt_in_flight": {
+   "section_2_3_row": "need_now (b): attempts_in_flight non-empty",
+   "expect": {
+    "id": "model",
+    "state": "attention",
+    "code": "unreachable"
+   },
+   "item": {
+    "id": "model",
+    "kind": "model",
+    "state": "attention",
+    "code": "unreachable",
+    "message": null,
+    "optional": false,
+    "stored_in": "this_pc",
+    "checked_at": "2026-11-11T09:12:00",
+    "next_check_at": null,
+    "last_ok_at": null,
+    "retry_after": null,
+    "facts": {
+     "backend": "ollama",
+     "model": "example-model:8b",
+     "local": true,
+     "need_now": true
+    }
+   }
+  },
+  "need_now_c_model_unavailable_recent": {
+   "section_2_3_row": "need_now (c): last attempt model_unavailable within 24 h",
+   "expect": {
+    "id": "model",
+    "state": "attention",
+    "code": "unreachable"
+   },
+   "item": {
+    "id": "model",
+    "kind": "model",
+    "state": "attention",
+    "code": "unreachable",
+    "message": null,
+    "optional": false,
+    "stored_in": "this_pc",
+    "checked_at": "2026-11-11T09:12:00",
+    "next_check_at": null,
+    "last_ok_at": null,
+    "retry_after": null,
+    "facts": {
+     "backend": "ollama",
+     "model": "example-model:8b",
+     "local": true,
+     "need_now": true
+    }
+   }
+  },
+  "need_now_c_model_unavailable_old": {
+   "section_2_3_row": "need_now (c) negative: model_unavailable older than 24 h",
+   "expect": {
+    "id": "model",
+    "state": "neutral",
+    "code": "unreachable"
+   },
+   "item": {
+    "id": "model",
+    "kind": "model",
+    "state": "neutral",
+    "code": "unreachable",
+    "message": null,
+    "optional": false,
+    "stored_in": "this_pc",
+    "checked_at": "2026-11-11T09:12:00",
+    "next_check_at": null,
+    "last_ok_at": null,
+    "retry_after": null,
+    "facts": {
+     "backend": "ollama",
+     "model": "example-model:8b",
+     "local": true,
+     "need_now": false
+    }
+   }
+  },
+  "need_now_d_pending_model": {
+   "section_2_3_row": "need_now (d): mail last_counts_json pending_model > 0",
+   "expect": {
+    "id": "model",
+    "state": "attention",
+    "code": "unreachable"
+   },
+   "item": {
+    "id": "model",
+    "kind": "model",
+    "state": "attention",
+    "code": "unreachable",
+    "message": null,
+    "optional": false,
+    "stored_in": "this_pc",
+    "checked_at": "2026-11-11T09:12:00",
+    "next_check_at": null,
+    "last_ok_at": null,
+    "retry_after": null,
+    "facts": {
+     "backend": "ollama",
+     "model": "example-model:8b",
+     "local": true,
+     "need_now": true
+    }
+   }
+  }
+ }
+}
