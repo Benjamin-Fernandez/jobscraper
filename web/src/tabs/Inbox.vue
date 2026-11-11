@@ -12,7 +12,7 @@
 // posting on the company's site asks afterwards whether you applied, the way
 // LinkedIn does, so the record is one click away.
 import { computed, nextTick, onActivated, onBeforeUnmount, onDeactivated, onMounted, ref, watch } from 'vue'
-import { describeError, setApplicationStatus, untrackApplication } from '../api.js'
+import { ApiError, applyStatus, describeError, setApplicationStatus, startAutoApply, untrackApplication } from '../api.js'
 import { dismiss, dismissedAt, isDismissed, migrateSessionDismissals, restore } from '../dismissed.js'
 import { cleanLocation, exactTime, plural, safeUrl, shortDate } from '../format.js'
 import { loadPosting, postingEntry } from '../postingCache.js'
@@ -310,6 +310,60 @@ function chooseRuns() {
   window.location.hash = '#/runs'
 }
 
+// ---- Auto-apply (Q-110, F-30, D-200): the owner's click is the only trigger ----
+// `applyState` is GET /api/apply/status ({mode, missing, busy}); null until it
+// loads or when it cannot, which keeps the button off rather than guessing.
+const applyState = ref(null)
+const starting = ref(false)
+const applyReady = computed(() => Boolean(applyState.value)
+  && applyState.value.missing.length === 0 && !applyState.value.busy)
+
+async function loadApplyStatus() {
+  try {
+    const s = await applyStatus()
+    applyState.value = s && Array.isArray(s.missing) ? s : null
+  } catch {
+    applyState.value = null
+  }
+}
+onMounted(loadApplyStatus)
+
+// What a 422 means, in the owner's words: the refusals' own sentences, or the profile.
+function refusalText(body) {
+  if (body?.detail === 'profile_incomplete') return 'Finish your application details first.'
+  const refused = Array.isArray(body?.refused) ? body.refused : []
+  const texts = refused.map(r => [r.text, r.hint].filter(Boolean).join(' '))
+  return texts.length ? texts.join(' ') : 'Could not start auto-apply.'
+}
+
+async function autoApply(job) {
+  if (!applyReady.value || starting.value) return
+  if (applyState.value.mode === 'auto'
+    && !window.confirm(`Send an application to ${job.company} now? JobScraper fills and submits it in Edge.`)) return
+  starting.value = true
+  try {
+    const r = await startAutoApply([job.id])
+    const refused = Array.isArray(r?.refused) ? r.refused.map(x => x.text).filter(Boolean) : []
+    showToast({
+      message: ['Auto-apply started.',
+        r?.mode === 'dry_run' ? 'Dry run: the form is filled in Edge and left open; nothing is submitted.' : '',
+        ...refused].filter(Boolean).join(' '),
+      link: { label: 'Follow it in Runs', href: '#/runs' },
+    })
+  } catch (e) {
+    if (e instanceof ApiError && e.status === 409) {
+      showToast({ message: 'Another job is running; try again when it finishes.' })
+    } else if (e instanceof ApiError && e.status === 422) {
+      showToast({ message: refusalText(e.body) })
+    } else {
+      showToast({ message: `Could not start auto-apply: ${describeError(e)}` })
+    }
+  } finally {
+    starting.value = false
+    loadApplyStatus()
+  }
+}
+
 function markOpened(job) {
   opened.value = new Set(opened.value).add(job.id)
 }
@@ -456,7 +510,7 @@ onDeactivated(() => window.removeEventListener('keydown', onShortcut))
         <p class="muted">Show other runs above, or start a new one from the <a href="#/runs">Runs tab</a>.</p>
       </div>
     </SetupChecklist>
-    <div v-else-if="!visible.length && !query.trim()" class="empty caught-up">
+    <div v-else-if="!error && !visible.length && !query.trim()" class="empty caught-up">
       <Icon name="check" :size="28" />
       <p class="empty-title">You're all caught up.</p>
       <p class="muted">Every new role is triaged.<template v-if="notInterested.length"> <button type="button" class="link show-ni" @click="niOpen = true">Show Not interested ({{ notInterested.length }})</button></template><template v-else> See <a href="#/applications">Applications</a>.</template></p>
@@ -528,9 +582,17 @@ onDeactivated(() => window.removeEventListener('keydown', onShortcut))
           <template #actions>
             <div class="action-bar">
             <div class="actions">
+              <button
+                type="button"
+                class="button primary auto-apply"
+                :disabled="!applyReady || busy || starting"
+                @click="autoApply(selected)"
+              >
+                <Icon name="briefcase" /> Auto-apply
+              </button>
               <a
                 v-if="safeUrl(selected.url)"
-                class="button primary open"
+                class="button open"
                 :href="safeUrl(selected.url)"
                 target="_blank"
                 rel="noopener noreferrer"
@@ -550,6 +612,15 @@ onDeactivated(() => window.removeEventListener('keydown', onShortcut))
                 <Icon name="x" /> Not interested
               </button>
             </div>
+            <p v-if="applyState" class="auto-apply-note muted small">
+              <template v-if="applyState.missing.length">
+                <a class="auto-apply-profile" href="#/profile">Finish your application details first</a>
+                ({{ applyState.missing.length }} missing).
+              </template>
+              <template v-else-if="applyState.busy">Another job is running.</template>
+              <template v-if="applyState.mode === 'auto'">Auto-apply mode: automatic submit</template>
+              <template v-else>Auto-apply mode: dry run (fills, never submits)</template>
+            </p>
             <p class="shortcuts muted">
               <template v-if="shortcutsOn">
                 Keys: <kbd>S</kbd> save · <kbd>A</kbd> applied · <kbd>X</kbd> not interested · <kbd>O</kbd> open ·
@@ -706,6 +777,7 @@ onDeactivated(() => window.removeEventListener('keydown', onShortcut))
 }
 
 /* Keyboard hints: for a keyboard, not a touch screen. */
+.auto-apply-note { margin: var(--space-2) 0 0; }
 .shortcuts { margin: var(--space-2) 0 0; font-size: var(--text-xs); }
 .shortcuts kbd {
   display: inline-block; min-width: 1.4em; padding: 0 0.3em; text-align: center;

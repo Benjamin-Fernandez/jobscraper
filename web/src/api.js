@@ -403,3 +403,17 @@ export function problemOf(e) {
     text: describeError(e),
   }
 }
+
+// ---- Q-110 (F-30, D-200): start auto-apply from the Inbox ----
+
+// {mode:'auto'|'dry_run', missing:[dotted paths], busy}. Never throws on a missing profile.
+export function applyStatus() {
+  return request('apply/status')
+}
+
+// Start an apply job for the roles the owner clicked. 202 {job, accepted, refused, mode};
+// 409 {detail:'busy'}; 422 {detail:'profile_incomplete', missing} or {detail:'refused', refused}
+// (refused: [{job_id, reason_code, text, hint}]). e.body carries the lists.
+export function startAutoApply(jobIds) {
+  return sendJson('apply', 'POST', { job_ids: jobIds })
+}
