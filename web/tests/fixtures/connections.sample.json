@@ -18,7 +18,7 @@
    "optional": true,
    "stored_in": "credential_manager",
    "checked_at": "2026-11-11T09:10:00",
-   "next_check_at": "2026-11-11T09:20:00",
+   "next_check_at": null,
    "last_ok_at": "2026-11-11T09:10:00",
    "retry_after": null,
    "facts": {
@@ -473,7 +473,9 @@
     "backend": "ollama",
     "model": "example-model:8b",
     "local": true,
-    "need_now": false
+    "need_now": false,
+    "need_reason": null,
+    "pending_mail": 0
    }
   }
  ],
@@ -629,7 +631,7 @@
     "optional": true,
     "stored_in": "credential_manager",
     "checked_at": "2026-11-11T09:10:00",
-    "next_check_at": "2026-11-11T09:20:00",
+    "next_check_at": null,
     "last_ok_at": "2026-11-11T09:10:00",
     "retry_after": null,
     "facts": {
@@ -1616,7 +1618,9 @@
      "backend": "ollama",
      "model": "example-model:8b",
      "local": true,
-     "need_now": false
+     "need_now": false,
+     "need_reason": null,
+     "pending_mail": 0
     }
    }
   },
@@ -1643,7 +1647,9 @@
      "backend": "off",
      "model": "",
      "local": false,
-     "need_now": false
+     "need_now": false,
+     "need_reason": null,
+     "pending_mail": 0
     }
    }
   },
@@ -1670,7 +1676,9 @@
      "backend": "mystery",
      "model": "",
      "local": false,
-     "need_now": false
+     "need_now": false,
+     "need_reason": null,
+     "pending_mail": 0
     }
    }
   },
@@ -1697,7 +1705,9 @@
      "backend": "ollama",
      "model": "example-model:8b",
      "local": true,
-     "need_now": false
+     "need_now": false,
+     "need_reason": null,
+     "pending_mail": 0
     }
    }
   },
@@ -1724,7 +1734,9 @@
      "backend": "ollama",
      "model": "example-model:8b",
      "local": true,
-     "need_now": true
+     "need_now": true,
+     "need_reason": "run",
+     "pending_mail": 0
     }
    }
   },
@@ -1751,7 +1763,9 @@
      "backend": "ollama",
      "model": "example-model:8b",
      "local": true,
-     "need_now": true
+     "need_now": true,
+     "need_reason": "run",
+     "pending_mail": 0
     }
    }
   },
@@ -1778,7 +1792,9 @@
      "backend": "ollama",
      "model": "example-model:8b",
      "local": true,
-     "need_now": false
+     "need_now": false,
+     "need_reason": null,
+     "pending_mail": 0
     }
    }
   },
@@ -1805,7 +1821,9 @@
      "backend": "ollama",
      "model": "example-model:8b",
      "local": true,
-     "need_now": false
+     "need_now": false,
+     "need_reason": null,
+     "pending_mail": 0
     }
    }
   },
@@ -1832,7 +1850,9 @@
      "backend": "ollama",
      "model": "example-model:8b",
      "local": true,
-     "need_now": false
+     "need_now": false,
+     "need_reason": null,
+     "pending_mail": 0
     }
    }
   },
@@ -1859,7 +1879,9 @@
      "backend": "ollama",
      "model": "example-model:8b",
      "local": true,
-     "need_now": true
+     "need_now": true,
+     "need_reason": "run",
+     "pending_mail": 0
     }
    }
   },
@@ -1886,7 +1908,9 @@
      "backend": "ollama",
      "model": "example-model:8b",
      "local": true,
-     "need_now": false
+     "need_now": false,
+     "need_reason": null,
+     "pending_mail": 0
     }
    }
   },
@@ -1913,7 +1937,9 @@
      "backend": "ollama",
      "model": "example-model:8b",
      "local": true,
-     "need_now": true
+     "need_now": true,
+     "need_reason": "application",
+     "pending_mail": 0
     }
    }
   },
@@ -1940,7 +1966,9 @@
      "backend": "ollama",
      "model": "example-model:8b",
      "local": true,
-     "need_now": true
+     "need_now": true,
+     "need_reason": "application",
+     "pending_mail": 0
     }
    }
   },
@@ -1967,7 +1995,9 @@
      "backend": "ollama",
      "model": "example-model:8b",
      "local": true,
-     "need_now": false
+     "need_now": false,
+     "need_reason": null,
+     "pending_mail": 0
     }
    }
   },
@@ -1994,7 +2024,9 @@
      "backend": "ollama",
      "model": "example-model:8b",
      "local": true,
-     "need_now": true
+     "need_now": true,
+     "need_reason": "mail",
+     "pending_mail": 5
     }
    }
   }

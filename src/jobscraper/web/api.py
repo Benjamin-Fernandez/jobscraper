@@ -26,6 +26,7 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from jobscraper.config import Config, load_config
 from jobscraper.web import routers
+from jobscraper.web.connections import ModelHealth
 from jobscraper.web.jobs import CommandBuilder, JobManager, cli_command
 from jobscraper.web.mailsync import MailCommand, MailSyncRunner, cli_mail_command
 
@@ -241,6 +242,9 @@ def create_app(cfg: Optional[Config] = None,
     `JOBSCRAPER_MAIL_SYNC=0`: tests and dev instances never read a mailbox by
     themselves. `mail_command` builds the sync / connect children (default: the
     `mail` CLI verbs), so tests stub them.
+
+    `app.state.model_health` is the Q-100 `ModelHealth` cache behind
+    `/api/connections` (q100_ui_design §3.3); tests may replace it.
     """
     cfg = cfg or load_config()
     app = FastAPI(title="JobScraper", version="2")
@@ -258,6 +262,9 @@ def create_app(cfg: Optional[Config] = None,
     app.state.mail = MailSyncRunner(cfg, cfg.db_path.parent, app.state.store_factory,
                                     app.state.jobs,
                                     mail_command or cli_mail_command(config_path))
+    # Q-100 §3.3: the hub's cached model check. Its probe runs on a daemon thread,
+    # so no request ever waits on Ollama.
+    app.state.model_health = ModelHealth(lambda: cfg.budget)
     if mail_timer:
         app.router.add_event_handler("startup", app.state.mail.start_timer)
     app.router.add_event_handler("shutdown", app.state.mail.stop)
