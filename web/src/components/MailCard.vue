@@ -17,6 +17,11 @@
 // refreshes when the window gets focus. Only a check this page has *seen*
 // running raises "Check finished" when it ends: a 202 alone doesn't, or a read
 // made before the child flags itself would announce a check that hasn't run.
+//
+// `embedded` (Q-100 lane B): the card sits inside Settings > Accounts, whose card
+// header already names it. The title is dropped, the chrome flattened, and once a
+// mailbox is connected the connect form folds behind "Connect another Gmail".
+// Without the prop nothing here changes.
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import {
   ApiError, connectApplicationMailbox, connectMailbox, describeError, disconnectMailbox, getMail,
@@ -25,6 +30,8 @@ import {
 import { ago, shortDate } from '../format.js'
 import { showToast } from '../toast.js'
 import TabLoading from './TabLoading.vue'
+
+const props = defineProps({ embedded: { type: Boolean, default: false } })
 
 const POLL_MS = 5000
 const APP_PASSWORDS_URL = 'https://myaccount.google.com/apppasswords'
@@ -54,6 +61,7 @@ const starting = ref(false)        // POST /api/mail/sync in flight
 const checkError = ref('')
 
 const root = ref(null)
+const showConnect = ref(false)     // embedded: the folded connect form is open
 
 const accounts = computed(() => mail.value?.accounts ?? [])
 const running = computed(() => Boolean(mail.value?.sync?.running))
@@ -62,6 +70,8 @@ const offerApp = computed(() => {
   const box = mail.value?.application_mailbox
   return Boolean(box && box.ready && !box.connected)
 })
+
+const connectFolded = computed(() => props.embedded && accounts.value.length > 0 && !showConnect.value)
 
 const patch = (target, key, v) => { target.value = { ...target.value, [key]: v } }
 
@@ -183,6 +193,7 @@ function disconnectBody(a) {
 
 function connected() {
   consented.value = false
+  showConnect.value = false
   showToast({ message: 'Connected. The first check has started.' })
   return started()
 }
@@ -354,8 +365,8 @@ defineExpose({ load })
 </script>
 
 <template>
-  <div ref="root" class="mail-card surface" :aria-busy="loading ? 'true' : 'false'">
-    <h3 class="mail-title">Application updates from email</h3>
+  <div ref="root" class="mail-card surface" :class="{ embedded }" :aria-busy="loading ? 'true' : 'false'">
+    <h3 v-if="!embedded" class="mail-title">Application updates from email</h3>
     <p class="mail-intro">
       Connect Gmail and JobScraper updates your applications when employers write: received,
       assessment, interview, offer or rejection. Each change shows the email line it came from,
@@ -492,7 +503,12 @@ defineExpose({ load })
 
       <p v-if="checkError" class="notice error check-error" role="alert">{{ checkError }}</p>
 
-      <div class="mail-connect">
+      <div v-if="connectFolded" class="mail-connect-fold">
+        <button type="button" class="connect-another" aria-expanded="false" @click="showConnect = true">
+          Connect another Gmail
+        </button>
+      </div>
+      <div v-else class="mail-connect">
         <div class="consent">
           <p class="consent-text">{{ consent.text }}</p>
           <label class="consent-box">
@@ -553,6 +569,7 @@ defineExpose({ load })
 
 <style scoped>
 .mail-card { display: grid; gap: var(--space-3); max-width: 40rem; padding: var(--space-4); }
+.mail-card.embedded { max-width: none; padding: 0; background: transparent; border: 0; box-shadow: none; }
 .mail-title { margin: 0; font-size: var(--text-md); font-weight: 650; }
 .mail-intro { margin: 0; color: var(--text-2); font-size: var(--text-sm); text-wrap: pretty; }
 .not-offered { margin: 0; font-size: var(--text-sm); }
