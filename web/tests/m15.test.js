@@ -6,7 +6,7 @@ import Settings from '../src/tabs/Settings.vue'
 import TitleEditor from '../src/components/TitleEditor.vue'
 import { POLL_MS, resetSeenJobs } from '../src/composables/useJob.js'
 import { cycleLabel, matchLabel, runLabel, runQuery, runsInRange, sameRun } from '../src/runs.js'
-import { defaultSettings, defaultTitles, fakeApi } from './helpers.js'
+import { defaultSettings, defaultTitles, fakeApi, setHash } from './helpers.js'
 
 let api
 
@@ -30,6 +30,7 @@ const puts = () => api.calls.filter(c => c.method === 'PUT').map(c => JSON.parse
 describe('Settings: the cycle', () => {
   async function mountSettings(settings) {
     if (settings) useApi({ settings: { ...defaultSettings(), ...settings } })
+    setHash('#/settings/search')   // Q-100: the cycle is in the Search view
     const wrapper = mount(Settings, { props: { run: 'all', jobs: [] } })
     await flushPromises()
     return wrapper
@@ -43,13 +44,15 @@ describe('Settings: the cycle', () => {
     expect(wrapper.find('.cycle-option.active').attributes('data-days')).toBe('14')
     expect(wrapper.find('input[type="radio"][value="14"]').element.checked).toBe(true)
     expect(wrapper.find('.cycle-hint').text()).toContain('every 14 days')
-    expect(wrapper.text()).toContain('your plan (local)')
+    // Q-100 A12: the "plan (...)" sentence is gone; the paragraph only names the config default.
+    expect(wrapper.text()).not.toContain('your plan')
+    expect(wrapper.text()).toContain('The config default is fortnightly')
   })
 
   it('a smaller plan offers fewer cycles - nothing in the page is hardcoded', async () => {
     const wrapper = await mountSettings({ cycle_day_options: [7, 14, 30], plan: 'free' })
     expect(wrapper.findAll('.cycle-option').map(o => o.attributes('data-days'))).toEqual(['7', '14', '30'])
-    expect(wrapper.text()).toContain('your plan (free)')
+    expect(wrapper.text()).not.toContain('your plan')   // A12
   })
 
   it('choosing a cycle saves it at once and the hint follows', async () => {
