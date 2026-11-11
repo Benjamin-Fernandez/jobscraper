@@ -227,7 +227,7 @@ describe('Developer tab: the current job and its log', () => {
 
   it('says nothing has run, and does not poll', async () => {
     const wrapper = await mountDeveloper()
-    expect(wrapper.find('.summary').text()).toContain('Nothing has run')
+    expect(wrapper.find('.summary').text()).toContain('No job is running. Past runs are in the Runs tab.')
     await tick(3)
     expect(api.count(/^api\/jobs\/current/)).toBe(1)
   })

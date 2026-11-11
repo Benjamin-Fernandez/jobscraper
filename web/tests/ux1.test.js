@@ -53,7 +53,7 @@ describe('Getting started: the steps', () => {
   it('lists resume, titles, companies and a first run, in that order', () => {
     const steps = setupSteps({ hasResume: false, titleCount: 0, companyCount: 0, runCount: 0 })
     expect(steps.map(s => s.id)).toEqual(['resume', 'titles', 'companies', 'run'])
-    expect(steps.map(s => s.href)).toEqual(['#/profile', '#/profile', '#/companies', '#/runs'])
+    expect(steps.map(s => s.href)).toEqual(['#/profile/resume', '#/profile/resume', '#/companies', '#/runs'])
     expect(steps.every(s => !s.done)).toBe(true)
   })
 
@@ -76,7 +76,7 @@ describe('Getting started: in the empty Inbox', () => {
     expect(wrapper.find('.setup').exists()).toBe(true)
     expect(wrapper.find('.setup-progress').text()).toBe('0 of 4 done')
     expect(wrapper.findAll('.setup-step a').map(a => a.attributes('href')))
-      .toEqual(['#/profile', '#/profile', '#/companies', '#/runs'])
+      .toEqual(['#/profile/resume', '#/profile/resume', '#/companies', '#/runs'])
     expect(wrapper.text()).not.toContain('No roles in')
   })
 

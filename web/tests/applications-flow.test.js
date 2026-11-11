@@ -197,6 +197,8 @@ describe('Remove from Applications (B6)', () => {
   it('removes the role, and the toast Undo re-tracks it with its status', async () => {
     const w = await mountTab({ a1b2c3: 'applied', j1k2l3: 'interviewing' })
     await row(w, 'a1b2c3').find('.row-remove').trigger('click')
+    expect(api.calls.filter(c => c.method === 'DELETE')).toEqual([])   // A13: Remove asks first
+    await row(w, 'a1b2c3').find('.remove-yes').trigger('click')
     await flushPromises()
     expect(api.calls.filter(c => c.method === 'DELETE').map(c => c.url)).toEqual(['api/applications/a1b2c3'])
     expect(row(w, 'a1b2c3').exists()).toBe(false)

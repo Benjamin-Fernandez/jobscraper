@@ -480,7 +480,7 @@ suite('Q-70 D2/D3: unsaved marker, Saved. note, Discard changes, Save enabled st
 
   it('(d) Save details stays enabled when applicant.yaml does not exist yet, so it can be created', async () => {
     const w = await mountDetails({ applicant: f2Payload({}, { file: { exists: false, has_comments: false, error: '' } }) })
-    expect(w.text()).toContain('There is no data/applicant.yaml yet. Saving creates it.')
+    expect(w.text()).toContain('Nothing saved yet. Saving keeps your details on this PC.')
     expect(button(w, 'Save details').attributes('disabled')).toBeUndefined()
     await button(w, 'Save details').trigger('click')
     await flushPromises()
