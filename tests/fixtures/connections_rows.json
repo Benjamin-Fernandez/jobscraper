@@ -1,0 +1,1370 @@
+{
+ "_doc": [
+  "Raw composer inputs for web/connections.py compose(cfg, store, mail_runner_view, job_view, model_snapshot, vault_has, lockfile_busy, now). Lane A table-drives from this file; lane T1-A asserts the (state, code) in 'expect' for the item or row with that id.",
+  "Each case lists ONLY the inputs it overrides: effective inputs = {**defaults, **case.inputs} (shallow per top-level key). Three shorthands expand into defaults.cfg: cfg_apply_mail -> cfg.apply_mail, cfg_apply_mail_backup -> cfg.apply_mail_backup, cfg_model {enable_llm, backend} -> cfg.budget_enable_llm / cfg.budget_backend.",
+  "mail_accounts: full rows as store.mail_accounts() returns them (every column of CREATE TABLE mail_accounts). ats_accounts: full rows as store.accounts() returns them (every column of CREATE TABLE ats_accounts, vault_service included; the composer must never send it).",
+  "mail_runner: the view of request.app.state.mail: {timer_running, status:{running, started_at, next_at}} (web/mailsync.py). job_view (ASSUMED shape; adjust together with lane A): {current: jobs.current(tail=0) reduced to {state, kind} or null; attempts_in_flight: store.attempts_in_flight(); last_attempts: store.last_attempts()}. model_snapshot: ModelHealth.snapshot() as {ok, code, backend, model, local, checked_at}, or null before the first probe (-> checking/probing).",
+  "vault_has: booleans only, keyed '<vault service>|<username>' (service = vault.imap_service(host) for mailboxes, the row's vault_service for employer accounts). A missing key means False. No password or secret appears anywhere in these fixtures.",
+  "edge: {profile_dir_exists, lockfile_busy} stand in for the is_dir() check and the lockfile read test. now: the clock the 24 h rules use.",
+  "expect.id: the item id (gmail:<mail_accounts.id>, gmail for none, apply-mailbox, apply-mailbox:backup, employer-accounts, edge, model) or 'account:<ats_accounts.id>' for a row of employer_accounts[] (its per-row state/code). Assert only the item/row with that id; other items in the composed response are not specified by the case.",
+  "need_now_* cases pin the exact rule of section 2.3 (a to d plus two negatives); the snapshot there is 'unreachable', so need_now flips neutral to attention."
+ ],
+ "defaults": {
+  "now": "2026-11-11T09:12:00",
+  "cfg": {
+   "mail_status_enabled": true,
+   "budget_enable_llm": true,
+   "budget_backend": "ollama",
+   "budget_model": "example-model:8b",
+   "apply_profile_dir": "%LOCALAPPDATA%\\JobScraper\\apply-profile",
+   "apply_edge_sync": false,
+   "apply_mail": {
+    "host": "imap.gmail.com",
+    "port": 993,
+    "username": ""
+   },
+   "apply_mail_backup": {
+    "host": "",
+    "port": 993,
+    "username": ""
+   }
+  },
+  "mail_accounts": [],
+  "ats_accounts": [],
+  "mail_runner": {
+   "timer_running": false,
+   "status": {
+    "running": false,
+    "started_at": null,
+    "next_at": null
+   }
+  },
+  "job_view": {
+   "current": null,
+   "attempts_in_flight": [],
+   "last_attempts": {}
+  },
+  "model_snapshot": null,
+  "vault_has": {},
+  "edge": {
+   "profile_dir_exists": false,
+   "lockfile_busy": false
+  }
+ },
+ "cases": {
+  "gmail_switched_off": {
+   "section_2_3_row": "Gmail mailbox: enabled = 0",
+   "inputs": {
+    "mail_accounts": [
+     {
+      "id": 1,
+      "address": "owner1@example.com",
+      "host": "imap.gmail.com",
+      "port": 993,
+      "vault_service": "jobscraper:imap:imap.gmail.com",
+      "shared_with_apply": 0,
+      "enabled": 0,
+      "consent_at": "2026-11-07T08:00:00",
+      "consent_version": "mail-consent:v1",
+      "state": "ok",
+      "state_code": null,
+      "notes": null,
+      "fail_count": 0,
+      "retry_after": null,
+      "first_sync_from": "2026-10-08T00:00:00",
+      "last_sync_at": "2026-11-11T09:10:00",
+      "last_ok_at": "2026-11-11T09:10:00",
+      "last_counts_json": "{\"scanned\": 42, \"duplicates\": 3, \"skipped\": 30, \"bodies\": 9, \"matched\": 6, \"applied\": 2, \"suggested\": 1, \"unmatched\": 3, \"pending_model\": 0, \"model_calls\": 4, \"errors\": 0}",
+      "created_at": "2026-11-07T08:00:00",
+      "updated_at": "2026-11-11T09:10:00"
+     }
+    ],
+    "mail_runner": {
+     "timer_running": true,
+     "status": {
+      "running": false,
+      "started_at": null,
+      "next_at": "2026-11-11T09:20:00"
+     }
+    }
+   },
+   "expect": {
+    "id": "gmail:1",
+    "state": "paused",
+    "code": "switched_off"
+   }
+  },
+  "gmail_consent": {
+   "section_2_3_row": "Gmail mailbox: consent_version != CONSENT_VERSION",
+   "inputs": {
+    "mail_accounts": [
+     {
+      "id": 2,
+      "address": "owner2@example.com",
+      "host": "imap.gmail.com",
+      "port": 993,
+      "vault_service": "jobscraper:imap:imap.gmail.com",
+      "shared_with_apply": 0,
+      "enabled": 1,
+      "consent_at": "2026-11-07T08:00:00",
+      "consent_version": "mail-consent:v0",
+      "state": "ok",
+      "state_code": null,
+      "notes": null,
+      "fail_count": 0,
+      "retry_after": null,
+      "first_sync_from": "2026-10-08T00:00:00",
+      "last_sync_at": "2026-11-11T09:10:00",
+      "last_ok_at": "2026-11-11T09:10:00",
+      "last_counts_json": "{\"scanned\": 42, \"duplicates\": 3, \"skipped\": 30, \"bodies\": 9, \"matched\": 6, \"applied\": 2, \"suggested\": 1, \"unmatched\": 3, \"pending_model\": 0, \"model_calls\": 4, \"errors\": 0}",
+      "created_at": "2026-11-07T08:00:00",
+      "updated_at": "2026-11-11T09:10:00"
+     }
+    ],
+    "mail_runner": {
+     "timer_running": true,
+     "status": {
+      "running": false,
+      "started_at": null,
+      "next_at": "2026-11-11T09:20:00"
+     }
+    }
+   },
+   "expect": {
+    "id": "gmail:2",
+    "state": "attention",
+    "code": "consent"
+   }
+  },
+  "gmail_paused_login_refused": {
+   "section_2_3_row": "Gmail mailbox: state = paused with state_code login_refused",
+   "inputs": {
+    "mail_accounts": [
+     {
+      "id": 3,
+      "address": "owner3@example.com",
+      "host": "imap.gmail.com",
+      "port": 993,
+      "vault_service": "jobscraper:imap:imap.gmail.com",
+      "shared_with_apply": 0,
+      "enabled": 1,
+      "consent_at": "2026-11-07T08:00:00",
+      "consent_version": "mail-consent:v1",
+      "state": "paused",
+      "state_code": "login_refused",
+      "notes": null,
+      "fail_count": 1,
+      "retry_after": null,
+      "first_sync_from": "2026-10-08T00:00:00",
+      "last_sync_at": "2026-11-11T09:10:00",
+      "last_ok_at": "2026-11-10T09:00:00",
+      "last_counts_json": "{\"scanned\": 42, \"duplicates\": 3, \"skipped\": 30, \"bodies\": 9, \"matched\": 6, \"applied\": 2, \"suggested\": 1, \"unmatched\": 3, \"pending_model\": 0, \"model_calls\": 4, \"errors\": 0}",
+      "created_at": "2026-11-07T08:00:00",
+      "updated_at": "2026-11-11T09:10:00"
+     }
+    ],
+    "mail_runner": {
+     "timer_running": true,
+     "status": {
+      "running": false,
+      "started_at": null,
+      "next_at": "2026-11-11T09:20:00"
+     }
+    }
+   },
+   "expect": {
+    "id": "gmail:3",
+    "state": "attention",
+    "code": "login_refused"
+   }
+  },
+  "gmail_paused_app_password_required": {
+   "section_2_3_row": "Gmail mailbox: state = paused with state_code app_password_required",
+   "inputs": {
+    "mail_accounts": [
+     {
+      "id": 4,
+      "address": "owner4@example.com",
+      "host": "imap.gmail.com",
+      "port": 993,
+      "vault_service": "jobscraper:imap:imap.gmail.com",
+      "shared_with_apply": 0,
+      "enabled": 1,
+      "consent_at": "2026-11-07T08:00:00",
+      "consent_version": "mail-consent:v1",
+      "state": "paused",
+      "state_code": "app_password_required",
+      "notes": null,
+      "fail_count": 1,
+      "retry_after": null,
+      "first_sync_from": "2026-10-08T00:00:00",
+      "last_sync_at": "2026-11-11T09:10:00",
+      "last_ok_at": "2026-11-10T09:00:00",
+      "last_counts_json": "{\"scanned\": 42, \"duplicates\": 3, \"skipped\": 30, \"bodies\": 9, \"matched\": 6, \"applied\": 2, \"suggested\": 1, \"unmatched\": 3, \"pending_model\": 0, \"model_calls\": 4, \"errors\": 0}",
+      "created_at": "2026-11-07T08:00:00",
+      "updated_at": "2026-11-11T09:10:00"
+     }
+    ],
+    "mail_runner": {
+     "timer_running": true,
+     "status": {
+      "running": false,
+      "started_at": null,
+      "next_at": "2026-11-11T09:20:00"
+     }
+    }
+   },
+   "expect": {
+    "id": "gmail:4",
+    "state": "attention",
+    "code": "app_password_required"
+   }
+  },
+  "gmail_paused_web_login_required": {
+   "section_2_3_row": "Gmail mailbox: state = paused with state_code web_login_required",
+   "inputs": {
+    "mail_accounts": [
+     {
+      "id": 5,
+      "address": "owner5@example.com",
+      "host": "imap.gmail.com",
+      "port": 993,
+      "vault_service": "jobscraper:imap:imap.gmail.com",
+      "shared_with_apply": 0,
+      "enabled": 1,
+      "consent_at": "2026-11-07T08:00:00",
+      "consent_version": "mail-consent:v1",
+      "state": "paused",
+      "state_code": "web_login_required",
+      "notes": null,
+      "fail_count": 1,
+      "retry_after": null,
+      "first_sync_from": "2026-10-08T00:00:00",
+      "last_sync_at": "2026-11-11T09:10:00",
+      "last_ok_at": "2026-11-10T09:00:00",
+      "last_counts_json": "{\"scanned\": 42, \"duplicates\": 3, \"skipped\": 30, \"bodies\": 9, \"matched\": 6, \"applied\": 2, \"suggested\": 1, \"unmatched\": 3, \"pending_model\": 0, \"model_calls\": 4, \"errors\": 0}",
+      "created_at": "2026-11-07T08:00:00",
+      "updated_at": "2026-11-11T09:10:00"
+     }
+    ],
+    "mail_runner": {
+     "timer_running": true,
+     "status": {
+      "running": false,
+      "started_at": null,
+      "next_at": "2026-11-11T09:20:00"
+     }
+    }
+   },
+   "expect": {
+    "id": "gmail:5",
+    "state": "attention",
+    "code": "web_login_required"
+   }
+  },
+  "gmail_paused_not_set_up": {
+   "section_2_3_row": "Gmail mailbox: state = paused with state_code not_set_up",
+   "inputs": {
+    "mail_accounts": [
+     {
+      "id": 6,
+      "address": "owner6@example.com",
+      "host": "imap.gmail.com",
+      "port": 993,
+      "vault_service": "jobscraper:imap:imap.gmail.com",
+      "shared_with_apply": 0,
+      "enabled": 1,
+      "consent_at": "2026-11-07T08:00:00",
+      "consent_version": "mail-consent:v1",
+      "state": "paused",
+      "state_code": "not_set_up",
+      "notes": null,
+      "fail_count": 1,
+      "retry_after": null,
+      "first_sync_from": "2026-10-08T00:00:00",
+      "last_sync_at": "2026-11-11T09:10:00",
+      "last_ok_at": "2026-11-10T09:00:00",
+      "last_counts_json": "{\"scanned\": 42, \"duplicates\": 3, \"skipped\": 30, \"bodies\": 9, \"matched\": 6, \"applied\": 2, \"suggested\": 1, \"unmatched\": 3, \"pending_model\": 0, \"model_calls\": 4, \"errors\": 0}",
+      "created_at": "2026-11-07T08:00:00",
+      "updated_at": "2026-11-11T09:10:00"
+     }
+    ],
+    "mail_runner": {
+     "timer_running": true,
+     "status": {
+      "running": false,
+      "started_at": null,
+      "next_at": "2026-11-11T09:20:00"
+     }
+    }
+   },
+   "expect": {
+    "id": "gmail:6",
+    "state": "attention",
+    "code": "not_set_up"
+   }
+  },
+  "gmail_error_recent": {
+   "section_2_3_row": "Gmail mailbox: state error, last_ok_at within 24 h",
+   "inputs": {
+    "mail_accounts": [
+     {
+      "id": 7,
+      "address": "owner7@example.com",
+      "host": "imap.gmail.com",
+      "port": 993,
+      "vault_service": "jobscraper:imap:imap.gmail.com",
+      "shared_with_apply": 0,
+      "enabled": 1,
+      "consent_at": "2026-11-07T08:00:00",
+      "consent_version": "mail-consent:v1",
+      "state": "error",
+      "state_code": "network",
+      "notes": null,
+      "fail_count": 2,
+      "retry_after": "2026-11-11T09:30:00",
+      "first_sync_from": "2026-10-08T00:00:00",
+      "last_sync_at": "2026-11-11T09:10:00",
+      "last_ok_at": "2026-11-11T03:00:00",
+      "last_counts_json": "{\"scanned\": 42, \"duplicates\": 3, \"skipped\": 30, \"bodies\": 9, \"matched\": 6, \"applied\": 2, \"suggested\": 1, \"unmatched\": 3, \"pending_model\": 0, \"model_calls\": 4, \"errors\": 0}",
+      "created_at": "2026-11-07T08:00:00",
+      "updated_at": "2026-11-11T09:10:00"
+     }
+    ],
+    "mail_runner": {
+     "timer_running": true,
+     "status": {
+      "running": false,
+      "started_at": null,
+      "next_at": "2026-11-11T09:20:00"
+     }
+    }
+   },
+   "expect": {
+    "id": "gmail:7",
+    "state": "connected",
+    "code": "retrying"
+   }
+  },
+  "gmail_backoff_recent": {
+   "section_2_3_row": "Gmail mailbox: state backoff, last_ok_at within 24 h",
+   "inputs": {
+    "mail_accounts": [
+     {
+      "id": 8,
+      "address": "owner8@example.com",
+      "host": "imap.gmail.com",
+      "port": 993,
+      "vault_service": "jobscraper:imap:imap.gmail.com",
+      "shared_with_apply": 0,
+      "enabled": 1,
+      "consent_at": "2026-11-07T08:00:00",
+      "consent_version": "mail-consent:v1",
+      "state": "backoff",
+      "state_code": "rate_limited",
+      "notes": null,
+      "fail_count": 1,
+      "retry_after": "2026-11-11T10:12:00",
+      "first_sync_from": "2026-10-08T00:00:00",
+      "last_sync_at": "2026-11-11T09:10:00",
+      "last_ok_at": "2026-11-10T20:00:00",
+      "last_counts_json": "{\"scanned\": 42, \"duplicates\": 3, \"skipped\": 30, \"bodies\": 9, \"matched\": 6, \"applied\": 2, \"suggested\": 1, \"unmatched\": 3, \"pending_model\": 0, \"model_calls\": 4, \"errors\": 0}",
+      "created_at": "2026-11-07T08:00:00",
+      "updated_at": "2026-11-11T09:10:00"
+     }
+    ],
+    "mail_runner": {
+     "timer_running": true,
+     "status": {
+      "running": false,
+      "started_at": null,
+      "next_at": "2026-11-11T09:20:00"
+     }
+    }
+   },
+   "expect": {
+    "id": "gmail:8",
+    "state": "connected",
+    "code": "retrying"
+   }
+  },
+  "gmail_error_stale": {
+   "section_2_3_row": "Gmail mailbox: state error, last_ok_at older than 24 h",
+   "inputs": {
+    "mail_accounts": [
+     {
+      "id": 9,
+      "address": "owner9@example.com",
+      "host": "imap.gmail.com",
+      "port": 993,
+      "vault_service": "jobscraper:imap:imap.gmail.com",
+      "shared_with_apply": 0,
+      "enabled": 1,
+      "consent_at": "2026-11-07T08:00:00",
+      "consent_version": "mail-consent:v1",
+      "state": "error",
+      "state_code": "network",
+      "notes": null,
+      "fail_count": 6,
+      "retry_after": "2026-11-11T09:30:00",
+      "first_sync_from": "2026-10-08T00:00:00",
+      "last_sync_at": "2026-11-11T09:10:00",
+      "last_ok_at": "2026-11-09T09:00:00",
+      "last_counts_json": "{\"scanned\": 42, \"duplicates\": 3, \"skipped\": 30, \"bodies\": 9, \"matched\": 6, \"applied\": 2, \"suggested\": 1, \"unmatched\": 3, \"pending_model\": 0, \"model_calls\": 4, \"errors\": 0}",
+      "created_at": "2026-11-07T08:00:00",
+      "updated_at": "2026-11-11T09:10:00"
+     }
+    ],
+    "mail_runner": {
+     "timer_running": true,
+     "status": {
+      "running": false,
+      "started_at": null,
+      "next_at": "2026-11-11T09:20:00"
+     }
+    }
+   },
+   "expect": {
+    "id": "gmail:9",
+    "state": "attention",
+    "code": "network"
+   }
+  },
+  "gmail_backoff_never_ok": {
+   "section_2_3_row": "Gmail mailbox: state backoff, last_ok_at null",
+   "inputs": {
+    "mail_accounts": [
+     {
+      "id": 10,
+      "address": "owner10@example.com",
+      "host": "imap.gmail.com",
+      "port": 993,
+      "vault_service": "jobscraper:imap:imap.gmail.com",
+      "shared_with_apply": 0,
+      "enabled": 1,
+      "consent_at": "2026-11-07T08:00:00",
+      "consent_version": "mail-consent:v1",
+      "state": "backoff",
+      "state_code": "rate_limited",
+      "notes": null,
+      "fail_count": 3,
+      "retry_after": "2026-11-11T10:12:00",
+      "first_sync_from": "2026-10-08T00:00:00",
+      "last_sync_at": "2026-11-11T09:10:00",
+      "last_ok_at": null,
+      "last_counts_json": null,
+      "created_at": "2026-11-07T08:00:00",
+      "updated_at": "2026-11-11T09:10:00"
+     }
+    ],
+    "mail_runner": {
+     "timer_running": true,
+     "status": {
+      "running": false,
+      "started_at": null,
+      "next_at": "2026-11-11T09:20:00"
+     }
+    }
+   },
+   "expect": {
+    "id": "gmail:10",
+    "state": "attention",
+    "code": "rate_limited"
+   }
+  },
+  "gmail_ok_timer_running": {
+   "section_2_3_row": "Gmail mailbox: state ok, timer running",
+   "inputs": {
+    "mail_accounts": [
+     {
+      "id": 11,
+      "address": "owner11@example.com",
+      "host": "imap.gmail.com",
+      "port": 993,
+      "vault_service": "jobscraper:imap:imap.gmail.com",
+      "shared_with_apply": 0,
+      "enabled": 1,
+      "consent_at": "2026-11-07T08:00:00",
+      "consent_version": "mail-consent:v1",
+      "state": "ok",
+      "state_code": null,
+      "notes": null,
+      "fail_count": 0,
+      "retry_after": null,
+      "first_sync_from": "2026-10-08T00:00:00",
+      "last_sync_at": "2026-11-11T09:10:00",
+      "last_ok_at": "2026-11-11T09:10:00",
+      "last_counts_json": "{\"scanned\": 42, \"duplicates\": 3, \"skipped\": 30, \"bodies\": 9, \"matched\": 6, \"applied\": 2, \"suggested\": 1, \"unmatched\": 3, \"pending_model\": 0, \"model_calls\": 4, \"errors\": 0}",
+      "created_at": "2026-11-07T08:00:00",
+      "updated_at": "2026-11-11T09:10:00"
+     }
+    ],
+    "mail_runner": {
+     "timer_running": true,
+     "status": {
+      "running": false,
+      "started_at": null,
+      "next_at": "2026-11-11T09:20:00"
+     }
+    }
+   },
+   "expect": {
+    "id": "gmail:11",
+    "state": "connected",
+    "code": "ok"
+   }
+  },
+  "gmail_ok_timer_off": {
+   "section_2_3_row": "Gmail mailbox: state ok, mail_status.enabled true, timer not running",
+   "inputs": {
+    "mail_accounts": [
+     {
+      "id": 12,
+      "address": "owner12@example.com",
+      "host": "imap.gmail.com",
+      "port": 993,
+      "vault_service": "jobscraper:imap:imap.gmail.com",
+      "shared_with_apply": 0,
+      "enabled": 1,
+      "consent_at": "2026-11-07T08:00:00",
+      "consent_version": "mail-consent:v1",
+      "state": "ok",
+      "state_code": null,
+      "notes": null,
+      "fail_count": 0,
+      "retry_after": null,
+      "first_sync_from": "2026-10-08T00:00:00",
+      "last_sync_at": "2026-11-11T09:10:00",
+      "last_ok_at": "2026-11-11T09:10:00",
+      "last_counts_json": "{\"scanned\": 42, \"duplicates\": 3, \"skipped\": 30, \"bodies\": 9, \"matched\": 6, \"applied\": 2, \"suggested\": 1, \"unmatched\": 3, \"pending_model\": 0, \"model_calls\": 4, \"errors\": 0}",
+      "created_at": "2026-11-07T08:00:00",
+      "updated_at": "2026-11-11T09:10:00"
+     }
+    ],
+    "mail_runner": {
+     "timer_running": false,
+     "status": {
+      "running": false,
+      "started_at": null,
+      "next_at": null
+     }
+    }
+   },
+   "expect": {
+    "id": "gmail:12",
+    "state": "connected",
+    "code": "timer_off"
+   }
+  },
+  "gmail_none": {
+   "section_2_3_row": "Gmail (none): no mail_accounts rows",
+   "inputs": {},
+   "expect": {
+    "id": "gmail",
+    "state": "not_set_up",
+    "code": "none"
+   }
+  },
+  "apply_mailbox_ok": {
+   "section_2_3_row": "Application mailbox: host and username set, vault entry present",
+   "inputs": {
+    "cfg_apply_mail": {
+     "host": "imap.gmail.com",
+     "port": 993,
+     "username": "apply@example.com"
+    },
+    "vault_has": {
+     "jobscraper:imap:imap.gmail.com|apply@example.com": true
+    }
+   },
+   "expect": {
+    "id": "apply-mailbox",
+    "state": "connected",
+    "code": "ok"
+   }
+  },
+  "apply_mailbox_no_password": {
+   "section_2_3_row": "Application mailbox: username set, no vault entry",
+   "inputs": {
+    "cfg_apply_mail": {
+     "host": "imap.gmail.com",
+     "port": 993,
+     "username": "apply@example.com"
+    },
+    "vault_has": {
+     "jobscraper:imap:imap.gmail.com|apply@example.com": false
+    }
+   },
+   "expect": {
+    "id": "apply-mailbox",
+    "state": "attention",
+    "code": "no_password"
+   }
+  },
+  "apply_mailbox_unset": {
+   "section_2_3_row": "Application mailbox: username unset",
+   "inputs": {},
+   "expect": {
+    "id": "apply-mailbox",
+    "state": "not_set_up",
+    "code": "none"
+   }
+  },
+  "apply_mailbox_backup_ok": {
+   "section_2_3_row": "Application mailbox, backup id (not a separate 2.3 row): host and username set, vault entry present",
+   "inputs": {
+    "cfg_apply_mail_backup": {
+     "host": "imap.example.com",
+     "port": 993,
+     "username": "backup@example.com"
+    },
+    "vault_has": {
+     "jobscraper:imap:imap.example.com|backup@example.com": true
+    }
+   },
+   "expect": {
+    "id": "apply-mailbox:backup",
+    "state": "connected",
+    "code": "ok"
+   }
+  },
+  "apply_mailbox_backup_unset": {
+   "section_2_3_row": "Application mailbox, backup id: username unset",
+   "inputs": {},
+   "expect": {
+    "id": "apply-mailbox:backup",
+    "state": "not_set_up",
+    "code": "none"
+   }
+  },
+  "employer_created_ok": {
+   "section_2_3_row": "Employer account: created, password present, last_signin_ok != 0",
+   "inputs": {
+    "ats_accounts": [
+     {
+      "id": 11,
+      "ats": "workday",
+      "tenant_host": "acme.wd3.myworkdayjobs.com",
+      "email": "owner+11@example.com",
+      "vault_service": "jobscraper:workday:acme.wd3.myworkdayjobs.com",
+      "status": "created",
+      "created_at": "2026-11-08T10:00:00",
+      "verified_at": null,
+      "last_signin_at": "2026-11-10T10:00:00",
+      "last_signin_ok": 1,
+      "exported_to_edge_at": null,
+      "created_by_attempt": 51
+     }
+    ],
+    "vault_has": {
+     "jobscraper:workday:acme.wd3.myworkdayjobs.com|owner+11@example.com": true
+    }
+   },
+   "expect": {
+    "id": "account:11",
+    "state": "connected",
+    "code": "ok"
+   }
+  },
+  "employer_created_signin_unset": {
+   "section_2_3_row": "Employer account: created, password present, last_signin_ok null (null != 0 reads as ok)",
+   "inputs": {
+    "ats_accounts": [
+     {
+      "id": 12,
+      "ats": "workday",
+      "tenant_host": "acme.wd3.myworkdayjobs.com",
+      "email": "owner+12@example.com",
+      "vault_service": "jobscraper:workday:acme.wd3.myworkdayjobs.com",
+      "status": "created",
+      "created_at": "2026-11-08T10:00:00",
+      "verified_at": null,
+      "last_signin_at": "2026-11-10T10:00:00",
+      "last_signin_ok": null,
+      "exported_to_edge_at": null,
+      "created_by_attempt": 52
+     }
+    ],
+    "vault_has": {
+     "jobscraper:workday:acme.wd3.myworkdayjobs.com|owner+12@example.com": true
+    }
+   },
+   "expect": {
+    "id": "account:12",
+    "state": "connected",
+    "code": "ok"
+   }
+  },
+  "employer_verified": {
+   "section_2_3_row": "Employer account: verified, password present, last_signin_ok != 0",
+   "inputs": {
+    "ats_accounts": [
+     {
+      "id": 13,
+      "ats": "workday",
+      "tenant_host": "acme.wd3.myworkdayjobs.com",
+      "email": "owner+13@example.com",
+      "vault_service": "jobscraper:workday:acme.wd3.myworkdayjobs.com",
+      "status": "verified",
+      "created_at": "2026-11-08T10:00:00",
+      "verified_at": "2026-11-09T10:00:00",
+      "last_signin_at": "2026-11-10T10:00:00",
+      "last_signin_ok": 1,
+      "exported_to_edge_at": null,
+      "created_by_attempt": 53
+     }
+    ],
+    "vault_has": {
+     "jobscraper:workday:acme.wd3.myworkdayjobs.com|owner+13@example.com": true
+    }
+   },
+   "expect": {
+    "id": "account:13",
+    "state": "connected",
+    "code": "verified"
+   }
+  },
+  "employer_signin_failed": {
+   "section_2_3_row": "Employer account: signin_failed",
+   "inputs": {
+    "ats_accounts": [
+     {
+      "id": 14,
+      "ats": "workday",
+      "tenant_host": "acme.wd3.myworkdayjobs.com",
+      "email": "owner+14@example.com",
+      "vault_service": "jobscraper:workday:acme.wd3.myworkdayjobs.com",
+      "status": "signin_failed",
+      "created_at": "2026-11-08T10:00:00",
+      "verified_at": null,
+      "last_signin_at": "2026-11-10T10:00:00",
+      "last_signin_ok": 0,
+      "exported_to_edge_at": null,
+      "created_by_attempt": 54
+     }
+    ],
+    "vault_has": {
+     "jobscraper:workday:acme.wd3.myworkdayjobs.com|owner+14@example.com": true
+    }
+   },
+   "expect": {
+    "id": "account:14",
+    "state": "attention",
+    "code": "signin_failed"
+   }
+  },
+  "employer_exists_no_password": {
+   "section_2_3_row": "Employer account: exists_no_password",
+   "inputs": {
+    "ats_accounts": [
+     {
+      "id": 15,
+      "ats": "workday",
+      "tenant_host": "acme.wd3.myworkdayjobs.com",
+      "email": "owner+15@example.com",
+      "vault_service": "jobscraper:workday:acme.wd3.myworkdayjobs.com",
+      "status": "exists_no_password",
+      "created_at": "2026-11-08T10:00:00",
+      "verified_at": null,
+      "last_signin_at": null,
+      "last_signin_ok": null,
+      "exported_to_edge_at": null,
+      "created_by_attempt": 55
+     }
+    ],
+    "vault_has": {
+     "jobscraper:workday:acme.wd3.myworkdayjobs.com|owner+15@example.com": false
+    }
+   },
+   "expect": {
+    "id": "account:15",
+    "state": "attention",
+    "code": "exists_no_password"
+   }
+  },
+  "employer_password_missing": {
+   "section_2_3_row": "Employer account: created / verified with no vault entry",
+   "inputs": {
+    "ats_accounts": [
+     {
+      "id": 16,
+      "ats": "workday",
+      "tenant_host": "acme.wd3.myworkdayjobs.com",
+      "email": "owner+16@example.com",
+      "vault_service": "jobscraper:workday:acme.wd3.myworkdayjobs.com",
+      "status": "created",
+      "created_at": "2026-11-08T10:00:00",
+      "verified_at": null,
+      "last_signin_at": "2026-11-10T10:00:00",
+      "last_signin_ok": 1,
+      "exported_to_edge_at": null,
+      "created_by_attempt": 56
+     }
+    ],
+    "vault_has": {
+     "jobscraper:workday:acme.wd3.myworkdayjobs.com|owner+16@example.com": false
+    }
+   },
+   "expect": {
+    "id": "account:16",
+    "state": "attention",
+    "code": "password_missing"
+   }
+  },
+  "employer_creating": {
+   "section_2_3_row": "Employer account: creating",
+   "inputs": {
+    "ats_accounts": [
+     {
+      "id": 17,
+      "ats": "workday",
+      "tenant_host": "acme.wd3.myworkdayjobs.com",
+      "email": "owner+17@example.com",
+      "vault_service": "jobscraper:workday:acme.wd3.myworkdayjobs.com",
+      "status": "creating",
+      "created_at": "2026-11-08T10:00:00",
+      "verified_at": null,
+      "last_signin_at": null,
+      "last_signin_ok": null,
+      "exported_to_edge_at": null,
+      "created_by_attempt": 57
+     }
+    ],
+    "vault_has": {
+     "jobscraper:workday:acme.wd3.myworkdayjobs.com|owner+17@example.com": true
+    }
+   },
+   "expect": {
+    "id": "account:17",
+    "state": "neutral",
+    "code": "unconfirmed"
+   }
+  },
+  "employer_unknown": {
+   "section_2_3_row": "Employer account: unknown",
+   "inputs": {
+    "ats_accounts": [
+     {
+      "id": 18,
+      "ats": "workday",
+      "tenant_host": "acme.wd3.myworkdayjobs.com",
+      "email": "owner+18@example.com",
+      "vault_service": "jobscraper:workday:acme.wd3.myworkdayjobs.com",
+      "status": "unknown",
+      "created_at": "2026-11-08T10:00:00",
+      "verified_at": null,
+      "last_signin_at": null,
+      "last_signin_ok": null,
+      "exported_to_edge_at": null,
+      "created_by_attempt": 58
+     }
+    ],
+    "vault_has": {
+     "jobscraper:workday:acme.wd3.myworkdayjobs.com|owner+18@example.com": true
+    }
+   },
+   "expect": {
+    "id": "account:18",
+    "state": "neutral",
+    "code": "unconfirmed"
+   }
+  },
+  "employer_summary_worst": {
+   "section_2_3_row": "Employer accounts (summary): worst row state",
+   "inputs": {
+    "ats_accounts": [
+     {
+      "id": 11,
+      "ats": "workday",
+      "tenant_host": "acme.wd3.myworkdayjobs.com",
+      "email": "owner+11@example.com",
+      "vault_service": "jobscraper:workday:acme.wd3.myworkdayjobs.com",
+      "status": "created",
+      "created_at": "2026-11-08T10:00:00",
+      "verified_at": null,
+      "last_signin_at": "2026-11-10T10:00:00",
+      "last_signin_ok": 1,
+      "exported_to_edge_at": null,
+      "created_by_attempt": 51
+     },
+     {
+      "id": 14,
+      "ats": "workday",
+      "tenant_host": "acme.wd3.myworkdayjobs.com",
+      "email": "owner+14@example.com",
+      "vault_service": "jobscraper:workday:acme.wd3.myworkdayjobs.com",
+      "status": "signin_failed",
+      "created_at": "2026-11-08T10:00:00",
+      "verified_at": null,
+      "last_signin_at": "2026-11-10T10:00:00",
+      "last_signin_ok": 0,
+      "exported_to_edge_at": null,
+      "created_by_attempt": 54
+     },
+     {
+      "id": 17,
+      "ats": "workday",
+      "tenant_host": "acme.wd3.myworkdayjobs.com",
+      "email": "owner+17@example.com",
+      "vault_service": "jobscraper:workday:acme.wd3.myworkdayjobs.com",
+      "status": "creating",
+      "created_at": "2026-11-08T10:00:00",
+      "verified_at": null,
+      "last_signin_at": "2026-11-10T10:00:00",
+      "last_signin_ok": null,
+      "exported_to_edge_at": null,
+      "created_by_attempt": 57
+     }
+    ],
+    "vault_has": {
+     "jobscraper:workday:acme.wd3.myworkdayjobs.com|owner+11@example.com": true,
+     "jobscraper:workday:acme.wd3.myworkdayjobs.com|owner+14@example.com": true,
+     "jobscraper:workday:acme.wd3.myworkdayjobs.com|owner+17@example.com": true
+    }
+   },
+   "expect": {
+    "id": "employer-accounts",
+    "state": "attention",
+    "code": "signin_failed"
+   }
+  },
+  "employer_summary_none": {
+   "section_2_3_row": "Employer accounts (summary): 0 rows",
+   "inputs": {},
+   "expect": {
+    "id": "employer-accounts",
+    "state": "not_set_up",
+    "code": "none"
+   }
+  },
+  "edge_missing": {
+   "section_2_3_row": "Apply browser: profile_dir missing",
+   "inputs": {},
+   "expect": {
+    "id": "edge",
+    "state": "not_set_up",
+    "code": "none"
+   }
+  },
+  "edge_in_use_job": {
+   "section_2_3_row": "Apply browser: web job manager runs an apply job",
+   "inputs": {
+    "edge": {
+     "profile_dir_exists": true,
+     "lockfile_busy": false
+    },
+    "job_view": {
+     "current": {
+      "state": "running",
+      "kind": "apply"
+     },
+     "attempts_in_flight": [],
+     "last_attempts": {}
+    }
+   },
+   "expect": {
+    "id": "edge",
+    "state": "connected",
+    "code": "in_use"
+   }
+  },
+  "edge_in_use_lockfile": {
+   "section_2_3_row": "Apply browser: lockfile exists and cannot be opened",
+   "inputs": {
+    "edge": {
+     "profile_dir_exists": true,
+     "lockfile_busy": true
+    }
+   },
+   "expect": {
+    "id": "edge",
+    "state": "connected",
+    "code": "in_use"
+   }
+  },
+  "edge_ok": {
+   "section_2_3_row": "Apply browser: dir present, free",
+   "inputs": {
+    "edge": {
+     "profile_dir_exists": true,
+     "lockfile_busy": false
+    }
+   },
+   "expect": {
+    "id": "edge",
+    "state": "connected",
+    "code": "ok"
+   }
+  },
+  "model_ai_off_enable_llm": {
+   "section_2_3_row": "Local AI: budget.enable_llm false",
+   "inputs": {
+    "cfg_model": {
+     "enable_llm": false,
+     "backend": "ollama"
+    }
+   },
+   "expect": {
+    "id": "model",
+    "state": "paused",
+    "code": "ai_off"
+   }
+  },
+  "model_ai_off_backend": {
+   "section_2_3_row": "Local AI: backend off",
+   "inputs": {
+    "cfg_model": {
+     "enable_llm": true,
+     "backend": "off"
+    },
+    "model_snapshot": {
+     "ok": false,
+     "code": "off",
+     "backend": "off",
+     "model": "",
+     "local": false,
+     "checked_at": "2026-11-11T09:12:00"
+    }
+   },
+   "expect": {
+    "id": "model",
+    "state": "paused",
+    "code": "ai_off"
+   }
+  },
+  "model_misconfigured": {
+   "section_2_3_row": "Local AI: unknown backend",
+   "inputs": {
+    "cfg_model": {
+     "enable_llm": true,
+     "backend": "mystery"
+    },
+    "model_snapshot": {
+     "ok": false,
+     "code": "misconfigured",
+     "backend": "mystery",
+     "model": "",
+     "local": false,
+     "checked_at": "2026-11-11T09:12:00"
+    }
+   },
+   "expect": {
+    "id": "model",
+    "state": "attention",
+    "code": "misconfigured"
+   }
+  },
+  "model_ok": {
+   "section_2_3_row": "Local AI: probe ok",
+   "inputs": {
+    "model_snapshot": {
+     "ok": true,
+     "code": "",
+     "backend": "ollama",
+     "model": "example-model:8b",
+     "local": true,
+     "checked_at": "2026-11-11T09:12:00"
+    }
+   },
+   "expect": {
+    "id": "model",
+    "state": "connected",
+    "code": "ok"
+   }
+  },
+  "model_unreachable_need_now": {
+   "section_2_3_row": "Local AI: probe unreachable and need_now",
+   "inputs": {
+    "model_snapshot": {
+     "ok": false,
+     "code": "unreachable",
+     "backend": "ollama",
+     "model": "example-model:8b",
+     "local": true,
+     "checked_at": "2026-11-11T09:12:00"
+    },
+    "job_view": {
+     "current": {
+      "state": "running",
+      "kind": "tailor"
+     },
+     "attempts_in_flight": [],
+     "last_attempts": {}
+    }
+   },
+   "expect": {
+    "id": "model",
+    "state": "attention",
+    "code": "unreachable"
+   }
+  },
+  "model_missing_need_now": {
+   "section_2_3_row": "Local AI: probe model_missing and need_now",
+   "inputs": {
+    "model_snapshot": {
+     "ok": false,
+     "code": "model_missing",
+     "backend": "ollama",
+     "model": "example-model:8b",
+     "local": true,
+     "checked_at": "2026-11-11T09:12:00"
+    },
+    "job_view": {
+     "current": {
+      "state": "running",
+      "kind": "scrape"
+     },
+     "attempts_in_flight": [],
+     "last_attempts": {}
+    }
+   },
+   "expect": {
+    "id": "model",
+    "state": "attention",
+    "code": "model_missing"
+   }
+  },
+  "model_unreachable_idle": {
+   "section_2_3_row": "Local AI: probe unreachable, not need_now",
+   "inputs": {
+    "model_snapshot": {
+     "ok": false,
+     "code": "unreachable",
+     "backend": "ollama",
+     "model": "example-model:8b",
+     "local": true,
+     "checked_at": "2026-11-11T09:12:00"
+    }
+   },
+   "expect": {
+    "id": "model",
+    "state": "neutral",
+    "code": "unreachable"
+   }
+  },
+  "model_missing_idle": {
+   "section_2_3_row": "Local AI: probe model_missing, not need_now",
+   "inputs": {
+    "model_snapshot": {
+     "ok": false,
+     "code": "model_missing",
+     "backend": "ollama",
+     "model": "example-model:8b",
+     "local": true,
+     "checked_at": "2026-11-11T09:12:00"
+    }
+   },
+   "expect": {
+    "id": "model",
+    "state": "neutral",
+    "code": "model_missing"
+   }
+  },
+  "model_probing": {
+   "section_2_3_row": "Local AI: no probe result yet",
+   "inputs": {
+    "model_snapshot": null
+   },
+   "expect": {
+    "id": "model",
+    "state": "checking",
+    "code": "probing"
+   }
+  },
+  "need_now_a_job_running": {
+   "section_2_3_row": "need_now (a): running job of a kind other than mailtest",
+   "inputs": {
+    "model_snapshot": {
+     "ok": false,
+     "code": "unreachable",
+     "backend": "ollama",
+     "model": "example-model:8b",
+     "local": true,
+     "checked_at": "2026-11-11T09:12:00"
+    },
+    "job_view": {
+     "current": {
+      "state": "running",
+      "kind": "profile"
+     },
+     "attempts_in_flight": [],
+     "last_attempts": {}
+    }
+   },
+   "expect": {
+    "id": "model",
+    "state": "attention",
+    "code": "unreachable"
+   }
+  },
+  "need_now_a_mailtest_does_not_count": {
+   "section_2_3_row": "need_now (a) negative: running mailtest job",
+   "inputs": {
+    "model_snapshot": {
+     "ok": false,
+     "code": "unreachable",
+     "backend": "ollama",
+     "model": "example-model:8b",
+     "local": true,
+     "checked_at": "2026-11-11T09:12:00"
+    },
+    "job_view": {
+     "current": {
+      "state": "running",
+      "kind": "mailtest"
+     },
+     "attempts_in_flight": [],
+     "last_attempts": {}
+    }
+   },
+   "expect": {
+    "id": "model",
+    "state": "neutral",
+    "code": "unreachable"
+   }
+  },
+  "need_now_b_attempt_in_flight": {
+   "section_2_3_row": "need_now (b): attempts_in_flight non-empty",
+   "inputs": {
+    "model_snapshot": {
+     "ok": false,
+     "code": "unreachable",
+     "backend": "ollama",
+     "model": "example-model:8b",
+     "local": true,
+     "checked_at": "2026-11-11T09:12:00"
+    },
+    "job_view": {
+     "current": null,
+     "attempts_in_flight": [
+      {
+       "id": 50,
+       "job_id": "job-x",
+       "state": "filling"
+      }
+     ],
+     "last_attempts": {}
+    }
+   },
+   "expect": {
+    "id": "model",
+    "state": "attention",
+    "code": "unreachable"
+   }
+  },
+  "need_now_c_model_unavailable_recent": {
+   "section_2_3_row": "need_now (c): last attempt model_unavailable within 24 h",
+   "inputs": {
+    "model_snapshot": {
+     "ok": false,
+     "code": "unreachable",
+     "backend": "ollama",
+     "model": "example-model:8b",
+     "local": true,
+     "checked_at": "2026-11-11T09:12:00"
+    },
+    "job_view": {
+     "current": null,
+     "attempts_in_flight": [],
+     "last_attempts": {
+      "job-y": {
+       "id": 51,
+       "job_id": "job-y",
+       "state": "failed",
+       "reason_code": "model_unavailable",
+       "started_at": "2026-11-11T05:00:00",
+       "finished_at": "2026-11-11T05:03:00"
+      }
+     }
+    }
+   },
+   "expect": {
+    "id": "model",
+    "state": "attention",
+    "code": "unreachable"
+   }
+  },
+  "need_now_c_model_unavailable_old": {
+   "section_2_3_row": "need_now (c) negative: model_unavailable older than 24 h",
+   "inputs": {
+    "model_snapshot": {
+     "ok": false,
+     "code": "unreachable",
+     "backend": "ollama",
+     "model": "example-model:8b",
+     "local": true,
+     "checked_at": "2026-11-11T09:12:00"
+    },
+    "job_view": {
+     "current": null,
+     "attempts_in_flight": [],
+     "last_attempts": {
+      "job-y": {
+       "id": 51,
+       "job_id": "job-y",
+       "state": "failed",
+       "reason_code": "model_unavailable",
+       "started_at": "2026-11-09T05:00:00",
+       "finished_at": "2026-11-09T05:03:00"
+      }
+     }
+    }
+   },
+   "expect": {
+    "id": "model",
+    "state": "neutral",
+    "code": "unreachable"
+   }
+  },
+  "need_now_d_pending_model": {
+   "section_2_3_row": "need_now (d): mail last_counts_json pending_model > 0",
+   "inputs": {
+    "model_snapshot": {
+     "ok": false,
+     "code": "unreachable",
+     "backend": "ollama",
+     "model": "example-model:8b",
+     "local": true,
+     "checked_at": "2026-11-11T09:12:00"
+    },
+    "mail_accounts": [
+     {
+      "id": 1,
+      "address": "owner1@example.com",
+      "host": "imap.gmail.com",
+      "port": 993,
+      "vault_service": "jobscraper:imap:imap.gmail.com",
+      "shared_with_apply": 0,
+      "enabled": 1,
+      "consent_at": "2026-11-07T08:00:00",
+      "consent_version": "mail-consent:v1",
+      "state": "ok",
+      "state_code": null,
+      "notes": null,
+      "fail_count": 0,
+      "retry_after": null,
+      "first_sync_from": "2026-10-08T00:00:00",
+      "last_sync_at": "2026-11-11T09:10:00",
+      "last_ok_at": "2026-11-11T09:10:00",
+      "last_counts_json": "{\"scanned\": 42, \"duplicates\": 3, \"skipped\": 30, \"bodies\": 9, \"matched\": 6, \"applied\": 2, \"suggested\": 1, \"unmatched\": 3, \"pending_model\": 5, \"model_calls\": 4, \"errors\": 0}",
+      "created_at": "2026-11-07T08:00:00",
+      "updated_at": "2026-11-11T09:10:00"
+     }
+    ],
+    "mail_runner": {
+     "timer_running": true,
+     "status": {
+      "running": false,
+      "started_at": null,
+      "next_at": "2026-11-11T09:20:00"
+     }
+    }
+   },
+   "expect": {
+    "id": "model",
+    "state": "attention",
+    "code": "unreachable"
+   }
+  }
+ }
+}
