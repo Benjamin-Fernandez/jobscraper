@@ -23,7 +23,7 @@ defineProps({
 const FIXABLE = new Set(['signin_failed', 'exists_no_password', 'password_missing'])
 
 const needsFix = row => row.state === 'attention' && FIXABLE.has(row.code)
-const command = row => `python -m jobscraper accounts add --url https://${row.tenant_host}/ --email ${row.email}`
+const command = row => `.\\run.ps1 accounts add --url https://${row.tenant_host}/careers --email ${row.email}`
 
 function lastSignin(row) {
   if (!row.last_signin_at) return 'Not yet'
@@ -73,7 +73,7 @@ const hintParts = COPY.readPassword.split('`').map((text, i) => ({ text, code: i
               <details v-if="needsFix(row)" class="employer-fix">
                 <summary>See how to fix</summary>
                 <p class="employer-fix-note">
-                  Run this in a terminal. It asks for the password, so the password never goes through this page.
+                  In PowerShell, in the JobScraper folder, run this. It asks for the password, so the password never goes through this page.
                 </p>
                 <pre class="code-wrap">{{ command(row) }}</pre>
               </details>

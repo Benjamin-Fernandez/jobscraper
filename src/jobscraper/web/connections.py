@@ -37,6 +37,7 @@ VERSION = 1
 NO_ACCOUNT_NEEDED = ["greenhouse", "lever", "ashby"]     # they apply as a guest
 CHECK_FAILED_TEXT = "Couldn't check this just now. Try again in a moment."   # §4.4
 RECENT_DAYS = 1                       # §2.3: "within 24 h"
+IN_FLIGHT_HOURS = 2                   # D-198: an attempt older than this is a stuck row, not work
 
 # Worst first: the employer summary takes the worst row's state (§2.3).
 _SEVERITY = {"attention": 0, "neutral": 1, "checking": 2, "connected": 3,
@@ -214,8 +215,14 @@ def _mailbox_items(cfg: Any, store: Any, vault_has: VaultHas) -> list[dict[str, 
     # unset, it is an Optional not_set_up item (T0 fixture).
     separate = bool(buser) and (buser.lower() != user.lower()
                                 or bhost.lower() != host.lower())
-    return [_mailbox_item("apply-mailbox", host, box.port, user, separate, vault_has,
-                          optional=False),
+    primary = _mailbox_item("apply-mailbox", host, box.port, user, separate, vault_has,
+                            optional=False)
+    # D-198 M2: the same account twice is one mailbox. No backup item when its
+    # username equals the primary's (case-insensitive, trimmed), so a problem
+    # with it is counted once in the badge.
+    if buser.lower() == user.lower() and buser:
+        return [primary]
+    return [primary,
             _mailbox_item("apply-mailbox:backup", bhost, ac.mail_backup.port, buser,
                           separate, vault_has, optional=True)]
 
@@ -322,16 +329,20 @@ def pending_mail(mail_rows: Optional[list[dict[str, Any]]]) -> int:
 
 def need_reason(current: dict[str, Any], in_flight: Optional[list],
                 attempts: Optional[dict[str, Any]], mail_rows: Optional[list[dict[str, Any]]],
-                recent: str) -> Optional[str]:
+                recent: str, in_flight_since: Optional[str] = None) -> Optional[str]:
     """What is waiting on the model right now (§2.3 `need_now`, D-196): the first
     rule that holds, in order a to d, as "run" | "application" | "mail"; None
-    when nothing is. Fixed words only, for the §4.4 copy."""
+    when nothing is. Fixed words only, for the §4.4 copy. `in_flight_since`
+    (D-198 M3) is the oldest `started_at` an in-flight attempt may have and
+    still count; older rows are stuck, not work. A row with no `started_at`
+    counts (unknown is not stale)."""
     # (a) a running background job of any kind but the mailbox test; an apply
     # job is an application waiting (Coordinator ruling on D-196)
     if current.get("state") == "running" and current.get("kind") not in (None, "mailtest"):
         return "application" if current.get("kind") == "apply" else "run"
     # (b) an apply attempt in flight
-    if in_flight:
+    if any(not r.get("started_at") or in_flight_since is None
+           or str(r["started_at"]) >= in_flight_since for r in in_flight or []):
         return "application"
     # (c) an attempt ended model_unavailable in the last 24 h
     for r in (attempts or {}).values():
@@ -346,9 +357,10 @@ def need_reason(current: dict[str, Any], in_flight: Optional[list],
 
 def need_now(current: dict[str, Any], in_flight: Optional[list],
              attempts: Optional[dict[str, Any]], mail_rows: Optional[list[dict[str, Any]]],
-             recent: str) -> bool:
+             recent: str, in_flight_since: Optional[str] = None) -> bool:
     """§2.3 `need_now`: something is waiting on the model right now."""
-    return need_reason(current, in_flight, attempts, mail_rows, recent) is not None
+    return need_reason(current, in_flight, attempts, mail_rows, recent,
+                       in_flight_since) is not None
 
 
 def _model_item(cfg: Any, snapshot: Optional[dict[str, Any]], reason: Optional[str],
@@ -409,6 +421,7 @@ def compose(cfg: Any, store: Any, mail_runner_view: dict[str, Any],
     degrades only its own item."""
     now = now or datetime.now(timezone.utc).strftime(TIME_FMT)
     recent = shift(now, days=-RECENT_DAYS)
+    stale_before = shift(now, seconds=-IN_FLIGHT_HOURS * 3600)
     runner = mail_runner_view or {}
     jv = job_view or {}
     job = jv.get("current") or {}
@@ -431,7 +444,8 @@ def compose(cfg: Any, store: Any, mail_runner_view: dict[str, Any],
              + _mailbox_items(cfg, store, vault_has)
              + [_edge_item(cfg, job, attempts, lockfile_busy, profile_dir_exists),
                 _model_item(cfg, model_snapshot,
-                            need_reason(job, in_flight, attempts, mail_rows, recent),
+                            need_reason(job, in_flight, attempts, mail_rows, recent,
+                                        stale_before),
                             pending_mail(mail_rows)),
                 employer_item])
     for item in items:
