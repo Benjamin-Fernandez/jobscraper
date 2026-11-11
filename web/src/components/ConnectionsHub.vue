@@ -71,12 +71,12 @@ function mailFix(item, backupBox = false) {
   const flag = backupBox ? ' --backup' : ''
   const setUp = item.state === 'not_set_up' && !item.facts?.username
   return {
-    note: 'Run this in a terminal. It asks for the app password, so the password never goes through this page.',
+    note: 'In PowerShell, in the JobScraper folder. It asks for the app password, so the password never goes through this page.',
     commands: [
       setUp
-        ? `python -m jobscraper mail set-password${flag} --host imap.gmail.com --user you@gmail.com`
-        : `python -m jobscraper mail set-password${flag}`,
-      `python -m jobscraper mail test${flag}`,
+        ? `.\\run.ps1 mail set-password${flag} --host imap.gmail.com --user you@gmail.com`
+        : `.\\run.ps1 mail set-password${flag}`,
+      `.\\run.ps1 mail test${flag}`,
     ],
   }
 }
