@@ -510,7 +510,7 @@ onDeactivated(() => window.removeEventListener('keydown', onShortcut))
         <p class="muted">Show other runs above, or start a new one from the <a href="#/runs">Runs tab</a>.</p>
       </div>
     </SetupChecklist>
-    <div v-else-if="!visible.length && !query.trim()" class="empty caught-up">
+    <div v-else-if="!error && !visible.length && !query.trim()" class="empty caught-up">
       <Icon name="check" :size="28" />
       <p class="empty-title">You're all caught up.</p>
       <p class="muted">Every new role is triaged.<template v-if="notInterested.length"> <button type="button" class="link show-ni" @click="niOpen = true">Show Not interested ({{ notInterested.length }})</button></template><template v-else> See <a href="#/applications">Applications</a>.</template></p>
