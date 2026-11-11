@@ -258,6 +258,8 @@ S values are never in an LLM prompt (`llm_extract` excludes them), never in a lo
 
 **Amendment D-105 (Q-74, ADR-0008, `q74_model_sees_sensitive.md`):** when config `apply.model_sees_sensitive` is true **and** the model backend is local (`backends.is_local`: Ollama on localhost/127.0.0.1/::1), `ResolveContext.model_sees_sensitive` is true. Then `llm_extract(profile, sensitive=True)` and `grounding_text(..., sensitive=True)` add the S paths (not `extra`), so S values may be in the tier-5 prompt and its grounding corpus (and in llm_fill's FACTS, q74 §4). A tier-5 answer that contains an S value carries `sensitive=True`. With a remote backend, or the switch off, the rule above stands unchanged. In every case, S values are never logged. The fail-closed routing (tier-1 `SENSITIVE_CANONICALS`, tier-2 sensitive stops, tier-4 locks, EEO by code) and the refusal to send a sensitive question for naming don't change: the switch widens what the model reads, not what it decides.
 
+**Amendment D-201 (2026-11-11, `q74_model_sees_sensitive.md` § "D-201"):** under the same effective switch the model also reads `identity`, `pay` and `consents` (never `documents` or `version`), and llm_fill FACTS show sensitive `extra` answers and the standing `account_email`. Still private, never logged, and decided by code and locks as above.
+
 ### 5.4 Template: `config/applicant.example.yaml` (public; placeholders only)
 
 The engineer creates this file verbatim (scope request §20, R-1). The owner copies it to `data/applicant.yaml` (Q-13).

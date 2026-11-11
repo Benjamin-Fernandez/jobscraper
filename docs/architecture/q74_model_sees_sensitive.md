@@ -109,3 +109,34 @@ Why this copy: the badge exists to say where a value goes. That still matters, b
 - T8 web: both GET payloads carry `model_sees_private`. Vitest: the badge text for each flag value in the three components; the header variant.
 
 READY TO BUILD: yes
+
+## D-201 (2026-11-11): the whole profile is readable
+
+Owner, 2026-11-11: "the AI filling in the auto-apply information can access all inputted information about the user; it is not sensitive in any way". Fast-track delta on D-105; KA-2, so an independent review before merge. No contract change, no ADR (ADR-0008's decision holds; this widens one list it already names).
+
+**(a) Paths.** `applicant.LLM_ALLOW_SENSITIVE` becomes `("identity", "pay", "consents", "singapore_status", "us_self_id", "declarations", "contact")`: the two `identity.*` leaves give way to the whole `identity` block, plus `pay` and `consents`. That adds the leaves still hidden under D-105: `identity.legal_first_name`, `legal_last_name`, `preferred_name`, `name_order`, `pronouns`, `pay.current_salary`, `pay.months_per_year`, `consents.privacy_consent`, `data_retention_consent`, `talent_pool_opt_in`, `certify_true`. Never `documents` (local file paths; the resume upload is lock L1) and never `version` (not about the applicant). `LLM_ALLOW_CONTACT` is unchanged, so the tier-5 grounding corpus is unchanged. Both users of the list widen with no edit of their own: tier 5 (`resolve.user_prompt` → `llm_extract(sensitive=True)`) and llm_fill FACTS (`facts._model_may_read`). Note: in FACTS the three `facts.NAME_PATHS` are already non-private and shown; for them only tier 5 widens.
+
+**(b) `extra` and the standing `account_email`.** With the effective switch on, `facts.fact_catalogue` gives a sensitive `extra` answer and the private standing fact `standing:account_email` their value, so `facts_text(show_private=True)` prints `private: <value>`. `Fact.private` stays `True`, so G2d (never a restated private fact), G7 (a private `extra` or standing fact on an S-labelled question gives unknown), `pick_refused`, the audit `sensitive` order and redaction keep their meaning. The model still cites the ref with value "" and the program writes the value (SYSTEM text unchanged). `llm_extract` and `grounding_text` still never include `extra` (tier 3 reads it by code).
+
+**(c) Unchanged.**
+- ADR-0008 Option C: the model reads, code decides. Tier-1 `SENSITIVE_CANONICALS`, tier-2 sensitive stops, tier-4 declaration and attestation locks, EEO by code, LF locks L1–L7 (L5 keeps `consents.privacy_consent` / `certify_true` lock-decided), G7, `pick_option` redaction with the full `facts.s_values` (which still lists `account_email`), the `_withhold` rule for values JobScraper typed.
+- Grounding: `protected_strings`, the tier-5 corpus (contact only), the llm_fill `facts_corpus` (non-private facts only) and G3 / the text guard. A value the model repeats from a newly readable leaf (say the current salary) grounds only where it already did; otherwise the field ends unknown or captured. That is fail-closed.
+- S values are never logged (`redaction_values`, job-log scrubber, prompt hashes only, `debug_dump` redacted). `inputs_hash` still folds the effective switch. A remote backend or cloud tag ignores the switch (D-107). `extra` values and sensitive questions are still never sent for question naming (`questions.ask_model`, `naming_existing`).
+
+**(d) Risks, accepted.** (1) More personal data in local prompts: accepted on the owner's statement, and it stays on this computer (principle 6: the backend must be local, else the switch is off). (2) The model could write a name, salary or consent into a free-text answer: grounding and the guards are unchanged, so it cannot invent or decide one (principle 1); the value goes to the employer anyway when its form asks. (3) Stale cache: a flag-on fill cached under D-105 saw less. The `inputs_hash` marker is versioned (f) so those fills re-run once.
+
+**(e) Opt-in.** No new switch. The existing `apply.model_sees_sensitive: true` (owner config) plus a local backend turns D-201 on. The UI line stays: Profile tab / `doctor` "Private fields: the local AI may read them", badge "Private: local AI only". Same meaning, wider set.
+
+**(f) Code delta (engineer, one small lane).**
+1. `applicant.py`: `LLM_ALLOW_SENSITIVE` as in (a). Comment above it: "D-201: every profile group except `documents` and `version`; `extra` never". `llm_extract` docstring: "adds LLM_ALLOW_SENSITIVE (D-105, widened by D-201)". `LLM_ALLOW_CONTACT` unchanged.
+2. `apply/facts.py` `fact_catalogue`: the `extra` loop `value=words if (not private or reads) else ""`, and the standing loop `value="" if not is_set or (private and not reads) else _text(v)`. Docstrings of `fact_catalogue`, `_model_may_read` ("Never `extra` or a standing private fact" becomes "the `extra` and standing private facts are handled in `fact_catalogue`") and `facts_text`.
+3. `apply/facts.py` `inputs_hash`: the marker `"\n\x1e\x1dprivate-visible"` becomes `"\n\x1e\x1dprivate-visible:d201"`.
+4. Nothing in `guards.py`, `locks.py`, `llm_fill.py`, `pagefill.py`, `resolve.py`, contracts or the web. Verify: `python tests/run_tests.py -k q74`, `-k q79`, `-k llm_fill`, `-k guards`, `-k applicant`, then the full suite plus `-k apply_flow` and `-k apply_e2e` (Edge).
+
+**(g) Pins (tester).** Rule: a pin that asserts a formerly hidden leaf stays hidden with the switch effective becomes a pin that it is shown, and gets a flag-off twin that it is hidden. Flag-off pins don't change.
+- `tests/test_q74_llm_fill_hooks.py::test_hook_a_extra_answers_never_reach_the_prompt_even_with_the_flag_on` → flag on, a usable sensitive `extra` value is in FACTS as `private: <value>`; flag off it is not. Use an entry that `facts._extra_usable` accepts, so the pin cannot pass empty.
+- `test_hook_a_show_private_without_a_value_keeps_the_set_marker` stays (an unset `identity.pronouns` still prints `private, empty`).
+- `tests/test_q74_model_sees_sensitive.py::test_t2_sensitive_true_adds_every_s_block_but_never_extra` stays. Add: `llm_extract(p, sensitive=True)` holds the legal name, `pay.current_salary` and `consents`, and no `documents` or `version`; `protected=False` still gives contact only.
+- New: flag on, `standing:account_email` prints its value, and `pick_option` still redacts it; G7 still gives unknown for a private `extra` fact on an S-labelled field; a flag-on/flag-off `inputs_hash` pair differs and the flag-on one differs from the D-105 marker. G3 pins: none expected to change, since `facts_corpus` is unchanged.
+
+READY TO BUILD: yes (after the KA-2 review of this delta)

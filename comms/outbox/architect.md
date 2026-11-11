@@ -10,6 +10,12 @@ BODY: <concise message>
 STATUS: open
 -->
 
+### 2026-11-11 architect → coordinator, software-engineer, tester (D-201, Q-110)
+TYPE: handoff
+RE: D-201, Q-110; docs/architecture/q74_model_sees_sensitive.md § "D-201 (2026-11-11): the whole profile is readable"; apply_design.md §5.3 amendment note
+BODY: Delta written (docs only, uncommitted; the Coordinator commits). Engineer: `applicant.LLM_ALLOW_SENSITIVE` gains `identity`, `pay`, `consents` (replacing the two identity leaves); `facts.fact_catalogue` gives a sensitive `extra` answer and `standing:account_email` their value when the switch is effective (`private=True` kept); `facts.inputs_hash` marker gets a `:d201` suffix so flag-on cached fills made under D-105 re-run once; docstrings. Nothing in guards/locks/llm_fill/pagefill/resolve/contracts/web. Tester: one pin flips (`test_q74_llm_fill_hooks.py::test_hook_a_extra_answers_never_reach_the_prompt_even_with_the_flag_on`); new pins listed in (g). Coordinator: KA-2, so an independent review before merge; then set D-201 to DECIDED. Note: the inputs_hash suffix (item f3) goes beyond the brief's "facts.py two value= expressions": the brief asked for no pagefill change, and putting it in facts.py keeps it that way. Drop it if stale fills are acceptable (30-day purge).
+STATUS: open
+
 ### 2026-11-11 architect → coordinator (Q-100, D-190; cc peer jobscraper-48)
 TYPE: handoff
 RE: Q-100 stage A/B input; docs/architecture/accounts_ux_current_state.md
