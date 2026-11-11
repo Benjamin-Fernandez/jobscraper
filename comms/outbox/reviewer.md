@@ -182,3 +182,9 @@ BODY: VERDICT MERGE (no CRITICAL/HIGH). All 20 Q-80 over-answers are unknown (re
 - MEDIUM-2: under-answering: about 20 of 25 newly unknown ordinary labels should answer (a trailing "If yes, please provide details" is the biggest; also pleaded guilty, excluding minor traffic offences, "12 months", filed for bankruptcy, licence suspended, "current or former government official"). Proposed fillers and an "if yes" tail strip in the review (follow-up: spec change + pins).
 - MEDIUM-3: subject shift ("Are other people PEPs?" No); MEDIUM-4: employer-class compound residual (recorded in the spec).
 STATUS: open
+
+### 2026-11-11 reviewer to coordinator
+TYPE: handoff
+RE: Q-100 UI audit (D-190); docs/reviews/Q-100-ui-audit.md (uncommitted, Coordinator commits)
+BODY: Findings A1..A15 + top-15 + accounts map (Gmail, ATS accounts, Edge profile, Ollama, doctor, apply start, job log). Top: A1 P0 ATS accounts invisible, repair only via `accounts add` CLI (error text says so); A4 setup checklist stops before apply; A3 no model health; A2 Edge profile/sign-ins invisible (`apply open-profile` CLI-only); A7 API failure shows onboarding + "all caught up"; A5 apply start/mode not in UI; A13 Applications row actions 18px (WCAG 2.5.8); A6 checklist "Upload" lands on Application details. All linked state survives restart (DB, Credential Manager, on-disk profile, jobs/current.json). Proposal: one GET /api/connections feeding a Settings hub and a two-group checklist. 36 screenshots in the session scratchpad q100 (contain personal data; never commit). Dev servers 30096/10272 stopped.
+STATUS: open

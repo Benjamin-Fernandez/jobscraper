@@ -10,6 +10,35 @@ BODY: <concise message>
 STATUS: open
 -->
 
+### 2026-11-11 architect → coordinator, tester, planner; requests to Q-110/Q-111 (jobscraper-c6) and jobscraper-48 (Q-100 stage B, D-191)
+TYPE: handoff + request
+RE: Q-100; docs/architecture/q100_ui_design.md (DRAFT for cross-review); docs/architecture/adr/0009-no-secret-to-browser.md; apply_design §14.3 amended
+BODY: Design ready for cross-review.
+- **Hub location:** Settings views Accounts / Apply / Search / Appearance, so the existing "Settings → Accounts/Apply" hints become true. Deep links `#/<tab>/<view>/<item>`. Settings badge for items needing attention; the attention banner sits in the App.vue shell.
+- **Contract:** `GET /api/connections` v1 (§3.1). The tester writes the fixture first (T0).
+- **Wave 1 lanes:** A backend (web/connections.py, routers/connections.py, api.py, backends.py `unavailable_code`); B hub + Settings (connections.js, connections_api.js, a one-line `export request` in api.js, new hub components, Settings.vue); C shell + onboarding + fixes (route.js, App.vue, tabs.js, AttentionBanner, setup.js, SetupChecklist, Overview, Profile, Applications A13, ApplicationDetails, JobStatus). Merge order A, C, B.
+- **Wave 2 (KA-3 dossier + jobscraper-48 sign-off):** G2, G4, G6, G7, G11, with the CLI/apply API asks in §6.
+- **Requests:**
+  - R1 (Q-110 owner): `!error` on the Inbox.vue:459 caught-up branch.
+  - R2 (jobscraper-48): MailCard collapses its connect form once a mailbox is connected, plus an optional `embedded` prop (A8).
+  - R3 (Q-111): `writable: true` in GET /api/apply/settings once its PUT exists. The UI must not probe with a PUT, because that would pin apply.* settings rows.
+  - R4 (Q-111): `compose_enabled` in the same GET/PUT /api/apply/settings. Fallback: a lane A route after the Q-45 merge.
+- **Coordinator:** D-191 is recorded as ADR-0009; the apply_design §14.3 row is struck through and the amendment note added.
+- **Open:** Q2 show the employer email in full or masked (proposed: in full); Q3 where R1 lands.
+STATUS: open
+
+### 2026-11-11 architect → coordinator, software-engineer, tester (D-201, Q-110)
+TYPE: handoff
+RE: D-201, Q-110; docs/architecture/q74_model_sees_sensitive.md § "D-201 (2026-11-11): the whole profile is readable"; apply_design.md §5.3 amendment note
+BODY: Delta written (docs only, uncommitted; the Coordinator commits). Engineer: `applicant.LLM_ALLOW_SENSITIVE` gains `identity`, `pay`, `consents` (replacing the two identity leaves); `facts.fact_catalogue` gives a sensitive `extra` answer and `standing:account_email` their value when the switch is effective (`private=True` kept); `facts.inputs_hash` marker gets a `:d201` suffix so flag-on cached fills made under D-105 re-run once; docstrings. Nothing in guards/locks/llm_fill/pagefill/resolve/contracts/web. Tester: one pin flips (`test_q74_llm_fill_hooks.py::test_hook_a_extra_answers_never_reach_the_prompt_even_with_the_flag_on`); new pins listed in (g). Coordinator: KA-2, so an independent review before merge; then set D-201 to DECIDED. Note: the inputs_hash suffix (item f3) goes beyond the brief's "facts.py two value= expressions": the brief asked for no pagefill change, and putting it in facts.py keeps it that way. Drop it if stale fills are acceptable (30-day purge).
+STATUS: open
+
+### 2026-11-11 architect → coordinator (Q-100, D-190; cc peer jobscraper-48)
+TYPE: handoff
+RE: Q-100 stage A/B input; docs/architecture/accounts_ux_current_state.md
+BODY: Current-state map done (docs only, uncommitted; the Coordinator commits). Key findings: (1) ATS accounts, the apply mailbox and the Edge profile are CLI-only; only Gmail-for-status has a web UI (MailCard). (2) Failure hints point to "Settings → Accounts / Apply", which don't exist (apply/contracts.py:169,175,193). (3) The web app never purges stale data/edge_passwords_*.csv (design §10.3 says it does; only cli.py:1177 does), so a plaintext CSV can outlive its hour: KA-3 fix for the peer. (4) The planned "Copy password" endpoint (apply_design §14.3) conflicts with "secrets never sent to the browser": needs a decision + ADR before the hub design. (5) Collision of an apply job and open-profile shows as generic `error`. (6) `doctor` writes (watchlist sync) and can't back a read-only health endpoint. Gaps G1-G12 are classed UI vs KA-3 in §3; new read-only endpoint shapes are in §4. Peer sign-off needed for G2, G4 (password), G6 job kind, G7, G11, and any apply/contracts.py copy change. App lock: recommend not building it (§6). Ready for the hub design once the competitor brief and UI audit land.
+STATUS: open
+
 ### 2026-11-10 architect → coordinator, software-engineer, tester (Q-87, D-113..D-116)
 TYPE: handoff
 RE: Q-87; docs/architecture/q87_company_recommendations.md
