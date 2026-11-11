@@ -1,0 +1,22 @@
+<!-- Q-97 flow oracle: a required cover-letter FILE input, a required "Why do you want to join us?" TEXTAREA (both compose targets, llm_fill_design section 19) and one ordinary field. Next goes to compose_review.html; the shim counts Next and Submit presses. Synthetic. -->
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Example Employer Careers</title><style>.hidden-file{display:none}textarea{width:400px;height:60px}</style></head>
+<body>
+<main><div data-automation-id="applyFlowPage">
+<h2 data-automation-id="jobTitleHeading">Example Role (REQ-0000)</h2><div data-automation-id="progressBar"><div data-automation-id="progressBarActiveStep"><span class="sr-only">current step 2 of 3</span>My Information</div></div>
+<h3>My Information</h3>
+<div data-automation-id="formField-legalName--firstName"><label for="input-9"><span>Given Name(s)<abbr title="required">*</abbr></span></label><div><div><input type="text" id="input-9" name="legalName--firstName" aria-required="true" value=""></div></div></div>
+<div data-automation-id="formField-coverLetter"><label for="file-5" id="filelabel-6"><span>Cover Letter<abbr title="required">*</abbr></span></label><div data-automation-id="attachments-FileUpload" aria-labelledby="filelabel-6"><div data-automation-id="file-upload-drop-zone"><div>Drop file here</div><div><div>or</div><button type="button" data-automation-id="select-files"><span>Select files</span></button></div></div><input data-automation-id="file-upload-input-ref" type="file" id="file-5" class="hidden-file"></div></div>
+<div data-automation-id="formField-whyJoin"><label for="input-21"><span>Why do you want to join us?<abbr title="required">*</abbr></span></label><div><div><textarea id="input-21" aria-required="true"></textarea></div></div></div>
+</div>
+<div data-automation-id="pageFooter"><button type="button" data-automation-id="pageFooterBackButton">Back</button>
+<button type="button" data-automation-id="pageFooterNextButton">Save and Continue</button></div></main>
+<script type="application/json" id="shim-data">{"options": {}, "search": {}, "drop": {}, "reveal": {}, "next": "compose_review.html"}</script>
+<script src="../llm_fill/shim.js"></script>
+<script>/* test readout: what the page held when Next was pressed (the Review page cannot show it) */
+document.querySelector('[data-automation-id="pageFooterNextButton"]').addEventListener('click', () => {
+  sessionStorage.setItem('q97', JSON.stringify({area: document.querySelector('#input-21').value,
+    given: document.querySelector('#input-9').value,
+    files: [...document.querySelectorAll('[data-automation-id="file-upload-item-name"]')].map(e => e.textContent.trim())}));
+});</script>
+</body></html>
