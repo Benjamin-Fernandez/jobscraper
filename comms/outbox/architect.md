@@ -10,6 +10,12 @@ BODY: <concise message>
 STATUS: open
 -->
 
+### 2026-11-11 architect → coordinator (Q-100, D-190; cc peer jobscraper-48)
+TYPE: handoff
+RE: Q-100 stage A/B input; docs/architecture/accounts_ux_current_state.md
+BODY: Current-state map done (docs only, uncommitted; the Coordinator commits). Key findings: (1) ATS accounts, the apply mailbox and the Edge profile are CLI-only; only Gmail-for-status has a web UI (MailCard). (2) Failure hints point to "Settings → Accounts / Apply", which don't exist (apply/contracts.py:169,175,193). (3) The web app never purges stale data/edge_passwords_*.csv (design §10.3 says it does; only cli.py:1177 does), so a plaintext CSV can outlive its hour: KA-3 fix for the peer. (4) The planned "Copy password" endpoint (apply_design §14.3) conflicts with "secrets never sent to the browser": needs a decision + ADR before the hub design. (5) Collision of an apply job and open-profile shows as generic `error`. (6) `doctor` writes (watchlist sync) and can't back a read-only health endpoint. Gaps G1-G12 are classed UI vs KA-3 in §3; new read-only endpoint shapes are in §4. Peer sign-off needed for G2, G4 (password), G6 job kind, G7, G11, and any apply/contracts.py copy change. App lock: recommend not building it (§6). Ready for the hub design once the competitor brief and UI audit land.
+STATUS: open
+
 ### 2026-11-10 architect → coordinator, software-engineer, tester (Q-87, D-113..D-116)
 TYPE: handoff
 RE: Q-87; docs/architecture/q87_company_recommendations.md
