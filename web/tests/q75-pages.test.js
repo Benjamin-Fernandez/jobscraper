@@ -300,6 +300,7 @@ describe('runs.js: num, matchLabel, runsPerDayLabel (G37)', () => {
 describe('Settings: the cycle radios (N17)', () => {
   const puts = () => calls('PUT').filter(c => c.url === 'api/settings').map(c => JSON.parse(c.body))
   async function mountSettings() {
+    setHash('#/settings/search')   // Q-100: the cycle is in the Search view
     const w = mount(Settings, { props: { run: 'all', jobs: [] }, attachTo: document.body })
     await flushPromises()
     return w
@@ -384,6 +385,7 @@ describe('Settings: the cycle radios (N17)', () => {
 describe('Settings: notices clear when the number is edited (N17)', () => {
   const input = w => w.find('#batch-size')
   async function mountSettings() {
+    setHash('#/settings/search')   // Q-100: the number field is in the Search view
     const w = mount(Settings, { props: { run: 'all', jobs: [] } })
     await flushPromises()
     return w
@@ -426,6 +428,7 @@ describe('Settings: notices clear when the number is edited (N17)', () => {
 
 describe('Settings: theme switch (G40)', () => {
   const mountSettings = async () => {
+    setHash('#/settings/appearance')   // Q-100: the theme switch has its own view
     const w = mount(Settings, { props: { run: 'all', jobs: [] } })
     await flushPromises()
     return w

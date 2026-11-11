@@ -107,7 +107,9 @@ export function useHashItem(tabId) {
   const item = ref(null)
   function sync() {
     const parts = split(window.location.hash)
-    if (parts && parts.tab === tabId) item.value = parts.item
+    // Another tab's hash (or no route): no item, so a kept-alive tab that is hidden
+    // never re-scrolls to a card the hash no longer names (D-197).
+    item.value = parts && parts.tab === tabId ? parts.item : null
   }
   sync()
   onHash(sync)

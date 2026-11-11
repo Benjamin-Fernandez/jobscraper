@@ -120,6 +120,7 @@ describe('Runs: choosing how many companies', () => {
 
 describe('Settings: the same quick sizes', () => {
   it('a preset is saved like a typed number', async () => {
+    setHash('#/settings/search')   // Q-100: the quick sizes are in the Search view
     const w = mount(Settings)
     await flushPromises()
     await w.find('[data-preset="50"]').trigger('click')
