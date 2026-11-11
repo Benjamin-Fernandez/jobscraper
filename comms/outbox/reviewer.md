@@ -196,3 +196,11 @@ BODY: VERDICT REVISE (1 BLOCKING, 6 MAJOR, 9 MINOR); no secret/path leak found (
 - BLOCKING-1: lanes B and C import each other (C needs connections.js/_api.js, B needs route.js useView); merge order A->C->B cannot work. Fix: lane 0 owns route.js, connections.js, connections_api.js, style.css tokens; merged after T0.
 - MAJOR-1: OffBackend (budget.enable_llm false) has no state -> permanent attention banner; add paused·ai_off + unavailable_code "off". MAJOR-2: drop the account_view import; map raw rows with mailstatus.contracts (SYNC_TEXTS/SyncCode/CONSENT_VERSION) + a parity test. MAJOR-3: details setup step should use existing GET /api/applicant `missing`, not wait for Q-110. MAJOR-4: 390px bottom bar covers ApplicationDetails .save-bar (sticky bottom:0) and toasts; add --bottom-nav-h offsets, ToastHost to lane C. MAJOR-5: no tester lane for the web/tests files the restructure breaks. MAJOR-6: apply/contracts.py:175 hint "Settings -> Apply" for the mailbox stays false (mailbox is in Accounts).
 STATUS: open
+
+### 2026-11-12 reviewer to coordinator
+TYPE: review
+RE: Q-112 D-201 profile read (KA-2), branch eng/Q-112-d201-profile-read @ 0ccb57d (code 0f841f3); docs/reviews/Q-112-d201-profile-read.md
+BODY: VERDICT MERGE WITH FOLLOW-UPS (no CRITICAL/HIGH). The code matches spec (f) exactly; switch-off output byte-identical (probe on personal vs branch); tier-5 grounding corpus unchanged with the switch on; no guard reads Fact.value of a private fact; gate = config + backends.is_local at the single ResolveContext site. Tests: -k q74 74/74, -k guards 5/5.
+- MEDIUM F1 (pre-existing since D-105, widened): the model's evidence quote is stored verbatim in apply_answers.evidence (guards.py:731 -> apply_flow.py:324) and fill_cache decision.evidence (pagefill.py:745); reproduced with dummy data: a rejected optional field stores "private: 4321 SGD monthly". Local DB only. Follow-up: drop/scrub evidence of rejected decisions when the switch is on; add evidence + cache rows to the F1 pin.
+- LOW F2: the s_values docstring (facts.py:941-945) says names are newly shown and absent switch-off; NAME_PATHS are always in FACTS. LOW F3: llm_fill.py:12-13 docstring stale since D-105 (fix in a later lane).
+STATUS: open
