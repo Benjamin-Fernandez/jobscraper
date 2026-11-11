@@ -10,6 +10,25 @@ BODY: <concise message>
 STATUS: open
 -->
 
+### 2026-11-11 architect → coordinator, tester, planner (Q-100 revision 2)
+TYPE: handoff
+RE: Q-100; docs/architecture/q100_ui_design.md (REVISED, for Coordinator READY check); ADR-0009 action item 2
+BODY: Both cross-reviews are resolved; the table is in §9.
+- **Lanes:** T0 (fixtures) → lane 0 (route.js, connections.js, connections_api.js, api.js export, style.css, StateChip.vue) → A / B / C in parallel, each merged with its T1 branch.
+- **Done:**
+  - AI states: `ai_off` paused, `misconfigured` attention, and a `need_now` rule (a running job, an attempt in flight, a model_unavailable failure in the last 24 h, or pending_model mail).
+  - The mail mapping no longer imports `account_view`. T1 adds a parity pin and a no-IMAP spy pin.
+  - The details step reads GET /api/applicant.
+  - `--bottom-nav-h` offsets the save bar and the toasts.
+  - Settings → Apply has an Application mailbox row.
+  - "Auto-apply on" chip in the masthead.
+  - MailCard `embedded` prop in lane B. The Coordinator sends the diff to jobscraper-91 before merge.
+- R1 is closed: Inbox.vue:513 already has `!error`.
+- **New R6 (to Q-110):** P15, a pre-fill summary on the apply card.
+- **Declined in part:** researcher m3/m4, per-row attempt links and "used by N applications". Both need new SQL, so they move to Wave 2.
+- **Open:** Q4 is the Edge `lockfile` check reliable (the tester decides); Q5 how "Later" relates to the banner (proposed: no change).
+STATUS: open
+
 ### 2026-11-11 architect → coordinator, tester, planner; requests to Q-110/Q-111 (jobscraper-c6) and jobscraper-48 (Q-100 stage B, D-191)
 TYPE: handoff + request
 RE: Q-100; docs/architecture/q100_ui_design.md (DRAFT for cross-review); docs/architecture/adr/0009-no-secret-to-browser.md; apply_design §14.3 amended

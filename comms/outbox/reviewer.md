@@ -188,3 +188,11 @@ TYPE: handoff
 RE: Q-100 UI audit (D-190); docs/reviews/Q-100-ui-audit.md (uncommitted, Coordinator commits)
 BODY: Findings A1..A15 + top-15 + accounts map (Gmail, ATS accounts, Edge profile, Ollama, doctor, apply start, job log). Top: A1 P0 ATS accounts invisible, repair only via `accounts add` CLI (error text says so); A4 setup checklist stops before apply; A3 no model health; A2 Edge profile/sign-ins invisible (`apply open-profile` CLI-only); A7 API failure shows onboarding + "all caught up"; A5 apply start/mode not in UI; A13 Applications row actions 18px (WCAG 2.5.8); A6 checklist "Upload" lands on Application details. All linked state survives restart (DB, Credential Manager, on-disk profile, jobs/current.json). Proposal: one GET /api/connections feeding a Settings hub and a two-group checklist. 36 screenshots in the session scratchpad q100 (contain personal data; never commit). Dev servers 30096/10272 stopped.
 STATUS: open
+
+### 2026-11-11 reviewer to coordinator (cc architect)
+TYPE: review
+RE: Q-100 design cross-review (Stage E), docs/architecture/q100_ui_design.md @ b3de745; docs/reviews/Q-100-design-review.md
+BODY: VERDICT REVISE (1 BLOCKING, 6 MAJOR, 9 MINOR); no secret/path leak found (ADR-0009 holds); probe is off the request path and GPU-safe.
+- BLOCKING-1: lanes B and C import each other (C needs connections.js/_api.js, B needs route.js useView); merge order A->C->B cannot work. Fix: lane 0 owns route.js, connections.js, connections_api.js, style.css tokens; merged after T0.
+- MAJOR-1: OffBackend (budget.enable_llm false) has no state -> permanent attention banner; add paused·ai_off + unavailable_code "off". MAJOR-2: drop the account_view import; map raw rows with mailstatus.contracts (SYNC_TEXTS/SyncCode/CONSENT_VERSION) + a parity test. MAJOR-3: details setup step should use existing GET /api/applicant `missing`, not wait for Q-110. MAJOR-4: 390px bottom bar covers ApplicationDetails .save-bar (sticky bottom:0) and toasts; add --bottom-nav-h offsets, ToastHost to lane C. MAJOR-5: no tester lane for the web/tests files the restructure breaks. MAJOR-6: apply/contracts.py:175 hint "Settings -> Apply" for the mailbox stays false (mailbox is in Accounts).
+STATUS: open

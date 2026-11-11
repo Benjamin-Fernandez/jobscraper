@@ -40,5 +40,5 @@ The Q-100 hub now shows the employer accounts in the web app, so whether to buil
 ## Action items
 
 1. [x] apply_design §14.3: replace the Copy password row with a pointer to this ADR.
-2. [ ] Tester: add a "no secret in any `/api` response" check (stub vault with marker values; GET every route) to the Q-100 test plan.
+2. [ ] Tester: add a "no secret in any `/api` response" check to the Q-100 test plan, explicitly including `GET /api/connections`. The check uses a stub vault holding marker values, calls GET on every route, and asserts that no marker, `vault_service` value or exception text appears in any response body (q100 design §3.4, T1).
 3. [ ] Hub copy (q100 §5.4) names the reading routes; no "Copy" button anywhere.
