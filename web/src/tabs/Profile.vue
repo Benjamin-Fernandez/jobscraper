@@ -12,6 +12,9 @@
 // "Application details" (the applicant form and the questions employers asked).
 // The view last chosen is remembered; a first visit opens Application details
 // when something there needs the owner, and its label carries that count.
+// Q-100 A6: the hash can name the view (`#/profile/resume`, `#/profile/details`,
+// route.js `useView`) and then wins; the remembered view is the fallback when
+// the hash names none.
 //
 // Q-73: what the resume gave is a readable card ("What we read from your
 // resume"), not the job's log; the log sits under a collapsed Details (open
@@ -25,6 +28,7 @@ import {
 import { useJob } from '../composables/useJob.js'
 import { exactTime, when } from '../format.js'
 import { PROFILE_VIEW_KEY } from '../profileView.js'
+import { parseHash, useView } from '../route.js'
 import { tabEmits, tabProps } from '../shell.js'
 import ApplicationDetails from '../components/ApplicationDetails.vue'
 import JobStatus from '../components/JobStatus.vue'
@@ -100,8 +104,10 @@ function rememberedView() {
   }
 }
 const stored = rememberedView()
-const view = ref(stored ?? 'resume')
-let chosen = stored !== null            // the owner picked a view, now or before
+// A view named in the hash (a deep link from the setup checklist, say) counts as chosen.
+const linked = VIEWS.some(v => v.id === parseHash(window.location.hash, ['profile']).view)
+const view = useView('profile', VIEWS, stored ?? 'resume')
+let chosen = stored !== null || linked  // the owner picked a view, now or before
 const counts = ref({ missing: 0, questions: 0 })
 const todo = computed(() => counts.value.missing + counts.value.questions)
 const labelOf = v => (v.id === 'details' && todo.value > 0 ? `${v.label} (${todo.value})` : v.label)

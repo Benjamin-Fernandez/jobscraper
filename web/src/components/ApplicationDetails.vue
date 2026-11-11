@@ -616,7 +616,7 @@ defineExpose({ load })
           Your unsaved changes are back. <button type="button" class="link" @click="discard">Discard them</button>
         </p>
         <h2 class="section-title">Your details</h2>
-        <p v-if="!data.file?.exists" class="muted lead">There is no data/applicant.yaml yet. Saving creates it.</p>
+        <p v-if="!data.file?.exists" class="muted lead">Nothing saved yet. Saving keeps your details on this PC.</p>
         <div v-if="meter" class="meter-row">
           <div
             class="meter"
@@ -890,8 +890,9 @@ defineExpose({ load })
 .others > div { display: flex; flex-wrap: wrap; gap: var(--space-1) var(--space-3); }
 .others dt { color: var(--muted); font-size: var(--text-xs); }
 .others dd { margin: 0; font-size: var(--text-xs); overflow-wrap: anywhere; }
+/* Under 640px it rides above the bottom bar (Q-100 A14; --bottom-nav-h is 0 wider). */
 .save-bar {
-  position: sticky; bottom: 0; z-index: 5;
+  position: sticky; bottom: calc(var(--bottom-nav-h) + env(safe-area-inset-bottom, 0px)); z-index: 5;
   display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: var(--space-2) var(--space-3);
   padding: var(--space-3) var(--space-4);
   background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg);

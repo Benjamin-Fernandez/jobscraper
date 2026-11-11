@@ -14,7 +14,7 @@
 // strip (MailSuggestions, hidden when there are none), and an event an email
 // made wears a "From email" badge in History (MailEvidence) with its quote and
 // Undo. Either action reloads the rows and the suggestions.
-import { computed, onActivated, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onActivated, onMounted, ref, watch } from 'vue'
 import { describeError, getApplicationAttempts, getApplications, getStats, setApplicationStatus, untrackApplication } from '../api.js'
 import { attemptLabel, modeLabel } from '../attempts.js'
 import { ageLabel, isActive, lastAt, needsFollowUp, secondLine, STAGE_KEY } from '../applications.js'
@@ -170,6 +170,27 @@ async function change(row, status) {
   } finally {
     saving.value = ''
   }
+}
+
+// Removing asks first, in the row (Q-100 A13): "Remove {company} from
+// Applications? Its notes go too." [Remove] [Keep]. Focus goes to Keep, the safe
+// answer, and back to the Remove link when the owner keeps the row.
+const removeAsk = ref('')           // job id whose removal is being confirmed
+const removeBtns = {}
+const keepBtns = {}
+async function askRemove(row) {
+  removeAsk.value = row.job_id
+  await nextTick()
+  keepBtns[row.job_id]?.focus()
+}
+async function keepRow(row) {
+  removeAsk.value = ''
+  await nextTick()
+  removeBtns[row.job_id]?.focus()
+}
+function confirmRemove(row) {
+  removeAsk.value = ''
+  return removeRow(row)
 }
 
 // Only a row with a single event can be removed, so no history is lost; Undo
@@ -390,33 +411,53 @@ onActivated(() => { if (shownOnce) load(); shownOnce = true })
                 </form>
                 <template v-else>
                   <p v-if="row.notes" class="notes">{{ row.notes }}</p>
-                  <button
-                    type="button"
-                    class="link note-edit"
-                    :disabled="savingNote"
-                    :aria-label="`${row.notes ? 'Edit note' : 'Add note'} on ${row.company ?? row.job_id} · ${row.role ?? ''}`"
-                    @click="editNote(row)"
-                  >
-                    {{ row.notes ? 'Edit note' : 'Add note' }}
-                  </button>
-                  <button
-                    type="button"
-                    class="link details-toggle"
-                    :aria-expanded="openId === row.job_id ? 'true' : 'false'"
-                    :aria-controls="`app-panel-${row.job_id}`"
-                    :aria-label="`${openId === row.job_id ? 'Hide details' : 'Details'}: ${row.company ?? row.job_id} · ${row.role ?? ''}`"
-                    @click="toggleDetail(row)"
-                  >
-                    {{ openId === row.job_id ? 'Hide details' : 'Details' }}
-                  </button>
-                  <button
-                    v-if="(row.events?.length ?? 0) <= 1"
-                    type="button"
-                    class="link row-remove"
-                    @click="removeRow(row)"
-                  >
-                    Remove from Applications
-                  </button>
+                  <!-- Q-100 A13: one row of actions with room between them, each
+                       at least 2rem tall (44px on a phone); Remove last, apart. -->
+                  <div class="row-actions">
+                    <button
+                      type="button"
+                      class="link note-edit"
+                      :disabled="savingNote"
+                      :aria-label="`${row.notes ? 'Edit note' : 'Add note'} on ${row.company ?? row.job_id} · ${row.role ?? ''}`"
+                      @click="editNote(row)"
+                    >
+                      {{ row.notes ? 'Edit note' : 'Add note' }}
+                    </button>
+                    <button
+                      type="button"
+                      class="link details-toggle"
+                      :aria-expanded="openId === row.job_id ? 'true' : 'false'"
+                      :aria-controls="`app-panel-${row.job_id}`"
+                      :aria-label="`${openId === row.job_id ? 'Hide details' : 'Details'}: ${row.company ?? row.job_id} · ${row.role ?? ''}`"
+                      @click="toggleDetail(row)"
+                    >
+                      {{ openId === row.job_id ? 'Hide details' : 'Details' }}
+                    </button>
+                    <template v-if="(row.events?.length ?? 0) <= 1">
+                      <span class="row-actions-rule" aria-hidden="true" />
+                      <button
+                        v-if="removeAsk !== row.job_id"
+                        :ref="el => { removeBtns[row.job_id] = el }"
+                        type="button"
+                        class="link row-remove"
+                        @click="askRemove(row)"
+                      >
+                        Remove from Applications
+                      </button>
+                      <span v-else class="remove-ask" role="group" :aria-labelledby="`remove-q-${row.job_id}`">
+                        <span :id="`remove-q-${row.job_id}`" class="remove-q">
+                          Remove {{ row.company ?? row.job_id }} from Applications? Its notes go too.
+                        </span>
+                        <button type="button" class="link remove-yes" @click="confirmRemove(row)">Remove</button>
+                        <button
+                          :ref="el => { keepBtns[row.job_id] = el }"
+                          type="button"
+                          class="link remove-keep"
+                          @click="keepRow(row)"
+                        >Keep</button>
+                      </span>
+                    </template>
+                  </div>
                 </template>
               </div>
               <span class="updated" :title="exactTime(lastAt(row))">{{ ageLabel(row) }}</span>
@@ -555,7 +596,7 @@ a.role-title:hover { color: var(--accent); text-decoration: underline; }
 a.role-title .icon { color: var(--muted); }
 .notes { margin: 2px 0 0; color: var(--text-2); font-size: var(--text-sm); white-space: pre-line; text-wrap: pretty; }
 /* Its own line under the title and note, never beside the title. */
-.note-edit { display: flex; width: max-content; margin-top: 2px; font-size: var(--text-xs); color: var(--muted); text-decoration: none; }
+.note-edit { display: flex; width: max-content; font-size: var(--text-xs); color: var(--muted); text-decoration: none; }
 .note-edit:hover:not(:disabled) { color: var(--accent); text-decoration: underline; }
 .note-form { display: grid; gap: var(--space-2); margin-top: var(--space-2); max-width: 40rem; }
 .note-input {
@@ -580,10 +621,27 @@ a.role-title .icon { color: var(--muted); }
 button.attempt-link { border: 0; cursor: pointer; font: inherit; font-size: var(--text-xs); font-weight: 600; line-height: 1.7; min-height: 0; padding: 0 var(--space-2); box-shadow: none; }
 button.attempt-link:hover { text-decoration: underline; }
 .row-meta { margin: 2px 0 0; font-size: var(--text-xs); color: var(--muted); }
-.row-remove { display: flex; width: max-content; margin-top: 2px; font-size: var(--text-xs); color: var(--muted); text-decoration: none; }
+.row-remove { display: flex; width: max-content; font-size: var(--text-xs); color: var(--muted); text-decoration: none; }
 .row-remove:hover:not(:disabled) { color: var(--accent); text-decoration: underline; }
-.details-toggle { display: flex; width: max-content; margin-top: 2px; font-size: var(--text-xs); color: var(--muted); text-decoration: none; }
+.details-toggle { display: flex; width: max-content; font-size: var(--text-xs); color: var(--muted); text-decoration: none; }
 .details-toggle:hover:not(:disabled) { color: var(--accent); text-decoration: underline; }
+/* Q-100 A13: the row's actions side by side with a gap, each 2rem tall (the
+   look is unchanged: small muted words), and --touch-min on a phone. Remove
+   sits last, after a hairline. */
+.row-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 0 var(--space-2); margin-top: 2px; }
+.row-actions .note-edit, .row-actions .details-toggle, .row-actions .row-remove,
+.remove-ask .remove-yes, .remove-ask .remove-keep {
+  align-items: center; min-height: 2rem; padding: 0 var(--space-1);
+}
+.row-actions-rule { align-self: stretch; margin: var(--space-2) var(--space-1); border-left: 1px solid var(--border-strong); }
+.remove-ask { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 0 var(--space-2); font-size: var(--text-xs); }
+.remove-q { color: var(--text-2); }
+.remove-ask .remove-yes { font-size: var(--text-xs); color: var(--danger); font-weight: 600; }
+.remove-ask .remove-keep { font-size: var(--text-xs); font-weight: 600; }
+@media (max-width: 640px) {
+  .row-actions .note-edit, .row-actions .details-toggle, .row-actions .row-remove,
+  .remove-ask .remove-yes, .remove-ask .remove-keep { min-height: var(--touch-min); }
+}
 
 /* The posting under its row, as wide as the row; min-width 0 so a long word wraps. */
 .app-detail {

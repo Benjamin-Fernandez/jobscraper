@@ -8,18 +8,30 @@
 // list, the selected run's shortlist, and the stats behind the badges - and
 // hands it to every tab (see shell.js). Choosing a run fetches that run's
 // shortlist and swaps it in place: one request, no navigation (M7-T2).
+//
+// Q-100 (design §1): the hash may also name a view and an item
+// (`#/settings/accounts/gmail:3`); the shell keeps both and only checks the tab.
+// The shell also carries three signals any tab may need to see: the Settings
+// badge (connections that need the owner), the attention banner under the
+// masthead, and the "Auto-apply on" chip. Under 640px the tab bar becomes a
+// bottom bar of the `bar` tabs plus More (A14).
 import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { ApiError, describeError, failureText, getQuestions, getRuns, getShortlist, getStats } from './api.js'
 import { onJobStarted, useJob } from './composables/useJob.js'
 import { showToast } from './toast.js'
 import { TABS } from './tabs.js'
 import { runQuery, sameRun } from './runs.js'
-import { hashFor, tabFromHash } from './route.js'
+import { hashFor, parseHash } from './route.js'
+import { attentionItems } from './connections.js'
+import { getApplyStatus, getConnections } from './connections_api.js'
 import { createShellKeys, goKeysOf } from './shortcuts.js'
 import TabLoading from './components/TabLoading.vue'
 import TabFailed from './components/TabFailed.vue'
 import ToastHost from './components/ToastHost.vue'
 import JobPill from './components/JobPill.vue'
+import AttentionBanner from './components/AttentionBanner.vue'
+import ModeChip from './components/ModeChip.vue'
+import Icon from './components/Icon.vue'
 import ShortcutsSheet from './components/ShortcutsSheet.vue'
 
 const runs = ref([])
@@ -47,20 +59,35 @@ const tabs = TABS.map(t => ({
 }))
 const ids = tabs.map(t => t.id)
 
-const activeId = ref(tabFromHash(window.location.hash, ids))
+// { tab, view, item } as the hash says. The view and item are the tab's business
+// (route.js `useView`); the shell reads them only to hide the banner on the hub.
+const route = ref(parseHash(window.location.hash, ids))
+const activeId = ref(route.value.tab)
 const active = computed(() => tabs.find(t => t.id === activeId.value))
 
 // An empty or unknown hash lands on the first tab and the URL says so, without
-// adding a history entry the back button would then have to step over.
+// adding a history entry the back button would then have to step over. A known
+// tab keeps its view and item (`#/settings/accounts/gmail:3` stays as written).
 function normaliseHash() {
-  const want = hashFor(activeId.value)
+  const r = parseHash(window.location.hash, ids)
+  route.value = r
+  const want = hashFor(r.tab, r.view, r.item)
   if (window.location.hash !== want) window.history.replaceState(window.history.state, '', want)
 }
 normaliseHash()
 
 function onHashChange() {
-  activeId.value = tabFromHash(window.location.hash, ids)
+  activeId.value = parseHash(window.location.hash, ids).tab
   normaliseHash()
+}
+
+// A tab switches its own views with replaceState, which fires no event: after a
+// click or a key in the panel, read the hash again (cheap; no history change).
+async function syncRoute() {
+  await nextTick()
+  const r = parseHash(window.location.hash, ids)
+  const now = route.value
+  if (r.tab !== now.tab || r.view !== now.view || r.item !== now.item) route.value = r
 }
 
 function open(id) {
@@ -89,8 +116,90 @@ function onTabKey(event, index) {
 
 function badgeOf(tab) {
   if (!tab.badge) return null
-  const n = tab.badge({ jobs: jobs.value, stats: stats.value, runs: runs.value, run: run.value, openQuestions: openQuestions.value })
+  const n = tab.badge({
+    jobs: jobs.value, stats: stats.value, runs: runs.value, run: run.value,
+    openQuestions: openQuestions.value, attention: attentionCount.value,
+  })
   return Number.isFinite(n) && n > 0 ? n : null
+}
+
+// ---- shell signals (Q-100 §1): connections that need the owner, and the mode ----
+// GET /api/connections and GET /api/apply/status, at boot, after any background
+// job ends, on coming back to the page after more than a minute, and on leaving
+// Settings (where the owner may just have fixed something). The load before the
+// latest is kept in memory only: one failed check is a blip, the same check
+// failing twice in a row counts (connections.js §2.2). A failed or absent load
+// (null) means no badge, no banner and no chip - never a false "all good".
+const SIGNALS_STALE_MS = 60 * 1000
+const connections = ref(null)
+const connectionsBefore = ref(null)
+const applyStatus = ref(null)
+let signalsAt = 0
+let signalsSeq = 0
+
+const usable = c => (c && Array.isArray(c.items) ? c : null)
+
+async function loadSignals() {
+  const seq = ++signalsSeq
+  signalsAt = Date.now()
+  const [c, s] = await Promise.allSettled([getConnections(), getApplyStatus()])
+  if (seq !== signalsSeq) return
+  connectionsBefore.value = connections.value
+  connections.value = c.status === 'fulfilled' ? usable(c.value) : null
+  applyStatus.value = s.status === 'fulfilled' ? s.value : null
+}
+
+const attention = computed(() => (connections.value ? attentionItems(connections.value, connectionsBefore.value) : []))
+const attentionCount = computed(() => (connections.value ? attention.value.length : null))
+// The hub shows these itself: no banner on Settings → Accounts (its default view).
+const onHub = computed(() => route.value.tab === 'settings' && (!route.value.view || route.value.view === 'accounts'))
+
+// ---- the phone's bottom bar (A14): the `bar` tabs, and More for the rest ----
+const barTabs = tabs.filter(t => t.bar)
+const moreTabs = tabs.filter(t => !t.bar)
+const moreCurrent = computed(() => moreTabs.some(t => t.id === activeId.value))
+// More carries the hidden tabs' attention counts (amber), so a problem in
+// Settings is seen from the bar.
+const moreBadge = computed(() => {
+  const n = moreTabs.filter(t => t.badgeTone === 'attention').reduce((sum, t) => sum + (badgeOf(t) ?? 0), 0)
+  return n > 0 ? n : null
+})
+const moreEl = ref(null)
+const moreBtn = ref(null)
+const moreOpen = ref(false)
+
+// A modal <dialog>: the browser keeps focus inside, Esc closes it, and the page
+// behind is inert. (jsdom has no showModal; the `open` attribute stands in.)
+// The sheet's content exists only while it is open, so a closed sheet adds no
+// second set of section buttons to the page.
+async function openMore() {
+  const el = moreEl.value
+  if (!el || moreOpen.value) return
+  moreOpen.value = true
+  await nextTick()
+  if (typeof el.showModal === 'function') el.showModal()
+  else el.setAttribute('open', '')
+  el.querySelector('.more-item[aria-current="page"], .more-item')?.focus()
+}
+function closeMore() {
+  const el = moreEl.value
+  if (!el) return
+  if (typeof el.close === 'function') el.close()
+  else { el.removeAttribute('open'); onMoreClosed() }
+}
+// The dialog's own close event (Esc, a choice, the backdrop): focus goes back to More.
+function onMoreClosed() {
+  if (!moreOpen.value) return
+  moreOpen.value = false
+  moreBtn.value?.focus()
+}
+// A click on the backdrop lands on the dialog itself, not on its content.
+function onMoreClick(event) {
+  if (event.target === moreEl.value) closeMore()
+}
+function pickMore(id) {
+  closeMore()
+  open(id)
 }
 
 // Guards against a slow response for an old run landing after a newer one.
@@ -174,6 +283,7 @@ const shell = useJob({
   consume: false,
   onFinish: j => {
     onChanged({ runs: j.kind === 'run' })
+    loadSignals()
     if (j.kind === 'run') {
       showToast({
         message: j.state === 'succeeded' ? 'Run finished. New roles are in the Inbox.' : failureText(j, 'The run stopped.'),
@@ -184,7 +294,9 @@ const shell = useJob({
 })
 // Coming back to the page, the job may have ended while the timers slept.
 function onVisible() {
-  if (document.visibilityState === 'visible') shell.refresh()
+  if (document.visibilityState !== 'visible') return
+  shell.refresh()
+  if (!bootError.value && signalsAt && Date.now() - signalsAt > SIGNALS_STALE_MS) loadSignals()
 }
 let stopStarters = () => {}
 
@@ -206,8 +318,12 @@ function measureTabs() {
   if (el) moreRight.value = el.scrollLeft + el.clientWidth < el.scrollWidth - 1
 }
 
-// Leaving Profile, where questions get answered, refreshes its badge.
-watch(activeId, (_, was) => { if (was === 'profile') loadQuestions() })
+// Leaving Profile, where questions get answered, refreshes its badge; leaving
+// Settings, where connections get fixed, refreshes the attention signals.
+watch(activeId, (_, was) => {
+  if (was === 'profile') loadQuestions()
+  if (was === 'settings') loadSignals()
+})
 
 // The keyboard layer (Q-75 N16, shortcuts.js): "/" jumps to the open tab's
 // search box, "g" then a letter goes to a tab, "?" opens the key sheet. It
@@ -260,7 +376,7 @@ async function boot() {
     runsError.value = describeError(e)
   }
   retrying.value = false
-  await Promise.all([loadJobs(), loadStats(), loadQuestions()])
+  await Promise.all([loadJobs(), loadStats(), loadQuestions(), loadSignals()])
 }
 
 onMounted(() => {
@@ -322,16 +438,23 @@ onBeforeUnmount(() => {
               <!-- Only a count takes space (UX-1): an empty reserved slot left
                    uneven gaps between the tabs. -->
               <span v-if="badgeOf(tab) !== null" class="badge-slot">
-                <span class="badge">
+                <span class="badge" :data-tone="tab.badgeTone || undefined">
                   {{ badgeOf(tab) }}<span class="visually-hidden"> {{ tab.badgeLabel || '' }}</span>
                 </span>
               </span>
             </button>
           </div>
         </div>
+        <ModeChip :status="applyStatus" />
         <JobPill :job="shell.job.value" />
       </div>
     </header>
+    <AttentionBanner
+      v-if="!bootError"
+      :items="attention"
+      :hidden="onHub"
+      :inert="helpOpen || undefined"
+    />
 
     <main v-if="bootError" class="panel boot-error" role="alert">
       <h2 class="page-title">Could not reach JobScraper</h2>
@@ -350,6 +473,8 @@ onBeforeUnmount(() => {
       role="tabpanel"
       :aria-labelledby="`tab-${active.id}`"
       tabindex="0"
+      @click="syncRoute"
+      @keyup="syncRoute"
     >
       <!-- Inbox and Applications keep their place (selection, scroll, filters)
            while another tab is open (Q-70 C4, G15). The names are the SFC file
@@ -370,6 +495,80 @@ onBeforeUnmount(() => {
         />
       </KeepAlive>
     </main>
+    <!-- The phone's section nav (A14): shown under 640px instead of the tab bar
+         above, which is hidden there. Links, not tabs: one press opens a page. -->
+    <nav class="bottom-nav" aria-label="Sections" :inert="helpOpen || undefined">
+      <button
+        v-for="tab in barTabs"
+        :key="tab.id"
+        type="button"
+        class="bnav-item"
+        :class="{ current: tab.id === activeId }"
+        :aria-current="tab.id === activeId ? 'page' : undefined"
+        :data-bnav="tab.id"
+        @click="open(tab.id)"
+      >
+        <span class="bnav-icon">
+          <Icon :name="tab.icon || 'layers'" :size="20" />
+          <span v-if="badgeOf(tab) !== null" class="bnav-badge" :data-tone="tab.badgeTone || undefined">
+            {{ badgeOf(tab) }}<span class="visually-hidden"> {{ tab.badgeLabel || '' }}</span>
+          </span>
+        </span>
+        <span class="bnav-label">{{ tab.label }}</span>
+      </button>
+      <button
+        ref="moreBtn"
+        type="button"
+        class="bnav-item bnav-more"
+        :class="{ current: moreCurrent }"
+        :aria-current="moreCurrent ? 'page' : undefined"
+        aria-haspopup="dialog"
+        :aria-expanded="moreOpen ? 'true' : 'false'"
+        data-bnav="more"
+        @click="openMore"
+      >
+        <span class="bnav-icon">
+          <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" focusable="false">
+            <circle cx="5.5" cy="12" r="1.6" /><circle cx="12" cy="12" r="1.6" /><circle cx="18.5" cy="12" r="1.6" />
+          </svg>
+          <span v-if="moreBadge !== null" class="bnav-badge" data-tone="attention">
+            {{ moreBadge }}<span class="visually-hidden"> need attention</span>
+          </span>
+        </span>
+        <span class="bnav-label">More</span>
+      </button>
+    </nav>
+    <dialog
+      ref="moreEl"
+      class="more-sheet"
+      aria-labelledby="more-title"
+      @close="onMoreClosed"
+      @click="onMoreClick"
+    >
+      <div v-if="moreOpen" class="more-body">
+        <header class="more-head">
+          <h2 id="more-title">More</h2>
+          <button type="button" class="ghost more-close" @click="closeMore">Close</button>
+        </header>
+        <ul class="more-list">
+          <li v-for="tab in moreTabs" :key="tab.id">
+            <button
+              type="button"
+              class="more-item"
+              :class="{ current: tab.id === activeId, quiet: tab.quiet }"
+              :aria-current="tab.id === activeId ? 'page' : undefined"
+              :data-more="tab.id"
+              @click="pickMore(tab.id)"
+            >
+              <span>{{ tab.label }}</span>
+              <span v-if="badgeOf(tab) !== null" class="bnav-badge inline" :data-tone="tab.badgeTone || undefined">
+                {{ badgeOf(tab) }}<span class="visually-hidden"> {{ tab.badgeLabel || '' }}</span>
+              </span>
+            </button>
+          </li>
+        </ul>
+      </div>
+    </dialog>
     <ToastHost />
     <ShortcutsSheet :open="helpOpen" :go-keys="goKeys" @close="helpOpen = false" />
   </div>
@@ -469,17 +668,145 @@ onBeforeUnmount(() => {
   color: var(--accent);
 }
 .tab.current .badge { background: var(--accent); color: var(--accent-text); }
+/* An attention count (Q-100): amber, on every tab state - something is wrong,
+   not "there is work". The hidden label says so in words. */
+.badge[data-tone='attention'],
+.tab.current .badge[data-tone='attention'] {
+  background: var(--state-attention-bg);
+  color: var(--state-attention-fg);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--state-attention-fg) 45%, transparent);
+}
 .panel {
   max-width: var(--page-w);
   margin: 0 auto;
-  padding: var(--space-5) var(--gutter) calc(var(--space-7) + var(--space-6));
+  /* --bottom-nav-h is 0 wider than 640px, so the desktop page is unchanged. */
+  padding: var(--space-5) var(--gutter)
+    calc(var(--space-7) + var(--space-6) + var(--bottom-nav-h) + env(safe-area-inset-bottom, 0px));
 }
 .panel:focus-visible { outline-offset: -2px; }
 .boot-error .notice { margin: var(--space-3) 0; }
+
+/* The phone's bottom bar and its More sheet (A14); hidden wider than 640px. */
+.bottom-nav { display: none; }
+.bnav-item {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  min-width: 0;
+  min-height: var(--touch-min);
+  padding: var(--space-1) 0;
+  border: none;
+  border-radius: 0;
+  background: none;
+  box-shadow: none;
+  color: var(--muted);
+  font-size: var(--text-xs);
+  font-weight: 500;
+}
+.bnav-item:hover:not(:disabled) { background: none; color: var(--text); }
+.bnav-item.current { color: var(--accent); font-weight: 650; }
+/* The current section is marked by a bar as well as the colour. */
+.bnav-item.current::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 25%;
+  right: 25%;
+  height: 3px;
+  border-radius: 0 0 3px 3px;
+  background: var(--accent);
+}
+.bnav-item:focus-visible { outline-offset: -4px; }
+.bnav-icon { position: relative; display: inline-flex; }
+.bnav-icon svg circle { fill: currentColor; }
+.bnav-label { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bnav-badge {
+  position: absolute;
+  top: -0.35rem;
+  left: 70%;
+  min-width: 1.1rem;
+  font-family: var(--mono);
+  font-size: 0.68rem;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+  text-align: center;
+  padding: 0.15rem 0.3rem;
+  border-radius: 999px;
+  background: var(--accent);
+  color: var(--accent-text);
+}
+.bnav-badge[data-tone='attention'] {
+  background: var(--state-attention-bg);
+  color: var(--state-attention-fg);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--state-attention-fg) 45%, transparent);
+}
+.bnav-badge.inline { position: static; }
+
+.more-sheet {
+  margin: auto 0 0;
+  width: 100%;
+  max-width: 100%;
+  max-height: 80vh;
+  padding: 0;
+  border: 1px solid var(--border-strong);
+  border-bottom: none;
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: var(--shadow-lg);
+}
+.more-sheet::backdrop { background: rgba(10, 10, 14, 0.5); }
+.more-body { padding: var(--space-3) var(--gutter) calc(var(--space-4) + env(safe-area-inset-bottom, 0px)); }
+.more-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); }
+.more-head h2 { margin: 0; font-size: var(--text-lg); }
+.more-close { min-height: var(--touch-min); }
+.more-list { list-style: none; margin: var(--space-2) 0 0; padding: 0; }
+.more-list li + li { border-top: 1px solid var(--border); }
+.more-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  width: 100%;
+  min-height: var(--touch-min);
+  padding: 0 var(--space-2);
+  border: none;
+  border-radius: var(--radius-sm);
+  background: none;
+  box-shadow: none;
+  color: var(--text);
+  font-size: var(--text-md);
+  font-weight: 500;
+  text-align: left;
+}
+.more-item.current { color: var(--accent); font-weight: 650; }
+.more-item.current::after { content: '•'; margin-left: auto; color: var(--accent); }
+.more-item.quiet { color: var(--muted); font-size: var(--text-sm); }
+
 @media (max-width: 640px) {
-  .masthead-inner { flex-direction: column; gap: 0; }
+  /* The tabs move to the bottom bar, so the masthead is one row: brand, then the
+     mode chip; the job pill keeps its corner (JobPill.vue). */
+  .app { --header-h: 3.25rem; }
+  .masthead-inner { flex-direction: row; align-items: center; gap: var(--space-3); padding-right: 3.5rem; }
   .brand { min-height: 2.5rem; font-size: var(--text-md); }
-  .tab { min-height: 2.75rem; }
-  .tablist { margin: 0 calc(-1 * var(--space-3)); }
+  .tabbar { display: none; }
+  .bottom-nav {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 20;
+    display: grid;
+    grid-auto-flow: column;
+    grid-auto-columns: minmax(0, 1fr);
+    height: calc(var(--bottom-nav-h) + env(safe-area-inset-bottom, 0px));
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+    background: var(--surface);
+    border-top: 1px solid var(--border);
+    box-shadow: 0 -1px 6px rgba(0, 0, 0, 0.06);
+  }
 }
 </style>

@@ -19,18 +19,71 @@
 // Email (Q-60, F-50): the Gmail mailboxes JobScraper reads for application
 // updates. MailCard loads and saves its own data (GET /api/mail), so a server
 // without those routes still shows the rest of this tab.
+//
+// Four views (Q-100 design section 1), picked like Profile's and kept in the hash
+// (`#/settings/<view>[/<item>]`): Accounts (the Connected accounts hub, the default),
+// Apply, Search (the cycle and companies per run) and Appearance. The hub's data -
+// GET /api/connections - is loaded here, because the Accounts tab carries the
+// attention count and Apply shows the mailbox row from the same answer. A missing
+// or failed answer never reads as "all good": no count, and the hub says so.
 import { computed, onMounted, ref } from 'vue'
 import { ApiError, describeError, getSettings, saveSettings } from '../api.js'
+import { attentionCount } from '../connections.js'
+import { getConnections } from '../connections_api.js'
 import { plural } from '../format.js'
+import { useView } from '../route.js'
 import { cycleLabel, num, runsPerDayLabel } from '../runs.js'
 import { tabEmits, tabProps } from '../shell.js'
 import { THEMES, setTheme, storedTheme } from '../theme.js'
+import ApplySettings from '../components/ApplySettings.vue'
+import ConnectionsHub from '../components/ConnectionsHub.vue'
 import CountPicker from '../components/CountPicker.vue'
-import MailCard from '../components/MailCard.vue'
 import TabLoading from '../components/TabLoading.vue'
 
 defineProps(tabProps)
 defineEmits(tabEmits)
+
+// ---- views (Q-100) ----
+const VIEWS = [
+  { id: 'accounts', label: 'Accounts' },
+  { id: 'apply', label: 'Apply' },
+  { id: 'search', label: 'Search' },
+  { id: 'appearance', label: 'Appearance' },
+]
+const view = useView('settings', VIEWS, 'accounts')
+
+function onViewKey(e, i) {
+  const next = { ArrowRight: i + 1, ArrowLeft: i - 1, Home: 0, End: VIEWS.length - 1 }[e.key]
+  if (next === undefined) return
+  e.preventDefault()
+  const v = VIEWS[(next + VIEWS.length) % VIEWS.length]
+  view.value = v.id
+  document.getElementById(`settings-tab-${v.id}`)?.focus()
+}
+
+// ---- connections (the hub's data) ----
+const connections = ref(null)
+const connLoading = ref(true)
+const connFailed = ref(false)
+let previous = null            // the last good answer: a single blip is not yet a problem
+const attention = ref(0)
+
+async function loadConnections() {
+  try {
+    const next = await getConnections()
+    if (next === null) throw new Error('absent')
+    attention.value = attentionCount(next, previous)
+    previous = next
+    connections.value = next
+    connFailed.value = false
+  } catch {
+    // Keep the last good answer on screen, but count nothing from a failed load.
+    attention.value = 0
+    connFailed.value = true
+  } finally {
+    connLoading.value = false
+  }
+}
 
 const settings = ref(null)
 const loadError = ref('')
@@ -64,7 +117,7 @@ function oneDecimal(x) {
 const cadence = computed(() => {
   const s = settings.value
   if (!s || invalid.value) return ''
-  if (noneEnabled.value) return 'No companies are enabled yet - sync the watchlist first.'
+  if (noneEnabled.value) return 'No companies yet. Add some in Companies, or start a run to load your watchlist.'
   const runsPerCycle = Math.ceil(s.enabled_companies / draft.value)
   const perDay = unchanged.value && s.runs_per_day_needed !== undefined
     ? s.runs_per_day_needed
@@ -187,7 +240,10 @@ function chooseTheme(id) {
   setTheme(id)
 }
 
-onMounted(load)
+onMounted(() => {
+  load()
+  loadConnections()
+})
 </script>
 
 <template>
@@ -195,10 +251,56 @@ onMounted(load)
     <header class="page-head">
       <div>
         <h2 class="page-title">Settings</h2>
-        <p class="page-sub">How often your companies are checked, and how many each run takes on.</p>
+        <p class="page-sub">Accounts, applying, search and appearance.</p>
+      </div>
+      <div class="views" role="tablist" aria-label="Settings sections">
+        <button
+          v-for="(v, i) in VIEWS"
+          :id="`settings-tab-${v.id}`"
+          :key="v.id"
+          type="button"
+          role="tab"
+          class="view-tab"
+          :class="[`view-${v.id}`, { active: view === v.id }]"
+          :aria-selected="view === v.id ? 'true' : 'false'"
+          :aria-controls="`settings-panel-${v.id}`"
+          :tabindex="view === v.id ? 0 : -1"
+          @click="view = v.id"
+          @keydown="onViewKey($event, i)"
+        >
+          {{ v.label }}
+          <span v-if="v.id === 'accounts' && attention > 0" class="view-badge">
+            <span aria-hidden="true">{{ attention }}</span>
+            <span class="visually-hidden">{{ attention }} need attention</span>
+          </span>
+        </button>
       </div>
     </header>
 
+    <div
+      v-if="view === 'accounts'"
+      id="settings-panel-accounts"
+      role="tabpanel"
+      aria-labelledby="settings-tab-accounts"
+    >
+      <ConnectionsHub :connections="connections" :loading="connLoading" :failed="connFailed" @reload="loadConnections" />
+    </div>
+
+    <div
+      v-else-if="view === 'apply'"
+      id="settings-panel-apply"
+      role="tabpanel"
+      aria-labelledby="settings-tab-apply"
+    >
+      <ApplySettings :connections="connections" />
+    </div>
+
+    <div
+      v-else-if="view === 'search'"
+      id="settings-panel-search"
+      role="tabpanel"
+      aria-labelledby="settings-tab-search"
+    >
     <h3 class="section-title">Cycle</h3>
     <TabLoading v-if="loading" :rows="1" />
     <div v-else-if="settings" class="panel-box cycle">
@@ -236,8 +338,7 @@ onMounted(load)
       </p>
       <p class="hint cycle-hint">{{ cycleHint }}</p>
       <p class="muted small">
-        The choices come from your plan ({{ settings.plan }}). The config default is
-        {{ cycleLabel(settings.cycle_days_default).toLowerCase() }}.
+        The config default is {{ cycleLabel(settings.cycle_days_default).toLowerCase() }}.
       </p>
     </div>
     <p v-if="cycleError" class="notice error" role="alert">{{ cycleError }}</p>
@@ -276,7 +377,14 @@ onMounted(load)
     </form>
     <p v-if="saveError" class="notice error" role="alert">{{ saveError }}</p>
     <p v-if="saved" class="notice ok" role="status">{{ saved }}</p>
+    </div>
 
+    <div
+      v-else
+      id="settings-panel-appearance"
+      role="tabpanel"
+      aria-labelledby="settings-tab-appearance"
+    >
     <h3 class="section-title">Appearance</h3>
     <div class="panel-box appearance">
       <p id="theme-label" class="question">Colour theme</p>
@@ -301,13 +409,34 @@ onMounted(load)
       </div>
       <p class="muted small">Saved in this browser only. System follows your device's light or dark setting.</p>
     </div>
-
-    <h3 class="section-title">Email</h3>
-    <MailCard />
+    </div>
   </section>
 </template>
 
 <style scoped>
+.views {
+  display: inline-flex; flex-wrap: wrap; gap: 2px; padding: 2px;
+  background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius);
+}
+.view-tab {
+  border: 1px solid transparent; background: transparent; box-shadow: none; color: var(--text-2);
+  border-radius: calc(var(--radius) - 2px);
+}
+.view-tab:hover:not(:disabled) { background: var(--surface); color: var(--text); }
+.view-tab.active, .view-tab.active:hover:not(:disabled) {
+  background: var(--surface); border-color: var(--border-strong); box-shadow: var(--shadow-sm);
+  color: var(--text); font-weight: 650;
+}
+/* The attention count: a dot and a number, so it is not colour alone. */
+.view-badge {
+  display: inline-flex; align-items: center; gap: var(--space-1);
+  font-size: var(--text-xs); font-weight: 700; color: var(--state-attention-fg);
+}
+.view-badge::before { content: ''; width: 0.5rem; height: 0.5rem; border-radius: 50%; background: currentColor; }
+@media (max-width: 640px) {
+  .views { display: flex; width: 100%; }
+  .view-tab { flex: 1 1 40%; min-height: var(--touch-min); }
+}
 .batch, .panel-box {
   display: grid; gap: var(--space-2); max-width: 40rem;
   padding: var(--space-4); background: var(--surface);

@@ -3,6 +3,7 @@
 // always in the DOM so screen readers hear each new message (aria-live).
 // H1-4: hover or focus inside it pauses its timer; "Undo previous" runs the
 // Undo of the toast it replaced, and leaves this one up.
+// Q-100 (A14): under 640px it sits above the bottom bar (--bottom-nav-h is 0 wider).
 import { nextTick, ref } from 'vue'
 import { dismissToast, dropPrevious, pauseToast, resumeToast, toast } from '../toast.js'
 import Icon from './Icon.vue'
@@ -74,7 +75,7 @@ async function actPrevious(t) {
 .toast-region {
   position: fixed;
   left: 50%;
-  bottom: var(--space-5);
+  bottom: calc(var(--space-5) + var(--bottom-nav-h) + env(safe-area-inset-bottom, 0px));
   transform: translateX(-50%);
   z-index: 50;
   width: max-content;

@@ -407,7 +407,7 @@ describe('Overview: before the first run', () => {
     useApi({ fixture: { runs: [], jobs: [] }, questions: questionsOf(0) })
     const wrapper = await mountOverview()
     await vi.waitFor(() => expect(wrapper.find('.overview .setup').exists()).toBe(true))
-    expect(wrapper.find('.overview .setup-title').text()).toBe('Get your first matches')
+    expect(wrapper.find('.overview .setup-title').text()).toBe('Get set up')
     expect(wrapper.find('.run-line').exists()).toBe(false)
     expect(wrapper.find('.next-card').exists()).toBe(false)
     expect(wrapper.find('.empty-title').exists()).toBe(false)           // not "caught up" before the first run

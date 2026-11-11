@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils'
 import Settings from '../src/tabs/Settings.vue'
-import { fakeApi } from './helpers.js'
+import { fakeApi, setHash } from './helpers.js'
 
 let api
 
@@ -11,8 +11,14 @@ function useApi(options) {
   return api
 }
 
-beforeEach(() => useApi())
-afterEach(() => vi.unstubAllGlobals())
+beforeEach(() => {
+  setHash('#/settings/search')   // Q-100: Settings opens on Accounts; the form is in the Search view
+  useApi()
+})
+afterEach(() => {
+  vi.unstubAllGlobals()
+  setHash('')
+})
 enableAutoUnmount(afterEach)
 
 async function mountSettings() {
@@ -97,7 +103,7 @@ describe('Settings tab: companies per run', () => {
   it('before the first sync (0 enabled), the server\'s 422 message is what you see', async () => {
     useApi({ settings: { batch_size: 10, batch_size_default: 10, enabled_companies: 0, cycle_days: 14, runs_per_day_needed: 0 } })
     const wrapper = await mountSettings()
-    expect(hint(wrapper)).toBe('No companies are enabled yet - sync the watchlist first.')
+    expect(hint(wrapper)).toBe('No companies yet. Add some in Companies, or start a run to load your watchlist.')   // A10 copy
     await input(wrapper).setValue('12')
     expect(save(wrapper).attributes('disabled')).toBeUndefined()
     await wrapper.find('form').trigger('submit')
@@ -121,7 +127,8 @@ describe('Settings tab: companies per run', () => {
   it('without the M11 routes, shows a readable error and a retry', async () => {
     useApi({ m11: false })
     const wrapper = await mountSettings()
-    const alert = wrapper.find('[role="alert"]')
+    // Q-100: the Search view's own alert (the Accounts view has its own, not mounted here).
+    const alert = wrapper.find('#settings-panel-search [role="alert"]')
     expect(alert.text()).toContain('404')
     expect(alert.text()).toContain('does not offer that yet')
     expect(wrapper.find('form').exists()).toBe(false)
