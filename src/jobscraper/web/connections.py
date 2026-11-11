@@ -326,9 +326,10 @@ def need_reason(current: dict[str, Any], in_flight: Optional[list],
     """What is waiting on the model right now (§2.3 `need_now`, D-196): the first
     rule that holds, in order a to d, as "run" | "application" | "mail"; None
     when nothing is. Fixed words only, for the §4.4 copy."""
-    # (a) a running background job of any kind but the mailbox test
+    # (a) a running background job of any kind but the mailbox test; an apply
+    # job is an application waiting (Coordinator ruling on D-196)
     if current.get("state") == "running" and current.get("kind") not in (None, "mailtest"):
-        return "run"
+        return "application" if current.get("kind") == "apply" else "run"
     # (b) an apply attempt in flight
     if in_flight:
         return "application"
