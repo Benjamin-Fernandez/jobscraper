@@ -966,4 +966,9 @@ BODY: files `src/jobscraper/tailor/compose.py`, `tailor_flow.py`, `apply_flow.py
 - D-184 (M3): `compose.compose(..., timeout=None)` and `tailor_flow.compose(..., timeout=None)` pass `timeout=` to `backend.complete` per call (only when the backend accepts it); apply_flow passes `max(1.0, services.deadline_left())`. An exception, a timeout included, is `transport: <Type>` -> `model_unavailable`.
 - D-185 (M4): the `off` hint reads exactly "Write it here for this posting. Automatic cover letters are off (apply.compose in config.yaml)."
 EVIDENCE: `-k tailor_compose` 27/27, `-k tailor` 53/53, `-k layering` 13/13, `-k apply_flow_compose` 11/11, `-k apply_flow` 148/148. vitest not run.
+
+### 2026-11-11 software-engineer -> coordinator: Q-97 defect D1, composed FILE audit value (tst/Q-97-compose-edge)
+TYPE: handoff
+BODY: `src/jobscraper/apply_flow.py` only (commit 7eece9b). A composed FILE row (`source == composed`) now audits as the whole text: `_sent_value` returns `a.value` (new `_composed_file(f, a)` test) instead of `{"file", "sha256"}` of a bogus path. The file's name and SHA-256 come from the real path: `compose_step` records it in `compose_files[audit key]` and `stage()` rewrites the row note to `composed file: <name> (sha256 <hex>)` (name only if the file is unreadable). `_shown_form` for a composed FILE row returns the file name parsed from that note (value is text). Ordinary FILE rows (the resume) keep `{file, sha256}`. The pin expected exactly the spec: value_json holds the whole text and the note starts `composed file: cover_letter`. Note: LF 19.5 says "the note names the uploaded file"; the sha256 in the note is my reading of your instruction (no other column fits).
+EVIDENCE: `-k q97` 5/5 (no "browser not available" line), `-k apply_flow_compose` 11/11, `-k layering` 13/13, `-k apply_flow`: see the result line in my report.
 STATUS: open

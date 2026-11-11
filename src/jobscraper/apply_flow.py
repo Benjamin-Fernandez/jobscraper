@@ -276,12 +276,32 @@ class _Attempt:
         self.record(self.step, list(self.fields.values()))
 
 
+COMPOSED_FILE_NOTE = "composed file: "          # locks L8: the note that names the uploaded letter
+
+
+def _composed_file(f: FormField, a: Answer) -> bool:
+    """A composed FILE row: its value is the letter's TEXT (LF 19.5), not a path; the file's
+    name is in the note and its real path is `ctx.composed_files[key]`."""
+    return f.type is FieldType.FILE and a.source == AnswerSource.COMPOSED.value
+
+
+def _composed_note(path: str) -> str:
+    """`composed file: <name> (sha256 <hex>)`: what the audit row says about the uploaded letter."""
+    p = Path(path)
+    try:
+        return f"{COMPOSED_FILE_NOTE}{p.name} (sha256 {sha256_file(p)})"
+    except OSError:
+        return f"{COMPOSED_FILE_NOTE}{p.name}"
+
+
 def _sent_value(f: FormField, a: Answer) -> Any:
     """The exact value sent, for the audit: a file as name + SHA-256 (never
     the path); None when nothing is (or will be) on the page."""
     if a.value in _BLANK or a.status not in (AnswerStatus.FILLED, AnswerStatus.PREFILLED,
                                              AnswerStatus.FILL_FAILED):
         return None
+    if _composed_file(f, a):                          # LF 19.5: the audit holds the whole text
+        return a.value
     if f.type is FieldType.FILE and a.status is not AnswerStatus.PREFILLED:
         p = Path(str(a.value))
         try:
@@ -373,6 +393,9 @@ def overwrite_decision(field: FormField, answer: Optional[Answer], shown: Any) -
 
 def _shown_form(f: FormField, a: Answer) -> Any:
     """How our answer reads back on the page (option labels, a file name)."""
+    if _composed_file(f, a):                          # the value is the text; the page shows the file
+        name = (a.note or "").partition(COMPOSED_FILE_NOTE)[2].split(" (", 1)[0].strip()
+        return name or a.value
     if f.type is FieldType.FILE:
         return Path(str(a.value)).name
     if f.fit_type in CHOICE_TYPES and a.option_labels:
@@ -717,6 +740,7 @@ class _Run:
         self._resume_text: Optional[str] = None
         self._resume_entries: Optional[tuple[tuple[str, str, str], ...]] = None
         self._aliases = None
+        self.compose_files: dict[str, str] = {}               # audit key -> path of the composed letter file
         self.compose_meta: dict[str, tuple[str, str]] = {}    # audit key -> (model, prompt hash) of a composed text
 
     # -- browser
@@ -1349,6 +1373,9 @@ class _Run:
             meta = self.compose_meta.get(key)
             if meta and a.source == AnswerSource.COMPOSED.value:
                 a = dataclasses.replace(a, model=meta[0], prompt_hash=meta[1])   # audit (section 19.5)
+            path = self.compose_files.get(key)
+            if path and f.type is FieldType.FILE and a.source == AnswerSource.COMPOSED.value:
+                a = dataclasses.replace(a, note=_composed_note(path))   # name and SHA-256 of the real file
             at.fields[key] = f
             at.answers[key] = a
 
@@ -1396,7 +1423,7 @@ class _Run:
                 text, meta = res.text, (res.model, res.prompt_hash)
             ctx.composed[akey] = text
             if f.type is FieldType.FILE:
-                ctx.composed_files[akey] = self.write_letter(at, ctx, text)
+                ctx.composed_files[akey] = self.compose_files[akey] = self.write_letter(at, ctx, text)
             self.compose_meta[akey] = meta
             self.log(f"[attempt {at.id}] composed 1 text ({len(text.split())} words)")
         return fill_page(page, nav, ctx, rctx, services)
