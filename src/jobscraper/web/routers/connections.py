@@ -50,29 +50,41 @@ def _model_health(request: Request) -> ModelHealth:
     return mh
 
 
+IDLE_STATUS = {"running": False, "started_at": None, "next_at": None}
+
+
 def _runner_view(request: Request) -> dict[str, Any]:
-    """The mail runner's status calls only: never a sync, a connect or IMAP."""
+    """`{timer_running, status}` from the mail runner: status calls only, never a
+    sync, a connect or IMAP."""
     runner = getattr(request.app.state, "mail", None)
     if runner is None:
-        return {"timer_running": False, "running": False, "started_at": None,
-                "next_at": None}
+        return {"timer_running": False, "status": dict(IDLE_STATUS)}
     try:
-        return {"timer_running": bool(runner.timer_running), **runner.status()}
+        return {"timer_running": bool(runner.timer_running), "status": runner.status()}
     except Exception as exc:
         log.warning("connections: mail runner status failed (%s)", type(exc).__name__)
-        return {"timer_running": bool(getattr(runner, "timer_running", False)),
-                "running": False, "started_at": None, "next_at": None}
+        return {"timer_running": False, "status": dict(IDLE_STATUS)}
 
 
-def _job_view(request: Request) -> dict[str, Any]:
+def _job_view(request: Request, store: Any) -> dict[str, Any]:
+    """`{current, attempts_in_flight, last_attempts}`: the job slot's record
+    (no log lines) and two attempt reads, for need_now and the Edge item."""
+    current = None
     jobs = getattr(request.app.state, "jobs", None)
-    if jobs is None:
-        return {"state": "idle", "kind": None}
-    try:
-        return jobs.current(tail=0)
-    except Exception as exc:
-        log.warning("connections: job slot status failed (%s)", type(exc).__name__)
-        return {"state": "idle", "kind": None}
+    if jobs is not None:
+        try:
+            current = jobs.current(tail=0)
+        except Exception as exc:
+            log.warning("connections: job slot status failed (%s)", type(exc).__name__)
+
+    def read(name: str, default: Any) -> Any:
+        try:
+            return getattr(store, name)()
+        except Exception as exc:
+            log.warning("connections: %s could not be read (%s)", name, type(exc).__name__)
+            return default
+    return {"current": current, "attempts_in_flight": read("attempts_in_flight", []),
+            "last_attempts": read("last_attempts", {})}
 
 
 @router.get("/connections")
@@ -87,7 +99,8 @@ def get_connections(request: Request) -> JSONResponse:
         return JSONResponse({"code": "unavailable"}, status_code=503, headers=NO_STORE)
     try:
         body = compose(request.app.state.cfg, store, _runner_view(request),
-                       _job_view(request), snapshot, _vault_has, lockfile_busy, utcnow())
+                       _job_view(request, store), snapshot, _vault_has, lockfile_busy,
+                       utcnow())
     finally:
         close = getattr(store, "close", None)
         if callable(close):
@@ -99,6 +112,6 @@ def get_connections(request: Request) -> JSONResponse:
 def check_model(request: Request) -> JSONResponse:
     """Start a fresh model probe now (unless one is running) and return at once;
     the hub polls GET for the answer."""
-    snap = _model_health(request).snapshot(force=True)
-    return JSONResponse({"checking": bool(snap.get("in_flight"))}, status_code=202,
-                        headers=NO_STORE)
+    mh = _model_health(request)
+    mh.snapshot(force=True)
+    return JSONResponse({"checking": mh.in_flight}, status_code=202, headers=NO_STORE)

@@ -25,12 +25,10 @@ import os
 import threading
 import time
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import Any, Callable, Optional
 
 from jobscraper import backends, vault
-from jobscraper.mailstatus.contracts import (CONSENT_VERSION, PAUSING_CODES, SYNC_TEXTS,
-                                             SyncCode)
+from jobscraper.mailstatus.contracts import CONSENT_VERSION, SYNC_TEXTS, SyncCode
 from jobscraper.store import TIME_FMT, shift
 
 log = logging.getLogger(__name__)
@@ -131,8 +129,8 @@ def _gmail_item(row: dict[str, Any], mail_enabled: bool, runner: dict[str, Any],
     elif row.get("consent_version") != CONSENT_VERSION:
         state, code = "attention", "consent"
     elif st == "paused":
-        # PAUSING_CODES per §2.3; any other code on a paused row also waits on
-        # the owner (only the owner resumes a paused mailbox).
+        # The pausing codes per §2.3; D-195 (5): any other code on a paused row
+        # also waits on the owner (only the owner resumes a paused mailbox).
         state, code = "attention", str(state_code or SyncCode.NOT_SET_UP.value)
     elif st in ("error", "backoff"):
         if last_ok and str(last_ok) >= recent:
@@ -140,8 +138,8 @@ def _gmail_item(row: dict[str, Any], mail_enabled: bool, runner: dict[str, Any],
         else:
             state, code = "attention", str(state_code or SyncCode.INTERNAL.value)
     elif not mail_enabled:
-        # Not a §2.3 row: config switches email updates off for every mailbox.
-        state, code = "paused", SyncCode.DISABLED.value
+        # D-195 (4): config switches email updates off for every mailbox.
+        state, code = "paused", "switched_off"
     elif runner.get("timer_running"):
         state, code = "connected", "ok"
     else:
@@ -152,7 +150,8 @@ def _gmail_item(row: dict[str, Any], mail_enabled: bool, runner: dict[str, Any],
         # The same message as `routers/mail.py` account_view(row) (parity pin).
         message=_sync_text(state_code) if state_code else None,
         checked_at=row.get("last_sync_at"),
-        next_check_at=runner.get("next_at") if row.get("enabled") else None,
+        next_check_at=((runner.get("status") or {}).get("next_at")
+                       if row.get("enabled") else None),
         last_ok_at=last_ok, retry_after=row.get("retry_after"),
         facts={"address": row.get("address"),
                "enabled": bool(row.get("enabled")),
@@ -177,11 +176,11 @@ def _gmail_items(rows: Optional[list[dict[str, Any]]], error: Optional[BaseExcep
 # ---------------------------------------------------------------- application mailbox
 
 def _mailbox_item(id_: str, host: str, port: Any, user: str, backup_separate: bool,
-                  vault_has: VaultHas) -> dict[str, Any]:
+                  vault_has: VaultHas, optional: bool) -> dict[str, Any]:
     """The D-72 mailbox apply reads codes from (§2.3): connected when host and
     username are set and the vault has the entry; the vault is asked for a yes
-    or no only."""
-    facts = {"host": host or None, "port": port, "username": user or None,
+    or no only. The backup mailbox is always optional."""
+    facts = {"host": host, "port": port, "username": user,
              "has_password": False, "backup_separate": backup_separate}
     if not user or not host:
         return _item(id_, "apply_mailbox", "not_set_up", "none", optional=True,
@@ -190,10 +189,10 @@ def _mailbox_item(id_: str, host: str, port: Any, user: str, backup_separate: bo
         has = bool(vault_has(vault.imap_service(host), user))
     except Exception as exc:
         return _failed(id_, "apply_mailbox", "application mailbox vault entry", exc,
-                       optional=True, stored_in="credential_manager", facts=facts)
+                       optional=optional, stored_in="credential_manager", facts=facts)
     facts["has_password"] = has
     return _item(id_, "apply_mailbox", "connected" if has else "attention",
-                 "ok" if has else "no_password", optional=True,
+                 "ok" if has else "no_password", optional=optional,
                  stored_in="credential_manager", facts=facts)
 
 
@@ -211,14 +210,14 @@ def _mailbox_items(cfg: Any, store: Any, vault_has: VaultHas) -> list[dict[str, 
                         exc, optional=True,
                         facts={"host": None, "port": None, "username": None,
                                "has_password": False, "backup_separate": False})]
+    # The backup mailbox (contact.backup_email, D-70 §11.5) is always listed;
+    # unset, it is an Optional not_set_up item (T0 fixture).
     separate = bool(buser) and (buser.lower() != user.lower()
                                 or bhost.lower() != host.lower())
-    items = [_mailbox_item("apply-mailbox", host, box.port, user, separate, vault_has)]
-    if separate:
-        port = ac.mail_backup.port
-        items.append(_mailbox_item("apply-mailbox:backup", bhost, port, buser, True,
-                                   vault_has))
-    return items
+    return [_mailbox_item("apply-mailbox", host, box.port, user, separate, vault_has,
+                          optional=False),
+            _mailbox_item("apply-mailbox:backup", bhost, ac.mail_backup.port, buser,
+                          separate, vault_has, optional=True)]
 
 
 # ---------------------------------------------------------------- employer accounts
@@ -227,16 +226,15 @@ def _account_row(row: dict[str, Any], vault_has: VaultHas) -> dict[str, Any]:
     """One `ats_accounts` row (§2.3). `vault_service` is used to ask the vault
     and never sent."""
     status = str(row.get("status") or "")
-    has: Optional[bool] = None
+    has = False
     failed = False
-    if status in ("created", "verified", "signin_failed", "exists_no_password"):
-        try:
-            has = bool(vault_has(str(row.get("vault_service") or ""),
-                                 str(row.get("email") or "")))
-        except Exception as exc:
-            log.warning("connections: employer account %s vault entry could not be read (%s)",
-                        row.get("id"), type(exc).__name__)
-            failed = True
+    try:
+        has = bool(vault_has(str(row.get("vault_service") or ""),
+                             str(row.get("email") or "")))
+    except Exception as exc:
+        log.warning("connections: employer account %s vault entry could not be read (%s)",
+                    row.get("id"), type(exc).__name__)
+        failed = True
     if status == "signin_failed":
         state, code = "attention", "signin_failed"
     elif status == "exists_no_password":
@@ -246,12 +244,11 @@ def _account_row(row: dict[str, Any], vault_has: VaultHas) -> dict[str, Any]:
             state, code = "neutral", "check_failed"
         elif not has:
             state, code = "attention", "password_missing"
-        elif row.get("last_signin_ok") == 0:
-            # Not a §2.3 row: the last sign-in failed but the status wasn't moved
-            # to signin_failed. Shown as the failure it is.
-            state, code = "attention", "signin_failed"
         else:
-            state, code = "connected", status
+            # D-195 (2): a failed last sign-in (last_signin_ok = 0) whose status
+            # didn't move to signin_failed stays connected; the row's
+            # `last_signin_ok: false` says so, and it raises no badge.
+            state, code = "connected", "verified" if status == "verified" else "ok"
     else:                                          # creating / unknown / anything new
         state, code = "neutral", "unconfirmed"
     ok = row.get("last_signin_ok")
@@ -286,8 +283,9 @@ def _employer(store: Any, vault_has: VaultHas) -> tuple[dict[str, Any], list[dic
 
 # ---------------------------------------------------------------- Edge
 
-def _edge_item(cfg: Any, job_view: dict[str, Any], attempts: Optional[dict[str, Any]],
-               lockfile: Callable[[str], bool]) -> dict[str, Any]:
+def _edge_item(cfg: Any, current: dict[str, Any], attempts: Optional[dict[str, Any]],
+               lockfile: Callable[[str], bool],
+               dir_exists: Callable[[str], bool]) -> dict[str, Any]:
     """The apply browser's profile (§2.3). The path is read, never sent."""
     acfg = cfg.apply
     sync = bool(acfg.edge_sync)
@@ -296,14 +294,14 @@ def _edge_item(cfg: Any, job_view: dict[str, Any], attempts: Optional[dict[str, 
     last_used = max(starts) if starts else None
     try:
         profile = os.path.expandvars(acfg.profile_dir)
-        exists = Path(profile).is_dir()
+        exists = bool(dir_exists(profile))
     except Exception as exc:
         return _failed("edge", "edge", "apply browser profile", exc, stored_in="edge_profile",
                        facts={"exists": False, "in_use": False, "sync": sync,
                               "last_used_at": last_used})
     in_use = False
     if exists:
-        in_use = (job_view.get("state") == "running" and job_view.get("kind") == "apply")
+        in_use = current.get("state") == "running" and current.get("kind") == "apply"
         if not in_use:
             in_use = bool(_safe(lambda: lockfile(profile), False, "apply browser lockfile"))
     facts = {"exists": exists, "in_use": in_use, "sync": sync, "last_used_at": last_used}
@@ -316,12 +314,12 @@ def _edge_item(cfg: Any, job_view: dict[str, Any], attempts: Optional[dict[str, 
 
 # ---------------------------------------------------------------- model
 
-def need_now(job_view: dict[str, Any], in_flight: Optional[list],
+def need_now(current: dict[str, Any], in_flight: Optional[list],
              attempts: Optional[dict[str, Any]], mail_rows: Optional[list[dict[str, Any]]],
              recent: str) -> bool:
     """§2.3 `need_now`: something is waiting on the model right now."""
     # (a) a running background job of any kind but the mailbox test
-    if job_view.get("state") == "running" and job_view.get("kind") not in (None, "mailtest"):
+    if current.get("state") == "running" and current.get("kind") not in (None, "mailtest"):
         return True
     # (b) an apply attempt in flight
     if in_flight:
@@ -338,14 +336,23 @@ def need_now(job_view: dict[str, Any], in_flight: Optional[list],
     return False
 
 
-def _model_item(cfg: Any, snapshot: dict[str, Any], need: bool) -> dict[str, Any]:
+def _model_item(cfg: Any, snapshot: Optional[dict[str, Any]], need: bool) -> dict[str, Any]:
+    """`snapshot` is `ModelHealth.snapshot()`: the last probe, or None before the
+    first answer. "off" and "misconfigured" are read from config here too, so a
+    cached probe never hides a config change."""
     budget = cfg.budget or {}
-    probe = snapshot.get("probe") or None
+    snapshot = snapshot or {}
+    configured = backends.configured_code(budget)
+    probe: Optional[dict[str, Any]] = (
+        {"ok": False, "code": configured} if configured
+        else (snapshot if "ok" in snapshot else None))
     local = backends.is_local_config(budget)
-    facts = {"backend": (probe or {}).get("backend") or str(budget.get("backend") or "ollama"),
-             "model": (probe or {}).get("model") or str(budget.get("ollama_model") or ""),
+    facts = {"backend": snapshot.get("backend") or str(budget.get("backend") or "ollama"),
+             "model": snapshot.get("model") or str(budget.get("ollama_model") or ""),
              "local": local, "need_now": need}
-    kw = {"stored_in": "this_pc" if local else None, "facts": facts,
+    # Only a remote Ollama (D-107) is not "this PC"; off/misconfigured run nothing elsewhere.
+    remote = not configured and not local
+    kw = {"stored_in": None if remote else "this_pc", "facts": facts,
           "checked_at": snapshot.get("checked_at"),
           "next_check_at": snapshot.get("next_check_at"),
           "last_ok_at": snapshot.get("last_ok_at")}
@@ -365,21 +372,30 @@ def _model_item(cfg: Any, snapshot: dict[str, Any], need: bool) -> dict[str, Any
 # ---------------------------------------------------------------- compose
 
 def compose(cfg: Any, store: Any, mail_runner_view: dict[str, Any],
-            job_view: dict[str, Any], model_snapshot: dict[str, Any],
+            job_view: dict[str, Any], model_snapshot: Optional[dict[str, Any]],
             vault_has: VaultHas, lockfile_busy: Callable[[str], bool] = lockfile_busy,
-            now: Optional[str] = None) -> dict[str, Any]:
+            now: Optional[str] = None,
+            profile_dir_exists: Callable[[str], bool] = os.path.isdir) -> dict[str, Any]:
     """The `GET /api/connections` body (schema v1, §3.1).
 
-    `mail_runner_view` is `{timer_running, running, started_at, next_at}` from the
-    `MailSyncRunner` (status only); `job_view` is `JobManager.current(tail=0)`;
-    `model_snapshot` is `ModelHealth.snapshot()`; `vault_has(service, user)` says
-    whether the vault has an entry; `now` is UTC in `store.TIME_FMT`.
-    Store reads: mail_accounts, settings, accounts, last_attempts,
-    attempts_in_flight. Each failing source degrades only its own item."""
+    Input shapes (as in the T0 fixture `tests/fixtures/connections_rows.json`):
+    - `mail_runner_view`: `{timer_running, status: MailSyncRunner.status()}`;
+    - `job_view`: `{current: JobManager.current(tail=0) or None,
+      attempts_in_flight: store.attempts_in_flight(),
+      last_attempts: store.last_attempts()}`;
+    - `model_snapshot`: `ModelHealth.snapshot()`, None before the first probe;
+    - `vault_has(service, user)`: is there a vault entry (a boolean only);
+    - `lockfile_busy(dir)`, `profile_dir_exists(dir)`: the Edge profile checks;
+    - `now`: UTC in `store.TIME_FMT`.
+    Store reads here: mail_accounts, settings, accounts. Each failing source
+    degrades only its own item."""
     now = now or datetime.now(timezone.utc).strftime(TIME_FMT)
     recent = shift(now, days=-RECENT_DAYS)
     runner = mail_runner_view or {}
-    job = job_view or {}
+    jv = job_view or {}
+    job = jv.get("current") or {}
+    attempts = jv.get("last_attempts") or {}
+    in_flight = jv.get("attempts_in_flight") or []
 
     mail_rows: Optional[list[dict[str, Any]]] = None
     mail_error: Optional[BaseException] = None
@@ -391,16 +407,21 @@ def compose(cfg: Any, store: Any, mail_runner_view: dict[str, Any],
         mail_enabled = bool(cfg.mail_status.enabled)
     except Exception:
         mail_enabled = True
-    attempts = _safe(store.last_attempts, None, "last attempts")
-    in_flight = _safe(store.attempts_in_flight, None, "attempts in flight")
 
     employer_item, employer_rows = _employer(store, vault_has)
     items = (_gmail_items(mail_rows, mail_error, mail_enabled, runner, recent)
              + _mailbox_items(cfg, store, vault_has)
-             + [_edge_item(cfg, job, attempts, lockfile_busy),
-                _model_item(cfg, model_snapshot or {},
+             + [_edge_item(cfg, job, attempts, lockfile_busy, profile_dir_exists),
+                _model_item(cfg, model_snapshot,
                             need_now(job, in_flight, attempts, mail_rows, recent)),
                 employer_item])
+    for item in items:
+        # Never configured: the chip reads "Optional", and nothing is stored yet
+        # (the Edge profile's place is known before it exists). T0 sample.
+        if item["state"] == "not_set_up":
+            item["optional"] = True
+            if item["kind"] != "edge":
+                item["stored_in"] = None
     return {"version": VERSION, "checked_at": now,
             "attention": sum(1 for i in items if i["state"] == "attention"),
             "items": items, "employer_accounts": employer_rows,
@@ -416,7 +437,7 @@ class ModelHealth:
     probe is stale (60 s after a success, 15 s after a failure) and, if so, marks
     `in_flight` before starting one daemon thread, so two requests never start
     two probes. The thread builds a fresh backend through `backends.probe` (one
-    `GET /api/tags`: no model is loaded, no GPU used), which closes its HTTP
+    model-list request: no model is loaded, no GPU used), which closes its HTTP
     client, and clears `in_flight` in `finally`. "off" and "misconfigured" come
     from config alone and are never probed."""
 
@@ -443,30 +464,37 @@ class ModelHealth:
     def _stamp(t: Optional[float]) -> Optional[str]:
         return None if t is None else datetime.fromtimestamp(t, timezone.utc).strftime(TIME_FMT)
 
-    def _view(self) -> dict[str, Any]:
-        ttl = self.ok_ttl_s if (self._result or {}).get("ok") else self.fail_ttl_s
-        return {"probe": dict(self._result) if self._result else None,
+    @property
+    def in_flight(self) -> bool:
+        with self._lock:
+            return self._in_flight
+
+    def _view(self) -> Optional[dict[str, Any]]:
+        if self._result is None or self._at is None:
+            return None
+        ttl = self.ok_ttl_s if self._result.get("ok") else self.fail_ttl_s
+        return {**self._result,
                 "checked_at": self._stamp(self._at),
                 "last_ok_at": self._stamp(self._last_ok),
-                "next_check_at": self._stamp(self._at + ttl) if self._at is not None else None,
+                "next_check_at": self._stamp(self._at + ttl),
                 "in_flight": self._in_flight}
 
-    def snapshot(self, force: bool = False) -> dict[str, Any]:
-        """The cached result now; starts a background probe when it is stale
-        (or `force`, the hub's "Check again") and none is running."""
+    def snapshot(self, force: bool = False) -> Optional[dict[str, Any]]:
+        """The cached result now, flat (`{ok, code, backend, model, local,
+        checked_at, last_ok_at, next_check_at, in_flight}`), or None before the
+        first answer. Starts a background probe when the cache is stale (or on
+        `force`, the hub's "Check again") and none is running."""
         budget = self._budget() or {}
         code = backends.configured_code(budget)
         if code:
-            now = self._stamp(self.clock())
-            return {"probe": {"ok": False, "code": code,
-                              "backend": "off" if code == "off" else "unknown",
-                              "model": "", "local": False},
-                    "checked_at": now, "last_ok_at": None, "next_check_at": None,
-                    "in_flight": False}
+            return {"ok": False, "code": code,
+                    "backend": "off" if code == "off" else "unknown", "model": "",
+                    "local": False, "checked_at": self._stamp(self.clock()),
+                    "last_ok_at": None, "next_check_at": None, "in_flight": False}
         start = False
         with self._lock:
             if not self._in_flight:
-                stale = force or self._at is None
+                stale = force or self._at is None or self._result is None
                 if not stale:
                     ttl = self.ok_ttl_s if self._result.get("ok") else self.fail_ttl_s
                     stale = self.clock() - self._at >= ttl
