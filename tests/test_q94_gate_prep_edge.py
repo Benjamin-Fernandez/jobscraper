@@ -62,8 +62,13 @@ def test_q94_q46e_workday_next_step_presses_next_once_per_call_when_nothing_chan
 @needs(*GATE)
 def test_q94_q46e_a_silent_next_is_pressed_once_in_the_whole_attempt_and_ends_shown_again():
     import test_apply_flow_llm as L
-    from llm_fill_support import FakeFillBackend
+    from llm_fill_support import FakeFillBackend, browser_page
     from jobscraper.apply.contracts import AttemptState as S, ReasonCode as R
+    probe = browser_page()      # the repo's own probe: None (with a note) when Edge cannot launch,
+    if probe is None:          # as after the leaked asyncio loop in the full suite (Q-84); never a fake pass
+        return
+    probe[1].close()
+    probe[0].stop()
     fname = {"|Given Name(s)": {"source": "profile", "ref": "profile:identity.legal_first_name",
                                 "value": "Alex", "evidence": ""}}
     fb = FakeFillBackend(replies=[{"kind": "page", "repeat": True, "reply": fname}], strict=True)
