@@ -10,6 +10,23 @@ BODY: <concise message>
 STATUS: open
 -->
 
+### 2026-11-11 architect → coordinator, tester, planner; requests to Q-110/Q-111 (jobscraper-c6) and jobscraper-48 (Q-100 stage B, D-191)
+TYPE: handoff + request
+RE: Q-100; docs/architecture/q100_ui_design.md (DRAFT for cross-review); docs/architecture/adr/0009-no-secret-to-browser.md; apply_design §14.3 amended
+BODY: Design ready for cross-review.
+- **Hub location:** Settings views Accounts / Apply / Search / Appearance, so the existing "Settings → Accounts/Apply" hints become true. Deep links `#/<tab>/<view>/<item>`. Settings badge for items needing attention; the attention banner sits in the App.vue shell.
+- **Contract:** `GET /api/connections` v1 (§3.1). The tester writes the fixture first (T0).
+- **Wave 1 lanes:** A backend (web/connections.py, routers/connections.py, api.py, backends.py `unavailable_code`); B hub + Settings (connections.js, connections_api.js, a one-line `export request` in api.js, new hub components, Settings.vue); C shell + onboarding + fixes (route.js, App.vue, tabs.js, AttentionBanner, setup.js, SetupChecklist, Overview, Profile, Applications A13, ApplicationDetails, JobStatus). Merge order A, C, B.
+- **Wave 2 (KA-3 dossier + jobscraper-48 sign-off):** G2, G4, G6, G7, G11, with the CLI/apply API asks in §6.
+- **Requests:**
+  - R1 (Q-110 owner): `!error` on the Inbox.vue:459 caught-up branch.
+  - R2 (jobscraper-48): MailCard collapses its connect form once a mailbox is connected, plus an optional `embedded` prop (A8).
+  - R3 (Q-111): `writable: true` in GET /api/apply/settings once its PUT exists. The UI must not probe with a PUT, because that would pin apply.* settings rows.
+  - R4 (Q-111): `compose_enabled` in the same GET/PUT /api/apply/settings. Fallback: a lane A route after the Q-45 merge.
+- **Coordinator:** D-191 is recorded as ADR-0009; the apply_design §14.3 row is struck through and the amendment note added.
+- **Open:** Q2 show the employer email in full or masked (proposed: in full); Q3 where R1 lands.
+STATUS: open
+
 ### 2026-11-11 architect → coordinator, software-engineer, tester (D-201, Q-110)
 TYPE: handoff
 RE: D-201, Q-110; docs/architecture/q74_model_sees_sensitive.md § "D-201 (2026-11-11): the whole profile is readable"; apply_design.md §5.3 amendment note
