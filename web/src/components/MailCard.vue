@@ -62,6 +62,8 @@ const checkError = ref('')
 
 const root = ref(null)
 const showConnect = ref(false)     // embedded: the folded connect form is open
+const consentBox = ref(null)       // embedded: focus lands here when the fold opens
+const foldButton = ref(null)       // ... and returns here on Cancel
 
 const accounts = computed(() => mail.value?.accounts ?? [])
 const running = computed(() => Boolean(mail.value?.sync?.running))
@@ -72,6 +74,19 @@ const offerApp = computed(() => {
 })
 
 const connectFolded = computed(() => props.embedded && accounts.value.length > 0 && !showConnect.value)
+
+async function openConnect() {
+  showConnect.value = true
+  await nextTick()
+  consentBox.value?.focus()
+}
+
+async function cancelConnect() {
+  showConnect.value = false
+  consented.value = false
+  await nextTick()
+  foldButton.value?.focus()
+}
 
 const patch = (target, key, v) => { target.value = { ...target.value, [key]: v } }
 
@@ -504,7 +519,7 @@ defineExpose({ load })
       <p v-if="checkError" class="notice error check-error" role="alert">{{ checkError }}</p>
 
       <div v-if="connectFolded" class="mail-connect-fold">
-        <button type="button" class="connect-another" aria-expanded="false" @click="showConnect = true">
+        <button ref="foldButton" type="button" class="connect-another" aria-expanded="false" @click="openConnect">
           Connect another Gmail
         </button>
       </div>
@@ -512,9 +527,12 @@ defineExpose({ load })
         <div class="consent">
           <p class="consent-text">{{ consent.text }}</p>
           <label class="consent-box">
-            <input v-model="consented" type="checkbox" class="consent-input">
+            <input ref="consentBox" v-model="consented" type="checkbox" class="consent-input">
             <span>Read this mailbox for application updates</span>
           </label>
+          <div v-if="embedded && accounts.length > 0">
+            <button type="button" class="ghost connect-cancel" @click="cancelConnect">Cancel</button>
+          </div>
         </div>
 
         <div v-if="offerApp" class="app-mailbox">
