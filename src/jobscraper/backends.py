@@ -40,6 +40,11 @@ class Completion:
 class Backend:
     name = "none"
     unavailable_reason = ""
+    # Why the transport can't answer, as a fixed word the web hub can show
+    # (q100_ui_design §3.3): "off", "misconfigured", "unreachable", "model_missing",
+    # or "" while nothing is known to be wrong. `unavailable_reason` is the
+    # human sentence and names the URL, so it never leaves the server.
+    unavailable_code = ""
     model_id = ""       # recorded on every decision (see OllamaBackend.model_id)
 
     @property
@@ -76,12 +81,16 @@ class Backend:
         if not self.available:
             raise BackendError(self.unavailable_reason or "no model transport configured")
 
+    def close(self) -> None:
+        """Release what the transport holds open (an HTTP client). Nothing here."""
+
 
 class OffBackend(Backend):
     name = "off"
 
-    def __init__(self, reason: str = "disabled in config"):
+    def __init__(self, reason: str = "disabled in config", code: str = "off"):
         self.unavailable_reason = reason
+        self.unavailable_code = code    # "off" (switched off) or "misconfigured"
 
 
 class OllamaBackend(Backend):
@@ -113,6 +122,7 @@ class OllamaBackend(Backend):
         self.model_id = model
         self.num_ctx = int(num_ctx)
         self.timeout = float(timeout)
+        self._owns_http = client is None
         self._http = client or httpx.Client(timeout=self.timeout)
         self._probed: Optional[bool] = None
         self._thinks: Optional[bool] = None     # does the model have a thinking mode?
@@ -128,6 +138,7 @@ class OllamaBackend(Backend):
                 self.unavailable_reason = (
                     f"Ollama is not reachable at {self.url} ({type(exc).__name__}) - "
                     "install it from https://ollama.com and start it")
+                self.unavailable_code = "unreachable"
                 self._probed = False
                 return False
             wanted = self.model_id if ":" in self.model_id else f"{self.model_id}:latest"
@@ -135,8 +146,10 @@ class OllamaBackend(Backend):
                 self.unavailable_reason = (
                     f"model {self.model_id!r} is not pulled into Ollama - run "
                     f"`ollama pull {self.model_id}`")
+                self.unavailable_code = "model_missing"
                 self._probed = False
             else:
+                self.unavailable_code = ""
                 self._probed = True
         return self._probed
 
@@ -146,6 +159,15 @@ class OllamaBackend(Backend):
 
     def describe(self) -> str:
         return f"ollama ({self.model_id} at {self.url})"
+
+    def close(self) -> None:
+        """Close the HTTP client this backend made. A client handed in by the
+        caller (tests) is the caller's to close. Safe to call twice."""
+        if self._owns_http:
+            try:
+                self._http.close()
+            except Exception:
+                pass
 
     def _has_thinking(self) -> bool:
         """Does `/api/show` list the `thinking` capability? Asked once.
@@ -254,12 +276,12 @@ def build(budget: dict[str, Any]) -> Backend:
     how the Docker setup points at its Ollama service without editing config.
     """
     if not budget.get("enable_llm", True):
-        return OffBackend("disabled in config (budget.enable_llm: false)")
+        return OffBackend("disabled in config (budget.enable_llm: false)", "off")
 
     kind = str(os.environ.get("JOBSCRAPER_BACKEND")
                or budget.get("backend", "ollama")).strip().lower()
     if kind in ("off", "none", ""):
-        return OffBackend("budget.backend is `off`")
+        return OffBackend("budget.backend is `off`", "off")
     if kind == "ollama":
         return OllamaBackend(
             url=str(os.environ.get("JOBSCRAPER_OLLAMA_URL")
@@ -267,7 +289,64 @@ def build(budget: dict[str, Any]) -> Backend:
             model=str(budget.get("ollama_model") or "qwen3:14b"),
             timeout=float(budget.get("ollama_timeout", 600)),
             num_ctx=int(budget.get("ollama_num_ctx", 16384)))
-    return OffBackend(f"unknown budget.backend {kind!r} (expected ollama or off)")
+    return OffBackend(f"unknown budget.backend {kind!r} (expected ollama or off)",
+                      "misconfigured")
+
+
+def configured_code(budget: dict[str, Any]) -> str:
+    """What `build(budget)` would say from config alone, without building anything:
+    "off" (switched off), "misconfigured" (an unknown `budget.backend`), or ""
+    (Ollama, which only a probe can judge). Same resolution as `build`, so the web
+    hub can answer "off" at once instead of starting a probe thread."""
+    budget = budget or {}
+    if not budget.get("enable_llm", True):
+        return "off"
+    kind = str(os.environ.get("JOBSCRAPER_BACKEND")
+               or budget.get("backend", "ollama")).strip().lower()
+    if kind in ("off", "none", ""):
+        return "off"
+    return "" if kind == "ollama" else "misconfigured"
+
+
+@dataclass(frozen=True)
+class Probe:
+    """One health check of the configured model transport (q100_ui_design §3.3).
+
+    `code` is "" when `ok`, else "off", "misconfigured", "unreachable" or
+    "model_missing". No reason text: that names the Ollama URL, and a Probe is
+    what the web hub sends to the browser."""
+    ok: bool
+    code: str
+    backend: str
+    model: str
+    local: bool
+
+
+def probe(budget: dict[str, Any]) -> Probe:
+    """Build a transport from `budget`, ask whether it can answer, and close it.
+
+    For Ollama this is one `GET /api/tags` (5 s cap): it lists the pulled models,
+    so no model is loaded and no GPU is used. The backend's HTTP client is closed
+    in `finally`, so a health check repeated every minute leaks nothing. Any
+    other failure while asking counts as "unreachable"."""
+    budget = budget or {}
+    be = build(budget)
+    try:
+        try:
+            ok = bool(be.available)
+        except Exception:
+            ok = False
+            if not be.unavailable_code:
+                be.unavailable_code = "unreachable"
+        code = "" if ok else (be.unavailable_code or "unreachable")
+        if isinstance(be, OllamaBackend):
+            model = be.model_id
+        else:
+            model = str(budget.get("ollama_model") or "") if code != "off" else ""
+        return Probe(ok=ok, code=code, backend=be.name if code != "misconfigured"
+                     else "unknown", model=model, local=is_local(be))
+    finally:
+        be.close()
 
 
 # D-105 (q74_model_sees_sensitive.md §1, ADR-0008): hosts that mean "this computer".
