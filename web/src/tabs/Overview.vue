@@ -82,6 +82,14 @@ const weekTiles = computed(() => [
   { label: 'Other updates', n: week.value.moved },
 ])
 
+// Why the last run stopped, when the run stored a reason (Q-100 A15): the
+// pipeline writes `stats.reason` - "cancelled" or the error.
+const failReason = computed(() => {
+  const reason = String(lastRun.value.run?.stats?.reason ?? '').trim().replace(/\.$/, '')
+  if (!reason) return ''
+  return reason === 'cancelled' ? 'It was cancelled.' : `Reason: ${reason}.`
+})
+
 const lastRunLine = computed(() => {
   const run = lastRun.value.run
   return run ? `Last run ${ago(run.finished_at, now.value)}: ${plural(Number(run.accepted) || 0, 'new role')}.` : ''
@@ -133,7 +141,10 @@ async function start() {
 
     <TabLoading v-if="firstLoad" :rows="3" />
     <template v-else>
-      <SetupChecklist v-if="runs.length === 0" :runs="runs" />
+      <!-- Q-100 §4.2: it decides itself what to show - part 1 while there are no
+           runs, part 2 while applying still needs something - and shows nothing
+           once both are done. -->
+      <SetupChecklist :runs="runs" :runs-known="!runsError" with-apply />
 
       <section v-if="cards.length || caughtUp || errors.questions" aria-labelledby="next-title">
         <h2 id="next-title" class="section-title">Next up</h2>
@@ -180,7 +191,9 @@ async function start() {
             </template>
             <template v-else-if="lastRun.state === 'failed'">
               <h3 class="next-title">Your last run {{ runStatusLabel(lastRun.run.status) }}</h3>
-              <p class="next-body muted">See what happened on the Runs tab.</p>
+              <p class="next-body muted">
+                <template v-if="failReason">{{ failReason }} </template>See what happened on the Runs tab.
+              </p>
               <a class="button" :class="i === 0 ? 'primary' : 'ghost'" href="#/runs">Open Runs</a>
             </template>
             <template v-else>
