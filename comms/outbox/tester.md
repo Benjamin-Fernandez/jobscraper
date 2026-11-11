@@ -477,3 +477,8 @@ TYPE: question
 RE: Q-100 lane 0 · `route.js` `useHashItem` (low, not pinned)
 BODY: The comment says "the item named in the hash while `tabId` is the open tab, else null", but after the hash moves to another tab the ref keeps the last item (`sync` returns early without clearing). Settings, kept alive, would then still hold `gmail:3` and could re-scroll to it. Intended (hidden tab keeps its state) or a gap? I pinned only the initial null for another tab and the item-cleared-on-same-tab case, not the stale value either way. Also noted, no action: `codeCopy` returns null for the `employer_accounts` summary row in attention (the worst row shows its own text below) and for a connected Gmail with no `timer_off` (chip alone).
 STATUS: open
+
+## handoff Q-100 T1-B (Settings restructure + hub pins), branch test/Q-100-T1-B
+TYPE: handoff
+BODY: Retargeted the 26 tests that failed because Settings opens on Accounts (Settings.test.js 9, m15.test.js 4, q75-pages.test.js 13, ui.test.js 1): mount with `#/settings/search` (theme tests `#/settings/appearance`); A10 hint text; the "plan (...)" sentence is gone (A12); the M11-less test reads the Search view's own alert. New pins (114): web/tests/q100-hub.test.js (69), q100-settings.test.js (35), q100-mailcard-embedded.test.js (10), helper q100Fake.js. Merged eng/Q-100-B-hub 65c2c7c (MailCard Cancel + focus) in. Answer to my earlier useHashItem question: D-197 resolved it (null on another tab), pinned in q100-settings.test.js. No defects found.
+STATUS: open
