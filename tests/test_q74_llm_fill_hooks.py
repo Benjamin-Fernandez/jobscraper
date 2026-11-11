@@ -274,12 +274,10 @@ def _d201_profile() -> dict:
     return p
 
 
-def test_d201_f1_no_newly_readable_value_reaches_the_job_log_or_the_audit_rows():
-    """F1 (review): flag effective, one llm_fill page through the N6a harness (`fill_page` is a script that
-    runs the real `llm_fill.ask` + `guards.decide`; local fake backend). The model reads every value, so the
-    prompt holds them (the precondition); the job log and the audit rows (note, source, hashes ...) hold none.
-    `debug_dump` is a config key only: nothing in src/ writes a dump, so there is no dump to assert on.
-    A deliberate log line naming the string values stands in for any leak: `_Log` must scrub it."""
+def _d201_run_page():
+    """One llm_fill page through the N6a harness (`fill_page` is a script that runs the real `llm_fill.ask` +
+    `guards.decide`; local fake backend, flag effective). The model quotes every newly readable value as its
+    evidence, which G3 rejects. Returns (inner backend, seen, result, log, audit rows)."""
     import test_apply_flow_n6a as N
     import test_q79_body_llm_sees_sensitive as Q79
     from jobscraper import apply_flow
@@ -320,15 +318,36 @@ def test_d201_f1_no_newly_readable_value_reaches_the_job_log_or_the_audit_rows()
     for m in DISTINCT + (SALARY,):
         assert m in prompt, f"precondition: the model reads {m!r}"
     assert rows, "the audit rows exist"
+    return inner, seen, r, say, rows
+
+
+def test_d201_f1_no_newly_readable_value_reaches_the_job_log_or_the_audit_notes():
+    """F1 (review): flag effective, one llm_fill page (`_d201_run_page`). The model reads every value (the
+    precondition); the job log, the result detail and the audit `note`, `source`, `prompt_hash` and `rule_id`
+    hold none. The audit `evidence` column is the known gap Q-113 (next test).
+    `debug_dump` is a config key only: nothing in src/ writes a dump, so there is no dump to assert on.
+    A deliberate log line naming the string values stands in for any leak: `_Log` must scrub it."""
+    _inner, _seen, r, say, rows = _d201_run_page()
     haystack = {"log": say.text, "result": str(r.reason_detail or "")}
     for i, x in enumerate(rows):
-        for k, v in x.items():
-            if k not in ("value_json", "corrected_json"):       # the filled value itself may name the applicant
-                haystack[f"audit row {i} column {k}"] = str(v)
+        for k in ("note", "source", "prompt_hash", "rule_id"):
+            haystack[f"audit row {i} column {k}"] = str(x.get(k) or "")
     leaks = [f"{what} holds {m[:3]!r}..." for what, text in haystack.items() for m in DISTINCT + (SALARY,)
              if m in text]                       # never print a whole value
     assert not leaks, leaks
     assert "[redacted]" in say.text, "the stand-in leak line was scrubbed, not dropped"
+
+
+def test_d201_known_gap_q113_a_rejected_quote_is_stored_verbatim_in_evidence():
+    """Known gap Q-113 (review docs/reviews/Q-112-d201-profile-read.md F1): flip this to 'evidence holds no
+    newly readable value' when Q-113 lands; the same applies to the fill_cache row's evidence.
+    Today a quote G3 rejects is still kept verbatim (up to 240 chars) in `apply_answers.evidence`."""
+    _inner, _seen, _r, _say, rows = _d201_run_page()
+    row = rows[0]
+    assert row["status"] == "ungrounded" and str(row["note"]).startswith("G3"), (row["status"], row["note"])
+    ev = str(row["evidence"] or "")
+    for m in DISTINCT + (SALARY,):
+        assert m in ev, f"today's behaviour: the rejected quote keeps {m[:3]!r}... in evidence"
 
 
 def test_d201_f2_tier5_salary_text_is_never_filled_from_the_current_salary():
