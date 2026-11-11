@@ -1,4 +1,4 @@
-"""`/api/apply` - start auto-apply from the Inbox, the only trigger (F-30, D-182).
+"""`/api/apply` - start auto-apply from the Inbox, the only trigger (F-30, D-200).
 
 Auto-apply never starts by itself: the owner clicks "Auto-apply" on a role and
 the SPA posts that job id here. `GET /api/apply/status` tells the button what
