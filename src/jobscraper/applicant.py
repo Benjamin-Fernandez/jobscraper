@@ -693,6 +693,17 @@ def _canon_date(v: Any, formats: tuple[str, ...]) -> Any:
     return v
 
 
+_OPEN_END_WORDS = frozenset({"present", "current", "now", "ongoing", "to date"})
+
+
+def _is_open_end(v: Any) -> bool:
+    """An entry `end` typed as "Present", "current", "now", "ongoing" or "to date"
+    (any case, spaces around): the entry is still going on, which the profile
+    writes as a null end (Q-43, D-79 lenient validation). Only text matches; a
+    real date or a null is not an open word."""
+    return isinstance(v, str) and re.sub(r"\s+", " ", v.strip().lower()) in _OPEN_END_WORDS
+
+
 def _set_at(profile: dict, path: str, fn) -> None:
     """Replace the value at a dotted `path` with `fn(value)`, in place, when
     every step down to it is a mapping and the key is there."""
@@ -745,6 +756,8 @@ def normalise(profile: Any) -> Any:
                 for key in ("start", "end"):
                     if key in entry:
                         entry[key] = _canon_date(entry[key], ENTRY_DATE_FORMATS)
+                if _is_open_end(entry.get("end")):
+                    entry["end"] = None                # ongoing (Q-43, D-79)
     return out
 
 

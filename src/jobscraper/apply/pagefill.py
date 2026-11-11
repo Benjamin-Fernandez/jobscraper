@@ -55,7 +55,7 @@ from .contracts import (
     ModelDecision, PageField, PageOutcome, ResolveContext, ValueOrigin,
 )
 
-L1_KEPT_NOTE = "L1: kept, uploaded in this attempt"     # locks: the file on the page is ours
+L1_KEPT_NOTE = K.L1_KEPT_NOTE                            # locks: the file on the page is ours
 TIMED_OUT_NOTE = "transport: timed out"
 ENTRY_NOTE_PREFIX = "E5: another "                         # a section note (R3 F14, D-173), not a value failure
 ENTRY_NOTE_TAIL = " - this value was typed"
@@ -71,7 +71,7 @@ DEFAULT_LONG_LIST = 15
 # reply answers one page's site error, and a replayed recheck row ("cache:recheck") would
 # meet the generic copy rule, while `recheck_targets` asks again anyway.
 NO_CACHE_VIAS = ("second", "corrective", "recheck")
-FACT_SOURCES = frozenset({FillSource.PROFILE, FillSource.EXTRA, FillSource.STANDING})
+FACT_SOURCES = G.FACT_SOURCES                             # one definition, in guards (R3 F11)
 
 
 class _Stop(Exception):
