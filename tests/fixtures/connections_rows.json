@@ -1224,7 +1224,7 @@
    }
   },
   "need_now_b_attempt_in_flight": {
-   "section_2_3_row": "need_now (b): attempts_in_flight non-empty",
+   "section_2_3_row": "need_now (b): an attempt in flight that started less than 2 h ago (D-198 M3)",
    "inputs": {
     "model_snapshot": {
      "ok": false,
@@ -1240,7 +1240,8 @@
       {
        "id": 50,
        "job_id": "job-x",
-       "state": "filling"
+       "state": "filling",
+       "started_at": "2026-11-11T08:40:00"
       }
      ],
      "last_attempts": {}
@@ -1250,6 +1251,82 @@
     "id": "model",
     "state": "attention",
     "code": "unreachable"
+   }
+  },
+  "need_now_b_attempt_in_flight_stale": {
+   "section_2_3_row": "need_now (b) negative: an attempt still marked in flight but started 2 h or more ago (D-198 M3)",
+   "inputs": {
+    "model_snapshot": {
+     "ok": false,
+     "code": "unreachable",
+     "backend": "ollama",
+     "model": "example-model:8b",
+     "local": true,
+     "checked_at": "2026-11-11T09:12:00"
+    },
+    "job_view": {
+     "current": null,
+     "attempts_in_flight": [
+      {
+       "id": 50,
+       "job_id": "job-x",
+       "state": "filling",
+       "started_at": "2026-11-11T05:00:00"
+      }
+     ],
+     "last_attempts": {}
+    }
+   },
+   "expect": {
+    "id": "model",
+    "state": "neutral",
+    "code": "unreachable"
+   }
+  },
+  "apply_mailbox_backup_same_user_primary_ok": {
+   "section_2_3_row": "Application mailbox with a backup naming the same user (case and spaces aside): the primary is judged on its own (D-198 M2)",
+   "inputs": {
+    "cfg_apply_mail": {
+     "host": "imap.gmail.com",
+     "port": 993,
+     "username": "apply@example.com"
+    },
+    "cfg_apply_mail_backup": {
+     "host": "",
+     "port": 993,
+     "username": "  Apply@Example.com "
+    },
+    "vault_has": {
+     "jobscraper:imap:imap.gmail.com|apply@example.com": true
+    }
+   },
+   "expect": {
+    "id": "apply-mailbox",
+    "state": "connected",
+    "code": "ok"
+   }
+  },
+  "apply_mailbox_backup_same_user_no_password": {
+   "section_2_3_row": "Same user as backup, no vault entry: the primary alone is attention/no_password (D-198 M2)",
+   "inputs": {
+    "cfg_apply_mail": {
+     "host": "imap.gmail.com",
+     "port": 993,
+     "username": "apply@example.com"
+    },
+    "cfg_apply_mail_backup": {
+     "host": "",
+     "port": 993,
+     "username": "APPLY@example.com"
+    },
+    "vault_has": {
+     "jobscraper:imap:imap.gmail.com|apply@example.com": false
+    }
+   },
+   "expect": {
+    "id": "apply-mailbox",
+    "state": "attention",
+    "code": "no_password"
    }
   },
   "need_now_c_model_unavailable_recent": {

@@ -153,6 +153,33 @@ describe('ConnectionsHub: every sample state shows the right chip', () => {
     expect(w2.find('[data-card-part="apply-mailbox:backup"]').exists()).toBe(false)
   })
 
+  it('D-198 M2: with no backup item at all (same user as the primary) the mailbox card still draws, with no backup part', async () => {
+    const r = cloneSample(sample)
+    r.items = r.items.filter(i => i.id !== 'apply-mailbox:backup')
+    const w = await hub(r)
+    expect(card(w, 'apply-mailbox').exists()).toBe(true)
+    expect(w.find('[data-card-part="apply-mailbox:backup"]').exists()).toBe(false)
+    expect(w.text()).not.toContain('Backup mailbox')
+  })
+
+  it('D-198 H1/M1: the employer fix says where to run it, then gives one run.ps1 line with the careers URL', async () => {
+    const row = variant('employer_signin_failed').employer_account
+    const r = cloneSample(sample)
+    r.employer_accounts = r.employer_accounts.map(a => (a.id === row.id ? row : a))
+    const w = await hub(r)
+    const fix = w.find(`.employer-detail[data-account="${row.id}"] details.employer-fix`)
+    expect(fix.exists()).toBe(true)
+    const text = fix.text()
+    const intro = text.indexOf('In PowerShell, in the JobScraper folder')
+    const cmd = text.indexOf('.\\run.ps1 accounts add')
+    expect(intro).toBeGreaterThanOrEqual(0)
+    expect(cmd).toBeGreaterThan(intro)                       // the introduction comes first
+    expect(fix.findAll('pre')).toHaveLength(1)
+    expect(fix.find('pre').text()).toBe(`.\\run.ps1 accounts add --url https://${row.tenant_host}/careers --email ${row.email}`)
+    expect(fix.find('pre').text()).not.toMatch(/https:\/\/\S+\/ /)   // never the bare host root
+    expect(fix.find('.employer-fix-note').text()).toContain('the password never goes through this page')
+  })
+
   it('employer summary: worst state, or Optional with the empty-state text', async () => {
     const worst = variant('employer_summary_worst').item
     const w1 = await hub(withItem(worst))
@@ -180,8 +207,12 @@ describe('ConnectionsHub: every sample state shows the right chip', () => {
     const detail = w.find(`.employer-detail[data-account="${row.id}"]`)
     expect(detail.exists() && detail.find('details.employer-fix').exists()).toBe(fixable)
     if (fixable) {
+      // D-198 H1/M1: the URL names the careers site (the bare host root names no tenant to the
+      // CLI), the command is run through run.ps1, and the owner is told where and in what.
       expect(detail.find('pre').text())
-        .toBe(`python -m jobscraper accounts add --url https://${row.tenant_host}/ --email ${row.email}`)
+        .toBe(`.\\run.ps1 accounts add --url https://${row.tenant_host}/careers --email ${row.email}`)
+      expect(detail.find('details.employer-fix').text()).toContain('In PowerShell, in the JobScraper folder')
+      expect(detail.find('pre').text()).not.toContain('python -m jobscraper')
     }
   })
 })

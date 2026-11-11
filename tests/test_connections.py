@@ -177,6 +177,7 @@ NEED = {
     "need_now_a_job_running": ("run", 0),                # a: profile
     "need_now_a_mailtest_does_not_count": (None, 0),
     "need_now_b_attempt_in_flight": ("application", 0),
+    "need_now_b_attempt_in_flight_stale": (None, 0),       # D-198 M3: started 2 h or more ago
     "need_now_c_model_unavailable_recent": ("application", 0),
     "need_now_c_model_unavailable_old": (None, 0),
     "need_now_d_pending_model": ("mail", 5),
@@ -219,7 +220,7 @@ def test_connections_rule_a_a_running_apply_job_is_an_application_other_kinds_ar
 
 def test_connections_need_reason_follows_the_rule_order_a_b_c_d():
     a = {"state": "running", "kind": "apply"}
-    b = [{"id": 1, "job_id": "j", "state": "filling"}]
+    b = [{"id": 1, "job_id": "j", "state": "filling", "started_at": "2026-11-11T09:00:00"}]   # 12 min before now
     c = ROWS["cases"]["need_now_c_model_unavailable_recent"]["inputs"]["job_view"]["last_attempts"]
     d = ROWS["cases"]["need_now_d_pending_model"]["inputs"]["mail_accounts"]
     with _clean_env():
@@ -237,6 +238,96 @@ def test_connections_need_reason_follows_the_rule_order_a_b_c_d():
         # pending_mail is the count whatever else is waiting
         f = reason(current={"state": "running", "kind": "tailor"})
         assert f["need_reason"] == "run" and f["pending_mail"] == 5
+
+
+def test_connections_rule_b_counts_an_attempt_started_less_than_2h_ago_and_ignores_older_ones():
+    """D-198 M3: an attempt row left in a live state by a crashed run must not hold
+    the model 'needed' for ever. now = 2026-11-11T09:12:00, so the cut is 07:12:00:
+    started_at at or before it is ignored, after it counts."""
+    snap = ROWS["cases"]["need_now_b_attempt_in_flight"]["inputs"]["model_snapshot"]
+
+    def reason(*started):
+        flight = [{"id": 50 + i, "job_id": f"job-{i}", "state": "filling", "started_at": s}
+                  for i, s in enumerate(started)]
+        jv = {"current": None, "attempts_in_flight": flight, "last_attempts": {}}
+        return _model(_compose({"job_view": jv, "model_snapshot": snap}))["facts"]
+    with _clean_env():
+        for s in ("2026-11-11T09:11:00", "2026-11-11T08:12:00", "2026-11-11T07:13:00"):
+            f = reason(s)
+            assert (f["need_reason"], f["need_now"]) == ("application", True), s
+        for s in ("2026-11-11T07:12:00", "2026-11-11T07:11:00", "2026-11-11T05:00:00", "2026-11-09T09:00:00"):
+            f = reason(s)
+            assert (f["need_reason"], f["need_now"]) == (None, False), s
+        # one fresh among stale ones is enough; all stale is not
+        assert reason("2026-11-10T01:00:00", "2026-11-11T09:00:00")["need_reason"] == "application"
+        assert reason("2026-11-10T01:00:00", "2026-11-11T03:00:00")["need_reason"] is None
+        # a stale attempt does not outrank rules c and d below it
+        c = ROWS["cases"]["need_now_c_model_unavailable_recent"]["inputs"]["job_view"]["last_attempts"]
+        jv = {"current": None, "last_attempts": c,
+              "attempts_in_flight": [{"id": 50, "job_id": "j", "state": "filling", "started_at": "2026-11-11T01:00:00"}]}
+        assert _model(_compose({"job_view": jv, "model_snapshot": snap}))["facts"]["need_reason"] == "application"
+        # a stale in-flight attempt leaves an unreachable model neutral, not attention
+        stale = _model(_compose(ROWS["cases"]["need_now_b_attempt_in_flight_stale"]["inputs"]))
+        assert (stale["state"], stale["code"]) == ("neutral", "unreachable")
+
+
+def _mailbox_case(primary: str, backup: str, vault_has: dict, backup_host: str = "") -> dict:
+    return {"cfg_apply_mail": {"host": "imap.gmail.com", "port": 993, "username": primary},
+            "cfg_apply_mail_backup": {"host": backup_host, "port": 993, "username": backup},
+            "vault_has": vault_has}
+
+
+def test_connections_m2_a_backup_with_the_primarys_username_is_no_item_and_counts_nothing_twice():
+    """D-198 M2: the same username (case-insensitive, trimmed) is one mailbox, not two.
+    No `apply-mailbox:backup` item, and a missing password is one attention, not two."""
+    no_pw = {"jobscraper:imap:imap.gmail.com|apply@example.com": False}
+    ok = {"jobscraper:imap:imap.gmail.com|apply@example.com": True}
+    with _clean_env():
+        base = _compose(_mailbox_case("apply@example.com", "", no_pw))        # backup unset
+        for backup in ("apply@example.com", "APPLY@Example.com", "  apply@example.com  ", " Apply@EXAMPLE.com"):
+            for vault_has, state in ((no_pw, "attention"), (ok, "connected")):
+                body = _compose(_mailbox_case("apply@example.com", backup, vault_has))
+                ids = [i["id"] for i in body["items"]]
+                assert "apply-mailbox:backup" not in ids, (backup, ids)
+                assert ids == ["gmail", "apply-mailbox", "edge", "model", "employer-accounts"], (backup, ids)
+                assert _find(body, "apply-mailbox")["state"] == state
+                assert body["attention"] == sum(1 for i in body["items"] if i["state"] == "attention")
+        # a missing password counts once: the attention total is that of the mailbox alone
+        body = _compose(_mailbox_case("apply@example.com", "Apply@Example.com", no_pw))
+        assert [i["id"] for i in body["items"] if i["state"] == "attention"] == ["apply-mailbox"]
+        assert body["attention"] == base["attention"] == 1
+        # the primary's own facts say the backup is not separate
+        assert _find(body, "apply-mailbox")["facts"]["backup_separate"] is False
+
+
+def test_connections_m2_a_different_backup_username_is_still_its_own_item():
+    """The M2 rule is about equal usernames only: a real backup keeps its item and its own count."""
+    pw = {"jobscraper:imap:imap.gmail.com|apply@example.com": True,
+          "jobscraper:imap:imap.gmail.com|other@example.com": False}
+    with _clean_env():
+        body = _compose(_mailbox_case("apply@example.com", "other@example.com", pw))
+    assert _find(body, "apply-mailbox:backup")["state"] == "attention"
+    assert _find(body, "apply-mailbox")["facts"]["backup_separate"] is True
+    assert body["attention"] == 1
+
+
+def test_connections_h1_the_employer_fix_url_must_reach_the_workday_tenant():
+    """D-198 H1/M1: the fix command prints `--url https://<tenant_host>/careers`. The CLI
+    resolves a URL through the navigators' match_url; the bare host root names no tenant
+    and exits 2 (`accounts add` -> 'no known ATS'), which is why the hub appends /careers."""
+    from jobscraper.cli import _account_tenant
+    for host in ("acme.wd3.myworkdayjobs.com", "example.wd5.myworkdayjobs.com"):
+        got = _account_tenant(f"https://{host}/careers")
+        assert got is not None, host
+        ats, tenant = got
+        assert ats == "workday" and tenant.host == host, (ats, tenant)
+        assert _account_tenant(f"https://{host}/") is None, host
+        assert _account_tenant(f"https://{host}") is None, host
+    # the sample hosts the hub is shown with
+    hosts = {a["tenant_host"] for c in ROWS["cases"].values() for a in c["inputs"].get("ats_accounts", [])}
+    assert hosts
+    for host in hosts:
+        assert _account_tenant(f"https://{host}/careers") is not None, host
 
 
 def test_connections_pending_mail_sums_every_mailbox_and_ignores_bad_counts():
