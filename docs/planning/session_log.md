@@ -83,3 +83,10 @@ One entry per session. Older handover notes end up here, so `handover.md` stays 
 - Lesson: a sentence-start exemption for capitalised words needs an anchor (a source text or a common-word list); without one it lets invented names through.
 - Lesson: the full suite takes ~25 min when other suites run in parallel; an Edge test reaching the flow must probe the browser first (`browser_page()`), or it fails on the leaked loop instead of skipping.
 - Q-97 Edge pins (real apply_flow → fill_page → step 7b on a local page) found D1: a composed FILE row's audit value was read as a path, so "CI/CD …" was cut to "CD …" (D-186, fixed before merge). Lesson: a value whose meaning depends on the row's source needs an end-to-end pin; the flow oracles replace fill_page and could not see it.
+
+## 2026-11-11 · session jobscraper-c6: state check, Q-110 auto-apply from the Inbox, D-200/D-201
+- Owner asked for a working app with search/shortlist and auto-apply kept separate, auto-apply only on the owner's click, the model free to read the whole profile, minimal testing.
+- Found: the search pipeline never imports apply; the live DB had no apply settings and no attempts; the UI had no way to start an attempt (CLI and Questions Retry only). Built Q-110 (router + Inbox button) on one engineer lane, no new tests; merged with the bundle after clearing it with two peer sessions.
+- D-201 (whole-profile read): architect delta, KA-2 design review by the apply/tailor session (approve, F1-F4), build queued as Q-112 after Q-45.
+- Lesson: check every branch for an ID before taking it (Q-96/D-182 were in use on an unmerged lane), and scope a renumber script to your own rows (it edited a peer's row).
+- Lesson: `wc -l` on the handover is not enough with three live sessions: add to it, never rewrite another session's notes.

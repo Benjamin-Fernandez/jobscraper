@@ -6,9 +6,9 @@
 
 ## Now / Next (≤ 10 lines; history goes to `docs/planning/session_log.md`)
 
-- **Now:** paused by the owner (2026-11-02, session 3). M20 build of the D-78 filler: int/Q-35-M 3aadc13 (lane M + WP-Q48 first build + pins, 1007/1024); WP-Q48 fix round 8393f98 unverified; lane M how-heard fit e2414c5; lane R R3 fixes 2add8ee awaiting re-review. D-77 done (tenant A, tenant B "Applied").
-- **Next:** verify WP-Q48 fix round → re-review → merge e2414c5, Q-48, lane R (after re-review) into int → personal (vitest + bundle, smoke, owner's D-87/D-91 values) → N6a → N6b → M20 gate (D-83). See handover.
-- **Blocked on the owner:** nothing. Optional: Cantonese levels; whether a standing answer for NDA/restrictive-agreement questions should exist (tenant B's optional one was left blank).
+- **Now (2026-11-11):** search → shortlist and auto-apply are separate and both work on `personal`. Auto-apply starts only from the owner's click: the Inbox "Auto-apply" button (Q-110, D-200), the CLI verb or the Questions Retry. Live mode is `dry_run` (fills in Edge, never submits). Three sessions run in parallel: apply/tailor (jobscraper-91), Q-100 UI (jobscraper-72), this one (Q-110..Q-119, D-200..D-209).
+- **Next:** owner restarts the live app and tries one dry run from the Inbox (this is the first M20 gate run, D-83); Q-112 (D-201 whole-profile read, READY); Q-111 apply settings endpoints for Q-100's Settings → Apply. See handover.
+- **Blocked on the owner:** the M20 gate dry runs (owner-watched); switching `apply.mode` to `auto` stays the owner's call after the gate.
 
 ## 1. Milestones
 
