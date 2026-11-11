@@ -124,9 +124,10 @@ LLM_ALLOW: tuple[str, ...] = (
 # D-105 (q74_model_sees_sensitive.md §3, ADR-0008): what the model may also read when
 # ResolveContext.model_sees_sensitive is on (config switch + local backend). Every S
 # path; `extra` never (tier 3 reads it by code).
+# D-201: every profile group except `documents` and `version`; `extra` never.
 LLM_ALLOW_SENSITIVE: tuple[str, ...] = (
-    "identity.date_of_birth", "identity.gender", "singapore_status", "us_self_id",
-    "declarations", "contact",
+    "identity", "pay", "consents", "singapore_status", "us_self_id", "declarations",
+    "contact",
 )
 # The part of that addition that may also ground an answer (ADR-0008 Option C):
 # contact details are the applicant's own, typed by code into a form anyway.
@@ -1757,7 +1758,8 @@ def llm_extract(profile: dict, *, sensitive: bool = False, protected: bool = Tru
     shape. Nothing else from the profile ever reaches a prompt.
 
     `sensitive=True` (D-105: only when ResolveContext.model_sees_sensitive) adds
-    LLM_ALLOW_SENSITIVE, so S values may be in the prompt. Never `extra`.
+    LLM_ALLOW_SENSITIVE (D-105, widened by D-201), so S values may be in the prompt.
+    Never `extra`.
     `protected=False` keeps only the contact details of that addition (the
     grounding corpus, ADR-0008 Option C: the model may read a protected value,
     but cannot ground an answer on it)."""
@@ -2143,7 +2145,16 @@ def redaction_values(profile: dict) -> list[str]:
 
     `extra` answers (`value`, `picks`, `by_employer`) are walked; its question
     metadata (`labels`, `title`, `description`, `seen`, `kind`, `sensitive`) is
-    not: that is employer text, which the job log may show (questions_design §11)."""
+    not: that is employer text, which the job log may show (questions_design §11).
+
+    D-201 review F1 (what the local model may now read): the names, `name_order`,
+    `pronouns`, the salary currency/period and sensitive `extra` answers are strings,
+    so they are listed here. Left out on purpose, numbers and booleans:
+    `pay.current_salary.amount`, `pay.months_per_year` and the four `consents` (and a
+    yes/no `extra` answer). `scrub` matches a value with a digit anywhere, so a
+    salary such as 4500 or a "13" would blank parts of ids, timings and URLs, and
+    "yes"/"true" are ordinary words. No log line carries an answer value, and a
+    prompt that holds them is stored only as a hash."""
     vals: set[str] = set()
     for path, v in _walk(profile or {}):
         if _is_extra_meta(path):

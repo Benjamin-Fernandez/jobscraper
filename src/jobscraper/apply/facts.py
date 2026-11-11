@@ -333,8 +333,9 @@ def _standing_values(profile: dict, rctx: ResolveContext, today: str) -> dict[st
 
 def _model_may_read(path: str) -> bool:
     """D-105 / Q-74 §4: a private profile leaf the local model may be shown when
-    `rctx.model_sees_sensitive` is on: the paths `llm_extract(sensitive=True)` adds.
-    Never `extra` or a standing private fact (they stay "set"/"empty")."""
+    `rctx.model_sees_sensitive` is on: the paths `llm_extract(sensitive=True)` adds
+    (D-201: every profile group except `documents` and `version`). The `extra` and
+    standing private facts are handled in `fact_catalogue`."""
     b = bare(path)
     return any(b == p or b.startswith(p + ".") for p in applicant.LLM_ALLOW_SENSITIVE)
 
@@ -344,7 +345,9 @@ def fact_catalogue(profile: dict, rctx: ResolveContext, *, today: str) -> list[F
     extra, standing (§5.1). Pure and deterministic, so FACTS is byte-identical
     across the calls of an attempt (TR-11). With `rctx.model_sees_sensitive` (D-105,
     a local model) a private profile fact on the S allow-list carries its value, so
-    FACTS can show it; `private` keeps its meaning (G2d, G7, the audit)."""
+    FACTS can show it; under D-201 so do a sensitive `extra` answer and the private
+    standing fact (`account_email`). `private` keeps its meaning (G2d, G7,
+    `pick_refused`, the audit, redaction). Switch off: every private fact's value is ""."""
     profile = applicant.normalise(profile or {})
     reads = bool(getattr(rctx, "model_sees_sensitive", False))
     out: list[Fact] = []
@@ -367,14 +370,15 @@ def fact_catalogue(profile: dict, rctx: ResolveContext, *, today: str) -> list[F
         words = _text(ans.get("value")) if "value" in ans else _text(list(ans.get("picks") or []))
         is_set = bool(words) or isinstance(ans.get("value"), bool)
         out.append(Fact(ref=f"extra:{key}", title=str(entry.get("title") or key),
-                        value="" if private else words, private=private, is_set=is_set,
+                        value=words if (not private or reads) else "", private=private,
+                        is_set=is_set,
                         kind=str(entry.get("kind") or "text")))
     values = _standing_values(profile, rctx, today)
     for sid, title, kind, private in STANDING_IDS:
         v = values.get(sid)
         is_set = _is_set(v) or isinstance(v, bool)
         out.append(Fact(ref=f"standing:{sid}", title=title,
-                        value="" if private or not is_set else _text(v),
+                        value="" if not is_set or (private and not reads) else _text(v),
                         private=private, is_set=is_set, kind=kind))
     return out
 
@@ -387,7 +391,9 @@ def listed(fact: Fact) -> bool:
 def facts_text(facts: Sequence[Fact], *, show_private: bool = False) -> str:
     """The FACTS block: one line per listed fact, in catalogue order (§5.1, §6.2).
     A private fact shows only whether it is set; with `show_private` (D-105, a local
-    model) one that carries a value shows `private: <value>`. The model still cites
+    model) one that carries a value shows `private: <value>` (D-201: a private profile
+    leaf outside `documents`/`version`, a sensitive `extra` answer, `standing:account_email`;
+    `fact_catalogue` gives them a value only with the switch effective). The model still cites
     the ref with value "" and the program writes the value."""
     lines = []
     for f in facts:
@@ -932,7 +938,11 @@ def s_values(profile: dict, account_email: str) -> list[str]:
     the ATS account's mailbox differs from contact.email; pass `rctx.account_email`,
     review F4). Enum S values (gender,
     race, residency, NS, marital status) are ordinary words and are not listed; locks
-    and G7 keep the model off those questions. Longest first; 3+ characters."""
+    and G7 keep the model off those questions. Longest first; 3+ characters.
+    D-201 (review F1): the leaves the switch newly shows (names, pronouns, name order,
+    pay, consents, sensitive `extra` answers) are not listed: switch off,
+    `fact_catalogue` gives them no value, so no prompt holds them; switch on, prompts are
+    redacted with nothing. The job log is guarded by `applicant.redaction_values`."""
     p = applicant.normalise(profile or {})
     get = lambda path: resolve.profile_value(p, path)       # noqa: E731
     vals: list[str] = []
@@ -1025,9 +1035,10 @@ def inputs_hash(redacted_resume: str, jd_text: str, *, sees_private: bool = Fals
     """sha256(redacted resume text + JD text)[:16] (§13.3): a cache row is reused only
     for the same resume and posting."""
     # `sees_private` (D-105, the effective switch) is folded in: flipping it re-runs cached
-    # fills once, because the prompt text changed.
+    # fills once, because the prompt text changed. D-201 versions the marker (":d201"): a
+    # flag-on fill cached under D-105 saw less of the profile, so it re-runs once.
     return _sha16((redacted_resume or "") + "\n\x1e\n" + (jd_text or "")
-                  + ("\n\x1e\x1dprivate-visible" if sees_private else ""))
+                  + ("\n\x1e\x1dprivate-visible:d201" if sees_private else ""))
 
 
 def facts_used_hash(refs: Iterable[str], rctx: ResolveContext, *, today: str = "") -> str:
