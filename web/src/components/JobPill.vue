@@ -7,7 +7,7 @@ import { duration, utcMs } from '../format.js'
 
 const props = defineProps({ job: { type: Object, default: null } })
 
-const KINDS = { run: 'Run', profile: 'Profile refresh' }
+const KINDS = { run: 'Run', profile: 'Profile refresh', apply: 'Auto-apply' }
 const now = ref(Date.now())
 let timer = null
 onMounted(() => { timer = setInterval(() => { now.value = Date.now() }, 15000) })
