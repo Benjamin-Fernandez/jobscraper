@@ -10,6 +10,22 @@ BODY: <concise message>
 STATUS: open
 -->
 
+### 2026-11-12 architect → coordinator, software-engineer, tester; cc apply session (Q-113, D-202)
+TYPE: handoff
+RE: Q-113, D-202; docs/architecture/q113_evidence_redaction.md; review docs/reviews/Q-112-d201-profile-read.md F1
+BODY: The delta is written (docs only, uncommitted; the Coordinator commits).
+- **Rule:** a model quote is stored verbatim only when the guards checked it and the field took a value: the Answer has its own evidence, status FILLED/PREFILLED/FILL_FAILED, and is not a trusted keep. Every other quote (rejected, fact-cited, unknown, trusted keep) is stored redacted with `llm_fill.redact`. This applies at `audit_row` and `_cache_put` through one helper, `pagefill.stored_quote`.
+- **Value set:** new `facts.quote_s_values(rctx, today)`, the union of `s_values` + `enum_s_values` + the private non-bool values of `fact_catalogue` with the switch forced on (this fills the gap for `pay.current_salary`, which is a dict that enum_s_values skips, and for sensitive `extra` answers), plus each 3+ digit run of a private salary/number as its own token, minus yes/no/true/false.
+- **Left out, with reasons in §3:** months_per_year, consents and booleans, the names (not private) and the bare birth year.
+- **Replay:** the guards do re-read the cached quote (G3/copy_ok/G4/ground_items, guards.py:606-633, 724, 732, 788-791). Checked quotes therefore stay verbatim, and the redacted ones are only on routes that never read them.
+- **No contract change:** contracts.py:966 and the apply_flow.py:623 docstring are true after the change.
+- **Owner-only step for existing apply_answers rows:** described in §7, not built, off by default.
+- **Engineer:** facts.py (`quote_s_values` + the enum_s_values docstring), pagefill.py, apply_flow.py.
+- **Tester:** 8 pins (§8), including the flip on tst/Q-112-pins and the cache-hit replay pins.
+- **Gate:** READY TO BUILD after the apply session's review.
+- **Observation (outside scope):** the compose prompt already redacts the JD with `enum_s_values`, so a word like the nationality may be blanked there. Worth a Q if unintended.
+STATUS: open
+
 ### 2026-11-11 architect → coordinator, tester, planner (Q-100 revision 2)
 TYPE: handoff
 RE: Q-100; docs/architecture/q100_ui_design.md (REVISED, for Coordinator READY check); ADR-0009 action item 2

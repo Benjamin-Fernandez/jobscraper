@@ -14,7 +14,7 @@
 - Q-94 gate prep merged 2026-11-10: WP-A04 work-rights `country_bool` rows; D-180 an unknown place or region stops a work-rights label; D-181 Singapore rows never answer another country (names, all-caps, demonyms); Q-43 "Present" end; R3 F7 (D-178) / F11; Q-46 e pinned. Review `docs/reviews/Q-94-gate-prep.md`; follow-ups Q-95.
 - Q-45 compose merged 2026-11-11: a required cover letter / "why us" field is written by the tailor's compose call from the master resume + JD, checked C1-C7 (D-183 sentence-start names too), filled and audited; `apply.compose.enabled` is **off** by default, so the field is captured as a question instead. Review `docs/reviews/Q-45-compose.md`; follow-ups Q-96 (card hint by note), Q-97 (LOWs, Edge fixture).
 
-- Q-110 merged 2026-11-11 (session jobscraper-c6; 0b48371 + bundle 8f518e1): Inbox **Auto-apply** button + `routers/apply.py` (`GET /api/apply/status`, `POST /api/apply` with the AD §12.2 preflight). The owner's click is the only UI trigger (D-200); it runs the effective mode, live = `dry_run`. D-201 (the local model reads the whole profile under `apply.model_sees_sensitive`) is designed and reviewed (`q74_model_sees_sensitive.md` § D-201), build = Q-112, not started.
+- Q-110 merged 2026-11-11 (session jobscraper-c6; 0b48371 + bundle 8f518e1): Inbox **Auto-apply** button + `routers/apply.py` (`GET /api/apply/status`, `POST /api/apply` with the AD §12.2 preflight). The owner's click is the only UI trigger (D-200); it runs the effective mode, live = `dry_run`. Q-112 merged 2026-11-12 (56f37d7): D-201, the local model reads the whole profile under `apply.model_sees_sensitive` (every group except `documents`, `version`); it decides nothing new (review `docs/reviews/Q-112-d201-profile-read.md`). Follow-up Q-113 / D-202: a rejected model quote is stored verbatim in `apply_answers.evidence` and `fill_cache` (local DB only); spec `docs/architecture/q113_evidence_redaction.md` waits for jobscraper-91's review, then engineer + tester (flip `test_d201_known_gap_q113_…`).
 
 ## Where we are
 - M19 DONE. M20: the filler is complete through N6b; what remains is the M20 gate (D-83) plus follow-ups. Workday is filled in dry runs; account creation happens only inside owner-started attempts.
@@ -24,7 +24,7 @@
 ## Next 1–3 actions
 1. M20 gate (D-83): owner-watched dry runs (start them from the Inbox Auto-apply button after an app restart), then 5 Greenhouse dry runs whose audits are read row by row. Needs the owner and Ollama; on the first one check Q-92 F4 (resume-name check on a real Workday review page) and Q-93 (the M1 delete count); Q-95 (a): a bare other-country citizenship question waits as a Private question. If a posting asks for a cover letter, try one dry run with `apply.compose.enabled: true` and read the composed text against the resume.
 2. Entry-level `PageOutcome` channel (D-173) at the next contract version; Q-93 L2 residual; Q-95 (c) dead code; Q-96/Q-97.
-3. Q-112 (D-201 build: engineer + tester pins F1/F2 + independent review, KA-2); Q-111 (`GET/PUT /api/apply/settings` with `writable` and `compose_enabled` for Q-100; tell jobscraper-72 the shapes).
+3. Q-113 (after the spec review: one engineer lane in apply_flow.py / pagefill.py / facts.py, tester pins, `-k apply_flow` and `-k apply_e2e` separately); Q-111 (`GET/PUT /api/apply/settings` with `writable` and `compose_enabled` for Q-100; tell jobscraper-72 the shapes).
 4. Backlog: R3 F7/F11, Q-46 e, Q-45 compose_needed, Q-47, Q-43, Q-34, Q-32, Q-27, A04, Q-15.
 
 ## Watch out

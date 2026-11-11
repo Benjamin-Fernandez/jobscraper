@@ -90,3 +90,5 @@ One entry per session. Older handover notes end up here, so `handover.md` stays 
 - D-201 (whole-profile read): architect delta, KA-2 design review by the apply/tailor session (approve, F1-F4), build queued as Q-112 after Q-45.
 - Lesson: check every branch for an ID before taking it (Q-96/D-182 were in use on an unmerged lane), and scope a renumber script to your own rows (it edited a peer's row).
 - Lesson: `wc -l` on the handover is not enough with three live sessions: add to it, never rewrite another session's notes.
+- 2026-11-12, same session: Q-112 (D-201) built by one engineer lane, pinned by the tester (6 tests, mutation-checked), reviewed independently (MERGE WITH FOLLOW-UPS), merged 56f37d7 on top of Q-100 lane A. The review and the tester both found that a rejected model quote is stored verbatim in the audit and cache rows (open since D-105): Q-113, spec D-202 written, in review with the apply session.
+- Lesson: when a brief adds an assertion beyond what the review made binding (the evidence column), a red pin on a pre-existing gap should become a known-gap pin plus a queued fix, not a blocked merge or an unplanned edit in another session's files.
