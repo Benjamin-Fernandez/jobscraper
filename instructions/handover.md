@@ -19,6 +19,7 @@
 ## Where we are
 - M19 DONE. M20: the filler is complete through N6b; what remains is the M20 gate (D-83) plus follow-ups. Workday is filled in dry runs; account creation happens only inside owner-started attempts.
 - Owner declarations are all false (D-87), plus `willing_to_sign_nda: true`, `government_employment: false`.
+- **Q-100 (session jobscraper-72, 2026-11-11): UI overhaul + Connected accounts hub.** Brief/audit/state map/design + reviews committed; design `docs/architecture/q100_ui_design.md` READY (D-194; D-190 no app login, D-191/ADR-0009 no secret server→browser). Wave 1 building: T0 `test/Q-100-T0-fixtures`, lane 0 `eng/Q-100-L0-foundation`, lane A `eng/Q-100-A-connections` (worktrees); then B (hub+Settings), C (shell+onboarding), T1 tests; one bundle build after, messaging jobscraper-91/c6 first. MailCard `embedded` diff goes to jobscraper-91 before merge. Wave 2 (KA-3) = Q-103, peer said "not now".
 
 ## Next 1–3 actions
 1. M20 gate (D-83): owner-watched dry runs (start them from the Inbox Auto-apply button after an app restart), then 5 Greenhouse dry runs whose audits are read row by row. Needs the owner and Ollama; on the first one check Q-92 F4 (resume-name check on a real Workday review page) and Q-93 (the M1 delete count); Q-95 (a): a bare other-country citizenship question waits as a Private question. If a posting asks for a cover letter, try one dry run with `apply.compose.enabled: true` and read the composed text against the resume.
