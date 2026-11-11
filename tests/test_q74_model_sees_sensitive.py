@@ -217,6 +217,30 @@ def test_t2_sensitive_true_adds_every_s_block_but_never_extra():
     assert "zzzextra" not in applicant.grounding_text(p, sensitive=True)
 
 
+def test_d201_llm_extract_holds_the_whole_profile_but_documents_and_version():
+    """D-201 (a): `sensitive=True` adds identity, pay and consents; `documents` (local paths) and `version`
+    never; `protected=False` still gives contact only; the flag-off view is unchanged."""
+    p = s_profile()
+    p["identity"].update(legal_first_name="Zyxquill", legal_last_name="Vandermoot")
+    p["pay"]["current_salary"] = {"amount": 987654, "currency": "SGD", "period": "annual"}
+    p["documents"] = {"resume": "C:/zzz/dummy_resume.pdf"}
+    on = applicant.llm_extract(p, sensitive=True)
+    assert on["identity"]["legal_first_name"] == "Zyxquill" and on["identity"]["legal_last_name"] == "Vandermoot"
+    assert on["pay"]["current_salary"]["amount"] == 987654
+    assert set(on["consents"]) == {"privacy_consent", "data_retention_consent", "talent_pool_opt_in", "certify_true"}
+    assert "documents" not in on and "version" not in on and "extra" not in on
+    assert "dummy_resume" not in json.dumps(on, default=str)
+    contact = applicant.llm_extract(p, sensitive=True, protected=False)
+    blob = json.dumps(contact, default=str)
+    assert PHONE in blob
+    for m in ("Zyxquill", "Vandermoot", "987654", GENDER, DOB):
+        assert m not in blob, m
+    assert "consents" not in contact and "documents" not in contact
+    off = json.dumps(applicant.llm_extract(p), default=str)
+    for m in ("Zyxquill", "Vandermoot", "987654", "privacy_consent", "dummy_resume"):
+        assert m not in off, m
+
+
 def test_f1d_grounding_with_protected_false_keeps_contact_only():
     p = s_profile()
     g = applicant.grounding_text(p, sensitive=True, protected=False)
