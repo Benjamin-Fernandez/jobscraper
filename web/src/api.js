@@ -459,3 +459,28 @@ export function enqueueMessage(r) {
   if (one) return `Added to the auto-apply queue: ${ordinal(queued[0].position)} in line.`
   return r?.started ? `${added} Applying now.` : added
 }
+
+// ---- Q-120 U2: the queue's controls (Runs → Auto-apply queue) ----
+
+// Pause, resume and stop answer the queue view (the shape of applyQueue()). Pause is
+// idempotent: an existing pause keeps its reason.
+export function pauseApplyQueue() {
+  return sendJson('apply/queue/pause', 'POST')
+}
+
+// 409 {detail:'disabled'} in a copy with auto-apply switched off; 422
+// {detail:'profile_incomplete', missing:[dotted paths]} (e.body carries the list).
+export function resumeApplyQueue() {
+  return sendJson('apply/queue/resume', 'POST')
+}
+
+// Waiting rows only: {removed:n, queue:<view>}. The application in progress is untouched.
+export function clearApplyQueue() {
+  return sendJson('apply/queue/clear', 'POST')
+}
+
+// Stop the application in progress and pause the queue. 409 {detail:'already_finished'}
+// when `attemptId` is no longer the live attempt (the queue is paused anyway).
+export function stopApplyAttempt(attemptId) {
+  return sendJson('apply/queue/stop', 'POST', { attempt_id: attemptId })
+}
