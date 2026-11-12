@@ -786,11 +786,12 @@ class _Run:
             raise ApplyFailure(ReasonCode.ERROR, "another application is in progress")
 
     def cap_refusal(self, job: dict[str, Any]) -> Optional[ApplyFailure]:
-        """§12.1 (3): today's clicks against the caps (Asia/Singapore day)."""
+        """§12.1 (3): today's clicks against the caps (Asia/Singapore day).
+        A cap of 0 means no limit (D-204)."""
         total, employer = self.store.apply_counts(job.get("company_id"), day_start_utc())
-        if total >= self.acfg.daily_cap:
+        if self.acfg.daily_cap > 0 and total >= self.acfg.daily_cap:
             return ApplyFailure(ReasonCode.CAP_REACHED, f"{total} of {self.acfg.daily_cap} today")
-        if employer >= self.acfg.per_employer_daily_cap:
+        if self.acfg.per_employer_daily_cap > 0 and employer >= self.acfg.per_employer_daily_cap:
             return ApplyFailure(ReasonCode.CAP_REACHED,
                                 f"{employer} of {self.acfg.per_employer_daily_cap} today at "
                                 f"{job.get('company') or 'this employer'}")
