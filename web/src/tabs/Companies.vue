@@ -377,7 +377,9 @@ onMounted(() => Promise.all([loadList(), loadHealth(), loadCycle(), refresh()]))
           align="end"
           trigger-class="ghost more-actions"
           @select="onMore"
-        ><Icon name="more" /> More</MenuButton>
+        >
+          <template #trigger><Icon name="more" /> More</template>
+        </MenuButton>
         <input
           ref="fileEl"
           class="visually-hidden file"

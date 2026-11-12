@@ -300,6 +300,7 @@ const lastCheckedTitle = r => (r.lastChecked ? `${String(r.lastChecked).replace(
   .companies-table td.status-cell { order: 1; flex: 1 1 100%; min-width: 0; }
   .companies-table td.is-empty { display: none; }
   .careers { min-height: var(--touch-min); min-width: var(--touch-min); }
+  .result-line .clear-filters { min-height: var(--touch-min); }
   .status-note { max-width: none; }
   .is-compact .status-note { display: block; margin-left: 0; }
 }
