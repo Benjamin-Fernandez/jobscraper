@@ -96,30 +96,90 @@ def test_exit_3_when_another_apply_run_holds_the_lock_with_the_real_worker():
     assert "another apply run" in out
 
 
-def test_cmd_web_passes_the_queue_switch_to_create_app():
+@contextlib.contextmanager
+def _web_run(repo_root, env):
+    """`cmd_web` with uvicorn and create_app replaced (no server, no port), the env set to
+    exactly `env` for the switch's keys, and the code's repo root pointed at `repo_root`
+    (a temp dir whose `.git` is a directory = the main checkout, or a file = a worktree), so
+    the answer is the same wherever the suite runs. Yields the recorded create_app kwargs."""
     import uvicorn
-    from jobscraper.web import api as web_api
-    w = _world()
+    from jobscraper.web import api as web_api, applyqueue
     seen = []
-    saved_run, saved_app = uvicorn.run, web_api.create_app
-    keys = ("JOBSCRAPER_DB", "JOBSCRAPER_APPLY_QUEUE", "JOBSCRAPER_MAIL_SYNC")
+    saved = (uvicorn.run, web_api.create_app, applyqueue._REPO_ROOT)
+    keys = ("JOBSCRAPER_DB", "JOBSCRAPER_CONFIG", "JOBSCRAPER_PORT", "JOBSCRAPER_APPLY_QUEUE",
+            "JOBSCRAPER_MAIL_SYNC")
     old = {k: os.environ.get(k) for k in keys}
     uvicorn.run = lambda app, **kw: None
     web_api.create_app = lambda cfg, **kw: seen.append(kw) or object()
+    applyqueue._REPO_ROOT = Path(repo_root)
+    for k in keys:
+        os.environ.pop(k, None)
+    os.environ.update(env)
     try:
-        for env, want in (({"JOBSCRAPER_APPLY_QUEUE": "0"}, False),
-                          ({"JOBSCRAPER_DB": str(w.tmp / "copy.db")}, False),
-                          ({}, True)):
-            for k in keys:
-                os.environ.pop(k, None)
-            os.environ.update(env)
-            with contextlib.redirect_stdout(io.StringIO()):
-                assert cli.main(["--config", str(w.cfg_path), "web"]) == 0
-            assert seen[-1].get("apply_queue_worker") is want, (env, seen[-1])
+        yield seen
     finally:
-        uvicorn.run, web_api.create_app = saved_run, saved_app
+        uvicorn.run, web_api.create_app, applyqueue._REPO_ROOT = saved
         for k, v in old.items():
             if v is None:
                 os.environ.pop(k, None)
             else:
                 os.environ[k] = v
+
+
+def _git_dir_like(base):
+    d = Path(base) / "main_like"
+    (d / ".git").mkdir(parents=True)
+    return d
+
+
+def test_cmd_web_passes_the_queue_switch_to_create_app():
+    import tempfile
+    w = _world()
+    with tempfile.TemporaryDirectory() as t:
+        main_like = _git_dir_like(t)
+        cfg = ["--config", str(w.cfg_path)]
+        # (env, extra argv before `web`, wanted): `--config` alone now turns the worker OFF
+        # (review F4); the live app is `web` with no --config, from the main checkout.
+        cases = (({"JOBSCRAPER_APPLY_QUEUE": "0"}, [], False),
+                 ({"JOBSCRAPER_DB": str(w.tmp / "copy.db")}, [], False),
+                 ({}, cfg, False),
+                 ({"JOBSCRAPER_APPLY_QUEUE": "1"}, cfg, True),
+                 ({}, [], True))
+        for env, pre, want in cases:
+            with _web_run(main_like, env) as seen:
+                with contextlib.redirect_stdout(io.StringIO()):
+                    assert cli.main([*pre, "web"]) == 0
+                assert seen[-1].get("apply_queue_worker") is want, (env, pre, seen[-1])
+
+
+def test_cmd_web_hands_the_resolved_port_and_config_path_to_the_switch():
+    """F4: the switch is asked about the port `web` binds (config `web.port` with
+    JOBSCRAPER_PORT applied) and the `--config` it was given, not only the env."""
+    import tempfile
+    from jobscraper.web import applyqueue
+    w = _world()
+    calls = []
+    real = applyqueue.apply_queue_wanted
+
+    def spy(env, **kw):
+        calls.append(kw)
+        return real(env, **kw)
+    with tempfile.TemporaryDirectory() as t:
+        main_like = _git_dir_like(t)
+        applyqueue.apply_queue_wanted = spy
+        try:
+            for env, pre, port, path, want in (
+                    ({}, [], 8765, None, True),
+                    ({"JOBSCRAPER_PORT": "8769"}, [], 8769, None, False),
+                    ({}, ["--config", str(w.cfg_path)], None, str(w.cfg_path), False)):
+                with _web_run(main_like, env) as seen:
+                    with contextlib.redirect_stdout(io.StringIO()):
+                        assert cli.main([*pre, "web"]) == 0
+                kw = calls[-1]
+                assert kw["config_path"] == path, (env, kw)
+                if port is not None:
+                    assert kw["port"] == port, (env, kw)
+                assert isinstance(kw["port"], int)
+                assert seen[-1]["apply_queue_worker"] is want, (env, seen[-1])
+        finally:
+            applyqueue.apply_queue_wanted = real
