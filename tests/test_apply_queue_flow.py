@@ -243,7 +243,8 @@ def test_p6_a_browser_launch_error_returns_the_role_to_the_front_and_takes_no_ot
 # ================================================================== the pause table as built
 
 def test_content_failure_pauses_fill_failed_not_returned_and_transport_returns():
-    for detail in ("the model gave no usable answers", "3 answers would be guesses"):
+    for detail in (apply_flow.content_failure_detail(apply_flow.FILL_NO_USABLE_ANSWERS, "the model gave none"),
+                   apply_flow.content_failure_detail(apply_flow.FILL_WOULD_BE_GUESSES, "3 answers")):
         w, ad, cid, (j1, j2) = _world(2)
 
         def content(page, ctx, d=detail):

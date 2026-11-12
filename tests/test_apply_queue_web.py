@@ -311,13 +311,26 @@ def test_p7b_a_start_up_pause_that_cannot_be_written_keeps_the_gate_closed_until
 # ------------------------------------------------------------------ P18 (H2)
 
 
+def _source_dirs(base: Path):
+    """(a main-checkout-like dir: `.git` is a DIRECTORY, a worktree-like dir: `.git` is a FILE)."""
+    main_like, worktree_like = base / "main_like", base / "worktree_like"
+    (main_like / ".git").mkdir(parents=True)
+    worktree_like.mkdir()
+    (worktree_like / ".git").write_text("gitdir: ../elsewhere/.git/worktrees/x", encoding="utf-8")
+    return main_like, worktree_like
+
+
 def test_p18_h2_a_dev_copy_or_the_switch_off_records_clicks_but_never_starts_the_worker():
     from jobscraper.web.applyqueue import apply_queue_wanted
-    assert apply_queue_wanted({}) is True
-    assert apply_queue_wanted({"JOBSCRAPER_APPLY_QUEUE": "0"}) is False
-    assert apply_queue_wanted({"JOBSCRAPER_DB": "C:/copy/jobscraper.db"}) is False
-    assert apply_queue_wanted({"JOBSCRAPER_DB": "C:/copy/jobscraper.db",
-                               "JOBSCRAPER_APPLY_QUEUE": "1"}) is True
+    with tempfile.TemporaryDirectory() as t:
+        main_like, worktree_like = _source_dirs(Path(t))     # same answer wherever the suite runs
+        assert apply_queue_wanted({}, source_dir=main_like) is True
+        assert apply_queue_wanted({}, source_dir=worktree_like) is False
+        assert apply_queue_wanted({"JOBSCRAPER_APPLY_QUEUE": "0"}, source_dir=main_like) is False
+        assert apply_queue_wanted({"JOBSCRAPER_DB": "C:/copy/jobscraper.db"},
+                                  source_dir=main_like) is False
+        assert apply_queue_wanted({"JOBSCRAPER_DB": "C:/copy/jobscraper.db",
+                                   "JOBSCRAPER_APPLY_QUEUE": "1"}, source_dir=main_like) is True
 
     for env in ({"JOBSCRAPER_APPLY_QUEUE": "0"}, {"JOBSCRAPER_DB": "C:/copy/jobscraper.db"}):
         with _world(worker=apply_queue_wanted(env)) as w:     # slot free: a start would happen
