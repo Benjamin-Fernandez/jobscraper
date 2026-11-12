@@ -108,8 +108,8 @@ class LlmFillConfig:
 @dataclass(frozen=True)
 class ApplyConfig:
     mode: str = "dry_run"                   # auto | dry_run
-    daily_cap: int = 10                     # D-61
-    per_employer_daily_cap: int = 2         # D-61
+    daily_cap: int = 10                     # D-61/D-204; 0 = no limit
+    per_employer_daily_cap: int = 2         # D-61/D-204; 0 = no limit
     headed: bool = True                     # D-53
     captcha_wait_s: int = 0                 # F-38
     profile_dir: str = r"%LOCALAPPDATA%\JobScraper\apply-profile"
