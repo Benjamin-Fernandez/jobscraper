@@ -110,6 +110,15 @@ async function start() {
   startError.value = ''
   try {
     const started = await startRun({})
+    if (started?.deferred) {
+      // 202 {deferred: true} (Q-120): the auto-apply worker holds the slot, so no run has
+      // started. The server starts it when the current application finishes.
+      showToast({
+        message: 'The search run starts when the current application finishes.',
+        link: { label: 'Open Runs', href: '#/runs' },
+      })
+      return
+    }
     watcher.track(started, { started: true })
     job.value = { ...started, state: started?.state ?? 'running' }
     showToast({

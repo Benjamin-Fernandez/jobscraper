@@ -302,8 +302,9 @@ export function dismissQuestion(key) {
   return request(`questions/${encodeURIComponent(key)}/dismiss`, { method: 'POST' })
 }
 
-// Run the apply job again for jobs that stopped on a question now answered.
-// 202 + job; 409 {detail:'busy'}; 422 {detail:'not_ready', job_ids}.
+// Put the jobs that stopped on a question now answered back in the auto-apply
+// queue (Q-120). 202 {queued:[{job_id, position}], refused, job, started, disabled,
+// paused}, never a 409; 422 {detail:'not_ready', job_ids} (or profile_incomplete).
 export function retryQuestions(jobIds) {
   return sendJson('questions/retry', 'POST', { job_ids: jobIds })
 }
@@ -406,14 +407,80 @@ export function problemOf(e) {
 
 // ---- Q-110 (F-30, D-200): start auto-apply from the Inbox ----
 
-// {mode:'auto'|'dry_run', missing:[dotted paths], busy}. Never throws on a missing profile.
+// {mode:'auto'|'dry_run', missing:[dotted paths], busy, queue:{waiting, applying, paused}}.
+// `busy` (a job holds the slot) no longer blocks a click (Q-120): the Inbox reads only
+// `mode` and `missing`. Never throws on a missing profile.
 export function applyStatus() {
   return request('apply/status')
 }
 
-// Start an apply job for the roles the owner clicked. 202 {job, accepted, refused, mode};
-// 409 {detail:'busy'}; 422 {detail:'profile_incomplete', missing} or {detail:'refused', refused}
+// Add the roles the owner clicked to the auto-apply queue (Q-120, D-205). 202
+// {queued:[{job_id, position}], accepted, refused, mode, paused, started, disabled, job};
+// never a 409; 422 {detail:'profile_incomplete', missing} or {detail:'refused', refused}
 // (refused: [{job_id, reason_code, text, hint}]). e.body carries the lists.
 export function startAutoApply(jobIds) {
   return sendJson('apply', 'POST', { job_ids: jobIds })
+}
+
+// ---- Q-120 (D-205): the auto-apply queue ----
+
+// {paused, now, slot, run_pending, waiting:[{job_id, company, role, mode, position, ...}],
+//  recent:[...]}. No side effects. 404 on a server without the queue.
+export function applyQueue() {
+  return request('apply/queue')
+}
+
+// Take one waiting role out of the queue: null (204); 404 {detail:'not_waiting'} when it
+// has already started (or was never queued).
+export function removeFromApplyQueue(jobId) {
+  return request(`apply/queue/${encodeURIComponent(jobId)}`, { method: 'DELETE' })
+}
+
+// "1st", "2nd", "3rd", "11th": the place in line, in the owner's words.
+export function ordinal(n) {
+  const k = Math.abs(Math.trunc(Number(n) || 0))
+  const tail = k % 100
+  if (tail >= 11 && tail <= 13) return `${k}th`
+  return `${k}${{ 1: 'st', 2: 'nd', 3: 'rd' }[k % 10] ?? 'th'}`
+}
+
+// What an enqueue really did, as one sentence (Inbox and Questions retry share it).
+// `r` is the 202 body. Switched off, paused, or started at once beat the plain
+// "added" line, so the owner is never told the work is under way when it is not.
+export function enqueueMessage(r) {
+  const queued = Array.isArray(r?.queued) ? r.queued : []
+  const one = queued.length === 1
+  if (r?.disabled) {
+    return 'Added to the queue. Auto-apply is switched off in this copy of JobScraper, so nothing will be sent from here.'
+  }
+  const added = queued.length > 1 ? `Added ${queued.length} to the auto-apply queue.` : 'Added to the auto-apply queue.'
+  if (r?.paused) return `${added} The queue is paused; resume it in Runs.`
+  if (r?.started && one && queued[0].position === 1) return 'Applying now.'
+  if (one) return `Added to the auto-apply queue: ${ordinal(queued[0].position)} in line.`
+  return r?.started ? `${added} Applying now.` : added
+}
+
+// ---- Q-120 U2: the queue's controls (Runs → Auto-apply queue) ----
+
+// Pause, resume and stop answer the queue view (the shape of applyQueue()). Pause is
+// idempotent: an existing pause keeps its reason.
+export function pauseApplyQueue() {
+  return sendJson('apply/queue/pause', 'POST')
+}
+
+// 409 {detail:'disabled'} in a copy with auto-apply switched off; 422
+// {detail:'profile_incomplete', missing:[dotted paths]} (e.body carries the list).
+export function resumeApplyQueue() {
+  return sendJson('apply/queue/resume', 'POST')
+}
+
+// Waiting rows only: {removed:n, queue:<view>}. The application in progress is untouched.
+export function clearApplyQueue() {
+  return sendJson('apply/queue/clear', 'POST')
+}
+
+// Stop the application in progress and pause the queue. 409 {detail:'already_finished'}
+// when `attemptId` is no longer the live attempt (the queue is paused anyway).
+export function stopApplyAttempt(attemptId) {
+  return sendJson('apply/queue/stop', 'POST', { attempt_id: attemptId })
 }

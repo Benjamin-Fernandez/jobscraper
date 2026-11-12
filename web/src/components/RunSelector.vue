@@ -29,10 +29,13 @@ function onChange(event) {
 <template>
   <div class="run-selector">
     <label class="run-label" :for="id">Runs</label>
-    <select :id="id" :value="selected" :disabled="!props.runs.length" @change="onChange">
-      <option v-for="(label, value) in RANGES" :key="value" :value="value">{{ label }}</option>
-      <option v-if="chosen" value="chosen">{{ runLabel(props.modelValue) }}</option>
-    </select>
+    <!-- Q-118: the shared .ui-select chevron; the select itself is unchanged. -->
+    <span class="ui-select">
+      <select :id="id" :value="selected" :disabled="!props.runs.length" @change="onChange">
+        <option v-for="(label, value) in RANGES" :key="value" :value="value">{{ label }}</option>
+        <option v-if="chosen" value="chosen">{{ runLabel(props.modelValue) }}</option>
+      </select>
+    </span>
     <button v-if="props.choosable" type="button" class="ghost choose-runs" @click="emit('choose')">Choose runs…</button>
   </div>
 </template>
