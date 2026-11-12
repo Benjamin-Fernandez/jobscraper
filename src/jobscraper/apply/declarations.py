@@ -18,6 +18,7 @@ carry the same standing answer gets that answer (the agreement rule).
 from __future__ import annotations
 
 import re
+import unicodedata
 from typing import Any, Iterable, Optional
 
 from .contracts import (
@@ -26,9 +27,44 @@ from .contracts import (
 )
 from .plan import norm_label
 
-# Tokens dropped before comparing company names (only while others remain).
+# Tokens dropped before comparing company names (only while others remain). This is also
+# the `employer_norm` key of stored `by_employer` overrides and question sightings, so it
+# stays as it is; `company_match` uses the lists below (which contain every word of it).
 _COMPANY_NOISE = frozenset({"pte", "ltd", "limited", "inc", "llc", "corp", "corporation",
                             "co", "plc", "group", "holdings", "the", "singapore", "sg", "bank"})
+
+# Q-121 review F6: the GENERIC words of a company name, the only words by which a past
+# employer's name may differ from the employer's and still be the same company
+# ("DBS" ~ "DBS Bank Ltd", "Google" ~ "Google Asia Pacific Pte. Ltd."). Any other extra
+# word names a different business ("Example" vs "Example Logistics"), so a declaration
+# never says "I have worked here" for a company that only shares a first word.
+# 1. Legal forms and structure words.
+_COMPANY_FORMS = (_COMPANY_NOISE - {"singapore", "sg", "bank"}) | frozenset({
+    "private", "pvt", "incorporated", "llp", "company", "gmbh", "ag", "sa", "sas", "bv", "nv",
+    "kk", "pty", "sdn", "bhd", "holding", "branch", "international", "global", "worldwide",
+    "enterprises", "and", "of"})
+# 2. Countries, regions and major cities, and their short forms.
+_COMPANY_PLACES = frozenset({
+    "singapore", "sg", "asia", "asean", "apac", "apj", "japac", "pacific", "sea", "southeast",
+    "south", "east", "north", "west", "middle", "hong", "kong", "hongkong", "hk", "china", "prc",
+    "taiwan", "india", "japan", "korea", "malaysia", "indonesia", "thailand", "vietnam",
+    "philippines", "australia", "anz", "zealand", "nz", "uk", "us", "usa", "america", "americas",
+    "canada", "latam", "europe", "emea", "mena", "africa", "uae", "dubai", "germany", "france",
+    "netherlands", "switzerland", "ireland", "london", "new", "york", "tokyo", "shanghai",
+    "beijing", "shenzhen", "sydney", "melbourne", "jakarta", "bangkok", "manila", "kuala",
+    "lumpur", "seoul", "mumbai", "bangalore", "bengaluru", "delhi"})
+# 3. Entity-type words that almost always denote the same firm.
+_COMPANY_ENTITY = frozenset({
+    "bank", "technologies", "technology", "tech", "labs", "systems", "solutions", "services",
+    "software", "digital", "capital", "securities", "partners", "management", "asset",
+    "consulting", "advisory"})
+_COMPANY_GENERIC = _COMPANY_FORMS | _COMPANY_PLACES | _COMPANY_ENTITY
+# Dropped from the END of a name before the comparison (legal forms, "group", "branch",
+# "Singapore"), so two names that differ only there are equal ("Standard Chartered Bank
+# (Singapore) Limited" ~ "Standard Chartered Bank"). Other places and the entity words are
+# only allowed as extra words: "Air China" and "Air India" share "air" alone.
+_COMPANY_TAIL = (_COMPANY_FORMS - {"international", "global", "worldwide", "enterprises",
+                                   "and", "of", "the"}) | {"singapore", "sg"}
 
 
 def _company_tokens(name: str) -> list[str]:
@@ -44,16 +80,48 @@ def employer_norm(name: str) -> str:
     return " ".join(_company_tokens(name))
 
 
+def _fold_accents(text: str) -> str:
+    """"Nestlé" -> "Nestle": NFKD, combining marks dropped (§7.1 keeps "é", which is outside
+    [a-z0-9] and so splits the word: "nestl"). For matching only: `employer_norm` keeps them."""
+    return "".join(c for c in unicodedata.normalize("NFKD", text) if not unicodedata.combining(c))
+
+
+def _match_tokens(name: str) -> list[str]:
+    """`company_match`'s tokens: accents folded, §7.1-normalised, every "and" dropped (as
+    "&" already is: "Procter & Gamble" ~ "Procter and Gamble"), then a leading "the" and
+    the trailing run of `_COMPANY_TAIL` words dropped (only while others remain). A word
+    right after "of" is never dropped: in "Bank of Singapore" the place is the name."""
+    toks = [t for t in norm_label(_fold_accents(name or "")).split() if t != "and"]
+    if len(toks) > 1 and toks[0] == "the":
+        toks = toks[1:]
+    n = len(toks)
+    while n > 1 and toks[n - 1] in _COMPANY_TAIL and toks[n - 2] != "of":
+        n -= 1
+    return toks[:n]
+
+
 def company_match(a: str, b: str) -> bool:
-    """§7.5: both names normalised (§7.1) with legal-form and filler tokens
-    dropped (only while other tokens remain); a match if equal or one token
-    list is a prefix of the other. "DBS Bank Ltd" ~ "DBS"; "Grab" ~ "Grab
-    Financial Group" (on a declaration a truthful Yes beats a wrong No)."""
-    ta, tb = _company_tokens(a), _company_tokens(b)
+    """§7.5 as narrowed by Q-121 review F6: both names tokenised by `_match_tokens`; a
+    match if the token lists are equal, or one is a prefix of the other and every extra
+    word of the longer one is GENERIC (`_COMPANY_GENERIC`: a legal form or structure word,
+    a place, or an entity word like "bank") and does not follow "of". So "DBS" ~ "DBS
+    Bank Ltd" and "Northwind" ~ "Northwind Holdings Ltd", but "Example" is not "Example
+    Logistics" and "Bank of America" is not "Bank of Singapore": the old any-prefix rule
+    let a one-word employer match every past employer starting with that word, a false
+    "I have worked here" on a real form. A one-token name under 3 characters matches only
+    an equal name ("GS" is not "GS Yuasa")."""
+    ta, tb = _match_tokens(a), _match_tokens(b)
     if not ta or not tb:
         return False
-    n = min(len(ta), len(tb))
-    return ta[:n] == tb[:n]
+    if ta == tb:
+        return True
+    short, long = (ta, tb) if len(ta) <= len(tb) else (tb, ta)
+    if len(short) == 1 and len(short[0]) < 3:
+        return False
+    if long[:len(short)] != short:
+        return False
+    return all(long[i] in _COMPANY_GENERIC and long[i - 1] != "of"
+               for i in range(len(short), len(long)))
 
 
 def _matches_employer(name: str, employer: str, aliases: Iterable[str]) -> bool:
@@ -523,7 +591,7 @@ def names_employer(toks: list[str], employer_names: Iterable[str] = (), raw: str
                 continue
             return True
     for name in employer_names:
-        width = len(_company_tokens(name or ""))
+        width = len(_match_tokens(name or ""))       # the tokens company_match compares
         for i in range(len(toks) if width else 0):
             for j in range(i + 1, min(len(toks), i + width + 2) + 1):
                 if company_match(" ".join(toks[i:j]), name):
