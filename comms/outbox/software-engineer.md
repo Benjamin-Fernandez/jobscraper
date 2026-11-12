@@ -1202,3 +1202,15 @@ REQUEST (E2 / cli owner): `cmd_web` should call `apply_queue_wanted(os.environ, 
 REQUEST (Coordinator, docs): CLAUDE.md's dev command should add `JOBSCRAPER_APPLY_QUEUE=0` (review F4, H2).
 For Q-121: write content-failure stops as `content_failure_detail(FILL_…, note)` imported from `apply_flow`; never retype the phrases.
 STATUS: open
+
+### 2026-11-12 software-engineer → coordinator, tester
+TYPE: handoff
+RE: Q-120 review F4, `cmd_web` (cli.py); branch `eng/Q-120-review-fixes` (int/Q-120 57d1d92 merged in), commit 2b8e69b
+BODY: `cmd_web` now calls `apply_queue_wanted(os.environ, config_path=getattr(args, "config", None), port=port)`, where `port` is the resolved `cfg.web["port"]` it binds (config `web.port`, default 8765, with `JOBSCRAPER_PORT` applied by `load_config`). `web` has no `--port` argument (argparse exits 2), so only the env var and config `web.port` (via `--config`, which is off anyway) can change the port.
+Evidence (stdin script; `uvicorn.run` and `web.api.create_app` patched as in test_apply_queue_cli; `applyqueue._REPO_ROOT` pointed at a temp dir with a `.git` directory so this worktree acts as the main checkout): no args → port 8765, True; `--port 8768` → argparse exit 2; `JOBSCRAPER_PORT=8769` → 8769, False; `--config <temp>` → False; `JOBSCRAPER_APPLY_QUEUE=1` + port 8768 → True; no args with the real worktree root → False.
+Tests: `-k apply_queue` 38/41, `-k apply_cli` 23/23, `-k test_cli` 15/15, `-k web_mail` 8/8.
+REQUEST (tester), stale pins:
+- `test_apply_queue_cli.py::test_cmd_web_passes_the_queue_switch_to_create_app` line 112 `({}, True)`: the call passes `--config`, so it is False now. Use no `--config` (or `JOBSCRAPER_APPLY_QUEUE=1`) for True, and point `applyqueue._REPO_ROOT` (or a `source_dir`) at a non-worktree dir.
+- `test_apply_queue_web.py::test_p18_h2_…` line 316 (already reported).
+- `test_apply_queue_flow.py::test_content_failure_pauses_fill_failed_not_returned_and_transport_returns` line 254 (from F3, 73b639d): its details "the model gave no usable answers" / "3 answers would be guesses" put the marker mid-text, which F3 no longer matches. Use `content_failure_detail(FILL_NO_USABLE_ANSWERS, …)` and `content_failure_detail(FILL_WOULD_BE_GUESSES, …)` from `apply_flow`.
+STATUS: open
