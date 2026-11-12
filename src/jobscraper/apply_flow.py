@@ -2084,11 +2084,39 @@ def pick_mode(item_mode: Any, effective_mode: Any, force_dry_run: bool) -> str:
     return "dry_run"
 
 
-# Details that mean a fill CONTENT failure (the model gave no usable answers, or a page
-# would be guesses: Q-121 A6), not a transport one: they pause `fill_failed` and the role is
-# NOT returned, since it would fail the same page on every Resume (Coordinator, 2026-11-12).
-CONTENT_FAILURE_MARKERS = ("no usable answers", "would be guesses", "last resort")
+# Fill CONTENT failures (the model gave no usable answers, or a page would be guesses:
+# Q-121 A6), not transport ones: they pause `fill_failed` and the role is NOT returned,
+# since it would fail the same page on every Resume (Coordinator, 2026-11-12).
+# Review F3: the signal is data, not prose found anywhere. The filler that stops on such a
+# failure writes one of these constants as the START of the attempt's own `reason_detail`
+# (build it with `content_failure_detail`); `pause_for` matches nothing else. These are the
+# only spellings: the always-answer lane (Q-121) imports them, never retypes them.
+FILL_NO_USABLE_ANSWERS = "no usable answers"
+FILL_WOULD_BE_GUESSES = "would be guesses"
+FILL_LAST_RESORT = "last resort"
+CONTENT_FAILURE_DETAILS = (FILL_NO_USABLE_ANSWERS, FILL_WOULD_BE_GUESSES, FILL_LAST_RESORT)
+CONTENT_FAILURE_MARKERS = CONTENT_FAILURE_DETAILS          # the earlier name, same values
+# A `validation_error` detail is the employer's own error text (`res.errors`), so it is
+# never read as a content failure even when that text happens to begin with a marker.
+_PAGE_TEXT_REASONS = frozenset({ReasonCode.VALIDATION_ERROR.value})
 TRANSPORT_FAILURE_MARKERS = ("model unavailable",)
+
+
+def content_failure_detail(marker: str, rest: str = "") -> str:
+    """The `reason_detail` a content-failure stop writes: the marker first, then an
+    optional plain note (no personal value). Raises on a marker not in the list."""
+    if marker not in CONTENT_FAILURE_DETAILS:
+        raise ValueError(f"not a content-failure marker: {marker!r}")
+    return f"{marker}: {rest}" if rest else marker
+
+
+def is_content_failure(row: dict) -> bool:
+    """A failed attempt whose own `reason_detail` STARTS with a content-failure marker
+    (review F3). A marker later in the text, or in a page-text detail, does not count."""
+    if row.get("state") != S.FAILED.value or row.get("reason_code") in _PAGE_TEXT_REASONS:
+        return False
+    detail = str(row.get("reason_detail") or "").lstrip().lower()
+    return any(detail.startswith(m) for m in CONTENT_FAILURE_DETAILS)
 _BOT_REASONS = frozenset({ReasonCode.CAPTCHA.value, ReasonCode.BOT_CHALLENGE.value})
 _BOT_NOTES = ("captcha after submit", "bot check after submit")
 # Per-role endings before any form or account: never a "same way three times" pause.
@@ -2118,7 +2146,7 @@ def pause_for(row: Optional[dict], last_cap: str, streak: Sequence[dict], *,
     failed = row.get("state") == S.FAILED.value
     if reason == ReasonCode.PROFILE_INCOMPLETE.value:
         return QueuePause.PROFILE_INCOMPLETE, detail or None
-    if failed and any(m in low for m in CONTENT_FAILURE_MARKERS):
+    if is_content_failure(row):
         return QueuePause.FILL_FAILED, None
     if reason == ReasonCode.MODEL_UNAVAILABLE.value or (
             failed and any(m in low for m in TRANSPORT_FAILURE_MARKERS)):
