@@ -24,8 +24,9 @@ from urllib.parse import urlsplit
 
 from .models import RawJob, WatchedCompany, posting_key
 
-SCHEMA_VERSION = 5   # 4: D-78 fill_cache + apply_answers evidence/shown_json/shown_origin/entry
+SCHEMA_VERSION = 6   # 4: D-78 fill_cache + apply_answers evidence/shown_json/shown_origin/entry
                      # 5: F-50 mail_* tables (mail_status_design §9)
+                     # 6: Q-120 apply_queue (apply_queue_design §2, D-205)
 
 # A posting closes after this many successful fetches in a row leave it out (H1-1).
 CLOSE_AFTER_MISSES = 2
@@ -396,6 +397,24 @@ CREATE TABLE IF NOT EXISTS mail_sync_runs (    -- the lease and the last result
     started_at TEXT NOT NULL, heartbeat_at TEXT NOT NULL, finished_at TEXT,
     pid INTEGER, code TEXT, counts_json TEXT
 );
+"""
+
+# Q-120 auto-apply queue (apply_queue_design §2, ADR-0010, D-205). Waiting roles are
+# not apply_attempts rows, so the reaper, the attempt state machine and every NF-06
+# path stay as they were. Additive: CREATE TABLE IF NOT EXISTS, no ALTER in _migrate.
+# The queue's own state (pause, yield) lives in `settings` under `apply_queue.*`.
+SCHEMA += """
+CREATE TABLE IF NOT EXISTS apply_queue (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    job_id TEXT NOT NULL UNIQUE,               -- I2: a job waits at most once
+    company_id INTEGER,                        -- jobs.company_id at the click
+    pos INTEGER NOT NULL,                      -- ORDER BY pos, id; new = MAX(pos)+1, returned = MIN(pos)-1
+    mode TEXT NOT NULL CHECK (mode IN ('auto', 'dry_run')),   -- effective mode at the click (I5)
+    source TEXT NOT NULL CHECK (source IN ('inbox', 'retry', 'applications', 'returned')),
+    enqueued_at TEXT NOT NULL,
+    note TEXT                                  -- 'returned: <pause reason>' for an item put back by the worker
+);
+CREATE INDEX IF NOT EXISTS idx_apply_queue_pos ON apply_queue(pos, id);
 """
 
 # The one status that does not mean "an application went out". Moving to any
@@ -1114,6 +1133,10 @@ class Store:
         # the message rows stay for dedupe but no longer point at the role.
         self.conn.execute("DELETE FROM mail_evidence WHERE job_id = ?", (job_id,))
         self.conn.execute("UPDATE mail_messages SET job_id = NULL WHERE job_id = ?", (job_id,))
+        # Q-120 H3 (apply_queue_design §3.1): an untracked role leaves the auto-apply
+        # queue in the same transaction, so the worker never applies to a role the
+        # owner removed. A role in flight is refused by the router before this.
+        self.conn.execute("DELETE FROM apply_queue WHERE job_id = ?", (job_id,))
         self.conn.commit()
         return cur.rowcount > 0
 
@@ -1531,6 +1554,291 @@ class Store:
                 WHERE at.company_id = ? AND at.job_id != ? AND at.submit_clicked_at IS NOT NULL
                LIMIT 1""", (company_id, exclude_job_id, company_id, exclude_job_id)).fetchone()
         return r is not None
+
+    # ---------------- auto-apply queue (Q-120, apply_queue_design §2, §3.1) ----------------
+    #
+    # Waiting roles live in `apply_queue`, never in apply_attempts: `queue_take` turns
+    # the head into a `queued` attempt and deletes the row in one BEGIN IMMEDIATE, so a
+    # role is never waiting and in flight at once (I2). Pause reasons are plain strings
+    # here (a QueuePause value, or the enum itself via `_state`): the store may not
+    # import apply/ (tests/test_layering.py).
+
+    QUEUE_PAUSED = "apply_queue.paused"
+    QUEUE_PAUSED_DETAIL = "apply_queue.paused_detail"
+    QUEUE_PAUSED_AT = "apply_queue.paused_at"
+    QUEUE_RESUMED_AT = "apply_queue.resumed_at"
+    QUEUE_YIELD = "apply_queue.yield"
+
+    # Company and role as the Applications list names them: the application row's own
+    # copy first, then the posting (LEFT JOINs, so a vanished posting still lists).
+    _QUEUE_NAMES = """COALESCE(a.company, co.name) AS company,
+                      COALESCE(a.role, j.title)    AS role"""
+    _QUEUE_JOINS = """LEFT JOIN jobs j          ON j.job_id = {t}.job_id
+                      LEFT JOIN companies co    ON co.id = j.company_id
+                      LEFT JOIN applications a  ON a.job_id = {t}.job_id"""
+
+    def _setting_put(self, key: str, value: Any) -> None:
+        """`set_setting` without the commit, for the queue's multi-key writes."""
+        self.conn.execute(
+            """INSERT INTO settings (key, value, updated_at) VALUES (?, ?, ?)
+               ON CONFLICT (key) DO UPDATE
+               SET value = excluded.value, updated_at = excluded.updated_at""",
+            (key, None if value is None else str(value), utcnow()))
+
+    def _setting_del(self, *keys: str) -> None:
+        """Remove settings rows (an absent `apply_queue.paused` means "running"). No commit."""
+        for key in keys:
+            self.conn.execute("DELETE FROM settings WHERE key = ?", (key,))
+
+    @staticmethod
+    def _live_attempt_states() -> list[str]:
+        """Every non-terminal attempt state, `queued` included (a taken item)."""
+        return sorted(set(ATTEMPT_TRANSITIONS) - TERMINAL_ATTEMPT_STATES)
+
+    def _queue_position(self, row_id: int) -> Optional[int]:
+        """1-based place of an `apply_queue` row in `(pos, id)` order, or None."""
+        r = self.conn.execute(
+            """SELECT COUNT(*) FROM apply_queue q, apply_queue r
+                WHERE r.id = ? AND (q.pos < r.pos OR (q.pos = r.pos AND q.id <= r.id))""",
+            (row_id,)).fetchone()
+        return int(r[0]) or None
+
+    def queue_add(self, job_id: str, company_id: Optional[int], mode: Any, source: Any,
+                  now: str) -> Optional[int]:
+        """Put a role at the back of the queue (an owner's click, I4). Returns its new
+        1-based position, or None when it is already waiting (UNIQUE(job_id), I2).
+
+        Defence in depth for I2: the insert is also skipped while the job has a live
+        attempt (`queued` included). The enqueue helper reports `in_progress` before
+        calling this; the guard only matters when `queue_take` of the same job
+        committed between that check and this write. Does not commit (the helper writes
+        the application row in the same transaction, review L6)."""
+        live = self._live_attempt_states()
+        marks = ",".join("?" * len(live))
+        cur = self.conn.execute(
+            f"""INSERT INTO apply_queue (job_id, company_id, pos, mode, source, enqueued_at)
+                SELECT ?, ?, (SELECT COALESCE(MAX(pos), 0) + 1 FROM apply_queue), ?, ?, ?
+                 WHERE NOT EXISTS (SELECT 1 FROM apply_attempts
+                                    WHERE job_id = ? AND state IN ({marks}))
+                ON CONFLICT (job_id) DO NOTHING""",
+            (job_id, company_id, _state(mode), _state(source), now, job_id, *live))
+        if cur.rowcount != 1:
+            return None
+        return self._queue_position(int(cur.lastrowid))
+
+    def queue_return(self, job_id: str, company_id: Optional[int], mode: Any,
+                     note: Optional[str], now: str) -> None:
+        """Put an item the worker could not start back at the front (`pos = MIN(pos)-1`,
+        source `returned`; I3). If the owner clicked the role again meanwhile, that
+        fresh row wins and this does nothing (`ON CONFLICT DO NOTHING`, review L6).
+        Commits."""
+        try:
+            self.conn.execute(
+                """INSERT INTO apply_queue (job_id, company_id, pos, mode, source, enqueued_at, note)
+                   VALUES (?, ?, (SELECT COALESCE(MIN(pos), 1) - 1 FROM apply_queue),
+                           ?, 'returned', ?, ?)
+                   ON CONFLICT (job_id) DO NOTHING""",
+                (job_id, company_id, _state(mode), now, note))
+            self.conn.commit()
+        except BaseException:
+            self.conn.rollback()
+            raise
+
+    def queue_items(self) -> list[dict[str, Any]]:
+        """Waiting roles in queue order: `{job_id, company, role, mode, position,
+        enqueued_at, source, note}`; `position` is 1-based."""
+        rows = self.conn.execute(
+            f"""SELECT q.job_id, {self._QUEUE_NAMES}, q.mode, q.enqueued_at, q.source, q.note
+                  FROM apply_queue q {self._QUEUE_JOINS.format(t="q")}
+                 ORDER BY q.pos, q.id""").fetchall()
+        return [{"job_id": r["job_id"], "company": r["company"], "role": r["role"],
+                 "mode": r["mode"], "position": i, "enqueued_at": r["enqueued_at"],
+                 "source": r["source"], "note": r["note"]}
+                for i, r in enumerate(rows, start=1)]
+
+    def queue_positions(self) -> dict[str, int]:
+        """job_id -> 1-based position, for the Applications list (one query)."""
+        rows = self.conn.execute("SELECT job_id FROM apply_queue ORDER BY pos, id")
+        return {r["job_id"]: i for i, r in enumerate(rows, start=1)}
+
+    def queue_remove(self, job_id: str) -> bool:
+        """Take a waiting role out of the queue. False when it was not waiting (it
+        may have started already). Commits."""
+        cur = self.conn.execute("DELETE FROM apply_queue WHERE job_id = ?", (job_id,))
+        self.conn.commit()
+        return cur.rowcount > 0
+
+    def queue_clear(self) -> int:
+        """Remove every waiting role (never an attempt). Returns how many. Commits."""
+        cur = self.conn.execute("DELETE FROM apply_queue")
+        self.conn.commit()
+        return cur.rowcount
+
+    def queue_take(self, now: str) -> tuple[Optional[dict[str, Any]], list[str]]:
+        """Hand the worker the next role, in ONE `BEGIN IMMEDIATE` transaction (§3.1).
+
+        1. A pause or a yield request returns (None, []) without consuming anything
+           (review M3: a Pause or Cancel committed before this can't be overtaken).
+        2. A head whose application row is gone or no longer `to_apply` (untracked,
+           marked applied) is deleted and its job id reported in `dropped` (H3); the
+           next one is tried.
+        3. The head is deleted and a `queued` attempt created with mode `dry_run`:
+           the row starts fail-safe, and the worker sets `pick_mode`'s result
+           (I5, H4) before it leaves `queued`.
+
+        BEGIN IMMEDIATE takes SQLite's write lock before the first read, so a second
+        process calling this at the same moment waits (the connection's busy
+        timeout) and then sees the row already gone; a concurrent `queue_add` of the
+        same job waits too, then finds the live attempt and inserts nothing.
+        Returns `({job_id, attempt_id, item_mode, source}, dropped)` or
+        `(None, dropped)` when nothing is waiting. Commits."""
+        dropped: list[str] = []
+        try:
+            self.begin_immediate()
+            if self.get_setting(self.QUEUE_PAUSED) or self.get_setting(self.QUEUE_YIELD):
+                self.conn.commit()
+                return None, []
+            while True:
+                head = self.conn.execute(
+                    "SELECT * FROM apply_queue ORDER BY pos, id LIMIT 1").fetchone()
+                if head is None:
+                    self.conn.commit()
+                    return None, dropped
+                self.conn.execute("DELETE FROM apply_queue WHERE id = ?", (head["id"],))
+                app = self.application(head["job_id"])
+                if app is None or app["status"] != "to_apply":
+                    dropped.append(head["job_id"])
+                    continue
+                attempt_id = self.create_attempt(head["job_id"], head["company_id"],
+                                                 "dry_run", now)
+                self.conn.commit()
+                return ({"job_id": head["job_id"], "attempt_id": attempt_id,
+                         "item_mode": head["mode"], "source": head["source"]}, dropped)
+        except BaseException:
+            self.conn.rollback()
+            raise
+
+    def queue_pause(self, reason: Any, detail: Optional[str], now: str) -> bool:
+        """Pause the queue. Writes only when it is not paused already (the first
+        reason wins, review L3); returns whether it wrote. Commits."""
+        try:
+            self.begin_immediate()
+            if self.get_setting(self.QUEUE_PAUSED):
+                self.conn.commit()
+                return False
+            self._setting_put(self.QUEUE_PAUSED, _state(reason))
+            self._setting_put(self.QUEUE_PAUSED_DETAIL, detail)
+            self._setting_put(self.QUEUE_PAUSED_AT, now)
+            self.conn.commit()
+        except BaseException:
+            self.conn.rollback()
+            raise
+        return True
+
+    def queue_pause_if_waiting(self, reason: Any, now: str) -> bool:
+        """The start-up pause (§3.4, D-200): pause only when roles are waiting and
+        the queue is not paused yet. Returns whether it wrote. Commits."""
+        try:
+            self.begin_immediate()
+            waiting = self.conn.execute("SELECT 1 FROM apply_queue LIMIT 1").fetchone()
+            if waiting is None or self.get_setting(self.QUEUE_PAUSED):
+                self.conn.commit()
+                return False
+            self._setting_put(self.QUEUE_PAUSED, _state(reason))
+            self._setting_put(self.QUEUE_PAUSED_DETAIL, None)
+            self._setting_put(self.QUEUE_PAUSED_AT, now)
+            self.conn.commit()
+        except BaseException:
+            self.conn.rollback()
+            raise
+        return True
+
+    def queue_resume(self, now: str) -> None:
+        """Clear the pause and stamp `resumed_at`, which starts a new streak window
+        (§4.1: failures before a Resume no longer count). Commits."""
+        try:
+            self.begin_immediate()
+            self._setting_del(self.QUEUE_PAUSED, self.QUEUE_PAUSED_DETAIL, self.QUEUE_PAUSED_AT)
+            self._setting_put(self.QUEUE_RESUMED_AT, now)
+            self.conn.commit()
+        except BaseException:
+            self.conn.rollback()
+            raise
+
+    def queue_pause_state(self) -> Optional[dict[str, Any]]:
+        """`{reason, detail, since}` while paused, else None."""
+        reason = self.get_setting(self.QUEUE_PAUSED)
+        if not reason:
+            return None
+        return {"reason": reason, "detail": self.get_setting(self.QUEUE_PAUSED_DETAIL),
+                "since": self.get_setting(self.QUEUE_PAUSED_AT)}
+
+    def queue_request_yield(self) -> None:
+        """A search run waits its turn (§6): the worker stops after the current role
+        and `queue_take` hands out nothing until the flag is cleared. Commits."""
+        self._setting_put(self.QUEUE_YIELD, "1")
+        self.conn.commit()
+
+    def queue_take_yield(self) -> bool:
+        """Read and clear the yield flag in one transaction; True when it was set.
+        Commits."""
+        try:
+            self.begin_immediate()
+            was = bool(self.get_setting(self.QUEUE_YIELD))
+            self._setting_del(self.QUEUE_YIELD)
+            self.conn.commit()
+        except BaseException:
+            self.conn.rollback()
+            raise
+        return was
+
+    def queue_clear_yield(self) -> None:
+        """Drop the yield flag (the run started, or a restart, review L4). Commits."""
+        self._setting_del(self.QUEUE_YIELD)
+        self.conn.commit()
+
+    def live_attempt(self, job_id: Optional[str] = None) -> Optional[dict[str, Any]]:
+        """The newest non-terminal attempt (`queued` included), optionally for one
+        job: the apply_attempts row plus `company` and `role`, or None."""
+        live = self._live_attempt_states()
+        marks = ",".join("?" * len(live))
+        where = f"at.state IN ({marks})"
+        params: list[Any] = list(live)
+        if job_id is not None:
+            where += " AND at.job_id = ?"
+            params.append(job_id)
+        r = self.conn.execute(
+            f"""SELECT at.*, {self._QUEUE_NAMES}
+                  FROM apply_attempts at {self._QUEUE_JOINS.format(t="at")}
+                 WHERE {where} ORDER BY at.id DESC LIMIT 1""", params).fetchone()
+        return dict(r) if r else None
+
+    def recent_attempts(self, limit: int = 10) -> list[dict[str, Any]]:
+        """The newest finished attempts (terminal states), newest first: the
+        apply_attempts row plus `company` and `role` (Runs "Recently finished")."""
+        done = sorted(TERMINAL_ATTEMPT_STATES)
+        marks = ",".join("?" * len(done))
+        return [dict(r) for r in self.conn.execute(
+            f"""SELECT at.*, {self._QUEUE_NAMES}
+                  FROM apply_attempts at {self._QUEUE_JOINS.format(t="at")}
+                 WHERE at.state IN ({marks})
+                 ORDER BY COALESCE(at.finished_at, at.queued_at) DESC, at.id DESC
+                 LIMIT ?""", (*done, int(limit)))]
+
+    def queue_streak(self, since: str, limit: int = 3) -> list[dict[str, Any]]:
+        """The newest finished attempts that started at or after `since`, newest
+        first, with `state, reason_code, reason_detail, submit_clicked_at` (review
+        M4). From the DB, so "N in a row" survives worker restarts; `since` (the
+        later of the last Resume and 24 h ago) keeps old failures out. An attempt
+        failed before it started (no `started_at`) counts from its `queued_at`."""
+        done = sorted(TERMINAL_ATTEMPT_STATES)
+        marks = ",".join("?" * len(done))
+        return [dict(r) for r in self.conn.execute(
+            f"""SELECT state, reason_code, reason_detail, submit_clicked_at
+                  FROM apply_attempts
+                 WHERE state IN ({marks}) AND COALESCE(started_at, queued_at) >= ?
+                 ORDER BY COALESCE(finished_at, queued_at) DESC, id DESC
+                 LIMIT ?""", (*done, since, int(limit)))]
 
     _ANSWER_COLUMNS = ("step", "field_key", "label", "label_norm", "field_type", "required",
                        "section", "options_json", "value_json", "tier", "source",
