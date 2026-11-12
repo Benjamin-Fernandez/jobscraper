@@ -41,8 +41,9 @@ export const COPY = {
   cycleDefault: weekly => `The config default is ${weekly}.`,
   cyclePending: (chosen, current) =>
     `${chosen} is selected but not saved. Press Enter to save, or Esc to keep ${current}.`,
-  batchCadence: (days, runs, r, c) =>
-    `A full ${days}-day sweep takes ${runs} at this size (${r} runs to cover ${c} companies).`,
+  // `perDay` "2 runs a day", `runs` "3 runs", `companies` "50 companies": already pluralised.
+  batchCadence: (days, perDay, runs, companies) =>
+    `A full ${days}-day sweep takes ${perDay} at this size (${runs} to cover ${companies}).`,
   batchRange: (max, def) =>
     `Between 1 and ${max}. The config default is ${def}. A run started with its own count (Runs tab) uses that instead.`,
   batchNone: 'No companies yet. Add some in Companies, or start a run to load your watchlist.',

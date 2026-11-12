@@ -10,8 +10,8 @@
 // screens, the routes and the two reads the panels share. The rows live in the panels.
 //
 // Routes (`#/settings/<category>[/<row-id>]`, design section 4). The category is read by
-// `useView`; a row id by the panel itself (`useHashItem`), and a panel is mounted only
-// while its category is open, so only that panel acts on the id. The hub is mounted the
+// `useView`, the row id by `useHashItem` here; a panel gets the id as its `item` prop only
+// while its category is open, and is mounted only then, so only that panel acts on it. The hub is mounted the
 // same way (`v-if`, never `v-show`): it reads the hash item without checking the
 // category, so a mounted hub would act on another category's row id.
 //   - `#/settings`          Accounts on a desktop (hash left alone); on a phone the list.
@@ -34,7 +34,7 @@ import { computed, nextTick, onActivated, onBeforeUnmount, onMounted, ref, watch
 import { loadApplyData, missingLabels } from '../applyData.js'
 import { attentionCount } from '../connections.js'
 import { getApplyStatus, getConnections } from '../connections_api.js'
-import { parseHash, useView } from '../route.js'
+import { parseHash, useHashItem, useView } from '../route.js'
 import { COPY } from '../settingsRows.js'
 import { tabEmits, tabProps } from '../shell.js'
 import ApplySettings from '../components/ApplySettings.vue'
@@ -66,6 +66,9 @@ const CATEGORIES = [
   { id: 'preferences', label: COPY.categories.preferences, icon: 'sliders' },
 ]
 const view = useView('settings', CATEGORIES, 'accounts')
+// The row id of `#/settings/<category>/<row-id>`; each panel gets it only while its own
+// category is open (the hub reads the same hash item itself).
+const item = useHashItem('settings')
 
 // ---- connections (the hub's data) ----
 const connections = ref(null)
@@ -237,11 +240,17 @@ onBeforeUnmount(() => {
             @reload="loadConnections"
           />
           <template v-else-if="view === 'apply'">
-            <ApplySettings v-if="apply" :connections="connections" :apply="apply" @saved="onApplySaved" />
+            <ApplySettings
+              v-if="apply"
+              :connections="connections"
+              :apply="apply"
+              :item="view === 'apply' ? item : null"
+              @saved="onApplySaved"
+            />
             <TabLoading v-else :rows="3" />
           </template>
-          <SearchSettings v-else-if="view === 'search'" />
-          <PreferencesSettings v-else />
+          <SearchSettings v-else-if="view === 'search'" :item="view === 'search' ? item : null" />
+          <PreferencesSettings v-else :item="view === 'preferences' ? item : null" />
         </div>
       </div>
     </div>
