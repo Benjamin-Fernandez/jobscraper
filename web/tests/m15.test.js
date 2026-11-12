@@ -35,9 +35,17 @@ describe('Settings: the cycle', () => {
     await flushPromises()
     return wrapper
   }
+  // Q-116: the cycle is a row; its radios render only after the row is opened.
+  async function openCycle(wrapper) {
+    await wrapper.find('#setting-cycle .setting-main').trigger('click')
+    await flushPromises()
+  }
 
   it('offers the plan\'s cycles, in words, with the current one chosen', async () => {
     const wrapper = await mountSettings()
+    expect(wrapper.find('#setting-cycle .setting-value').text()).toBe('Fortnightly')   // the closed row shows it
+    expect(wrapper.find('.cycle-option').exists()).toBe(false)
+    await openCycle(wrapper)
     const options = wrapper.findAll('.cycle-option')
     expect(options.map(o => o.find('.cycle-name').text()))
       .toEqual(['Daily', 'Every 3 days', 'Weekly', 'Fortnightly', 'Monthly'])
@@ -51,26 +59,32 @@ describe('Settings: the cycle', () => {
 
   it('a smaller plan offers fewer cycles - nothing in the page is hardcoded', async () => {
     const wrapper = await mountSettings({ cycle_day_options: [7, 14, 30], plan: 'free' })
+    await openCycle(wrapper)
     expect(wrapper.findAll('.cycle-option').map(o => o.attributes('data-days'))).toEqual(['7', '14', '30'])
     expect(wrapper.text()).not.toContain('your plan')   // A12
   })
 
   it('choosing a cycle saves it at once and the hint follows', async () => {
     const wrapper = await mountSettings()
+    await openCycle(wrapper)
     await wrapper.find('input[type="radio"][value="7"]').setValue(true)
     await flushPromises()
     expect(puts()).toEqual([{ cycle_days: 7 }])
     expect(wrapper.find('.cycle-option.active').attributes('data-days')).toBe('7')
-    expect(wrapper.find('.cycle-saved').text()).toContain('weekly')
+    expect(wrapper.find('#setting-cycle .setting-value').text()).toBe('Weekly')
+    // "Saved" plus a hidden announcement ("... The next run uses it."): match, don't equal.
+    expect(wrapper.find('#setting-cycle [role="status"]').text()).toContain('Saved')
     expect(wrapper.find('.cycle-hint').text()).toContain('every 7 days')
   })
 
   it('says what the server refused', async () => {
     const wrapper = await mountSettings({ cycle_day_options: [1, 7] })
     api.server.settings.cycle_day_options = [7]   // the plan changed under the page
+    await openCycle(wrapper)
     await wrapper.find('input[type="radio"][value="1"]').setValue(true)
     await flushPromises()
-    expect(wrapper.find('[role="alert"]').text()).toContain('did not accept that cycle')
+    expect(wrapper.find('#setting-cycle [role="alert"]').text()).toContain("Couldn't save: cycle_days must be one of [7]")
+    expect(wrapper.find('#setting-cycle .setting-value').text()).toBe('Fortnightly')   // the old cycle is kept
   })
 })
 

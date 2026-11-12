@@ -119,15 +119,16 @@ describe('Runs: choosing how many companies', () => {
 })
 
 describe('Settings: the same quick sizes', () => {
-  it('a preset is saved like a typed number', async () => {
+  it('a preset saves at once from the open row, like a typed number saved with Enter', async () => {
     setHash('#/settings/search')   // Q-100: the quick sizes are in the Search view
     const w = mount(Settings)
     await flushPromises()
-    await w.find('[data-preset="50"]').trigger('click')
-    await w.find('form.batch').trigger('submit')
+    await w.find('#setting-batch-size .setting-main').trigger('click')   // Q-116: the picker is in the opened row
     await flushPromises()
-    const put = api.calls.find(c => c.method === 'PUT' && c.url === 'api/settings')
-    expect(JSON.parse(put.body)).toEqual({ batch_size: 50 })
+    await w.find('[data-preset="50"]').trigger('click')                   // no form, no Save button
+    await flushPromises()
+    const puts = api.calls.filter(c => c.method === 'PUT' && c.url === 'api/settings')
+    expect(puts.map(c => JSON.parse(c.body))).toEqual([{ batch_size: 50 }])
   })
 })
 
