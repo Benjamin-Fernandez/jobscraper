@@ -299,21 +299,27 @@ describe('runs.js: num, matchLabel, runsPerDayLabel (G37)', () => {
 
 describe('Settings: the cycle radios (N17)', () => {
   const puts = () => calls('PUT').filter(c => c.url === 'api/settings').map(c => JSON.parse(c.body))
+  // Q-116: the cycle is a row of the Search category; its radios exist only once it is open.
   async function mountSettings() {
-    setHash('#/settings/search')   // Q-100: the cycle is in the Search view
+    setHash('#/settings/search')
     const w = mount(Settings, { props: { run: 'all', jobs: [] }, attachTo: document.body })
+    await flushPromises()
+    await w.find('#setting-cycle .setting-main').trigger('click')
     await flushPromises()
     return w
   }
   const radio = (w, days) => w.find(`input[name="cycle"][value="${days}"]`)
   const active = w => w.find('.cycle-option.active').attributes('data-days')
+  // The row's "Saved" (not the editor's own role=status "selected but not saved" line).
+  const saved = w => w.find('#setting-cycle .setting-saved')
 
   it('a click saves at once', async () => {
     const w = await mountSettings()
     await radio(w, 7).setValue(true)
     await flushPromises()
     expect(puts()).toEqual([{ cycle_days: 7 }])
-    expect(w.find('.cycle-saved').text()).toContain('Saved: weekly')
+    expect(saved(w).text()).toContain('Saved')
+    expect(w.find('#setting-cycle .setting-value').text()).toBe('Weekly')
     expect(w.find('.cycle-pending').exists()).toBe(false)
   })
 
@@ -340,16 +346,22 @@ describe('Settings: the cycle radios (N17)', () => {
     expect(w.find('.cycle-pending').exists()).toBe(false)
   })
 
-  it('Esc drops the held choice and restores the saved one', async () => {
+  it('Esc drops the held choice, closes the row and restores the saved one', async () => {
     const w = await mountSettings()
     await radio(w, 7).trigger('keydown', { key: 'ArrowRight' })
     await radio(w, 7).setValue(true)
+    expect(w.find('.cycle-pending').exists()).toBe(true)
     await radio(w, 7).trigger('keydown', { key: 'Escape' })
+    await flushPromises()
+    expect(w.find('#setting-cycle-editor').exists()).toBe(false)        // Q-116: Esc also closes the row
+    expect(w.find('#setting-cycle .setting-value').text()).toBe('Fortnightly')
+    expect(puts()).toEqual([])
+    await w.find('#setting-cycle .setting-main').trigger('click')       // reopen: the held choice is gone
+    await flushPromises()
     expect(active(w)).toBe('14')
     expect(radio(w, 14).element.checked).toBe(true)
     expect(radio(w, 7).element.checked).toBe(false)
     expect(w.find('.cycle-pending').exists()).toBe(false)
-    expect(puts()).toEqual([])
   })
 
   it('leaving the group (blur) saves the held choice; moving inside it does not', async () => {
@@ -375,10 +387,10 @@ describe('Settings: the cycle radios (N17)', () => {
     const w = await mountSettings()
     await radio(w, 7).setValue(true)
     await flushPromises()
-    expect(w.find('.cycle-saved').exists()).toBe(true)
+    expect(saved(w).exists()).toBe(true)
     await radio(w, 3).trigger('keydown', { key: 'ArrowLeft' })
     await radio(w, 3).setValue(true)
-    expect(w.find('.cycle-saved').exists()).toBe(false)
+    expect(saved(w).exists()).toBe(false)
   })
 })
 
@@ -388,17 +400,23 @@ describe('Settings: notices clear when the number is edited (N17)', () => {
     setHash('#/settings/search')   // Q-100: the number field is in the Search view
     const w = mount(Settings, { props: { run: 'all', jobs: [] } })
     await flushPromises()
+    await w.find('#setting-batch-size .setting-main').trigger('click')   // Q-116: open the row
+    await flushPromises()
     return w
   }
+  const enter = w => input(w).trigger('keydown', { key: 'Enter' })       // Q-116: Enter saves, no form
+  const status = w => w.find('#setting-batch-size [role="status"]')
+  const rowError = w => w.find('#setting-batch-size [role="alert"]')
 
   it('Saved goes as soon as the number changes', async () => {
     const w = await mountSettings()
     await input(w).setValue('25')
-    await w.find('form').trigger('submit')
+    await enter(w)
     await flushPromises()
-    expect(w.find('.notice.ok').text()).toBe('Saved: 25 companies per run.')
+    expect(status(w).text()).toContain('Saved')
+    expect(status(w).text()).toContain('25 companies')
     await input(w).setValue('26')
-    expect(w.find('.notice.ok').exists()).toBe(false)
+    expect(status(w).exists()).toBe(false)
   })
 
   it('an error goes the same way', async () => {
@@ -408,11 +426,12 @@ describe('Settings: notices clear when the number is edited (N17)', () => {
       ? { ok: false, status: 500, statusText: 'Error', json: async () => ({ detail: 'disk full' }) }
       : real(url, init))))
     await input(w).setValue('25')
-    await w.find('form').trigger('submit')
+    await enter(w)
     await flushPromises()
-    expect(w.find('.notice.error').text()).toContain('Could not save')
+    expect(rowError(w).text()).toContain("Couldn't save")
+    expect(rowError(w).text()).toContain('Your previous setting is kept')
     await input(w).setValue('26')
-    expect(w.find('.notice.error').exists()).toBe(false)
+    expect(rowError(w).exists()).toBe(false)
   })
 
   it('the cadence sentences read plainly', async () => {
@@ -428,8 +447,10 @@ describe('Settings: notices clear when the number is edited (N17)', () => {
 
 describe('Settings: theme switch (G40)', () => {
   const mountSettings = async () => {
-    setHash('#/settings/appearance')   // Q-100: the theme switch has its own view
+    setHash('#/settings/preferences')   // Q-116: Preferences (was Appearance) holds the theme row
     const w = mount(Settings, { props: { run: 'all', jobs: [] } })
+    await flushPromises()
+    await w.find('#setting-theme .setting-main').trigger('click')   // the radios render once the row is open
     await flushPromises()
     return w
   }
