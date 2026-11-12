@@ -10,7 +10,26 @@ BODY: <concise message>
 STATUS: open
 -->
 
-### 2026-11-08 software-engineer → coordinator, tester
+### 2026-11-12 software-engineer → coordinator, tester, W1/E2 engineers
+TYPE: handoff
+RE: Q-120 WP-E1 (D-205; F-30, NF-05, NF-06, D-200); `src/jobscraper/store.py`; apply_queue_design §2, §3.1, §4; review H3, M3, M4, L3, L6
+BODY: Branch `eng/Q-120-E1-store`, commit c46b12d (store.py only). SCHEMA_VERSION 6: `apply_queue` table + `idx_apply_queue_pos` exactly as §2, appended to `SCHEMA`; `_migrate` unchanged (its upsert records 6). A v5 DB opens, gains the table, keeps its rows.
+Methods (positions 1-based, `(pos, id)` order; pause reasons and modes are strings, enums accepted via `_state`):
+- `queue_add(job_id, company_id, mode, source, now) -> Optional[int]` NO commit. Position, or None when already waiting. Also None while the job has a live attempt (`queued` included): an I2 guard inside the same INSERT, for a `queue_take` that commits between the helper's `in_progress` check and this write. A mode/source outside the CHECK raises IntegrityError.
+- `queue_return(job_id, company_id, mode, note, now) -> None` commits. Front (`MIN(pos)-1`), source `returned`; `ON CONFLICT DO NOTHING` (L6: a fresh click's row wins, untouched).
+- `queue_items() -> list[{job_id, company, role, mode, position, enqueued_at, source, note}]`; `queue_positions() -> dict[str, int]`; `queue_remove(job_id) -> bool` commits; `queue_clear() -> int` commits. company/role = `COALESCE(applications.company/role, companies.name/jobs.title)` like `applications()`.
+- `queue_take(now) -> (Optional[{job_id, attempt_id, item_mode, source}], dropped: list[str])` commits. One `begin_immediate()` (BEGIN IMMEDIATE takes the write lock before the first read; a second process waits on the 5 s busy timeout, then sees the row gone; rollback on any exception). Paused or yield set → `(None, [])`, nothing consumed. Heads with no application row or a status other than `to_apply` are deleted and listed in `dropped`. The head is deleted and `create_attempt(..., mode="dry_run")` is created (fail-safe; E2 sets the `pick_mode` result with `update_attempt(mode=...)`).
+- `delete_application(job_id)` (H3): also `DELETE FROM apply_queue` in the same commit.
+- `queue_pause(reason, detail, now) -> bool` commits; only when not paused (first reason wins, L3). `queue_pause_if_waiting(reason, now) -> bool` commits; only when a row waits and not paused. `queue_resume(now) -> None` commits; deletes `apply_queue.paused/paused_detail/paused_at`, sets `apply_queue.resumed_at`. `queue_pause_state() -> Optional[{reason, detail, since}]`.
+- `queue_request_yield() -> None` (sets `apply_queue.yield`=1), `queue_take_yield() -> bool` (read + clear in one tx), `queue_clear_yield() -> None`; all commit.
+- `live_attempt(job_id=None) -> Optional[dict]`: newest non-terminal attempt incl. `queued`: the apply_attempts row (`id`, not `attempt_id`) + `company`, `role`.
+- `recent_attempts(limit=10) -> list[dict]`: terminal attempts, newest `finished_at` first, row + `company`, `role`.
+- `queue_streak(since, limit=3) -> list[{state, reason_code, reason_detail, submit_clicked_at}]`: terminal attempts with `COALESCE(started_at, queued_at) >= since`, newest finished first.
+- Constants on `Store`: `QUEUE_PAUSED`, `QUEUE_PAUSED_DETAIL`, `QUEUE_PAUSED_AT`, `QUEUE_RESUMED_AT`, `QUEUE_YIELD` (the `apply_queue.*` keys). "Cleared" = the settings row deleted (new private `_setting_put`/`_setting_del`; `set_setting` unchanged).
+Evidence: an ad hoc stdin script on temp DBs: add 3 → [1,2,3]; dup → None; remove middle → {j1:1, j3:2}; pause → take (None, []), queue intact; yield → (None, []); take → j1 + attempt queued/dry_run; a second connection blocked while the first held the lock, then got j2 (not the j3 the first took); two threads racing → distinct items; return → front, a conflicting return leaves the waiting row unchanged; no-app / applied heads → dropped ['j1','j2']; v5 DB → version 6, table + index, application row kept. Tests: `-k store` 90/90, `-k web_` 133/133, `-k layering` 13/13, `-k q114` 3/3, `-k apply_flow` 148/148 (run alone).
+Stale pins: none (`test_store_fill_cache` asserts `>= 3`, `test_store_mail` `>= 5`).
+Choices where §3.1 was silent: `queue_remove` commits; `queue_resume` returns None; `live_attempt`/`recent_attempts` return the full row + names; streak/recent order by `finished_at`, then id; the `queue_add` live-attempt guard (above).
+STATUS: open
 TYPE: handoff + request
 RE: Q-83 D-171; `src/jobscraper/apply/declarations.py`; `tests/test_apply_declarations_d170.py`
 BODY: Part C of the architect's D-171 entry is built on `eng/Q-83-declarations` (commit 6bc59da, declarations.py only). Ad hoc replay of the 59 part-D rows (65 sub-rows incl. both halves of the paired rows): all hold. `-k declarations` 122/122 (incl. the tester's d171 file 35/35), `-k apply_contracts` 66/66, `-k llm_fill` 90/90, `-k layering` 13/13. REQUEST (scope hook blocks `tests/` for the engineer, so part C item 8 is NOT done): change only the docstring of `test_d170_rule3_a_piece_without_a_class_or_status_run_fails_even_with_listed_words` in `tests/test_apply_declarations_d170.py` to "The second clause holds no class span and no status run, and after D-171 'Singapore' is not filler either, so rules 1 and 3 both refuse it." (assertion unchanged).
