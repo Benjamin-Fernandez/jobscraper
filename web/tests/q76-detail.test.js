@@ -114,61 +114,71 @@ describe('attempts.js wording', () => {
 
 // ------------------------------------------------------------------ the pill
 
-describe('the auto-apply pill on a row (N11)', () => {
+// Q-118 LB + Q-120 U3: the row's attempt pill became one chip in the `.app-state` slot
+// (`.ui-badge.app-chip[data-kind][data-tone]`), worded by `rowState`. Stopped, cancelled
+// and needs-input show only while the role is still To apply (the owner moved on
+// otherwise), so these rows are To apply. The attempt LIST under Details keeps
+// `.pill.attempt` and `attemptLabel` (below).
+describe('the auto-apply chip on a row (N11, Q-120 U3)', () => {
   const KINDS = [
-    ['running', 'Auto-apply running'], ['sent', 'Sent by auto-apply'], ['unconfirmed', 'Sent, not confirmed'],
-    ['dry_run', 'Dry run ready'], ['cancelled', 'Auto-apply cancelled'], ['stopped', 'Auto-apply stopped'],
+    ['running', 'Applying…', 'info'], ['sent', 'Sent by auto-apply', 'ok'], ['unconfirmed', 'Sent, not confirmed', 'warn'],
+    ['dry_run', 'Dry run ready', 'info'], ['cancelled', 'Cancelled', 'neutral'],
+    ['stopped', 'Stopped: The site asked for a CAPTCHA.', 'warn'],
   ]
+  const TO_APPLY = { a1b2c3: 'to_apply', d4e5f6: 'to_apply' }
+  const chip = (w, id) => row(w, id).find('.app-state .app-chip')
 
-  // Q-118 LB: the pill sits in the row's `.app-state` slot. An *applied* row whose last
-  // attempt was sent shows "Applied automatically" instead (pinned in q118-runs-applications),
-  // so these rows are Interviewing to keep every kind's pill in view.
-  const OTHER = { a1b2c3: 'interviewing', d4e5f6: 'interviewing' }
-  it.each(KINDS)('%s reads "%s" and carries its kind', async (kind, label) => {
-    const w = await mountTab({ statuses: OTHER, attempts: { a1b2c3: [attempt(kind, { text: kind === 'stopped' ? 'The site asked for a CAPTCHA.' : '' })] } })
-    const pill = row(w, 'a1b2c3').find('.app-state .pill.attempt')
-    expect(pill.text()).toBe(label)
-    expect(pill.attributes('data-kind')).toBe(kind)
-    expect(pill.element.tagName).toBe('SPAN')
-    expect(pill.attributes('title')).toBe(kind === 'stopped' ? 'The site asked for a CAPTCHA.' : undefined)
+  it.each(KINDS)('%s reads "%s" and carries its kind and tone', async (kind, label, tone) => {
+    const w = await mountTab({ statuses: TO_APPLY, attempts: { a1b2c3: [attempt(kind, { text: kind === 'stopped' ? 'The site asked for a CAPTCHA.' : '' })] } })
+    const c = chip(w, 'a1b2c3')
+    expect(c.text()).toBe(label)
+    expect(c.attributes('data-kind')).toBe(kind)
+    expect(c.attributes('data-tone')).toBe(tone)
+    expect(c.element.tagName).toBe('SPAN')
+    expect(c.attributes('title')).toBe(kind === 'stopped' ? 'The site asked for a CAPTCHA.' : undefined)
+    expect(row(w, 'a1b2c3').find('.pill.attempt').exists()).toBe(false)   // the old pill is gone
   })
 
-  it('no attempt, no pill; only the row with an attempt has one', async () => {
-    const w = await mountTab({ statuses: OTHER, attempts: { a1b2c3: [attempt('sent')] } })
-    expect(row(w, 'a1b2c3').find('.app-state .pill.attempt').exists()).toBe(true)
-    expect(row(w, 'd4e5f6').find('.pill.attempt').exists()).toBe(false)
+  it('no attempt, no chip; only the row with an attempt has one', async () => {
+    const w = await mountTab({ statuses: TO_APPLY, attempts: { a1b2c3: [attempt('dry_run')] } })
+    expect(chip(w, 'a1b2c3').exists()).toBe(true)
+    expect(chip(w, 'd4e5f6').exists()).toBe(false)
     expect(row(w, 'd4e5f6').find('.app-state').text()).toBe('')
   })
 
-  it('the pill shows the newest attempt only', async () => {
-    const w = await mountTab({ statuses: OTHER, attempts: { a1b2c3: [attempt('sent', { id: 2 }), attempt('stopped', { id: 1 })] } })
-    expect(row(w, 'a1b2c3').findAll('.pill.attempt')).toHaveLength(1)
-    expect(row(w, 'a1b2c3').find('.pill.attempt').text()).toBe('Sent by auto-apply')
+  it('the chip shows the newest attempt only', async () => {
+    const w = await mountTab({ statuses: TO_APPLY, attempts: { a1b2c3: [attempt('sent', { id: 2 }), attempt('stopped', { id: 1 })] } })
+    expect(row(w, 'a1b2c3').findAll('.app-chip')).toHaveLength(1)
+    expect(chip(w, 'a1b2c3').text()).toBe('Sent by auto-apply')
   })
 
-  it('"Needs your input" is a button with the reason in its title', async () => {
-    const w = await mountTab({ attempts: { a1b2c3: [NEEDS] } })
-    const pill = row(w, 'a1b2c3').find('.pill.attempt')
-    expect(pill.element.tagName).toBe('BUTTON')
-    expect(pill.text()).toBe('Needs your input')
-    expect(pill.attributes('title')).toContain('Why us?')
+  it('"Needs your answers" carries the reason in its title, with an "Answer in Profile" link', async () => {
+    const w = await mountTab({ statuses: TO_APPLY, attempts: { a1b2c3: [NEEDS] } })
+    const c = chip(w, 'a1b2c3')
+    expect(c.text()).toBe('Needs your answers')
+    expect(c.attributes('data-tone')).toBe('warn')
+    expect(c.attributes('title')).toContain('Why us?')
+    const answer = row(w, 'a1b2c3').find('.app-answer')
+    expect(answer.element.tagName).toBe('A')
+    expect(answer.text()).toBe('Answer in Profile')
+    expect(answer.attributes('href')).toBe('#/profile')
   })
 
-  it('clicking it remembers Application details and goes to Profile', async () => {
-    const w = await mountTab({ attempts: { a1b2c3: [NEEDS] } })
-    await row(w, 'a1b2c3').find('.pill.attempt').trigger('click')
+  it('"Answer in Profile" remembers Application details and goes to Profile', async () => {
+    const w = await mountTab({ statuses: TO_APPLY, attempts: { a1b2c3: [NEEDS] } })
+    await row(w, 'a1b2c3').find('.app-answer').trigger('click')
     expect(window.localStorage.getItem(PROFILE_VIEW_KEY)).toBe('details')
     expect(window.location.hash).toBe('#/profile')
   })
 
   it('end to end in the app: the click lands on the Application details view', async () => {
-    useApi({ statuses: { a1b2c3: 'applied' }, attempts: { a1b2c3: [NEEDS] } })
+    useApi({ statuses: { a1b2c3: 'to_apply' }, attempts: { a1b2c3: [NEEDS] } })
     // The owner last looked at Resume and titles.
     window.localStorage.setItem(PROFILE_VIEW_KEY, 'resume')
     setHash('#/applications')
     const w = mount(App, { attachTo: document.body })
-    await vi.waitFor(async () => { await flushPromises(); expect(w.find('.app-row .attempt-link').exists()).toBe(true) })
-    await w.find('.app-row .attempt-link').trigger('click')
+    await vi.waitFor(async () => { await flushPromises(); expect(w.find('.app-row .app-answer').exists()).toBe(true) })
+    await w.find('.app-row .app-answer').trigger('click')
     await vi.waitFor(async () => {
       await flushPromises()
       expect(window.location.hash).toBe('#/profile')
