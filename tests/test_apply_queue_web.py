@@ -22,6 +22,8 @@ from __future__ import annotations
 import sqlite3
 import sys
 import tempfile
+import threading
+import time
 from contextlib import contextmanager
 from pathlib import Path
 from types import SimpleNamespace
@@ -350,6 +352,37 @@ def test_p18_h2_a_dev_copy_or_the_switch_off_records_clicks_but_never_starts_the
             assert [k for k, _ in w.fake.started] == [] and w.calls == [], env
 
 
+def test_f4_dev_copy_switch_truth_table_one_deviation_from_the_live_app_turns_it_off():
+    """Review F4: unset, the worker is ON only for the owner's live app = no JOBSCRAPER_DB,
+    no JOBSCRAPER_CONFIG, no --config, port 8765, code not from a worktree. Any single
+    deviation is OFF; `=1` forces on (even on 8768 or from a worktree), `=0` forces off."""
+    from jobscraper.web.applyqueue import apply_queue_wanted as wanted, running_from_worktree
+    with tempfile.TemporaryDirectory() as t:
+        main_like, worktree_like = _source_dirs(Path(t))
+        assert running_from_worktree(main_like) is False
+        assert running_from_worktree(worktree_like) is True
+        live = dict(source_dir=main_like)
+        assert wanted({}, **live) is True
+        assert wanted({}, port=8765, **live) is True
+        assert wanted({"JOBSCRAPER_PORT": "8765"}, **live) is True
+        # forced
+        for extra in ({}, {"port": 8768}, {"config_path": "x.yaml"}):
+            assert wanted({"JOBSCRAPER_APPLY_QUEUE": "1", "JOBSCRAPER_PORT": "8768",
+                           "JOBSCRAPER_DB": "c.db"}, source_dir=worktree_like, **extra) is True
+        assert wanted({"JOBSCRAPER_APPLY_QUEUE": "0"}, **live) is False
+        assert wanted({"JOBSCRAPER_APPLY_QUEUE": "0"}, port=8765, **live) is False
+        # one deviation at a time, all OFF
+        assert wanted({"JOBSCRAPER_PORT": "8768"}, **live) is False       # the review scenario
+        assert wanted({"JOBSCRAPER_PORT": "abc"}, **live) is False        # not a number
+        assert wanted({}, port=8769, **live) is False
+        assert wanted({"JOBSCRAPER_PORT": "8765"}, port=8769, **live) is False   # `port` wins
+        assert wanted({}, config_path="other.yaml", **live) is False
+        assert wanted({"JOBSCRAPER_DB": "C:/copy/jobscraper.db"}, **live) is False
+        assert wanted({"JOBSCRAPER_CONFIG": "other.yaml"}, **live) is False
+        assert wanted({}, source_dir=worktree_like) is False
+        assert wanted({}, port=8765, source_dir=worktree_like) is False
+
+
 # ------------------------------------------------------------------ P21 (M1)
 
 
@@ -395,6 +428,93 @@ def test_p19_h3_untrack_removes_a_waiting_role_and_refuses_the_role_in_flight():
         with _db(w) as st:
             assert st.application(j2)["status"] == "to_apply"  # nothing deleted
             assert st.attempts_for_job(j1) == [] and st.queue_take(utcnow()) == (None, [])
+
+
+def test_f5_untrack_refuses_a_live_role_and_removes_a_waiting_role_with_its_queue_row():
+    with _world() as w:
+        j1, j2, *_ = w.jobs
+        w.fake.hold("run")
+        assert _post(w, j1, j2)[0] == 202
+        live = _take(w)                                        # j1 is now in flight
+        assert live["job_id"] == j1
+        r = w.c.delete(f"/api/applications/{j1}")
+        assert r.status_code == 409 and r.json()["detail"] == "in_progress", r.text
+        with _db(w) as st:
+            assert st.application(j1)["status"] == "to_apply"            # the row remains
+            assert [a["id"] for a in st.attempts_for_job(j1)] == [live["attempt_id"]]
+            assert st.live_attempt(j1) is not None                       # and the attempt
+            assert st.queue_positions() == {j2: 1}
+        assert w.c.delete(f"/api/applications/{j2}").status_code == 200   # waiting: both go together
+        with _db(w) as st:
+            assert st.application(j2) is None
+            assert st.queue_positions() == {} and st.queue_items() == []
+        assert w.c.delete(f"/api/applications/{j2}").status_code == 404
+
+
+def test_f5_a_take_attempted_while_the_untrack_transaction_holds_the_lock_cannot_take_the_role():
+    """The check and the delete are one BEGIN IMMEDIATE transaction: a worker `queue_take` that
+    arrives between the live-attempt check and the delete waits, then finds the role gone."""
+    with _world() as w:
+        j1, *_ = w.jobs
+        w.fake.hold("run")
+        assert _post(w, j1)[0] == 202
+        assert w.c.get("/api/apply/queue").json()["paused"] is None
+        inside, release = threading.Event(), threading.Event()
+        real = w.app.state.store_factory
+
+        def factory():
+            st = real()
+            check = st.live_attempt
+
+            def gated(*a, **k):                                # the untrack has taken its lock
+                out = check(*a, **k)
+                inside.set()
+                release.wait(15)
+                return out
+            st.live_attempt = gated
+            return st
+        w.app.state.store_factory = factory
+        out: dict = {}
+        untrack = threading.Thread(target=lambda: out.update(r=w.c.delete(f"/api/applications/{j1}")))
+        untrack.start()
+        assert inside.wait(10), "the untrack never reached its check"
+
+        def taker():
+            with _db(w) as st:
+                out["take"] = st.queue_take(utcnow())
+        take = threading.Thread(target=taker)
+        take.start()
+        time.sleep(0.4)
+        still_waiting = take.is_alive()
+        release.set()
+        untrack.join(15)
+        take.join(15)
+        assert still_waiting, "queue_take ran while the untrack transaction was open"
+        assert out["r"].status_code == 200, out["r"].text
+        assert out["take"] == (None, []), out["take"]
+        with _db(w) as st:
+            assert st.attempts_for_job(j1) == [] and st.application(j1) is None
+
+
+def test_f6_stop_cancels_only_an_apply_job_holding_the_slot_and_the_live_attempt_id():
+    """Review F6: the live attempt may be a leftover while a search run holds the slot;
+    cancelling then would kill the run. Every refusal is 409 with nothing cancelled."""
+    with _world() as w:
+        j1, *_ = w.jobs
+        assert _post(w, j1)[1]["started"] is True              # the worker holds the slot
+        live = _take(w)
+        stop = lambda attempt_id: w.c.post("/api/apply/queue/stop", json={"attempt_id": attempt_id})
+        w.fake.hold("run")                                     # a search run holds the slot
+        r = stop(live["attempt_id"])
+        assert r.status_code == 409 and r.json() == {"detail": "already_finished"}, r.text
+        assert w.fake.cancels == [] and w.fake.cur["kind"] == "run" and w.fake.cur["state"] == "running"
+        w.fake.hold("apply")                                   # an apply job, but a wrong attempt id
+        r = stop(live["attempt_id"] + 100)
+        assert r.status_code == 409 and r.json() == {"detail": "already_finished"}, r.text
+        assert w.fake.cancels == []
+        r = stop(live["attempt_id"])                           # apply job + the live attempt
+        assert r.status_code == 200, r.text
+        assert len(w.fake.cancels) == 1 and w.fake.cur["state"] != "running"
 
 
 # ------------------------------------------------------------------ P11 (M3)

@@ -268,6 +268,45 @@ def test_content_failure_pauses_fill_failed_not_returned_and_transport_returns()
     w.close()
 
 
+def test_f3_is_content_failure_reads_only_the_start_of_a_failed_rows_own_detail():
+    """Review F3: a stop is a content failure only when the flow wrote a marker FIRST in the
+    `reason_detail` of a FAILED row. Employer text (validation_error) or a marker later in a
+    sentence must not pause the queue as `fill_failed`."""
+    markers = apply_flow.CONTENT_FAILURE_DETAILS
+    assert set(markers) == {apply_flow.FILL_NO_USABLE_ANSWERS, apply_flow.FILL_WOULD_BE_GUESSES,
+                            apply_flow.FILL_LAST_RESORT} and len(markers) == 3
+
+    def row(detail, state="failed", code="unanswerable_required"):
+        return {"state": state, "reason_code": code, "reason_detail": detail}
+    is_cf = apply_flow.is_content_failure
+    for m in markers:
+        assert is_cf(row(m)), m
+        assert is_cf(row(apply_flow.content_failure_detail(m))), m
+        assert is_cf(row(apply_flow.content_failure_detail(m, "3 fields"))), m
+        assert apply_flow.content_failure_detail(m, "3 fields") == f"{m}: 3 fields"
+        assert is_cf(row("  " + m.upper() + ": 2 answers")), "case and leading spaces are ignored"
+        assert is_cf(row(m, code="error")), "any failed reason code counts, except page text"
+    # a marker in the middle (the shape the first F3 pin used) is not a content failure
+    for mid in ("the model gave no usable answers", "3 answers would be guesses",
+                "the model returned no answer, last resort used", "Email: " + markers[0]):
+        assert not is_cf(row(mid)), mid
+    # employer text: a validation_error never counts, even starting with a marker
+    assert not is_cf(row("Last resort contact is required", code="validation_error"))
+    assert not is_cf(row(apply_flow.content_failure_detail(apply_flow.FILL_LAST_RESORT),
+                         code="validation_error"))
+    assert not is_cf(row("Please give a last resort contact", code="validation_error"))
+    # not failed, or no detail
+    assert not is_cf(row(markers[0], state="ready_to_submit"))
+    assert not is_cf(row(None)) and not is_cf(row("")) and not is_cf({})
+    # a marker that is not in the list cannot be written
+    try:
+        apply_flow.content_failure_detail("model unavailable")
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("content_failure_detail accepted a non-marker")
+
+
 def test_one_unanswerable_question_goes_on_and_three_in_a_row_pause_repeated_failures():
     w, ad, cid, (j1, j2) = _world(2)
     ad.fields_for[j1] = [*ad.base, unknown_required()]
