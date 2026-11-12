@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Application form (select helper fixture)</title>
+<style>
+  body { font-family: sans-serif; margin: 24px; }
+  .select, .field, fieldset { margin: 12px 0; }
+  .select-shell { position: relative; width: 320px; }
+  .select__control { display: flex; border: 1px solid #888; min-height: 36px; width: 320px; }
+  .select__value-container { flex: 1; padding: 2px 8px; position: relative; }
+  .select__placeholder { position: absolute; color: #777; }
+  .select__input { border: 0; outline: 0; width: 100%; }
+  .select__indicators { padding: 0 8px; }
+</style>
+</head>
+<body>
+<!-- Anonymised: generic labels, hand-written markup shaped like react-select as an applicant form renders it.
+     Each empty select has a hidden "requiredInput" twin as the LAST child of .select-shell (opacity 0, absolute,
+     width 100%, NOT height 0). Static HTML and CSS only. -->
+<main>
+  <form id="application" onsubmit="return false">
+    <div class="field">
+      <label for="full_name">Full name *</label>
+      <input id="full_name" name="full_name" type="text" required>
+    </div>
+    <div class="field">
+      <label for="nickname">Preferred name</label>
+      <input id="nickname" name="nickname" type="text" aria-hidden="true" tabindex="0">
+    </div>
+    <fieldset>
+      <legend>Phone</legend>
+      <label for="phone_number">Phone number</label>
+      <input id="phone_number" name="phone_number" type="tel">
+    </fieldset>
+      <div class="select">
+        <div class="select__container">
+          <label id="country-label" for="country" class="label select__label">Country <span aria-hidden="true">*</span></label>
+          <div class="select-shell">
+            <div class="select__control css-ctl">
+              <div class="select__value-container">
+                <div class="select__placeholder">Select...</div>
+                <div class="select__input-container"><input id="country" class="select__input" type="text" role="combobox" aria-labelledby="country-label" aria-autocomplete="list" aria-expanded="false" aria-required="true" value=""></div>
+              </div>
+              <div class="select__indicators"><div class="select__indicator">v</div></div>
+            </div>
+            <input required tabindex="-1" aria-hidden="true" class="css-1x2y3z-requiredInput" style="opacity:0;position:absolute;bottom:0;left:0;right:0;width:100%" value="">
+          </div>
+        </div>
+      </div>
+      <div class="select">
+        <div class="select__container">
+          <label id="hear-label" for="hear" class="label select__label">How did you hear about us?</label>
+          <div class="select-shell">
+            <div class="select__control css-ctl">
+              <div class="select__value-container">
+                <div class="select__placeholder">Select...</div>
+                <div class="select__input-container"><input id="hear" class="select__input" type="text" role="combobox" aria-labelledby="hear-label" aria-autocomplete="list" aria-expanded="false" value=""></div>
+              </div>
+              <div class="select__indicators"><div class="select__indicator">v</div></div>
+            </div>
+            <input required tabindex="-1" aria-hidden="true" class="css-1x2y3z-requiredInput" style="opacity:0;position:absolute;bottom:0;left:0;right:0;width:100%" value="">
+          </div>
+        </div>
+      </div>
+      <div class="select">
+        <div class="select__container">
+          <label id="pronouns-label" for="pronouns" class="label select__label">Pronouns</label>
+          <div class="select-shell">
+            <div class="select__control css-ctl">
+              <div class="select__value-container">
+                <div class="select__placeholder">Select...</div>
+                <div class="select__input-container"><input id="pronouns" class="select__input" type="text" role="combobox" aria-labelledby="pronouns-label" aria-autocomplete="list" aria-expanded="false" value=""></div>
+              </div>
+              <div class="select__indicators"><div class="select__indicator">v</div></div>
+            </div>
+            
+          </div>
+        </div>
+      </div>
+
+    <div class="education--container">
+      <div class="education--form">
+        <hr>
+        <div class="education--header"><p>Education</p></div>
+      <div class="select">
+        <div class="select__container">
+          <label id="school--0-label" for="school--0" class="label select__label">School <span aria-hidden="true">*</span></label>
+          <div class="select-shell">
+            <div class="select__control css-ctl">
+              <div class="select__value-container">
+                <div class="select__placeholder">Select...</div>
+                <div class="select__input-container"><input id="school--0" class="select__input" type="text" role="combobox" aria-labelledby="school--0-label" aria-autocomplete="list" aria-expanded="false" aria-required="true" value=""></div>
+              </div>
+              <div class="select__indicators"><div class="select__indicator">v</div></div>
+            </div>
+            <input required tabindex="-1" aria-hidden="true" class="css-1x2y3z-requiredInput" style="opacity:0;position:absolute;bottom:0;left:0;right:0;width:100%" value="">
+          </div>
+        </div>
+      </div>
+      <div class="select">
+        <div class="select__container">
+          <label id="degree--0-label" for="degree--0" class="label select__label">Degree</label>
+          <div class="select-shell">
+            <div class="select__control css-ctl">
+              <div class="select__value-container">
+                <div class="select__placeholder">Select...</div>
+                <div class="select__input-container"><input id="degree--0" class="select__input" type="text" role="combobox" aria-labelledby="degree--0-label" aria-autocomplete="list" aria-expanded="false" value=""></div>
+              </div>
+              <div class="select__indicators"><div class="select__indicator">v</div></div>
+            </div>
+            <input required tabindex="-1" aria-hidden="true" class="css-1x2y3z-requiredInput" style="opacity:0;position:absolute;bottom:0;left:0;right:0;width:100%" value="">
+          </div>
+        </div>
+      </div>
+        <div class="field">
+          <label for="start-year--0">Start date year</label>
+          <input id="start-year--0" type="number" placeholder="YYYY">
+        </div>
+        <div class="field">
+          <label for="end-year--0">End date year</label>
+          <input id="end-year--0" type="number" placeholder="YYYY">
+        </div>
+      </div>
+      <button type="button" class="add-another-button">Add another</button>
+    </div>
+  </form>
+</main>
+</body>
+</html>
