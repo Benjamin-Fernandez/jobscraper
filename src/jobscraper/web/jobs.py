@@ -57,6 +57,9 @@ CommandBuilder = Callable[[str, dict[str, Any]], list[str]]
 
 KINDS = ("run", "profile", "titles", "companies", "tailor", "mailtest", "apply")
 RECORD = "current.json"
+# First words `jobscraper apply` reads as sub-verbs, never as job ids (review F11;
+# `queue` since Q-120, apply_queue_design §3.3).
+APPLY_RESERVED = frozenset({"show", "open-profile", "queue"})
 EXIT_CANCELLED = 143           # the CLI's cancel handler (128 + 15)
 KILLED_REASON = "cancelled (killed)"     # stats.reason of a run the web had to kill (D-64)
 # src/jobscraper/web/jobs.py -> src
@@ -109,13 +112,17 @@ def cli_command(config_path: Optional[str | os.PathLike] = None) -> CommandBuild
             argv += ["tailor", job_id]
         elif kind == "mailtest":                      # apply_design §14.2 (M20 lane V)
             argv += ["mail", "test"]
+        elif kind == "apply" and opts.get("queue") is True:
+            # Q-120 (apply_queue_design §3.4): the queue worker. It watches this
+            # web process and stops after the current role once it is gone.
+            argv += ["apply", "queue", "--parent-pid", str(os.getpid())]
         elif kind == "apply":                  # apply_design 14.2 (M20 lane B)
             ids = [str(j) for j in (opts.get("job_ids") or [])]
             if not ids or len(ids) > 20 or not all(
                     re.fullmatch(r"[A-Za-z0-9:_-]{1,80}", j) for j in ids):
                 raise ValueError("apply needs 1-20 job_ids of letters, digits, : _ -")
-            if {"show", "open-profile"} & set(ids):     # reserved CLI words (review F11)
-                raise ValueError("apply job_ids may not be 'show' or 'open-profile'")
+            if APPLY_RESERVED & set(ids):     # reserved CLI words (review F11, Q-120)
+                raise ValueError("apply job_ids may not be 'show', 'open-profile' or 'queue'")
             argv += ["apply", *ids] + (["--dry-run"] if opts.get("dry_run") else [])
         else:
             raise ValueError(f"unknown job kind {kind!r}")
