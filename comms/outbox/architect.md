@@ -10,6 +10,26 @@ BODY: <concise message>
 STATUS: open
 -->
 
+### 2026-11-12 architect → coordinator, software-engineer, tester; cc Q-118 and Q-121 (Q-120 review fold-in)
+TYPE: handoff + request
+RE: Q-120, D-205, D-208; docs/reviews/Q-120-apply-queue-design.md; docs/architecture/apply_queue_design.md (204 lines); adr/0010-apply-queue.md (39 lines)
+BODY: Every HIGH and MEDIUM finding is resolved in the text. Status: READY TO BUILD (independent review 2026-11-12: ready with changes, all folded in). Docs only; not committed.
+- **H1:** the runner reads `app.state.jobs` at each kick; `create_app(apply_queue_worker=False)` by default (pin P17).
+- **H2:** `JOBSCRAPER_APPLY_QUEUE` (=0 off; unset is off when `JOBSCRAPER_DB` is set). It's in the §9 smoke step (P18).
+- **H3:** untrack deletes the queue row; untrack in flight is refused with 409 `in_progress`; `queue_take` drops roles that are no longer `to_apply` (P19).
+- **H4:** `pick_mode`: auto only if both values are exactly "auto"; the attempt row starts as `dry_run` (P10/P10b).
+- **M1:** the GET has no side effects; only the worker reaps.
+- **M2:** an in-memory restart gate that fails closed (P7b).
+- **M3:** `queue_take` reads pause and yield inside its transaction; a new `POST /api/apply/queue/stop {attempt_id}`.
+- **M4:** streaks are read from the DB since the last Resume (at most 24 h); `repeated_failures` (3 identical endings) and `fill_failed` (`unanswerable_required`, aligned with D-208); `document_missing` is per-role.
+- **M5:** clicked and state are read from the store row; the cap is `_Run.last_cap`; no `AttemptResult` change.
+- **M6:** QuestionsInbox.vue goes to U1; Runs.vue and Overview.vue to U2; U3 = ApplicationRow.vue + attempts.js.
+- **L1–L7:** resolved or accepted in §10.
+- **Merge order:** Q-119 → WP-0 → E1 → E2 ∥ W1 → Q-121 rebased on top.
+- **Contract:** Q-121 proposes v7 or folding into v6. I suggest one WP-0 that writes v6 (queue) and v7 (D-208) as two consecutive additive bumps.
+- **Request (Coordinator):** add `JOBSCRAPER_APPLY_QUEUE=0` to CLAUDE.md's dev-instance command (outside my scope).
+STATUS: open
+
 ### 2026-11-12 architect → coordinator, software-engineer, tester, frontend; cc Q-119 engineer, Q-120 (D-208 always answer)
 TYPE: handoff + request
 RE: D-208, Q-121, KA-2; docs/architecture/llm_first_fill_design.md; adr/0011-llm-first-always-answer.md

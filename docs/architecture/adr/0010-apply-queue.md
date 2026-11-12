@@ -19,12 +19,21 @@ Today `POST /api/apply` starts one `apply` job for the clicked ids and answers 4
 B + 3.
 - Pause state lives in `settings` (`apply_queue.*`). System failures (profile, model, browser launch, daily limit) pause the queue and put the item back at the front, only if Submit was never clicked. Repeated CAPTCHAs or errors pause without putting it back.
 - Every web start-up pauses a non-empty queue: Resume is the fresh click.
-- An item's mode at the click is an upper bound: it never upgrades to auto.
+- An attempt runs in `auto` only when both the item's mode at the click and the effective mode at pick are exactly `auto`, never via a string comparison (review H4).
 - A search run requested while the worker is active waits for the current role, then goes before the rest of the queue.
 
 ## Consequences
-- Clicking never fails for "busy"; `POST /api/apply` and `POST /api/questions/retry` answer 202 with positions. The 409 pins change.
-- NF-05 and NF-06 machinery is reused as is. The worker is the only new code path that takes items, and it re-runs every guard at pick time.
-- Additive only: schema v6 (a new table), contract v6 (`QueuePause`, `QUEUE_PAUSE_TEXTS`, refusal texts), `GET /api/apply/status` gains `queue`.
-- Harder: other short jobs (profile, titles) still get 409 while the worker runs or holds a dry-run form; Pause frees the slot after the current role. The deferred run is in memory only.
+- Clicking never fails for "busy": `POST /api/apply` and `POST /api/questions/retry` answer 202 with positions, and the 409 pins change.
+- NF-05 and NF-06 machinery is reused as is. The worker is the only path that takes items and re-runs every guard at pick time. Only the worker reaps (at its start, under `RunLock`); the queue GET has no side effects (review M1).
+- Additive only: schema v6 (a new table), contract v6 (`QueuePause`, texts), `GET /api/apply/status` gains `queue`. `AttemptResult` is unchanged.
+- **New risk, fenced (review H1, H2):** a worker started by the web is a real `apply` process, and the repository config is `auto`.
+  - `create_app` defaults to no worker.
+  - The runner looks up `app.state.jobs` at each kick.
+  - `cmd_web` starts the 5 s tick only when `JOBSCRAPER_APPLY_QUEUE` allows it: unset is off on a dev instance (`JOBSCRAPER_DB` set).
+  - A copied DB must never drain the queue: its never-twice history is stale and the Edge profile is shared.
+- **Unattended sequences** are now possible in `auto` mode. That raises the stakes of D-208's always-answer filler. The pause rules carry it: system failures, `fill_failed`, 2 bot checks, 3 errors, 3 identical failures (streaks from the DB). So does the fail-closed restart gate.
+- **Smaller costs:**
+  - A paused or yielded worker exits 0, so its job record reads "succeeded"; the banner carries the reason.
+  - Other short jobs (profile, titles) still get 409 while the worker runs, or for up to 10 minutes while it holds a dry-run form; Pause frees the slot.
+  - The deferred search run lives in memory only.
 - Revisit if the owner wants the queue to continue by itself after a restart (one line), or wants a priority order.
