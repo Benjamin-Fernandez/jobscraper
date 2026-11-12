@@ -519,6 +519,11 @@ onMounted(() => Promise.all([loadProfile(), refresh(), ...(view.value === 'resum
 /* Skills. */
 .chips { list-style: none; padding: 0; margin: 0; display: flex; flex-wrap: wrap; gap: var(--space-2); }
 .more-skills { margin-top: var(--space-2); padding-left: 0; min-height: 0; }
+/* Phone: the quiet toggles and the log summary get a real 44px box. */
+@media (max-width: 640px) {
+  .summary-toggle, .more-skills { min-height: var(--touch-min); }
+  .job-details > summary { display: flex; align-items: center; min-height: var(--touch-min); }
+}
 .interests-group { margin-top: var(--space-4); padding-top: var(--space-3); border-top: 1px solid var(--border); }
 .interests-group h4 { margin: 0 0 var(--space-2); font-size: var(--text-sm); font-weight: var(--weight-semibold); }
 

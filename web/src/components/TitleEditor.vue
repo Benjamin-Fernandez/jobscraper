@@ -276,6 +276,28 @@ onMounted(() => {
 .te-s-title { font-weight: var(--weight-semibold); }
 .te-s-why { color: var(--muted); font-size: var(--text-xs); }
 .te-foot { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: var(--space-2); }
+/* Phone: a recommendation is one full-width row (title above its reason, plus at the
+   start) and the touch targets are real 44px boxes, not just padded hit areas. */
+@media (max-width: 640px) {
+  .te-suggestions { flex-direction: column; flex-wrap: nowrap; }
+  .te-suggestions li { width: 100%; }
+  .te-suggestion {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    column-gap: var(--space-2);
+    align-items: center;
+    width: 100%;
+    min-height: var(--touch-min);
+    padding: var(--space-2) var(--space-3);
+    border-radius: var(--radius-lg);
+  }
+  .te-suggestion .icon { grid-column: 1; grid-row: 1 / span 2; }
+  .te-s-title { grid-column: 2; min-width: 0; overflow-wrap: anywhere; }
+  .te-s-why { grid-column: 2; min-width: 0; white-space: normal; overflow-wrap: anywhere; }
+  .te-chip { min-height: var(--touch-min); }
+  .te-remove { width: var(--touch-min); height: var(--touch-min); min-height: var(--touch-min); }
+  .te-remove::after { content: none; }
+}
 .te-sk-title { width: 10rem; height: 1.1rem; }
 .te-sk-body { height: 6rem; }
 </style>
