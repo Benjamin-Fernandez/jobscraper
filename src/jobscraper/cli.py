@@ -286,8 +286,18 @@ def cmd_web(args) -> int:
     # Jobs started from the web app re-invoke the CLI; they must use the same
     # config the web app was started with (`--config X web`).
     mail_timer = mail_timer_wanted(os.environ)
+    # The auto-apply queue worker (apply_queue_design §3.4, review H2): on for the real
+    # app, off with JOBSCRAPER_APPLY_QUEUE=0 or on a dev copy (JOBSCRAPER_DB set, switch
+    # unset). A build without the queue's web module starts no worker.
+    queue_kw = {}
+    try:
+        from .web.applyqueue import apply_queue_wanted
+    except ImportError:
+        pass
+    else:
+        queue_kw["apply_queue_worker"] = apply_queue_wanted(os.environ)
     uvicorn.run(create_app(cfg, config_path=getattr(args, "config", None),
-                           mail_timer=mail_timer),
+                           mail_timer=mail_timer, **queue_kw),
                 host=host, port=port, log_level="warning")
     return 0
 
