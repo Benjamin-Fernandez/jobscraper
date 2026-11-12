@@ -210,14 +210,31 @@ def untrack(request: Request, job_id: str = JOB_ID) -> Any:
     transaction (the store). A role being applied to right now is refused with
     409 `in_progress` and nothing is deleted: a cancel could land after the
     Submit click, and that attempt's audit should keep its application row.
+
+    The check and the delete are one write transaction (review F5): BEGIN
+    IMMEDIATE takes SQLite's write lock before the check, so the worker's
+    `queue_take` (itself BEGIN IMMEDIATE) either committed before it - and the
+    role reads as in flight - or waits until the role and its queue row are gone,
+    and then finds nothing to take.
     """
     with open_store(request) as store:
+        begin = getattr(store, "begin_immediate", None)
         live_of = getattr(store, "live_attempt", None)
-        if callable(live_of) and live_of(job_id) is not None:
-            copy = QUEUE_REFUSAL_TEXTS["in_progress"]
-            return JSONResponse({"detail": "in_progress", "text": copy.text,
-                                 "hint": copy.hint}, status_code=409)
-        deleted = store.delete_application(job_id)
+        rollback = getattr(store, "rollback", None)
+        if callable(begin):
+            begin()
+        try:
+            if callable(live_of) and live_of(job_id) is not None:
+                if callable(rollback):
+                    rollback()                              # release the write lock
+                copy = QUEUE_REFUSAL_TEXTS["in_progress"]
+                return JSONResponse({"detail": "in_progress", "text": copy.text,
+                                     "hint": copy.hint}, status_code=409)
+            deleted = store.delete_application(job_id)      # commits the transaction
+        except BaseException:
+            if callable(rollback):
+                rollback()
+            raise
     if not deleted:
         raise HTTPException(status_code=404, detail=f"no application for {job_id!r}")
     return {"job_id": job_id, "deleted": True}
