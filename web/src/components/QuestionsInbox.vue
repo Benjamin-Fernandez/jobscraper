@@ -11,7 +11,7 @@
 // owns the file (`etag` prop) or, when this is used alone, fetched.
 import { computed, onMounted, ref, watch } from 'vue'
 import {
-  ApiError, answerQuestion, describeError, dismissQuestion, getApplicant, getQuestions, problemOf, retryQuestions,
+  ApiError, answerQuestion, describeError, dismissQuestion, enqueueMessage, getApplicant, getQuestions, problemOf, retryQuestions,
 } from '../api.js'
 import { findItem } from '../applicantForm.js'
 import { plural } from '../format.js'
@@ -46,7 +46,6 @@ const knownEtag = ref(null)   // the etag an answer just returned, until the par
 const groups = computed(() => (open.value?.groups ?? []).filter(g => !g.status || g.status === 'open'))
 const ready = computed(() => open.value?.ready ?? [])
 const mode = computed(() => open.value?.mode ?? 'dry_run')
-const busy = computed(() => !!open.value?.busy)
 // D-105: the Private tag's words follow the server's effective switch.
 const seesPrivate = computed(() => !!open.value?.model_sees_private)
 const form = computed(() => props.form ?? fetched.value?.form ?? null)
@@ -148,19 +147,21 @@ async function retry() {
   retrying.value = true
   retryProblem.value = ''
   try {
-    await retryQuestions(sending.value.map(r => r.job_id))
+    // Q-120: the retry adds them to the auto-apply queue (202 `queued`); it never waits
+    // on a running job, and says what really happened (queued, paused, switched off).
+    const r = await retryQuestions(sending.value.map(x => x.job_id))
+    const refused = Array.isArray(r?.refused) ? r.refused.map(x => x.text).filter(Boolean) : []
     showToast({
-      message: mode.value === 'auto'
-        ? 'Started. The applications are being filled in and sent in Edge.'
-        : 'Started. Dry run: everything is filled in and nothing is sent.',
-      link: { label: 'Follow it on the Developer tab', href: '#/developer' },
+      message: [enqueueMessage(r), ...refused].join(' '),
+      link: { label: 'See the queue', href: '#/runs' },
     })
+    window.dispatchEvent(new Event('jobscraper:apply-queue'))
     await load()
   } catch (e) {
     const p = problemOf(e)
-    if (p.status === 409) retryProblem.value = 'Another job is running. Retry when it finishes.'
+    if (p.code === 'profile_incomplete') retryProblem.value = 'Finish your application details first.'
     else if (p.status === 422) retryProblem.value = "Some of those applications can't go again yet. The list has been refreshed."
-    else retryProblem.value = `Could not start the retry: ${p.text}`
+    else retryProblem.value = `Could not add them to the auto-apply queue: ${p.text}`
     await load()
   } finally {
     retrying.value = false
@@ -215,10 +216,9 @@ defineExpose({ load })
             <button type="button" class="retry-no" @click="confirming = false">Not now</button>
           </div>
         </div>
-        <button v-else type="button" class="primary retry" :disabled="retrying || busy" @click="askRetry">
+        <button v-else type="button" class="primary retry" :disabled="retrying" @click="askRetry">
           Retry {{ plural(sending.length, 'application') }}
         </button>
-        <p v-if="busy" class="muted busy">Another job is running. Retry when it finishes.</p>
         <p v-if="retryProblem" class="notice error retry-problem" role="alert">{{ retryProblem }}</p>
       </div>
 
@@ -280,7 +280,6 @@ defineExpose({ load })
 .none { padding: var(--space-5) var(--space-4); }
 .ready { display: grid; gap: var(--space-2); padding: var(--space-3) var(--space-4); justify-items: start; }
 .ready-text { margin: 0; font-weight: 600; font-size: var(--text-sm); }
-.busy { margin: 0; font-size: var(--text-sm); }
 .retry-problem { margin: 0; }
 .confirm { display: grid; gap: var(--space-2); padding: var(--space-3); background: var(--warn-soft); border-radius: var(--radius); }
 .confirm p { margin: 0; font-size: var(--text-sm); }
