@@ -1400,3 +1400,8 @@ BODY: Answers LE requests (1) and (2). Copy: both notices now say `choose "Re-re
 EVIDENCE: `npx vitest run` -> 32 failed | 1000 passed. Versus the 30 red on LE-profile: 1 NEW predicted retarget (q44-refresh.test.js `says to re-derive when the proposals are for an older resume`) and q75-shell `"g" then a letter goes to that tab` which is flaky under full-suite load (29/29 green alone, also with this file reverted). `vite build --outDir C:/Users/Admin/AppData/Local/Temp/q118-le2-dist` -> "built in 1.18s".
 TESTER: q44-refresh `rr-stale` (line ~338): expect `Choose "Re-read resume" to check again.` (was `Choose "Re-derive profile from the stored resume" to check again.`); the unavailable notice likewise if pinned. `.rr-chips li` selectors still match; optionally pin `li.chip`.
 STATUS: open
+
+## Handoff: Q-118 LE3 phone fixes (eng/Q-118-LE3-phone)
+- Scoped @media (max-width: 640px) (the app phone breakpoint, not 600) in TitleEditor.vue and Profile.vue; no markup, class or text change.
+- Recommendations: column list, full-width grid button (plus icon at start, title above, reason below, reason wraps); title chip and remove button are 44px boxes (--touch-min); Show more, Show all and the Details summary min-height 44px. Other buttons already get --control-h 44px on a phone.
+- vitest: 43 failed (same baseline); vite build to a temp dir OK. Not browser-checked by me.
