@@ -12,7 +12,9 @@
 // posting on the company's site asks afterwards whether you applied, the way
 // LinkedIn does, so the record is one click away.
 import { computed, nextTick, onActivated, onBeforeUnmount, onDeactivated, onMounted, ref, watch } from 'vue'
-import { ApiError, applyStatus, describeError, setApplicationStatus, startAutoApply, untrackApplication } from '../api.js'
+import {
+  ApiError, applyStatus, describeError, enqueueMessage, removeFromApplyQueue, setApplicationStatus, startAutoApply, untrackApplication,
+} from '../api.js'
 import { dismiss, dismissedAt, isDismissed, migrateSessionDismissals, restore } from '../dismissed.js'
 import { cleanLocation, exactTime, plural, safeUrl, shortDate } from '../format.js'
 import { loadPosting, postingEntry } from '../postingCache.js'
@@ -273,6 +275,10 @@ async function markNotInterested(job) {
       writeError.value = `Could not mark ${job.company} · ${job.title} as not interested: ${describeError(e)}`
       return
     }
+    // A role this page put in the auto-apply queue must not stay there (Q-120).
+    await leaveQueue(job).catch(e => {
+      writeError.value = `${job.company} · ${job.title} may still be in the auto-apply queue: ${describeError(e)}`
+    })
     showToast({
       message: `Moved to Not interested: ${job.title} at ${job.company}`,
       action: { label: 'Undo', run: () => spendUndo(() => moveBack(job, { undoing: true })) },
@@ -310,15 +316,26 @@ function chooseRuns() {
   window.location.hash = '#/runs'
 }
 
-// ---- Auto-apply (Q-110, F-30, D-200, D-203): the owner's click is the only trigger ----
-// D-203: the click is the consent. In auto mode it fills the form and submits it, with
-// no confirm dialog in any mode; dry_run only fills and never submits.
-// `applyState` is GET /api/apply/status ({mode, missing, busy}); null until it
-// loads or when it cannot, which keeps the button off rather than guessing.
+// ---- Auto-apply (Q-110, F-30, D-200, D-203; the queue, Q-120, D-205) ----
+// D-203: the click is the consent. In auto mode the worker fills the form and submits
+// it, with no confirm dialog in any mode; dry_run only fills and never submits.
+// D-205: the click ADDS the role to the auto-apply queue and the server's worker applies
+// in the background, so the owner keeps adding roles. Nothing here waits for a running
+// job: the button is off only when the profile is incomplete or the status is unknown.
+// `applyState` is GET /api/apply/status ({mode, missing, busy, queue}); null until it
+// loads or when it cannot, which keeps the button off rather than guessing. Its `busy`
+// is deliberately not read.
 const applyState = ref(null)
-const starting = ref(false)
-const applyReady = computed(() => Boolean(applyState.value)
-  && applyState.value.missing.length === 0 && !applyState.value.busy)
+const applying = ref(new Set())        // role ids whose enqueue request is in flight (per role, no global lock)
+const queuedIds = new Set()            // roles this page put in the queue (for Not interested)
+const applyReady = computed(() => Boolean(applyState.value) && applyState.value.missing.length === 0)
+
+const APPLY_HINTS = {
+  auto: 'Adds this role to the auto-apply queue. JobScraper fills the form and submits it.',
+  dry_run: 'Adds this role to the auto-apply queue. Dry run: the form is filled, never submitted.',
+}
+const applyHint = computed(() => APPLY_HINTS[applyState.value?.mode] ?? APPLY_HINTS.dry_run)
+const applyOff = job => !applyReady.value || busy.value || applying.value.has(job.id)
 
 async function loadApplyStatus() {
   try {
@@ -330,40 +347,114 @@ async function loadApplyStatus() {
 }
 onMounted(loadApplyStatus)
 
+// The Applications tab and Runs listen for this and refresh their queue views.
+const announceQueue = () => window.dispatchEvent(new Event('jobscraper:apply-queue'))
+
 // What a 422 means, in the owner's words: the refusals' own sentences, or the profile.
 function refusalText(body) {
   if (body?.detail === 'profile_incomplete') return 'Finish your application details first.'
   const refused = Array.isArray(body?.refused) ? body.refused : []
   const texts = refused.map(r => [r.text, r.hint].filter(Boolean).join(' '))
-  return texts.length ? texts.join(' ') : 'Could not start auto-apply.'
+  return texts.length ? texts.join(' ') : 'Could not add this role to the auto-apply queue.'
+}
+
+function setApplying(id, on) {
+  const next = new Set(applying.value)
+  if (on) next.add(id)
+  else next.delete(id)
+  applying.value = next
+}
+
+// The role goes back into the list: the enqueue failed or was taken back.
+function putBack(job) {
+  unpend(job.id)
+  selectedId.value = job.id
 }
 
 async function autoApply(job) {
-  if (!applyReady.value || starting.value) return
-  starting.value = true
+  if (applyOff(job)) return
+  const hadFocus = hasFocus()
+  setApplying(job.id, true)
+  // On success the server tracks the role as To apply, so it leaves the list at the
+  // click (the same local removal Save uses); it comes back if the request fails.
+  const next = neighbour(job)
+  pending.value = new Set(pending.value).add(job.id)
+  selectedId.value = next
   try {
     const r = await startAutoApply([job.id])
     const refused = Array.isArray(r?.refused) ? r.refused.map(x => x.text).filter(Boolean) : []
-    showToast({
-      message: ['Auto-apply started.',
-        (r?.mode || applyState.value?.mode) === 'dry_run'
-          ? 'Dry run: the form is filled in Edge and left open; nothing is submitted.'
-          : 'JobScraper fills the form in Edge and submits it.',
-        ...refused].filter(Boolean).join(' '),
-      link: { label: 'Follow it in Runs', href: '#/runs' },
-    })
+    const mine = Array.isArray(r?.queued) ? r.queued.filter(q => String(q.job_id) === String(job.id)) : []
+    if (mine.length) {
+      queuedIds.add(job.id)
+      rememberUndo(() => undoQueued(job))
+      showToast({
+        message: [enqueueMessage({ ...r, queued: mine }), ...refused].join(' '),
+        action: { label: 'Undo', run: () => spendUndo(() => undoQueued(job)) },
+        link: { label: 'See the queue', href: '#/runs' },
+      })
+    } else {
+      putBack(job)        // refused (a twin, the daily cap, ...): it stays where it was
+      showToast({ message: refused.length ? refused.join(' ') : refusalText(r) })
+    }
+    quiet.value = true
+    emit('changed')
+    announceQueue()
   } catch (e) {
-    if (e instanceof ApiError && e.status === 409) {
-      showToast({ message: 'Another job is running; try again when it finishes.' })
-    } else if (e instanceof ApiError && e.status === 422) {
+    putBack(job)
+    if (e instanceof ApiError && e.status === 422) {
       showToast({ message: refusalText(e.body) })
     } else {
-      showToast({ message: `Could not start auto-apply: ${describeError(e)}` })
+      showToast({ message: `Could not add this role to the auto-apply queue: ${describeError(e)}` })
     }
   } finally {
-    starting.value = false
+    setApplying(job.id, false)
     loadApplyStatus()
   }
+  if (hadFocus) refocus()
+}
+
+// Take a role this page queued out of the queue. 404 `not_waiting` is fine: it has
+// started or is gone, and there is nothing to remove.
+async function leaveQueue(job) {
+  if (!queuedIds.has(job.id)) return
+  try {
+    await removeFromApplyQueue(job.id)
+  } catch (e) {
+    if (!(e instanceof ApiError && e.status === 404)) throw e
+  }
+  queuedIds.delete(job.id)
+  announceQueue()
+}
+
+// Undo for an enqueue: out of the queue, then untracked, so the role is back as new.
+// Once the worker has started it, it cannot be taken back here (the queue answers 404
+// not_waiting, an untrack 409 in_progress): Runs has Stop.
+async function undoQueued(job) {
+  const started = () => showToast({ message: 'It has already started; stop it in Runs.' })
+  const hadFocus = hasFocus()
+  try {
+    await removeFromApplyQueue(job.id)
+  } catch (e) {
+    if (e instanceof ApiError && e.status === 404) { started(); return }
+    writeError.value = `Could not undo ${job.company} · ${job.title}: ${describeError(e)}`
+    return
+  }
+  queuedIds.delete(job.id)
+  try {
+    await untrackApplication(job.id)
+  } catch (e) {
+    if (e instanceof ApiError && e.status === 409) { announceQueue(); started(); return }
+    if (!(e instanceof ApiError && e.status === 404)) {
+      writeError.value = `Could not undo ${job.company} · ${job.title}: ${describeError(e)}`
+      announceQueue()
+      return
+    }
+  }
+  putBack(job)
+  quiet.value = true
+  emit('changed')
+  announceQueue()
+  if (hadFocus) refocus()
 }
 
 function markOpened(job) {
@@ -587,10 +678,8 @@ onDeactivated(() => window.removeEventListener('keydown', onShortcut))
               <button
                 type="button"
                 class="button primary auto-apply"
-                :disabled="!applyReady || busy || starting"
-                :title="applyState?.mode === 'dry_run'
-                  ? 'Auto-apply mode: dry run (fills, never submits)'
-                  : 'Auto-apply fills the form and submits it for you.'"
+                :disabled="applyOff(selected)"
+                :title="applyHint"
                 @click="autoApply(selected)"
               >
                 <Icon name="briefcase" /> Auto-apply
@@ -622,9 +711,7 @@ onDeactivated(() => window.removeEventListener('keydown', onShortcut))
                 <a class="auto-apply-profile" href="#/profile">Finish your application details first</a>
                 ({{ applyState.missing.length }} missing).
               </template>
-              <template v-else-if="applyState.busy">Another job is running.</template>
-              <template v-if="applyState.mode === 'auto'">Auto-apply fills the form and submits it for you.</template>
-              <template v-else>Auto-apply mode: dry run (fills, never submits)</template>
+              <template v-else>{{ applyHint }}</template>
             </p>
             <p class="shortcuts muted">
               <template v-if="shortcutsOn">
