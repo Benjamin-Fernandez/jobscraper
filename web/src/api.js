@@ -417,24 +417,3 @@ export function applyStatus() {
 export function startAutoApply(jobIds) {
   return sendJson('apply', 'POST', { job_ids: jobIds })
 }
-
-// ---- Q-111: the owner's auto-apply settings ----
-
-// GET /api/apply/settings -> { mode: 'auto'|'dry_run', daily_cap, per_employer_daily_cap,
-// headed, captcha_wait_s, compose_enabled, writable: true, defaults: {the same six keys
-// from config.yaml alone} }. Values are the effective ones (settings table over config).
-// 0 for either cap means no limit. (Settings -> Apply reads this through
-// connections_api.js `getApplySettings`, which tolerates a missing route; this is the
-// plain call.)
-export function getApplySettings() {
-  return request('apply/settings')
-}
-
-// PUT /api/apply/settings with only the keys being changed (any non-empty subset of the
-// six). 200 returns the GET shape. 422 {detail:'invalid', errors:[{field, message}]}
-// changes nothing; e.body carries the list. Ranges: daily_cap 0-500,
-// per_employer_daily_cap 0-100, captcha_wait_s 0-600, mode auto|dry_run, headed and
-// compose_enabled booleans. Takes effect on the next apply job.
-export function saveApplySettings(changes) {
-  return sendJson('apply/settings', 'PUT', changes)
-}
