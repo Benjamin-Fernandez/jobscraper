@@ -14,7 +14,7 @@
     python -m jobscraper purge       delete job descriptions past their time to live
     python -m jobscraper applicant   check the applicant profile for application forms
     python -m jobscraper mail        store the mailbox app password, test the mailbox
-    python -m jobscraper apply       auto-apply (dry run, show, open-profile)
+    python -m jobscraper apply       auto-apply (dry run, show, open-profile, queue)
 """
 from __future__ import annotations
 
@@ -286,8 +286,18 @@ def cmd_web(args) -> int:
     # Jobs started from the web app re-invoke the CLI; they must use the same
     # config the web app was started with (`--config X web`).
     mail_timer = mail_timer_wanted(os.environ)
+    # The auto-apply queue worker (apply_queue_design §3.4, review H2): on for the real
+    # app, off with JOBSCRAPER_APPLY_QUEUE=0 or on a dev copy (JOBSCRAPER_DB set, switch
+    # unset). A build without the queue's web module starts no worker.
+    queue_kw = {}
+    try:
+        from .web.applyqueue import apply_queue_wanted
+    except ImportError:
+        pass
+    else:
+        queue_kw["apply_queue_worker"] = apply_queue_wanted(os.environ)
     uvicorn.run(create_app(cfg, config_path=getattr(args, "config", None),
-                           mail_timer=mail_timer),
+                           mail_timer=mail_timer, **queue_kw),
                 host=host, port=port, log_level="warning")
     return 0
 
@@ -1230,6 +1240,11 @@ def cmd_apply(args) -> int:
     except (AttributeError, ValueError):
         pass
     words = list(args.words)
+    if words[0] == "queue":
+        return _apply_queue(args, words[1:])
+    if getattr(args, "parent_pid", None) is not None:
+        print("apply: --parent-pid goes with `apply queue` only", file=sys.stderr)
+        return 2
     if words[0] == "show":
         return _apply_show(args, words[1:])
     if words[0] == "open-profile":
@@ -1259,6 +1274,60 @@ def cmd_apply(args) -> int:
             print(f"{r.job_id[:28]:<28} {r.attempt_id:>7}  {r.state.value:<22} {reason[:80]}")
         print(BAR)
         return 0 if results and all(r.ok for r in results) else 1
+    finally:
+        store.close()
+
+
+EXIT_APPLY_LOCKED = 3      # `apply queue`: another apply run holds RunLock (review L2)
+
+
+def _parent_gone(pid: int):
+    """`should_stop` for `apply queue --parent-pid N` (apply_queue_design §3.3): True
+    once the web process that started the worker is gone, or its PID now names
+    another process (the identity recorded at start differs)."""
+    from .web import jobs as web_jobs                # lazy: cli is exempt from layering
+
+    ident = web_jobs.process_identity(pid)
+
+    def gone() -> bool:
+        if not web_jobs.pid_alive(pid):
+            return True
+        return ident is not None and web_jobs.process_identity(pid) != ident
+    return gone
+
+
+def _apply_queue(args, rest: list[str]) -> int:
+    """`apply queue [--parent-pid N] [--dry-run]` (apply_queue_design §3.3, D-205): the
+    auto-apply queue worker. One role at a time until the queue is empty, paused or a
+    search run asks to go first; each role's mode is `pick_mode`'s (I5), `--dry-run`
+    makes every role a dry run. Exit 0 on every orderly end (item failures and pauses
+    included), 3 when another apply run holds the lock, 2 on bad arguments, 143 when
+    cancelled. Log lines are redacted as in `apply <ids>`."""
+    if rest:
+        print("apply queue: takes no job ids (the queue holds them)", file=sys.stderr)
+        return 2
+    pid = getattr(args, "parent_pid", None)
+    if pid is not None and pid <= 0:
+        print("apply queue: --parent-pid must be a positive process id", file=sys.stderr)
+        return 2
+    from . import apply_flow
+
+    cfg, store = _boot_v2(args)
+    try:
+        acfg = _effective_apply(cfg, store)
+        backend = backends.build(cfg.budget)
+        if acfg.fill == "llm" and hasattr(backend, "num_ctx"):
+            backend.num_ctx = acfg.llm_fill.num_ctx       # as cmd_apply (llm_fill_design §13.4)
+        out = apply_flow.run_queue(
+            cfg, store, backend=backend, apply_cfg_fn=lambda: _effective_apply(cfg, store),
+            should_stop=_parent_gone(pid) if pid is not None else None,
+            force_dry_run=bool(args.dry_run))
+        if out.lock_refused:
+            print("queue: another apply run holds the browser; nothing was taken")
+            return EXIT_APPLY_LOCKED
+        print(f"queue: {len(out.results)} finished, {out.waiting} waiting, "
+              f"paused: {out.paused or 'no'}")
+        return 0
     finally:
         store.close()
 
@@ -1509,12 +1578,15 @@ def build_parser() -> argparse.ArgumentParser:
     ac.set_defaults(fn=cmd_accounts)
     # --- apply (M20 lane B)
     apl = sub.add_parser("apply", help="auto-apply to jobs (dry run: fill, never send); "
-                                       "`apply show ID`, `apply open-profile [URL]`")
+                                       "`apply show ID`, `apply open-profile [URL]`, "
+                                       "`apply queue`")
     apl.add_argument("words", nargs="+", metavar="JOB_ID",
                      help="job ids (up to 20); or `show <job_id|attempt_id>`; "
-                          "or `open-profile [URL]`")
+                          "or `open-profile [URL]`; or `queue` (the auto-apply queue worker)")
     apl.add_argument("--dry-run", action="store_true",
                      help="fill every form and stop before Submit (wins over apply.mode)")
+    apl.add_argument("--parent-pid", type=int, default=None, metavar="N",
+                     help="`apply queue` only: stop after the current role once process N is gone")
     apl.set_defaults(fn=cmd_apply)
     return p
 
