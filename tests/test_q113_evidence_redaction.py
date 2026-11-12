@@ -230,6 +230,91 @@ def test_d202_d_quote_checked_is_true_only_for_the_resume_job_route_and_the_grou
     assert cases[3][1].confidence == G.CONF_KEEP_TRUSTED, "precondition: the trusted keep route"
 
 
+# ------------------------------------------------------------------ fix round: rows pagefill rewrites keep their quote
+
+def _assert_redacted(what, ev):
+    assert PRIVATE in ev, (what, ev)
+    for m in ("xe/xem", "Plumbago-7731", H.SALARY):
+        assert m not in ev, f"{what}: evidence still holds {m[:3]!r}..."
+
+
+def test_d202_h_rows_pagefill_rewrites_are_not_checked_and_keep_their_quote_redacted():
+    """Review F1. A rejected optional that the step-12 required scan rewrites to FILL_FAILED (real `_outcome`, with
+    `run.failed` set as `_required_scan` sets it), and a rejected or trusted-keep row rewritten to PREFILLED at
+    CONF_UNVERIFIED (real `_clear_failed_optional`; the widget's reset is stubbed to fail, as a site that ignores it)
+    keep their evidence but are NOT `quote_checked`: the audit row and the cache row hold it redacted."""
+    from types import SimpleNamespace
+    quote = "xe/xem Plumbago-7731 " + H.SALARY
+    rctx = dataclasses.replace(T.rctx(H._d201_profile()), model_sees_sensitive=True)
+    # (a) FILL_FAILED by the required scan
+    f1 = T.pf("f1", WHY, FT.TEXTAREA, required=False)
+    run, _d, _svc, _fb = _decide_page(rctx, [f1], [_page_reply((WHY, "resume", "I built a tool", quote))])
+    assert run.answers["f1"].status is AS.BLANK_OPTIONAL and run.answers["f1"].evidence, "precondition: a rejected quote"
+    run.failed["f1"] = "required_scan"
+    out = PF._outcome(run)
+    a = out.answers["f1"]
+    assert a.status is AS.FILL_FAILED and a.evidence, (a.status, a.note)
+    assert G.quote_checked(a) is False, "a rejected quote made FILL_FAILED is not checked"
+    _assert_redacted("FILL_FAILED row", apply_flow.audit_row("questions", f1.field, a, tuple(run.qv))["evidence"])
+    # (b) PREFILLED at CONF_UNVERIFIED: a rejected row and a trusted keep
+    f2 = T.pf("f2", "Describe your hobbies", FT.TEXT, required=False)
+    f3 = T.pf("f3", "Describe your background", FT.TEXT, required=False, shown="Typed site text",
+              origin=ValueOrigin.MYGREENHOUSE)
+    run, _d, svc, _fb = _decide_page(rctx, [f2, f3], [_page_reply(
+        ("Describe your hobbies", "resume", "a hobby", quote),
+        ("Describe your background", "keep", "", quote))])
+    assert run.answers["f2"].status is AS.BLANK_OPTIONAL and run.answers["f2"].evidence, "precondition: rejected"
+    assert run.answers["f3"].confidence == G.CONF_KEEP_TRUSTED and run.answers["f3"].evidence,         "precondition: a trusted keep with a quote"
+    run.failed.update(f2="readback", f3="readback")
+    saved = PF.W.reset_field
+    PF.W.reset_field = lambda page, pf: SimpleNamespace(ok=False, shown="Typed site text")
+    try:
+        PF._clear_failed_optional(run)
+    finally:
+        PF.W.reset_field = saved
+    svc.puts.clear()
+    PF._cache_put(run)
+    cache = {r["field_sig"]: r["decision"]["evidence"] for put in svc.puts for r in put}
+    assert len(cache) == 2, "both rewritten rows are cached"
+    for key, f in (("f2", f2), ("f3", f3)):
+        a = run.answers[key]
+        assert a.status is AS.PREFILLED and a.confidence == G.CONF_UNVERIFIED and a.evidence, (key, a.status)
+        assert G.quote_checked(a) is False, f"{key}: a PREFILLED row at CONF_UNVERIFIED is not checked"
+        _assert_redacted(f"{key} audit row", apply_flow.audit_row("questions", f.field, a, tuple(run.qv))["evidence"])
+        _assert_redacted(f"{key} fill_cache row", cache[run.sigs[key]])
+
+
+def test_d202_i_a_rejected_decisions_cached_value_is_redacted_a_checked_ones_replays_verbatim():
+    """Tester O1. fill_cache keeps the model's `value` for resume/job/keep decisions. A decision G3 rejected has its
+    value stored with private values as "[private]" (the legal name stays); an accepted, checked decision's value is
+    stored verbatim, and a second run replays it to the same FILLED value with no model call."""
+    resume = "Alex Testcase\nSingapore Citizen building REST APIs in Python and Postgres.\n"
+    jd = "We build logistics software in Python.\n"
+    rctx = dataclasses.replace(T.rctx(H._d201_profile(), resume_text=resume, jd_text=jd), model_sees_sensitive=False)
+    assert "singapore citizen" in F.enum_s_values(rctx.profile), "precondition: the value holds a private word"
+    fa, fb_, fc = (T.pf("a", "Describe your background", FT.TEXT), T.pf("b", WHY, FT.TEXTAREA),
+                   T.pf("c", "Describe the employer", FT.TEXT))
+    good_v = "Singapore Citizen building REST APIs"
+    bad_v = "Zyxquill built a Plumbago-7731 tool earning " + H.SALARY
+    replies = [_page_reply(("Describe your background", "resume", good_v, "Singapore Citizen building REST APIs"),
+                           (WHY, "resume", bad_v, "Plumbago-7731 " + H.SALARY),
+                           ("Describe the employer", "job", bad_v, "Plumbago-7731 " + H.SALARY))]
+    run1, _d, svc1, _f1 = _decide_page(rctx, [fa, fb_, fc], replies)
+    assert run1.answers["a"].status is AS.FILLED, (run1.answers["a"].status, run1.answers["a"].note)
+    for k in ("b", "c"):
+        assert run1.answers[k].status is AS.BLANK_OPTIONAL and run1.answers[k].note.startswith("G3"),             (k, run1.answers[k].note)
+    vals = {r["field_sig"]: r["decision"]["value"] for put in svc1.puts for r in put}
+    assert vals[run1.sigs["a"]] == good_v, "a checked decision's value is stored verbatim"
+    for k in ("b", "c"):
+        v = vals[run1.sigs[k]]
+        assert PRIVATE in v and "Plumbago-7731" not in v and H.SALARY not in v and "Zyxquill" in v, (k, v)
+    rows = [r for put in svc1.puts for r in put]
+    run2, _d2, _svc2, fake2 = _decide_page(rctx, [fa, fb_, fc], [], rows=rows)
+    assert not fake2.calls, "run 2 made no model call"
+    assert (run2.answers["a"].status, run2.answers["a"].value) == (AS.FILLED, good_v), "same FILLED value on replay"
+    assert run2.answers["b"].status is AS.BLANK_OPTIONAL and run2.answers["c"].status is AS.BLANK_OPTIONAL
+
+
 # ------------------------------------------------------------------ pin 5: rows that are not model decisions (review F2)
 
 def test_d202_e_rows_that_are_not_model_decisions_keep_their_audit_evidence_byte_identical():
