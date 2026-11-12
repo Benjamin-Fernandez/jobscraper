@@ -406,7 +406,12 @@ def test_declaration_classifier_labels_each_class_and_flags_ambiguity():
 def test_company_match_rules():
     m = importlib.import_module("jobscraper.apply.declarations").company_match
     assert m("DBS Bank Ltd", "DBS")
-    assert m("Grab", "Grab Financial Group")
+    # Q-121 F6 (Coordinator): "financial" is not a generic word - unrelated firms share a first word
+    # plus "Financial" (Prudential plc / Prudential Financial); the affiliate is matched by an alias.
+    assert not m("Grab", "Grab Financial Group") and not m("Grab Financial Group", "Grab")
+    prior = importlib.import_module("jobscraper.apply.declarations").prior_employment
+    entry = {"experience": [{"employer": "Grab Financial Group"}]}
+    assert not prior(entry, "Grab") and prior(entry, "Grab", ("Grab Financial Group",))   # the alias case
     assert m("Example Logistics Pte Ltd", "example logistics")
     assert not m("Example Logistics", "Sample Analytics")
     assert not m("Acme", "Apex Acme")
