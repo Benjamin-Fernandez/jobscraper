@@ -1,5 +1,5 @@
 // Q-75 lane J pins (Companies, Runs, Settings polish): inline Clear-list confirm
-// (G26), one set of counts (G25), density / A-Z jump / source chip (G30), the Runs
+// (G26), one set of counts (G25), density (G30; the A-Z jump and source chip went with Q-118 LD), the Runs
 // error state (G20), why a run aborted and the failed link (G27), thousands
 // separators and plain cadence wording (G37), Settings cycle keys and notices
 // that clear (N17), and the theme switch (G40).
@@ -15,7 +15,7 @@ import { THEME_KEY, applyTheme, setTheme, storedTheme } from '../src/theme.js'
 import { resetSeenJobs } from '../src/composables/useJob.js'
 import { resetDismissed } from '../src/dismissed.js'
 import { dismissToast } from '../src/toast.js'
-import { fakeApi, setHash } from './helpers.js'
+import { chooseMore, companyRows, fakeApi, healthOf, legendItem, legendOf, setHash, utcStamp } from './helpers.js'
 
 let api
 function useApi(options) {
@@ -53,16 +53,18 @@ describe('Companies: Clear list asks in place (G26)', () => {
     useApi({ companies })
     const w = mount(Companies, { props: { run: 'all', jobs: [] }, attachTo: document.body })
     await flushPromises()
-    await w.find('.view-list').trigger('click')
     return w
   }
+
+  // Q-118 LD: "Clear list…" is an item of the More menu (it was a button in the list head).
+  const clearItem = async w => chooseMore(w, 'Clear list…')
 
   it('Clear list opens a question with Keep list focused first; no window.confirm', async () => {
     const confirmSpy = vi.fn(() => true)
     vi.stubGlobal('confirm', confirmSpy)
     const w = await mountList()
     expect(w.find('.clear-ask').exists()).toBe(false)
-    await w.find('.clear').trigger('click')
+    await clearItem(w)
     expect(w.find('.clear-ask').exists()).toBe(true)
     expect(w.find('.clear-ask').attributes('role')).toBe('group')
     expect(document.activeElement).toBe(w.find('.keep-list').element)
@@ -70,27 +72,29 @@ describe('Companies: Clear list asks in place (G26)', () => {
     expect(confirmSpy).not.toHaveBeenCalled()
   })
 
-  it('Keep list closes it with no DELETE, and focus goes back to Clear list', async () => {
+  it('Keep list closes it with no DELETE, and focus goes back to the More menu button', async () => {
     const w = await mountList()
-    await w.find('.clear').trigger('click')
+    await clearItem(w)
     await w.find('.keep-list').trigger('click')
+    await flushPromises()
     expect(w.find('.clear-ask').exists()).toBe(false)
     expect(calls('DELETE')).toHaveLength(0)
-    expect(document.activeElement).toBe(w.find('.clear').element)
+    expect(document.activeElement).toBe(w.find('button.more-actions').element)
   })
 
   it('Esc cancels it the same way', async () => {
     const w = await mountList()
-    await w.find('.clear').trigger('click')
+    await clearItem(w)
     await press(w.find('.keep-list').element, 'Escape')
     expect(w.find('.clear-ask').exists()).toBe(false)
     expect(calls('DELETE')).toHaveLength(0)
-    expect(document.activeElement).toBe(w.find('.clear').element)
+    expect(document.activeElement).toBe(w.find('button.more-actions').element)
   })
 
   it('the confirm button empties the list with exactly one DELETE', async () => {
     const w = await mountList()
-    await w.find('.clear').trigger('click')
+    await clearItem(w)
+    api.server.health = healthOf([])                       // the server stops watching what the list added
     await w.find('.confirm-clear').trigger('click')
     await flushPromises()
     expect(calls('DELETE')).toHaveLength(1)
@@ -100,80 +104,57 @@ describe('Companies: Clear list asks in place (G26)', () => {
 })
 
 describe('Companies: one set of counts (G25)', () => {
-  it('Found counts found plus already-watched, and says how many were watched', async () => {
-    useApi({ companies: [{ name: 'Grab', status: 'found' }, { name: 'OKX', status: 'watched' }, { name: 'Stripe', status: 'watched' }, { name: 'Ghost Co', status: 'failed' }] })
+  // Q-118 LD: the tiles are gone; the funnel, the legend and the table read the same buckets.
+  it('a list name that is already watched is one row, and the funnel, legend and table agree', async () => {
+    useApi({
+      companies: [{ name: 'Grab', status: 'found' }, { name: 'OKX', status: 'watched' }, { name: 'Stripe', status: 'watched' }, { name: 'Ghost Co', status: 'failed' }],
+      health: healthOf(['Grab', 'OKX', 'Stripe'].map(company => ({ company, state: 'ok', reason: '', open_roles: 3, last_scan: utcStamp(1) }))),
+    })
     const w = mount(Companies, { props: { run: 'all', jobs: [] } })
     await flushPromises()
-    await w.find('.view-list').trigger('click')
-    expect(w.find('.found-n').text()).toBe('3')
-    expect(w.find('.watched-n').text()).toBe('2 already watched')
-    expect(w.find('.failed-n').text()).toBe('1')
+    expect(w.findAll('.funnel-n').map(n => n.text())).toEqual(['4', '3', '3', '3'])   // in your list, watched, readable, checked
+    expect(legendOf(w)).toEqual([
+      ['All', 4], ['Checked this cycle', 3], ['Due for a check', 0], ['Failed', 0], ['No job board found', 1],
+    ])
+    expect(companyRows(w).map(r => r[0])).toEqual(['Ghost Co', 'Grab', 'OKX', 'Stripe'])
+    expect(w.find('.result-line').text()).toContain('4 companies')
   })
 
-  it('says nothing about watched when none were', async () => {
-    useApi({ companies: [{ name: 'Grab', status: 'found' }] })
+  it('shows no "not found" or "waiting" row when every name was found', async () => {
+    useApi({
+      companies: [{ name: 'Grab', status: 'found' }],
+      health: healthOf([{ company: 'Grab', state: 'ok', reason: '', open_roles: 3, last_scan: utcStamp(1) }]),
+    })
     const w = mount(Companies, { props: { run: 'all', jobs: [] } })
     await flushPromises()
-    await w.find('.view-list').trigger('click')
-    expect(w.find('.found-n').text()).toBe('1')
-    expect(w.find('.watched-n').exists()).toBe(false)
+    expect(companyRows(w)).toEqual([['Grab', 'Checked']])
+    expect(legendItem(w, 'Waiting for search')).toBeUndefined()      // hidden at zero
+    expect(legendItem(w, 'No job board found').find('.ui-progress-n').text()).toBe('0')
   })
 })
 
-describe('WatchedCompanies: density, A-Z jump, source chip (G30)', () => {
+describe('WatchedCompanies: density (G30)', () => {
+  // The A-Z jump strip and the "your list" source chip went with Q-118 LD (see q118-companies.test.js
+  // for the pins that they are gone); the density switch stayed.
   const row = (i, extra = {}) => ({
     company: `${String.fromCharCode(65 + (i % 6))}Co${String(i).padStart(2, '0')}`, state: 'ok', source: 'watchlist',
     job_board: 'greenhouse', careers_url: 'https://x.example', open_roles: 3, reason: '', kind: '', ...extra,
   })
   const mountWith = items => mount(WatchedCompanies, { props: { health: { total: items.length, counts: {}, items } }, attachTo: document.body })
 
-  it('the A-Z strip appears only above 20 rows, and a letter scrolls to and focuses its heading', async () => {
-    const few = mountWith(Array.from({ length: 20 }, (_, i) => row(i)))
-    expect(few.find('.jump').exists()).toBe(false)
-    few.unmount()
-
-    const w = mountWith(Array.from({ length: 21 }, (_, i) => row(i)))
-    expect(w.findAll('.jump-letter').map(b => b.text())).toEqual(['A', 'B', 'C', 'D', 'E', 'F'])
-    const scroll = vi.fn()
-    Element.prototype.scrollIntoView = scroll
-    await w.findAll('.jump-letter')[2].trigger('click')
-    await flushPromises()
-    expect(scroll).toHaveBeenCalled()
-    expect(document.activeElement.getAttribute('data-letter')).toBe('C')
-    delete Element.prototype.scrollIntoView
-  })
-
-  it('the strip lists only the letters that exist', () => {
-    const items = Array.from({ length: 24 }, (_, i) => ({ ...row(i), company: `${i < 12 ? 'Acme' : 'Zeta'} ${i}` }))
-    const w = mountWith(items)
-    expect(w.findAll('.jump-letter').map(b => b.text())).toEqual(['A', 'Z'])
-  })
-
   it('the Compact toggle sets the class, pressed state and a remembered choice', async () => {
     const w = mountWith(Array.from({ length: 5 }, (_, i) => row(i)))
-    expect(w.find('.dir').classes()).not.toContain('compact')
+    expect(w.find('table.companies-table').classes()).not.toContain('is-compact')
     expect(w.find('.density').attributes('aria-pressed')).toBe('false')
     await w.find('.density').trigger('click')
-    expect(w.find('.dir').classes()).toContain('compact')
+    expect(w.find('table.companies-table').classes()).toContain('is-compact')
     expect(w.find('.density').attributes('aria-pressed')).toBe('true')
     expect(window.localStorage.getItem('jobscraper.companies.density')).toBe('compact')
     w.unmount()
     const again = mountWith(Array.from({ length: 5 }, (_, i) => row(i)))   // a new visit
-    expect(again.find('.dir').classes()).toContain('compact')
+    expect(again.find('table.companies-table').classes()).toContain('is-compact')
     await again.find('.density').trigger('click')
     expect(window.localStorage.getItem('jobscraper.companies.density')).toBe('comfortable')
-  })
-
-  it('"your list" chips show only when the list is mixed and Source is all', async () => {
-    const mixed = Array.from({ length: 4 }, (_, i) => row(i, i < 2 ? { source: 'your list' } : {}))
-    const w = mountWith(mixed)
-    expect(w.findAll('.chip').map(c => c.text())).toEqual(['your list', 'your list'])
-    await w.find('select.source').setValue('your list')
-    expect(w.findAll('.chip')).toHaveLength(0)             // the filter already says so
-    w.unmount()
-
-    const all = mountWith(Array.from({ length: 4 }, (_, i) => row(i, { source: 'your list' })))
-    expect(all.findAll('.chip')).toHaveLength(0)           // every row is from it
   })
 })
 

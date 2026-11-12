@@ -53,8 +53,10 @@ async function pick(wrapper, file) {
   await settle()
 }
 
+// Q-118 LE: with a resume the card itself takes a dropped file; the big drop zone shows only
+// before the first one. Both carry `.ui-drop`.
 async function drop(wrapper, file) {
-  await wrapper.find('.drop').trigger('drop', { dataTransfer: { files: [file] } })
+  await wrapper.find('.ui-drop').trigger('drop', { dataTransfer: { files: [file] } })
   await settle()
 }
 
@@ -62,17 +64,20 @@ const uploads = () => api.calls.filter(c => c.url === 'api/resume')
 const refreshes = () => api.calls.filter(c => c.url === 'api/jobs/profile' && c.method === 'POST')
 
 describe('Profile tab: the current profile', () => {
-  it('shows summary, skills, target titles, interests, version and source', async () => {
+  it('shows summary, skills, interests, version and when it was read; the job titles are the editor\'s card', async () => {
     const wrapper = await mountProfile()
     expect(wrapper.find('.version').text()).toBe('2')
-    expect(wrapper.find('.source').text()).toBe('resume.pdf')
     expect(wrapper.find('.parsed').text()).toBe('24 Sep 18:05')   // stored 10:05 UTC
     expect(wrapper.find('.parsed').attributes('title')).toBe('2026-09-24 10:05 UTC')
     expect(wrapper.find('.parsed-by').text()).toBe('qwen3:14b')   // M14: Qwen reads the resume
     expect(wrapper.find('.profile .summary').text()).toContain('cloud and backend internships')
     expect(wrapper.findAll('.skills li').map(l => l.text())).toEqual(['python', 'kubernetes', 'terraform'])
-    expect(wrapper.findAll('.titles li').map(l => l.text())).toEqual(['software engineer', 'site reliability engineer'])
     expect(wrapper.findAll('.interests li').map(l => l.text())).toEqual(['infrastructure', 'fintech'])
+    // Q-118 LE: no file name on the card, no titles list (the titles are chips in TitleEditor).
+    expect(wrapper.find('.resume-card').text()).not.toContain('resume.pdf')
+    expect(wrapper.find('.source').exists()).toBe(false)
+    expect(wrapper.find('ul.titles').exists()).toBe(false)
+    expect(wrapper.findAll('.te-chip').map(l => l.text())).toEqual(expect.arrayContaining(['software engineer']))
   })
 
   it('with no derived profile yet, says what to do rather than showing an error', async () => {

@@ -11,7 +11,10 @@ import { POLL_MS, resetSeenJobs } from '../src/composables/useJob.js'
 import { resetDismissed } from '../src/dismissed.js'
 import { dismissToast } from '../src/toast.js'
 import { runStatusLabel } from '../src/runs.js'
-import { DOCX, FIXTURE, MB, defaultTitles, descriptionOf, fakeApi } from './helpers.js'
+import {
+  DOCX, FIXTURE, MB, chooseMore, companyRows, defaultTitles, descriptionOf, fakeApi, healthOf, legendItem, legendOf,
+  moreItem, openMore, utcStamp,
+} from './helpers.js'
 
 let api
 
@@ -50,7 +53,6 @@ describe('Companies tab', () => {
     if (options) useApi(options)
     const wrapper = mount(Companies, { props: { run: 'all', jobs: [] } })
     await flushPromises()
-    await wrapper.find('.view-list').trigger('click')   // the list is the second view
     return wrapper
   }
 
@@ -65,19 +67,26 @@ describe('Companies tab', () => {
     }
   }
 
-  const rows = w => w.findAll('.list .row:not(.none)').map(r => [
-    r.find('.rank').text(), r.find('.name').text(), r.find('.status').text()])
+  // Q-118 LD: one table, sorted Company A-Z by default (no rank column, no view toggle).
+  const rows = companyRows
+  const nothingWatched = () => healthOf([])
+  // Grab and OKX read and recently checked.
+  const watched = () => healthOf([
+    { company: 'Grab', state: 'ok', reason: '', open_roles: 40, last_scan: utcStamp(1), job_board: 'greenhouse', careers_url: 'https://job-boards.greenhouse.io/grab' },
+    { company: 'OKX', state: 'ok', reason: '', open_roles: 12, last_scan: utcStamp(2), job_board: 'lever' },
+  ])
 
   it('with no list, invites one', async () => {
-    const wrapper = await mountCompanies()
+    const wrapper = await mountCompanies({ health: nothingWatched() })
     expect(wrapper.find('.empty-title').text()).toBe('No list yet.')
     expect(wrapper.find('.drop-title').text()).toContain('Drop your list of companies here')
     expect(wrapper.find('input.file').attributes('accept')).toContain('.txt')
     expect(wrapper.find('input.file').attributes('accept')).toContain('.docx')
+    expect(wrapper.find('.companies-table').exists()).toBe(false)
   })
 
   it('uploads a TXT list raw, keeps its order, and starts the search', async () => {
-    const wrapper = await mountCompanies()
+    const wrapper = await mountCompanies({ health: nothingWatched() })
     await drop(wrapper, new File(['1. Grab\n2. Ghost Holdings\n\n3. OKX\n'], 'dream.txt', { type: 'text/plain' }))
 
     const put = api.calls.find(c => c.method === 'PUT' && c.url === 'api/companies/list')
@@ -85,18 +94,20 @@ describe('Companies tab', () => {
     expect(put.body).toBeInstanceOf(File)                 // the file itself, not a form
     expect(wrapper.find('.notice.ok').text()).toContain('Read 3 companies from dream.txt')
     expect(posts('api/jobs/companies')).toHaveLength(1)
-    expect(rows(wrapper)).toEqual([['1', 'Grab', 'Waiting'], ['2', 'Ghost Holdings', 'Waiting'], ['3', 'OKX', 'Waiting']])
+    // The table lists the names while they wait (A-Z; the upload itself kept your order).
+    expect(rows(wrapper)).toEqual([['Ghost Holdings', 'Waiting'], ['Grab', 'Waiting'], ['OKX', 'Waiting']])
     expect(wrapper.find('.searching').text()).toContain('Searching 3 companies')
     expect(wrapper.find('.searching a').attributes('href')).toBe('#/developer')
 
+    // The search reads Grab and OKX (now watched, so health rows) and finds no board for Ghost.
+    api.server.health = watched()
     api.finishJob()
     await tick()
-    expect(rows(wrapper)).toEqual([['1', 'Grab', 'Found'], ['2', 'Ghost Holdings', 'Failed'], ['3', 'OKX', 'Found']])
-    expect(wrapper.find('.found-n').text()).toBe('2')
-    expect(wrapper.find('.failed-n').text()).toBe('1')
-    expect(wrapper.find('.cap').text()).toBe('2 companies counted · no limit on the local plan. Failed searches do not count.')
-    expect(wrapper.find('.row[data-status="failed"] .detail').text()).toContain('no careers site found')
-    expect(wrapper.find('.row[data-status="found"] a.site').attributes('href')).toBe('https://job-boards.greenhouse.io/grab')
+    expect(rows(wrapper)).toEqual([['Ghost Holdings', 'No job board found'], ['Grab', 'Checked'], ['OKX', 'Checked']])
+    expect(wrapper.findAll('.funnel-n').map(n => n.text())).toEqual(['3', '2', '2', '2'])
+    expect(wrapper.find('.page-sub').text()).toBe('Your list, and which of its companies JobScraper can read.')
+    expect(wrapper.find('tr[data-bucket="not_found"] .status-note').text()).toContain('no careers site found')
+    expect(wrapper.find('tr[data-bucket="checked"] a.careers').attributes('href')).toBe('https://job-boards.greenhouse.io/grab')
     expect(wrapper.emitted('changed')).toBeTruthy()
   })
 
@@ -119,21 +130,33 @@ describe('Companies tab', () => {
     expect(posts('api/jobs/companies')).toHaveLength(0)
   })
 
-  it('filters by what the search did, keeping your order', async () => {
-    const wrapper = await mountCompanies({ companies: [
-      { name: 'Grab', status: 'found', detail: 'a greenhouse board, 4 open roles' },
-      { name: 'Nowhere Ltd', status: 'failed', detail: 'no careers site found' },
-      { name: 'OKX', status: 'watched', detail: 'already watched as OKX' },
-      { name: 'Visa', status: 'pending' },
-    ] })
-    const filters = wrapper.findAll('.filter').map(b => b.text())
-    expect(filters).toEqual(['All 4', 'Found 2', 'Failed 1', 'Waiting 1'])
+  it('filters by what the search did (the legend is the filter)', async () => {
+    const wrapper = await mountCompanies({
+      health: healthOf([
+        ...watched().items,
+        { company: 'Akamai', state: 'failed', reason: 'the site blocks automated access', open_roles: null },
+      ]),
+      companies: [
+        { name: 'Grab', status: 'found', detail: 'a greenhouse board, 4 open roles' },
+        { name: 'Nowhere Ltd', status: 'failed', detail: 'no careers site found' },
+        { name: 'OKX', status: 'watched', detail: 'already watched as OKX' },
+        { name: 'Visa', status: 'pending' },
+      ],
+    })
+    // Found and already-watched names are the health rows: nobody is listed twice.
+    expect(legendOf(wrapper)).toEqual([
+      ['All', 5], ['Checked this cycle', 2], ['Due for a check', 0], ['Failed', 1],
+      ['No job board found', 1], ['Waiting for search', 1],
+    ])
+    expect(rows(wrapper).map(r => r[0])).toEqual(['Akamai', 'Grab', 'Nowhere Ltd', 'OKX', 'Visa'])
 
-    await wrapper.findAll('.filter')[1].trigger('click')
-    expect(rows(wrapper)).toEqual([['1', 'Grab', 'Found'], ['3', 'OKX', 'Already watched']])
-    await wrapper.findAll('.filter')[2].trigger('click')
-    expect(rows(wrapper)).toEqual([['2', 'Nowhere Ltd', 'Failed']])
-    expect(wrapper.findAll('.filter')[2].attributes('aria-pressed')).toBe('true')
+    await legendItem(wrapper, 'No job board found').trigger('click')
+    expect(rows(wrapper)).toEqual([['Nowhere Ltd', 'No job board found']])
+    expect(legendItem(wrapper, 'No job board found').attributes('aria-pressed')).toBe('true')
+    await legendItem(wrapper, 'Checked this cycle').trigger('click')
+    expect(rows(wrapper)).toEqual([['Grab', 'Checked'], ['OKX', 'Checked']])
+    await legendItem(wrapper, 'All').trigger('click')
+    expect(rows(wrapper)).toHaveLength(5)
   })
 
   it('downloads the found and the failed as TXT, one per line, in your order', async () => {
@@ -154,16 +177,17 @@ describe('Companies tab', () => {
         { name: 'Grab', status: 'found' }, { name: 'Nowhere Ltd', status: 'failed' },
         { name: 'OKX', status: 'watched' }, { name: '=cmd', status: 'failed', detail: 'no, really' },
       ] })
-      await wrapper.find('.dl-found').trigger('click')
-      await wrapper.find('.dl-failed').trigger('click')
-      await wrapper.find('.dl-report').trigger('click')
+      await chooseMore(wrapper, 'Download found (.txt)')
+      await chooseMore(wrapper, 'Download not found (.txt)')
+      await chooseMore(wrapper, 'Full report (.csv)')
       expect(clicks).toHaveBeenCalledTimes(3)
       expect(saved.map(b => b.filename)).toEqual(['companies-found.txt', 'companies-failed.txt', 'companies-report.csv'])
       expect(await saved[0].text()).toBe('Grab\r\nOKX\r\n')
       expect(await saved[1].text()).toBe('Nowhere Ltd\r\n=cmd\r\n')
       const csv = await saved[2].text()
       expect(csv.split('\r\n')[0]).toBe('﻿rank,company,status,careers_url,open_roles,detail')
-      expect(csv).toContain("4,'=cmd,Failed,,,\"no, really\"")     // never a formula; commas quoted
+      // never a formula; commas quoted; the status in the table's words (Q-118: "No job board found")
+      expect(csv).toContain("4,'=cmd,No job board found,,,\"no, really\"")
     } finally {
       clicks.mockRestore()
       URL.createObjectURL = real.create
@@ -173,18 +197,21 @@ describe('Companies tab', () => {
 
   it('a download with nothing in it is not offered', async () => {
     const wrapper = await mountCompanies({ companies: [{ name: 'Visa', status: 'pending' }] })
-    expect(wrapper.find('.dl-found').attributes('disabled')).toBeDefined()
-    expect(wrapper.find('.dl-failed').attributes('disabled')).toBeDefined()
+    await openMore(wrapper)
+    expect(moreItem(wrapper, 'Download found (.txt)').attributes('disabled')).toBeDefined()
+    expect(moreItem(wrapper, 'Download not found (.txt)').attributes('disabled')).toBeDefined()
+    expect(moreItem(wrapper, 'Full report (.csv)').attributes('disabled')).toBeUndefined()
   })
 
   it('the plan cap counts only companies found; the rest wait over the limit', async () => {
-    const wrapper = await mountCompanies({ maxCompanies: 1, companies: ['Ghost One', 'Grab', 'OKX'] })
+    const wrapper = await mountCompanies({ maxCompanies: 1, companies: ['Ghost One', 'Grab', 'OKX'], health: nothingWatched() })
     await wrapper.find('.search-now').trigger('click')
     await flushPromises()
+    api.server.health = healthOf([watched().items[0]])        // only Grab became watched
     api.finishJob()
     await tick()
-    expect(rows(wrapper)).toEqual([['1', 'Ghost One', 'Failed'], ['2', 'Grab', 'Found'], ['3', 'OKX', 'Over plan limit']])
-    expect(wrapper.find('.cap').text()).toContain('1 of 1 companies used on the local plan')
+    expect(rows(wrapper)).toEqual([['Ghost One', 'No job board found'], ['Grab', 'Checked'], ['OKX', 'Over plan limit']])
+    expect(wrapper.find('.page-sub').text()).toContain('1 of 1 companies used on the local plan')
   })
 
   it('Search now is refused while another job runs', async () => {
@@ -197,15 +224,16 @@ describe('Companies tab', () => {
 
   it('Clear list asks first, then empties it', async () => {
     const wrapper = await mountCompanies({ companies: ['Grab'] })
-    // Q-75 G26: an inline confirm, not window.confirm.
+    // Q-75 G26: an inline confirm, not window.confirm. Q-118: it sits in the More menu.
     const confirmSpy = vi.fn(() => true)
     vi.stubGlobal('confirm', confirmSpy)
-    await wrapper.find('.clear').trigger('click')
+    await chooseMore(wrapper, 'Clear list…')
     expect(wrapper.find('.clear-ask').exists()).toBe(true)
     await wrapper.find('.keep-list').trigger('click')
     expect(wrapper.find('.clear-ask').exists()).toBe(false)
     expect(api.calls.filter(c => c.method === 'DELETE')).toHaveLength(0)
-    await wrapper.find('.clear').trigger('click')
+    await chooseMore(wrapper, 'Clear list…')
+    api.server.health = nothingWatched()                      // what the server watches once the list is gone
     await wrapper.find('.confirm-clear').trigger('click')
     await flushPromises()
     expect(confirmSpy).not.toHaveBeenCalled()

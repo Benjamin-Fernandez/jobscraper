@@ -82,12 +82,16 @@ describe('the summary card (Q-73)', () => {
   it('says what the resume gave in plain lines, with no folder or path anywhere', async () => {
     const w = await mountProfile()
     const card = w.find('.resume-card')
-    expect(w.findAll('h2.section-title').map(h => h.text())).toContain('What we read from your resume')
-    expect(card.find('.read-line').text()).toBe('resume.pdf · read 24 Sep 18:05')
-    expect(card.find('.experience').text()).toBe('Experience: 1 year')
-    expect(card.find('.graduation').text()).toBe('Graduation: 2025')
-    expect(card.find('.skill-count').text()).toBe('3 skills')
-    expect(card.find('.title-count').text()).toBe('2 job titles')
+    expect(card.find('.ui-card-title').text()).toBe('From your resume')
+    expect(card.find('.read-line').text()).toBe('read 24 Sep 18:05')           // no file name (Q-118 LE)
+    expect(card.find('.experience').text()).toBe('Experience1 year')            // dt + dd
+    expect(card.find('.graduation').text()).toBe('Graduation2025')
+    expect(card.find('.experience dt').text()).toBe('Experience')
+    expect(card.find('.experience dd').text()).toBe('1 year')
+    // the counts moved to their own cards: the skills count is a number in the Skills card
+    expect(w.find('.skills-card .skill-count').text()).toBe('3')
+    expect(card.find('.skill-count').exists()).toBe(false)
+    expect(w.find('.title-count').exists()).toBe(false)
     expect(card.text()).not.toMatch(/[\\/]/)
     expect(card.find('.version').text()).toBe('2')
     expect(card.find('.parsed-by').text()).toBe('qwen3:14b')
@@ -95,9 +99,10 @@ describe('the summary card (Q-73)', () => {
   })
 
   it('experience and graduation: under a year, years, and nothing when unknown', async () => {
-    for (const [years, want] of [[0, 'Experience: Less than a year'], [3, 'Experience: 3 years']]) {
+    for (const [years, want] of [[0, 'Less than a year'], [3, '3 years']]) {
       const w = await mountProfile({ profile: { ...fakeApi().server.profile, years_experience: years } })
-      expect(w.find('.experience').text()).toBe(want)
+      expect(w.find('.experience dt').text()).toBe('Experience')
+      expect(w.find('.experience dd').text()).toBe(want)
       w.unmount()
     }
     const w = await mountProfile({ profile: { ...fakeApi().server.profile, years_experience: null, graduation: null } })
@@ -105,21 +110,29 @@ describe('the summary card (Q-73)', () => {
     expect(w.find('.graduation').exists()).toBe(false)
   })
 
-  it('shows the first 12 skills; "and k more" shows the rest', async () => {
+  // Q-118 LE: "and 3 more" became a toggle that names the total and stays after it opens.
+  it('shows the first 12 skills; "Show all 15" shows the rest, "Show fewer" folds them again', async () => {
     const skills = Array.from({ length: 15 }, (_, i) => `skill${i}`)
     const w = await mountProfile({ profile: { ...fakeApi().server.profile, skills } })
-    expect(w.find('.skill-count').text()).toBe('15 skills')
+    expect(w.find('.skill-count').text()).toBe('15')
     expect(w.findAll('.skills li')).toHaveLength(12)
-    expect(w.find('.more-skills').text()).toBe('and 3 more')
+    expect(w.find('.more-skills').text()).toBe('Show all 15')
+    expect(w.find('.more-skills').attributes('aria-expanded')).toBe('false')
     await w.find('.more-skills').trigger('click')
     expect(w.findAll('.skills li')).toHaveLength(15)
-    expect(w.find('.more-skills').exists()).toBe(false)
+    expect(w.find('.more-skills').text()).toBe('Show fewer')
+    expect(w.find('.more-skills').attributes('aria-expanded')).toBe('true')
+    await w.find('.more-skills').trigger('click')
+    expect(w.findAll('.skills li')).toHaveLength(12)
   })
 
+  // The "job titles" count is the title editor's now (its own card); the resume card has
+  // no skills or titles line, so this pins the singular forms that remain.
   it('singular wording', async () => {
     const w = await mountProfile({ profile: { ...fakeApi().server.profile, skills: ['go'], target_titles: ['dev'], years_experience: 1 } })
-    expect(w.find('.skill-count').text()).toBe('1 skill')
-    expect(w.find('.title-count').text()).toBe('1 job title')
+    expect(w.find('.skill-count').text()).toBe('1')
+    expect(w.find('.experience dd').text()).toBe('1 year')
+    expect(w.find('.more-skills').exists()).toBe(false)           // nothing to expand
   })
 })
 
@@ -333,9 +346,11 @@ describe('Update your application details (R10)', () => {
     expect(w.find('.rr-save').exists()).toBe(false)
   })
 
-  it('says to re-derive when the proposals are for an older resume', async () => {
+  it('says to re-read when the proposals are for an older resume, naming the button as built', async () => {
     const w = await mountProfile({ refresh: { state: 'stale' } })
-    expect(w.find('.rr-stale').text()).toContain('Choose "Re-derive profile from the stored resume" to check again.')
+    expect(w.find('.rr-stale').text()).toContain('Choose "Re-read resume" to check again.')
+    // ... and that button exists with exactly that name
+    expect(w.find('button.refresh').text()).toBe('Re-read resume')
   })
 
   it('is absent for none, no_profile and unreadable, and quiet on a server without the route (404)', async () => {
@@ -354,6 +369,7 @@ describe('Update your application details (R10)', () => {
     await pollOnce()
     expect(w.find('.rr-unavailable').text()).toContain("the AI model isn't running")
     expect(w.find('.rr-unavailable').text()).toContain('Start Ollama')
+    expect(w.find('.rr-unavailable').text()).toContain('choose "Re-read resume"')   // the button's name (Q-118 LE2)
   })
 
   it('does not say that when the check ran', async () => {
