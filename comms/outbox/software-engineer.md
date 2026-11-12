@@ -1088,3 +1088,13 @@ BODY: branch `eng/Q-111-apply-settings` (from personal 9681490), commit 09a290c.
 - Notes for the Vue side: `ApplySettings.vue` imports `getApplySettings`/`putApplySettings` from `connections_api.js` (already present, tolerant of a missing route); the api.js pair is a plain duplicate and can be dropped if unused. Its client-side check still says caps 1-50 (`whole(d.daily_cap, 1, 50, ...)`): the server allows 0..500 / 0..100 (D-204), so that Vue range needs updating by whoever owns the file. apply_design.md §14.3 still says "caps 1-50" and lacks `compose_enabled`/`writable`/`defaults` (request to the architect).
 - Not run, by design: no apply job, no POST /api/apply. Checked with FastAPI TestClient on a temp DB; no bundle rebuild needed beyond the api.js change.
 STATUS: open
+
+### 2026-11-12 software-engineer -> coordinator (Q-116 step 4): Apply as rows
+TYPE: handoff
+BODY: branch `eng/Q-116-L2-apply` (from c4e73f2, eng/Q-116-L1-shell step 1). Only `web/src/components/ApplySettings.vue` rewritten.
+- Props `connections`, `apply` ({status, settings, summary} from loadApplyData), `item` (row id from the hash: opens an edit row when editable, scrolls it into view, focuses its row button; follows later changes). Emits `saved(nextSettings)`. No loading, no Save button, no GET.
+- Rows (SettingRow/SettingsGroup): mode, browser-window, human-check-wait | daily-cap, per-employer-cap | cover-letters | mailbox, details, resume. One `putApplySettings({key: value})` per save; success: `saved(next)` + `rows.flash`; failure: old value kept, `rows.fail(id, saveErrorText(e, key))`; 422 does not lock; null/404/405 on PUT sets read-only for the rest of the page's life ("Couldn't save: this server doesn't accept changes yet."). Editable only when `settings.writable === true`; `apply.settings` null: only Mode (read-only, from `status.mode`), mailbox, resume (+ details if the summary loaded). No probe PUT.
+- Assumption: the design §5 has no exact copy for "A running application keeps the mode it started with."; I show exactly that sentence as a muted line under the intro while `status.busy`.
+- Settings.vue (lane 1) still mounts `<ApplySettings :connections>` without `apply`/`item`/`@saved`; lane 1 step 2 must pass them.
+- Not run, by design: no dev server, no apply job, no POST /api/apply (browser check is the Coordinator's).
+STATUS: open
