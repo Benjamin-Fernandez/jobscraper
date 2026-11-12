@@ -20,6 +20,7 @@ import {
   takePickerRequest,
 } from '../runs.js'
 import { tabEmits, tabProps } from '../shell.js'
+import ApplyQueuePanel from '../components/ApplyQueuePanel.vue'
 import CountPicker from '../components/CountPicker.vue'
 import Icon from '../components/Icon.vue'
 import Switch from '../ui/Switch.vue'
@@ -56,10 +57,31 @@ const batchError = computed(() => {
   return ''
 })
 
+// ---- the auto-apply queue (Q-120 U2) ----
+// The panel polls the queue and tells us who holds the job slot, so there is no second
+// poller here. While the auto-apply worker holds it, a search run can still be asked for:
+// the server defers it until the current application finishes ("Run after this
+// application"). An older server has no queue, reports 'free', and nothing changes.
+const queueSlot = ref('free')
+const queueRunPending = ref(false)
+const deferred = ref(false)
+const applyHolds = computed(() => queueSlot.value === 'apply')
+const DEFERRED = 'The search run starts when the current application finishes.'
+const APPLY_BUSY = 'Auto-apply is busy (it may be keeping a dry-run form open). Pause the queue in Runs to free it.'
+const deferredShown = computed(() => queueRunPending.value || (deferred.value && applyHolds.value))
+
+function onQueueStatus(status) {
+  queueSlot.value = status?.slot ?? 'free'
+  queueRunPending.value = Boolean(status?.runPending)
+}
+watch(applyHolds, on => { if (!on) deferred.value = false })
+
+// The job is "in the way" of a new run unless it is the apply worker, which defers it.
 const busyKind = computed(() => (running.value ? job.value.kind : null))
+const blocked = computed(() => running.value && !applyHolds.value)
 const BUSY = { run: 'A run', profile: 'A profile refresh', titles: 'A title recommendation', companies: 'A company search' }
 const busyLabel = computed(() => BUSY[busyKind.value] ?? 'A job')
-const canStart = computed(() => !running.value && !starting.value && !batchError.value)
+const canStart = computed(() => !blocked.value && !starting.value && !batchError.value && !queueRunPending.value)
 
 async function loadSettings() {
   try {
@@ -79,10 +101,19 @@ async function start() {
       batch_size: batch.value === '' ? undefined : batch.value,
       dry_run: dryRun.value,
     })
+    if (started?.deferred) {
+      // 202 {deferred: true}: the auto-apply worker holds the slot, so no run has
+      // started and nothing is tracked as a run. The panel shows the pending run.
+      deferred.value = true
+      window.dispatchEvent(new Event('jobscraper:apply-queue'))
+      return
+    }
     track(started, { started: true })
   } catch (e) {
     if (e instanceof ApiError && e.status === 409) {
-      actionError.value = 'A job is already running. Wait for it to finish, or cancel it.'
+      actionError.value = applyHolds.value || job.value?.kind === 'apply'
+        ? APPLY_BUSY
+        : 'A job is already running. Wait for it to finish, or cancel it.'
       refresh()
     } else {
       actionError.value = `Could not start the run: ${describeError(e)}`
@@ -151,10 +182,11 @@ const estimate = computed(() => {
   return duration(Math.max(60, n * pace.value))
 })
 
-// The start button says how many companies it will check. Q-120 U2 adds the
-// "Run after this application" wording here when a job is applying.
+// The start button says how many companies it will check; while the auto-apply
+// worker holds the slot it says the run waits for the current application (Q-120 U2).
 const startLabel = computed(() => {
   if (starting.value) return 'Starting…'
+  if (applyHolds.value) return 'Run after this application'
   const n = batch.value
   if (!Number.isInteger(n) || n < 1 || batchError.value) return dryRun.value ? 'Start dry run' : 'Start run'
   const companies = plural(n, 'company', 'companies')
@@ -283,7 +315,8 @@ onMounted(async () => {
     </header>
 
     <div class="runs-top">
-      <!-- Q-120 U2: <ApplyQueuePanel class="runs-queue ui-card" /> mounts here -->
+      <!-- The auto-apply queue (Q-120 U2). It renders nothing on a server without the queue. -->
+      <ApplyQueuePanel class="runs-queue ui-card" @status="onQueueStatus" @changed="refresh" />
       <form class="start ui-card" novalidate @submit.prevent="start">
         <header class="ui-card-head">
           <h3 class="ui-card-title">Start a run</h3>
@@ -302,7 +335,7 @@ onMounted(async () => {
               :placeholder="settings ? String(settings.batch_size) : 'default'"
               :invalid="Boolean(batchError)"
               describedby="run-batch-hint"
-              :disabled="running"
+              :disabled="blocked"
             />
             <p id="run-batch-hint" class="hint" :class="{ invalid: batchError }">
               <template v-if="batchError">{{ batchError }}</template>
@@ -325,17 +358,18 @@ onMounted(async () => {
               v-model="dryRun"
               label="Dry run"
               description="Fetch and report; save nothing."
-              :disabled="running"
+              :disabled="blocked"
             />
             <button type="submit" class="primary start-run" :disabled="!canStart">{{ startLabel }}</button>
           </div>
         </div>
 
         <!-- The job's log lives on the Developer tab (M16); here, one line. -->
-        <footer v-if="settingsError || actionError || running || (jobError && !job)" class="start-foot">
+        <footer v-if="settingsError || actionError || deferredShown || blocked || (jobError && !job)" class="start-foot">
           <p v-if="settingsError" class="notice error" role="alert">Could not read the saved setting: {{ settingsError }}</p>
           <p v-if="actionError" class="notice error" role="alert">{{ actionError }}</p>
-          <div v-if="running" class="busy-row">
+          <p v-if="deferredShown" class="notice ok run-deferred" role="status">{{ DEFERRED }}</p>
+          <div v-if="blocked" class="busy-row">
             <p class="notice warn run-busy" role="status">
               <span class="spinner" aria-hidden="true" />
               <span>
