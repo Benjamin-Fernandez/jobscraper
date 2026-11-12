@@ -107,6 +107,8 @@ async function loadApply() {
 // status (mode, busy) because the mode chip and "an application is running" depend on it.
 async function onApplySaved(next) {
   if (apply.value && next) apply.value = { ...apply.value, settings: next }
+  // Tells the shell (App.vue) to re-read the apply status for its mode chip.
+  window.dispatchEvent(new Event('jobscraper:apply-settings'))
   try {
     const status = await getApplyStatus()
     if (status && apply.value) apply.value = { ...apply.value, status }
