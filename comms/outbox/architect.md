@@ -816,3 +816,10 @@ Verify (engineer): `python tests/run_tests.py -k declarations` stays green (122 
 **Not done in this session:** I had no shell tool, so I made **no commits** and **did not run** `-k declarations`. The Coordinator (or the next agent with a shell) should commit on `eng/Q-90-declarations` as two commits: `docs(architecture): Q-90/Q-91 D-176 value-sensitive place and time, rule 6b, six labels` (apply_design.md + this outbox entry) and `docs(architecture): Q-92 F3/F5 spec notes` (llm_fill_design.md). No code was changed, so `-k declarations` should still give 122/122.
 Update 2026-11-10 (Coordinator, for the architect, who had no shell): Q-90 D-177 amends D-176 (§7.5 item 5): REGULATORY filler without company/companies; 12 director phrases incl. the addendum's three 'of a company'; UNCLASSED markers on choice fields only, EVENT 7 / NOUN 7 + INVOLVEMENT 11 ("currently" added by the Coordinator, addendum 2, closing residual (b)); size pins 169 per class; oracle rows 40-50, row 32 stays No.
 STATUS: open
+
+---
+2026-11-12 · architect → Coordinator · handoff · Q-116 Settings redesign design
+Design: `docs/architecture/q116_settings_design.md` (154 lines, READY for the review with the Q-100 session). Four categories in a left rail (Accounts, Apply, Search, Preferences; "Appearance" renamed, old hash aliased), rows with the current value, edit in place one at a time, save on change, in-row confirm for Automatic submit. Two lanes with disjoint files (§7): L1 shell/Search/Preferences (+ `density.js`, a 3-line `WatchedCompanies.vue` listener, 3 shapes in `Icon.vue`), L2 `ApplySettings.vue` only, branched from L1 step 1. No backend beyond Q-111; Later list in §9.
+For the Coordinator to confirm (assumed, not blocking): (1) `WatchedCompanies.vue` and `Icon.vue` edits are fine for a Q-116 lane (owners: Companies lanes / shared); (2) the rename Appearance → Preferences; (3) the Apply rail badge = distinct missing detail labels.
+No commit made (the delegation forbade git commands that change the index).
+STATUS: open
