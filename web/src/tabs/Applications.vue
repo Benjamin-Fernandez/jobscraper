@@ -21,11 +21,11 @@
 // strip (MailSuggestions, hidden when there are none), and an event an email
 // made wears a "From email" badge in History (MailEvidence) with its quote and
 // Undo. Either action reloads the rows and the suggestions.
-import { computed, nextTick, onActivated, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onActivated, onBeforeUnmount, onDeactivated, onMounted, ref, watch } from 'vue'
 import { describeError, getApplicationAttempts, getApplications, getStats, setApplicationStatus, untrackApplication } from '../api.js'
-import { attemptLabel, modeLabel } from '../attempts.js'
+import { IN_PROGRESS_REMOVE, attemptLabel, modeLabel } from '../attempts.js'
 import {
-  STAGE_KEY, inStage, isActive, lastAt, pinRank, rememberedStage, stageCounts,
+  STAGE_KEY, inFlight, inStage, isActive, lastAt, pinRank, rememberedStage, stageCounts,
 } from '../applications.js'
 import { openProfile } from '../profileView.js'
 import { exactTime, plural, when } from '../format.js'
@@ -381,7 +381,7 @@ async function removeRow(row) {
   } catch (e) {
     const said = e?.status === 409 && e?.body?.text
       ? [e.body.text, e.body.hint].filter(Boolean).join(' ')
-      : describeError(e)
+      : e?.status === 409 ? IN_PROGRESS_REMOVE : describeError(e)
     error.value = `Could not remove ${row.company ?? row.job_id}: ${said}`
   }
 }
@@ -453,6 +453,50 @@ onMounted(load)
 // A cached tab coming back shows what changed meanwhile (Q-70 B9).
 let shownOnce = false
 onActivated(() => { if (shownOnce) load(); shownOnce = true })
+
+// ---- follow the auto-apply queue (Q-120 U3) ----
+// The Inbox, Runs and a row's "Try again" announce `jobscraper:apply-queue`; the rows
+// reload then, and every 10 s while one is queued or being applied to (no polling
+// otherwise). A quiet reload: no error banner, and it waits while a save or a drag is
+// under way or the first load has not finished. Off while the tab is cached or hidden.
+const QUEUE_EVENT = 'jobscraper:apply-queue'
+const POLL_MS = 10000
+let active = true
+let following = false
+let poll = null
+
+async function refreshQuiet() {
+  if (!active || following || loading.value || saving.value || dragged.value) return
+  following = true
+  try {
+    const [apps, stats] = await Promise.all([getApplications(), getStats()])
+    rows.value = apps
+    statuses.value = stats.statuses
+  } catch { /* keep what is shown; the next tick tries again */ } finally {
+    following = false
+  }
+}
+
+function syncPoll() {
+  const live = active && rows.value.some(inFlight)
+  if (live && poll === null) {
+    poll = setInterval(() => { if (!document.hidden) refreshQuiet() }, POLL_MS)
+  } else if (!live && poll !== null) {
+    clearInterval(poll)
+    poll = null
+  }
+}
+watch(rows, syncPoll, { immediate: true })
+
+const onQueueEvent = () => refreshQuiet()
+onMounted(() => window.addEventListener(QUEUE_EVENT, onQueueEvent))
+onActivated(() => { active = true; syncPoll() })
+onDeactivated(() => { active = false; syncPoll() })
+onBeforeUnmount(() => {
+  window.removeEventListener(QUEUE_EVENT, onQueueEvent)
+  active = false
+  syncPoll()
+})
 </script>
 
 <template>

@@ -13,12 +13,19 @@
 // Drag (pointer, wider than a phone): the whole row drags, the grip is the cue. A row
 // JobScraper is applying to, or that waits in the queue (`inFlight`), is not draggable
 // and its Move menu is off with the reason; touch and keyboard always use Move to.
-import { computed, ref } from 'vue'
-import { ordinal } from '../api.js'
-import { attemptLabel } from '../attempts.js'
-import { LOCKED_REASON, ageLabel, appliedAutomatically, inFlight, lastAt, needsFollowUp, secondLine } from '../applications.js'
+//
+// The `.app-state` slot (Q-120 U3) says what is happening to the role: Queued · 3rd,
+// Applying…, Applied automatically, Needs your answers, Stopped: <reason>. "Try again"
+// adds a stopped, cancelled or waiting-for-answers role to the auto-apply queue again
+// (the same call and toast as the Inbox) and announces `jobscraper:apply-queue`; the
+// tab reloads its rows on that event.
+import { computed, ref, watch } from 'vue'
+import { ApiError, describeError, enqueueMessage, removeFromApplyQueue, startAutoApply } from '../api.js'
+import { IN_PROGRESS_REMOVE, canRetry, refusalMessage, rowState } from '../attempts.js'
+import { LOCKED_REASON, ageLabel, inFlight, lastAt, needsFollowUp, secondLine } from '../applications.js'
 import { exactTime, safeUrl } from '../format.js'
 import { openProfile } from '../profileView.js'
+import { showToast } from '../toast.js'
 import MenuButton from '../ui/MenuButton.vue'
 import MoveMenu from '../ui/MoveMenu.vue'
 import CompanyMark from './CompanyMark.vue'
@@ -42,23 +49,65 @@ const company = computed(() => props.row.company || 'Unknown company')
 const role = computed(() => props.row.role ?? props.row.job_id)
 const name = computed(() => `${role.value} at ${company.value}`)
 const url = computed(() => safeUrl(props.row.url))
-const locked = computed(() => inFlight(props.row))
+const locked = computed(() => inFlight(props.row) || justQueued.value > 0)
 const canDrag = computed(() => props.dragEnabled && !locked.value && !props.saving)
 const removable = computed(() => (props.row.events?.length ?? 0) <= 1)
 const meta = computed(() => [props.showCompany ? company.value : '', secondLine(props.row)].filter(Boolean).join(' · '))
-const attempt = computed(() => props.row.last_attempt ?? null)
-const auto = computed(() => appliedAutomatically(props.row))
 
-// The queue lane's `queued` kind (U3) may arrive before attempts.js words it.
-const attemptText = computed(() => {
-  const a = attempt.value
-  if (!a) return ''
-  if (a.kind === 'queued') {
-    const p = Number(props.row.queue?.position)
-    return p > 0 ? `Queued · ${ordinal(p)}` : 'Queued'
+// ---- the state chip and "Try again" (Q-120 U3) ----
+
+// After a successful "Try again": the place in line, shown at once until the tab's next
+// load brings the real row (any change of the attempt or the queue place clears it).
+const justQueued = ref(0)
+const rowKey = computed(() => `${props.row.last_attempt?.id ?? ''}|${props.row.last_attempt?.kind ?? ''}|${props.row.queue?.position ?? ''}`)
+watch(rowKey, () => { justQueued.value = 0 })
+
+const shown = computed(() => (justQueued.value > 0 ? { ...props.row, queue: { position: justQueued.value } } : props.row))
+const state = computed(() => rowState(shown.value))
+const stoppedLike = computed(() => state.value?.kind === 'stopped' || state.value?.kind === 'cancelled')
+const retryable = computed(() => canRetry(shown.value))
+const retrying = ref(false)
+
+const announceQueue = () => window.dispatchEvent(new Event('jobscraper:apply-queue'))
+
+async function tryAgain() {
+  if (retrying.value) return
+  retrying.value = true
+  const id = props.row.job_id
+  try {
+    const r = await startAutoApply([id])
+    const refused = Array.isArray(r?.refused) ? r.refused.map(x => x.text).filter(Boolean) : []
+    const mine = Array.isArray(r?.queued) ? r.queued.filter(q => String(q.job_id) === String(id)) : []
+    if (mine.length) {
+      justQueued.value = Number(mine[0].position) > 0 ? Number(mine[0].position) : 1
+      showToast({
+        message: [enqueueMessage({ ...r, queued: mine }), ...refused].join(' '),
+        action: { label: 'Undo', run: undoTryAgain },
+        link: { label: 'See the queue', href: '#/runs' },
+      })
+    } else {
+      showToast({ message: refused.length ? refused.join(' ') : refusalMessage(r) })
+    }
+    announceQueue()
+  } catch (e) {
+    if (e instanceof ApiError && e.status === 422) showToast({ message: refusalMessage(e.body) })
+    else showToast({ message: `Could not add this role to the auto-apply queue: ${describeError(e)}` })
+  } finally {
+    retrying.value = false
   }
-  return attemptLabel(a.kind, a.mode)
-})
+}
+
+// Take the role out of the queue again; once it has started that is Runs' Stop.
+async function undoTryAgain() {
+  try {
+    await removeFromApplyQueue(props.row.job_id)
+    justQueued.value = 0
+    announceQueue()
+  } catch (e) {
+    if (e instanceof ApiError && e.status === 404) showToast({ message: 'It has already started; stop it in Runs.' })
+    else showToast({ message: `Could not take ${role.value} out of the queue: ${describeError(e)}` })
+  }
+}
 
 const moreItems = computed(() => [
   { id: 'note', label: props.row.notes ? 'Edit note' : 'Add note' },
@@ -70,7 +119,12 @@ const moreItems = computed(() => [
 function onMore(id) {
   if (id === 'note') emit('note')
   else if (id === 'details') emit('details')
-  else if (id === 'remove') emit('remove')
+  else if (id === 'remove') {
+    // Being applied to right now: the server refuses (409 in_progress) and keeps the row,
+    // so say why here instead of asking first.
+    if (props.row.last_attempt?.kind === 'running') showToast({ message: IN_PROGRESS_REMOVE })
+    else emit('remove')
+  }
   else if (id === 'open' && url.value) window.open(url.value, '_blank', 'noopener,noreferrer')
 }
 
@@ -116,26 +170,42 @@ function onDragStart(event) {
         <p v-if="meta" class="row-meta">{{ meta }}</p>
       </div>
     </div>
-    <!-- The state slot (Q-118 §3, shared with Q-120 U3). Today it shows the latest
-         auto-apply attempt (Q-76 N11) as before; the queue lane words the queue states
-         here ("Queued · 3rd", "Applying…", "Try again"). "Applied automatically" marks
-         an applied status that an auto-apply submit made. -->
-    <div class="app-state" :data-kind="attempt?.kind || null">
-      <span v-if="auto" class="ui-badge app-auto" data-tone="ok"><Icon name="check" :size="12" />Applied automatically</span>
-      <button
-        v-else-if="attempt?.kind === 'needs_input'"
-        type="button"
-        class="pill attempt attempt-link"
-        data-kind="needs_input"
-        :title="attempt.text"
-        @click="openProfile('details')"
-      >{{ attemptText }}</button>
+    <!-- The state slot (Q-118 §3, Q-120 U3): one chip for what is happening to the role,
+         then what the owner can do about it. "Applied automatically" marks an applied
+         status that an auto-apply submit made. A later change adds "Submitted · N answers
+         assumed" here (llm_first_fill_design §6): the slot wraps, so it has room. -->
+    <div class="app-state" :data-kind="state?.kind || null">
       <span
-        v-else-if="attempt"
-        class="pill attempt"
-        :data-kind="attempt.kind"
-        :title="attempt.text || undefined"
-      >{{ attemptText }}</span>
+        v-if="state"
+        class="ui-badge app-chip"
+        :class="{ 'app-auto': state.icon }"
+        :data-tone="state.tone"
+        :data-kind="state.kind"
+        :title="state.title || undefined"
+      ><Icon v-if="state.icon" name="check" :size="12" />{{ state.label }}</span>
+      <span v-if="state?.step" class="app-step">{{ state.step }}</span>
+      <span v-if="state?.reason" class="app-reason" :title="state.title || undefined">{{ state.reason }}</span>
+      <a
+        v-if="state?.kind === 'needs_input'"
+        class="button ghost app-act app-answer"
+        href="#/profile"
+        @click.prevent="openProfile('details')"
+      >Answer in Profile</a>
+      <a
+        v-if="stoppedLike && url"
+        class="button ghost app-act app-open"
+        :href="url"
+        target="_blank"
+        rel="noopener noreferrer"
+        draggable="false"
+      >Open the posting</a>
+      <button
+        v-if="retryable"
+        type="button"
+        class="app-act app-retry"
+        :disabled="retrying || saving"
+        @click="tryAgain"
+      >{{ retrying ? 'Adding…' : 'Try again' }}</button>
     </div>
     <span class="updated num" :title="exactTime(lastAt(row))">{{ ageLabel(row) }}</span>
     <MoveMenu
@@ -192,16 +262,13 @@ a.role-title:hover { color: var(--accent); text-decoration: underline; }
 a.role-title .icon { color: var(--muted); }
 .row-meta { margin: 2px 0 0; font-size: var(--text-xs); color: var(--muted); }
 .follow-up { color: var(--warn); background: var(--warn-soft); }
-.app-state { grid-area: state; display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: var(--space-2); min-width: 0; }
+.app-state { grid-area: state; display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: var(--space-1) var(--space-2); min-width: 0; max-width: min(34rem, 50vw); }
 .app-state:empty { display: none; }
-.app-auto { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
-/* The auto-apply pill: green when sent, amber when it waits for you, red when it stopped. */
-.attempt { color: var(--text-2); background: var(--surface-3); white-space: nowrap; }
-.attempt[data-kind='sent'] { color: var(--ok); background: var(--ok-soft); }
-.attempt[data-kind='dry_run'], .attempt[data-kind='unconfirmed'], .attempt[data-kind='needs_input'] { color: var(--warn); background: var(--warn-soft); }
-.attempt[data-kind='stopped'] { color: var(--danger); background: var(--danger-soft); }
-button.attempt-link { border: 0; cursor: pointer; font: inherit; font-size: var(--text-xs); font-weight: 600; line-height: 1.7; min-height: 0; padding: 0 var(--space-2); box-shadow: none; }
-button.attempt-link:hover { text-decoration: underline; }
+/* The chip's tone comes from `.ui-badge[data-tone]`; a long "Stopped: ..." reason wraps. */
+.app-chip { white-space: normal; max-width: 24rem; text-align: left; }
+.app-auto { white-space: nowrap; }
+.app-step, .app-reason { color: var(--muted); font-size: var(--text-xs); }
+.app-act { min-height: 1.75rem; padding: 0 var(--space-2); font-size: var(--text-xs); }
 .updated { grid-area: age; color: var(--muted); font-size: var(--text-xs); white-space: nowrap; }
 .app-move { grid-area: move; justify-self: end; }
 .app-more { grid-area: more; }
@@ -221,7 +288,8 @@ button.attempt-link:hover { text-decoration: underline; }
   .app-state { justify-content: flex-start; }
   .app-move { justify-self: start; }
   .app-more :deep(.app-more-trigger) { min-height: var(--touch-min); min-width: var(--touch-min); }
-  button.attempt-link { min-height: var(--touch-min); }
+  .app-state { max-width: none; }
+  .app-act { min-height: var(--touch-min); }
 }
 @media (prefers-reduced-motion: reduce) {
   .app-grip { transition: none; }
