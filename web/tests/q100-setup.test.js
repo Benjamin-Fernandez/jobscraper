@@ -240,35 +240,42 @@ describe('Applications row actions (A13)', () => {
   }
   const row = (w, id) => w.find(`.app-row[data-job="${id}"]`)
   const deletes = () => api.calls.filter(c => c.method === 'DELETE')
+  // Q-118 LB: the row actions (note, details, posting, remove) moved into one "⋯" menu.
+  async function askRemove(w, id) {
+    await row(w, id).find('.app-more-trigger').trigger('click')
+    await flushPromises()
+    await row(w, id).findAll('[role="menuitem"]').find(b => b.text().trim() === 'Remove from Applications').trigger('click')
+    await flushPromises()
+  }
 
-  it('the row\'s actions sit in one .row-actions group, Remove last after a rule', async () => {
+  it('the row\'s actions sit in one "⋯" menu named for the row, Remove last', async () => {
     const w = await tab()
-    const actions = row(w, 'a1b2c3').find('.row-actions')
-    expect(actions.exists()).toBe(true)
-    const kids = actions.findAll('*').map(e => e.classes())
-    const rule = kids.findIndex(c => c.includes('row-actions-rule'))
-    const remove = kids.findIndex(c => c.includes('row-remove'))
-    expect(rule).toBeGreaterThan(-1)
-    expect(remove).toBeGreaterThan(rule)
-    expect(kids.at(-1)).toContain('row-remove')
-    expect(actions.find('.note-edit').exists() || actions.find('.details-toggle').exists()).toBe(true)
+    const more = row(w, 'a1b2c3').find('.app-more-trigger')
+    expect(more.attributes('aria-haspopup')).toBe('menu')
+    expect(more.attributes('aria-label')).toMatch(/^More actions for .+ at OKX$/)
+    await more.trigger('click')
+    const labels = row(w, 'a1b2c3').findAll('[role="menuitem"]').map(b => b.text().trim())
+    expect(labels[0]).toMatch(/^(Add|Edit) note$/)
+    expect(labels).toContain('Show details')
+    expect(labels.at(-1)).toBe('Remove from Applications')
+    expect(row(w, 'a1b2c3').find('.row-actions').exists()).toBe(false)
   })
 
-  it('the touch-target hook: --touch-min under 640px for every row action', () => {
-    const src = read('../src/tabs/Applications.vue')
-    const at = src.lastIndexOf('.row-actions .note-edit')
-    const block = src.slice(at, src.indexOf('}', at))
-    expect(src.lastIndexOf('@media', at)).toBe(src.lastIndexOf('@media (max-width: 640px)', at))
-    for (const sel of ['.note-edit', '.details-toggle', '.row-remove', '.remove-yes', '.remove-keep']) {
-      expect(block).toContain(sel)
+  it('the touch-target hook: --touch-min under 640px for the menu, its items and the confirm', () => {
+    const under640 = (src, needle) => {
+      const at = src.indexOf(needle, src.indexOf('@media (max-width: 640px)'))
+      expect(at, needle).toBeGreaterThan(-1)
+      const line = src.slice(at, src.indexOf('}', at))
+      expect(line, needle).toMatch(/min-height:\s*var\(--touch-min\)/)
     }
-    expect(block).toMatch(/min-height:\s*var\(--touch-min\)/)
+    under640(read('../src/tabs/Applications.vue'), '.remove-ask .remove-yes, .remove-ask .remove-keep')
+    under640(read('../src/components/ApplicationRow.vue'), '.app-more :deep(.app-more-trigger)')
+    under640(read('../src/ui/MenuButton.vue'), '.ui-menu-item')
   })
 
   it('Remove asks first, with the company named; focus goes to Keep; nothing is deleted yet', async () => {
     const w = await tab()
-    await row(w, 'a1b2c3').find('.row-remove').trigger('click')
-    await flushPromises()
+    await askRemove(w, 'a1b2c3')
     const ask = row(w, 'a1b2c3').find('.remove-ask')
     expect(ask.attributes('role')).toBe('group')
     expect(ask.find('.remove-q').text()).toMatch(/^Remove .+ from Applications\? Its notes go too\.$/)
@@ -277,21 +284,20 @@ describe('Applications row actions (A13)', () => {
     expect(deletes()).toEqual([])
   })
 
-  it('Keep keeps the row, deletes nothing, and returns focus to Remove', async () => {
+  it('Keep keeps the row, deletes nothing, and returns focus to the row\'s "⋯" menu', async () => {
     const w = await tab()
-    await row(w, 'a1b2c3').find('.row-remove').trigger('click')
-    await flushPromises()
+    await askRemove(w, 'a1b2c3')
     await row(w, 'a1b2c3').find('.remove-keep').trigger('click')
     await flushPromises()
     expect(row(w, 'a1b2c3').find('.remove-ask').exists()).toBe(false)
-    expect(document.activeElement).toBe(row(w, 'a1b2c3').find('.row-remove').element)
+    expect(document.activeElement).toBe(row(w, 'a1b2c3').find('.app-more-trigger').element)
     expect(deletes()).toEqual([])
     expect(row(w, 'a1b2c3').exists()).toBe(true)
   })
 
   it('only the asked row asks; confirming deletes that one and the row goes', async () => {
     const w = await tab({ a1b2c3: 'applied', z9y8x7: 'applied' })
-    await row(w, 'a1b2c3').find('.row-remove').trigger('click')
+    await askRemove(w, 'a1b2c3')
     expect(row(w, 'z9y8x7').find('.remove-ask').exists()).toBe(false)
     await row(w, 'a1b2c3').find('.remove-yes').trigger('click')
     await flushPromises()
