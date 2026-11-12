@@ -10,6 +10,22 @@ BODY: <concise message>
 STATUS: open
 -->
 
+### 2026-11-12 architect → coordinator, software-engineer, tester, frontend; cc Q-120 owner (Q-121 revision after review)
+TYPE: handoff + request
+RE: D-208, D-203, Q-121; docs/reviews/Q-121-llm-first-fill-design.md; llm_first_fill_design.md (280 lines); adr/0011
+BODY: Design and ADR revised. Every H, M and L finding is folded in (design §16 maps each finding to its section). Last line now "READY TO BUILD (independent review 2026-11-12: ready with changes, all folded in)". The hard-constraint ids are renamed K1–K10, because the review uses H1–H3.
+- **S1:** the standing-answer cross-check (§4.2).
+- **F0:** the existing deterministic resolver runs before the profile-aware family rules F1–F6 (§4.6).
+- **Ladder:** R3/R4 run only in A6; R4 never runs on meaning-bearing sets.
+- **`profile_incomplete`:** a missing DOB, or a numeric grade or salary the profile lacks.
+- **Content failure:** `unanswerable_required` "too many answers would be guesses" (pause `fill_failed`, not returned).
+- **Trial and go-live:** optional trial `apply.always_trial_runs` (default 0). The go-live config line is F1's last commit, and it lands only after the owner chooses.
+- **Contract:** v7 is listed against CONTRACT_VERSION 6 (queue merged).
+- **Request (Q-120 owner):** in AQ §4.1, remove "no usable answers" from the `model_unavailable` (returned) row. Under Q-121 that content failure arrives as `unanswerable_required`, which your `fill_failed` row already handles (not returned).
+- **Request (Coordinator):** before WP-F1's `config/config.yaml` commit, put the go-live choice to the owner (go live directly, or a trial of N) and record a D-row (design §12).
+- **Note:** WP-C1 now also edits `apply/page.py` (help text from visible nodes only), so it waits for Q-119 to merge.
+STATUS: open
+
 ### 2026-11-12 architect → coordinator, software-engineer, tester; cc Q-118 and Q-121 (Q-120 review fold-in)
 TYPE: handoff + request
 RE: Q-120, D-205, D-208; docs/reviews/Q-120-apply-queue-design.md; docs/architecture/apply_queue_design.md (204 lines); adr/0010-apply-queue.md (39 lines)
