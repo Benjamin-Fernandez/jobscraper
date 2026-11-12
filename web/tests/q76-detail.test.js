@@ -64,7 +64,24 @@ async function mountTab(options = {}) {
   return w
 }
 const row = (w, id) => w.find(`.app-row[data-job="${id}"]`)
-const toggle = (w, id) => row(w, id).find('.details-toggle')
+// Q-118 LB: the Details toggle moved into the row's "⋯" menu ("Show details" /
+// "Hide details"). `detailsItem` opens the menu and returns that item; `toggle` chooses it.
+const moreTrigger = (w, id) => row(w, id).find('.app-more-trigger')
+async function detailsItem(w, id) {
+  await moreTrigger(w, id).trigger('click')
+  await flushPromises()
+  return row(w, id).findAll('[role="menuitem"]').find(b => /^(Show|Hide) details$/.test(b.text().trim()))
+}
+async function detailsLabel(w, id) {
+  const label = (await detailsItem(w, id)).text().trim()
+  await row(w, id).find('[role="menu"]').trigger('keydown', { key: 'Escape' })
+  await flushPromises()
+  return label
+}
+async function toggle(w, id) {
+  await (await detailsItem(w, id)).trigger('click')
+  await flushPromises()
+}
 const panels = w => w.findAll('.app-detail')
 const attemptCalls = () => api.calls.filter(c => /\/attempts$/.test(c.url))
 
@@ -103,9 +120,13 @@ describe('the auto-apply pill on a row (N11)', () => {
     ['dry_run', 'Dry run ready'], ['cancelled', 'Auto-apply cancelled'], ['stopped', 'Auto-apply stopped'],
   ]
 
+  // Q-118 LB: the pill sits in the row's `.app-state` slot. An *applied* row whose last
+  // attempt was sent shows "Applied automatically" instead (pinned in q118-runs-applications),
+  // so these rows are Interviewing to keep every kind's pill in view.
+  const OTHER = { a1b2c3: 'interviewing', d4e5f6: 'interviewing' }
   it.each(KINDS)('%s reads "%s" and carries its kind', async (kind, label) => {
-    const w = await mountTab({ attempts: { a1b2c3: [attempt(kind, { text: kind === 'stopped' ? 'The site asked for a CAPTCHA.' : '' })] } })
-    const pill = row(w, 'a1b2c3').find('.pill.attempt')
+    const w = await mountTab({ statuses: OTHER, attempts: { a1b2c3: [attempt(kind, { text: kind === 'stopped' ? 'The site asked for a CAPTCHA.' : '' })] } })
+    const pill = row(w, 'a1b2c3').find('.app-state .pill.attempt')
     expect(pill.text()).toBe(label)
     expect(pill.attributes('data-kind')).toBe(kind)
     expect(pill.element.tagName).toBe('SPAN')
@@ -113,13 +134,14 @@ describe('the auto-apply pill on a row (N11)', () => {
   })
 
   it('no attempt, no pill; only the row with an attempt has one', async () => {
-    const w = await mountTab({ attempts: { a1b2c3: [attempt('sent')] } })
-    expect(row(w, 'a1b2c3').find('.pill.attempt').exists()).toBe(true)
+    const w = await mountTab({ statuses: OTHER, attempts: { a1b2c3: [attempt('sent')] } })
+    expect(row(w, 'a1b2c3').find('.app-state .pill.attempt').exists()).toBe(true)
     expect(row(w, 'd4e5f6').find('.pill.attempt').exists()).toBe(false)
+    expect(row(w, 'd4e5f6').find('.app-state').text()).toBe('')
   })
 
   it('the pill shows the newest attempt only', async () => {
-    const w = await mountTab({ attempts: { a1b2c3: [attempt('sent', { id: 2 }), attempt('stopped', { id: 1 })] } })
+    const w = await mountTab({ statuses: OTHER, attempts: { a1b2c3: [attempt('sent', { id: 2 }), attempt('stopped', { id: 1 })] } })
     expect(row(w, 'a1b2c3').findAll('.pill.attempt')).toHaveLength(1)
     expect(row(w, 'a1b2c3').find('.pill.attempt').text()).toBe('Sent by auto-apply')
   })
@@ -167,49 +189,49 @@ describe('the auto-apply pill on a row (N11)', () => {
 // ------------------------------------------------------------------ Details
 
 describe('Details opens one row at a time (N12)', () => {
-  it('starts closed, with the toggle named for its row and wired to its panel', async () => {
+  // Q-118 LB: the toggle is the "⋯" menu's "Show details" item (a menu item carries no
+  // aria-expanded/aria-controls); the menu trigger is named for its row, and the panel
+  // is a region labelled by the posting's title.
+  it('starts closed, with the menu named for its row and the panel labelled by its title', async () => {
     const w = await mountTab()
     expect(panels(w)).toHaveLength(0)
-    const t = toggle(w, 'a1b2c3')
-    expect(t.text()).toBe('Details')
-    expect(t.attributes('aria-expanded')).toBe('false')
-    expect(t.attributes('aria-controls')).toBe('app-panel-a1b2c3')
-    expect(t.attributes('aria-label')).toMatch(/^Details: OKX · /)
+    expect(moreTrigger(w, 'a1b2c3').attributes('aria-label')).toMatch(/^More actions for .+ at OKX$/)
+    expect(await detailsLabel(w, 'a1b2c3')).toBe('Show details')
     expect(attemptCalls()).toHaveLength(0)
+    await toggle(w, 'a1b2c3')
+    const panel = w.find('#app-panel-a1b2c3')
+    expect(panel.attributes('role')).toBe('region')
+    expect(panel.attributes('aria-labelledby')).toBe('app-detail-a1b2c3')
+    expect(panel.find('#app-detail-a1b2c3').exists()).toBe(true)
   })
 
-  it('opening one row closes the other; a second click closes it', async () => {
+  it('opening one row closes the other; choosing it again closes it', async () => {
     const w = await mountTab()
-    await toggle(w, 'a1b2c3').trigger('click')
-    await flushPromises()
+    await toggle(w, 'a1b2c3')
     expect(panels(w)).toHaveLength(1)
-    expect(toggle(w, 'a1b2c3').attributes('aria-expanded')).toBe('true')
-    expect(toggle(w, 'a1b2c3').text()).toBe('Hide details')
+    expect(await detailsLabel(w, 'a1b2c3')).toBe('Hide details')
     expect(w.find('#app-panel-a1b2c3').attributes('role')).toBe('region')
 
-    await toggle(w, 'd4e5f6').trigger('click')
-    await flushPromises()
+    await toggle(w, 'd4e5f6')
     expect(panels(w)).toHaveLength(1)
     expect(row(w, 'd4e5f6').find('.app-detail').exists()).toBe(true)
-    expect(toggle(w, 'a1b2c3').attributes('aria-expanded')).toBe('false')
-    expect(toggle(w, 'd4e5f6').attributes('aria-expanded')).toBe('true')
+    expect(await detailsLabel(w, 'a1b2c3')).toBe('Show details')
+    expect(await detailsLabel(w, 'd4e5f6')).toBe('Hide details')
 
-    await toggle(w, 'd4e5f6').trigger('click')
+    await toggle(w, 'd4e5f6')
     expect(panels(w)).toHaveLength(0)
-    expect(toggle(w, 'd4e5f6').text()).toBe('Details')
+    expect(await detailsLabel(w, 'd4e5f6')).toBe('Show details')
   })
 
   it('opening asks for that row\'s attempts, once', async () => {
     const w = await mountTab()
-    await toggle(w, 'a1b2c3').trigger('click')
-    await flushPromises()
+    await toggle(w, 'a1b2c3')
     expect(attemptCalls().map(c => c.url)).toEqual(['api/applications/a1b2c3/attempts'])
   })
 
   it('a row left off the shortlist still opens (no posting facts, no crash)', async () => {
     const w = await mountTab({ statuses: { gone99: 'applied' } })
-    await toggle(w, 'gone99').trigger('click')
-    await flushPromises()
+    await toggle(w, 'gone99')
     const panel = w.find('.app-detail')
     expect(panel.exists()).toBe(true)
     expect(panel.find('.why .reason').exists()).toBe(false)
@@ -220,7 +242,7 @@ describe('Details opens one row at a time (N12)', () => {
 // ------------------------------------------------------------------ attempts list
 
 describe('the attempts list (N11)', () => {
-  const open = async (w, id = 'a1b2c3') => { await toggle(w, id).trigger('click'); await flushPromises() }
+  const open = (w, id = 'a1b2c3') => toggle(w, id)
 
   it('says Loading while the request is out', async () => {
     useApi({ statuses: { a1b2c3: 'applied' } })
@@ -231,8 +253,7 @@ describe('the attempts list (N11)', () => {
       : real(url, init))))
     const w = mount(Applications, { props: { run: 12, runs: runsFrom(), jobs: [] }, attachTo: document.body })
     await flushPromises()
-    await toggle(w, 'a1b2c3').trigger('click')
-    await flushPromises()
+    await toggle(w, 'a1b2c3')
     expect(w.find('.attempts-status').text()).toBe('Loading…')
     release()
     await flushPromises()
