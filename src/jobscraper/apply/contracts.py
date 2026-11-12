@@ -20,7 +20,7 @@ from dataclasses import dataclass, field
 from enum import Enum, IntEnum
 from typing import Any, Callable, Optional, Protocol, Sequence, Union, runtime_checkable
 
-CONTRACT_VERSION = 6   # 2: D-69 (no FAILED after the Submit click, ADR-0004), D-68 context fields
+CONTRACT_VERSION = 7   # 2: D-69 (no FAILED after the Submit click, ADR-0004), D-68 context fields
                        # 3: D-70 (additive): prefill sources/policy, PREFILLED status, account
                        #    statuses, sign-up outcomes, Workday entry, identity email, adapter
                        #    `prefill`/`read_values`, SIGNING_UP -> SIGNING_UP (backup email)
@@ -49,6 +49,12 @@ CONTRACT_VERSION = 6   # 2: D-69 (no FAILED after the Submit click, ADR-0004), D
                        #    property, not a field; CHOICE_TYPES unchanged; llm_fill_design §3.1).
                        # 6: D-205 (additive; apply_queue_design.md §3.6, ADR-0010): QueuePause,
                        #    QUEUE_PAUSE_TEXTS, RETURNS_ITEM, QUEUE_REFUSAL_TEXTS.
+                       # 7: D-208 (additive; llm_first_fill_design.md §7.1, ADR-0011): FillPolicy,
+                       #    ResolveContext.fill_policy, Answer.assumed, ModelDecision.assumed,
+                       #    AnswerSource DEFAULT/ASSUMPTION/FALLBACK, FillSource DEFAULT/ASSUMPTION/NONE,
+                       #    DEFAULT_RULES, FALLBACK_RULES, Briefing, ReasonCode DOCUMENT_MISSING/
+                       #    OWNER_FACT_MISSING (+ REASON_TEXTS), QuestionReason/QuestionStatus ASSUMED,
+                       #    PageOutcome.assumed/.fallback/.standing_kept.
 
 
 # --------------------------------------------------------------------------
@@ -144,6 +150,11 @@ class ReasonCode(str, Enum):
     CANCELLED = "cancelled"
     MODEL_UNAVAILABLE = "model_unavailable"   # D-78: the local model is needed for every page
     ERROR = "error"
+    # D-208 (llm_first_fill_design §4.1 A2, §4.6, §9): per-role stops under fill_policy `always`.
+    DOCUMENT_MISSING = "document_missing"       # a required photo/ID/certificate/transcript slot, none in the profile
+    OWNER_FACT_MISSING = "owner_fact_missing"   # a required fact only the owner knows (date of birth, national ID,
+                                                # a numeric grade, a salary), in neither the profile nor the resume;
+                                                # detail = the fact in plain words; the queue continues
 
 
 @dataclass(frozen=True)
@@ -209,6 +220,12 @@ REASON_TEXTS: dict[ReasonCode, ReasonText] = {
     ReasonCode.ERROR: ReasonText(
         "Something unexpected went wrong, so JobScraper stopped before sending.",
         "Try again. If it happens again, the Developer tab log has the details."),
+    ReasonCode.DOCUMENT_MISSING: ReasonText(
+        "This form needs a {detail}, and your profile has none. Nothing was sent.",
+        "Add it in Profile, then try again."),
+    ReasonCode.OWNER_FACT_MISSING: ReasonText(
+        "This form asks for your {detail}, which isn't in your profile or resume. Nothing was sent.",
+        "Answer it in Questions or add it in Profile, then click Try again."),
 }
 
 # Copy for the two terminal states that are not failures but need the owner.
@@ -507,6 +524,10 @@ class AnswerSource(str, Enum):
     RESUME_IMPORT = "resume_import"  # kept as shown: the site's own resume import put it there
     COMPOSED = "composed"            # Q-45: a cover letter / motivation text the tailor composed and
                                      # checked (llm_fill_design §19); the audit row holds the text
+    # D-208 (llm_first_fill_design §6.1), fill_policy `always` only:
+    DEFAULT = "default"              # "default:<rule id>": one of the owner's standing rules (DEFAULT_RULES)
+    ASSUMPTION = "assumption"        # the model's best sensible answer with no basis; Answer.assumed is True
+    FALLBACK = "fallback"            # "fallback:<F id>": a code fallback after the model (FALLBACK_RULES)
 
 
 PREFILL_SOURCES = frozenset({AnswerSource.MYGREENHOUSE, AnswerSource.WORKDAY_LAST_APPLICATION,
@@ -551,6 +572,10 @@ class Answer:
     shown: Value = None               # what the field showed when the page was first read
     origin: str = ""                  # ValueOrigin value of `shown`
     entry: str = ""                   # entry group id ("work_experience#2"), "" outside repeated entries
+    # D-208 (llm_first_fill_design §6.1): the value was assumed, not backed by the profile, the
+    # resume, the job or a standing rule; offered to the owner as "Answered for you". Under
+    # `always`, `evidence` holds the model's one-line reason instead of a quote.
+    assumed: bool = False
 
     @property
     def fills(self) -> bool:
@@ -598,6 +623,22 @@ EMPLOYER_SPECIFIC_DECLARATIONS = frozenset({
 ALWAYS_OURS = frozenset({Canonical.RESUME, Canonical.EMAIL})
 
 
+class FillPolicy(str, Enum):
+    """How forms are answered (D-208, llm_first_fill_design §1, §7.2; ADR-0011). Config
+    `apply.fill_policy`; the effective value is ALWAYS only with a local model (K2)."""
+    STRICT = "strict"   # today's path: fail closed, captured questions (ADR-0003, ADR-0006)
+    ALWAYS = "always"   # the local model answers every field; assumptions are marked
+
+
+# The owner's standing rules under `always` (design §3.4); a row's source is "default:<id>".
+DEFAULT_RULES: tuple[str, ...] = (
+    "no_declaration", "employer_history", "work_rights", "self_id", "consent",
+    "talent_pool", "availability", "how_heard", "willing", "health",
+)
+# Code fallbacks after the model under `always` (design §4.6); a row's source is "fallback:<id>".
+FALLBACK_RULES: tuple[str, ...] = ("F0", "F1", "F2", "F3", "F4", "F5", "F6")
+
+
 @dataclass(frozen=True)
 class ResolveContext:
     """Everything the resolver may read, handed in by apply_flow (stages do not
@@ -636,6 +677,9 @@ class ResolveContext:
     # the tier routing (sensitive no-fit stops, tier-4 locks, tier-1 SENSITIVE_CANONICALS,
     # G7) is unchanged. Set by apply_flow.resolve_ctx; False everywhere else.
     model_sees_sensitive: bool = False
+    # D-208 (llm_first_fill_design §7.2): the effective policy, set by apply_flow.resolve_ctx
+    # (ALWAYS only with a local backend). The default keeps every existing caller on STRICT.
+    fill_policy: FillPolicy = FillPolicy.STRICT
 
 
 # --------------------------------------------------------------------------
@@ -667,12 +711,15 @@ class QuestionReason(str, Enum):
     COMPOSE_NEEDED = "compose_needed"            # D-86 F9 / Q-45: a required cover letter or motivation
                                                  # text JobScraper didn't write (composing off, or the draft
                                                  # failed its fact check); chip copy: llm_fill_design §19.6
+    ASSUMED = "assumed"                          # D-208: answered for the owner with an assumption
+                                                 # (llm_first_fill_design §6.3); chip "Answered for you"
 
 
 class QuestionStatus(str, Enum):
     OPEN = "open"
     ANSWERED = "answered"
     DISMISSED = "dismissed"    # "I'll answer this one by hand": never asked again, never retried
+    ASSUMED = "assumed"        # D-208: JobScraper answered it for the owner; Keep / Change (design §6.3)
 
 
 @dataclass(frozen=True)
@@ -988,6 +1035,10 @@ class FillSource(str, Enum):
     JOB = "job"             # the model's value from the job posting, with a verbatim quote
     KEEP = "keep"           # the value the field shows is right (quote the source that says so)
     UNKNOWN = "unknown"
+    # D-208 (llm_first_fill_design §5.1), fill_policy `always` only:
+    DEFAULT = "default"         # one of the owner's standing rules (ref "default:<rule id>", DEFAULT_RULES)
+    ASSUMPTION = "assumption"   # no basis in the briefing; the model's most neutral truthful answer
+    NONE = "none"               # leave an optional field empty (never allowed on a required field)
 
 
 @dataclass(frozen=True)
@@ -1015,6 +1066,21 @@ class ModelDecision:
     evidence: str = ""
     via: str = "page"       # page | entry:<group> | pick | second | recheck | corrective | cache:
                             # which call produced it (every decision sets it; tests route on it)
+    # D-208 (`always`): the model marked the answer as an assumption. There `evidence` holds
+    # the model's one-line reason (llm_first_fill_design §5.2).
+    assumed: bool = False
+
+
+@dataclass(frozen=True)
+class Briefing:
+    """D-208 (llm_first_fill_design §3.1): the candidate briefing, built once per attempt by
+    `apply.briefing.build` and sent as the cached prompt prefix. Holds personal values: local
+    prompts and memory only, never logged or stored. Not a FillServices member (that Protocol
+    is runtime-checkable): pagefill reads `getattr(services, "briefing", None)`."""
+    text: str                    # PROFILE, ANSWERS YOU GAVE BEFORE, COMPUTED FACTS, STANDING RULES, RESUME
+    hash: str = ""               # sha256(text)[:16]; part of the fill-cache inputs_hash
+    tokens: int = 0              # estimate (characters / 3.6), checked against briefing_max_tokens
+    refs: tuple[str, ...] = ()   # every citable ref, for the output schema's `ref` enum
 
 
 @dataclass
@@ -1033,6 +1099,12 @@ class PageOutcome:
     # Q-45 (§19): required compose targets with no text in ctx.composed. Like a stop, nothing on
     # the page was changed; apply_flow gets the texts and runs fill_page again on the same step.
     compose_needed: tuple[str, ...] = ()
+    # D-208 (`always`, llm_first_fill_design §4.1 A9): field keys answered with an assumption, by a
+    # code fallback (F0-F6), and declaration/work-rights fields where S1 kept the owner's standing
+    # answer over the model's. All empty under `strict`.
+    assumed: tuple[str, ...] = ()
+    fallback: tuple[str, ...] = ()
+    standing_kept: tuple[str, ...] = ()
 
 
 @runtime_checkable
