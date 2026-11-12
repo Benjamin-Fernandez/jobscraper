@@ -250,8 +250,32 @@ async function run(name, request, done) {
     if (alive) {
       acting.value = ''
       schedule()
+      // The flag is clear first, so the controls are enabled when focus moves.
+      await nextTick()
+      if (alive) restoreFocus(FOCUS_AFTER[name] ?? [])
     }
   }
+}
+
+// Where focus goes when the control that had it is gone or disabled (a button that
+// turned into the paused banner, a confirm that closed). A user who moved on during the
+// request is left alone. Falls back to the "Up next" heading.
+const FOCUS_AFTER = {
+  pause: ['.aq-resume', '.aq-pause'],
+  resume: ['.aq-pause', '.aq-resume'],
+  clear: ['.aq-resume', '.aq-pause'],
+  stop: ['.aq-resume', '.aq-stop', '.aq-pause'],
+}
+function restoreFocus(selectors) {
+  const el = root.value
+  const a = document.activeElement
+  const lost = !a || a === document.body || (el?.contains(a) && (a.disabled || !a.isConnected))
+  if (!el || !lost) return
+  for (const s of selectors) {
+    const b = el.querySelector(s)
+    if (b && !b.disabled) { b.focus(); return }
+  }
+  upNextHeading.value?.focus()
 }
 
 function failed(name, e) {
@@ -306,16 +330,14 @@ async function remove(item, index) {
   feedback.value = null
   removing.value = new Set(removing.value).add(item.job_id)
   loadSeq++
+  let removed = false
   try {
     await removeFromApplyQueue(item.job_id)
     if (!alive) return
     view.value = { ...view.value, waiting: waiting.value.filter(w => w.job_id !== item.job_id) }
     publish()
     announce()
-    // Focus stays in the list: the next Remove, else the "Up next" heading.
-    await nextTick()
-    const buttons = root.value?.querySelectorAll('.aq-remove') ?? []
-    ;(buttons[index] ?? upNextHeading.value)?.focus()
+    removed = true
   } catch (e) {
     if (!alive) return
     if (e instanceof ApiError && e.status === 404) {
@@ -330,6 +352,15 @@ async function remove(item, index) {
       next.delete(item.job_id)
       removing.value = next
       schedule()
+      if (removed) {
+        // The in-flight flag is clear first, then the DOM updates, then focus moves: a
+        // disabled button cannot take it. The next Remove, else the "Up next" heading.
+        await nextTick()
+        if (alive) {
+          const buttons = root.value?.querySelectorAll('.aq-remove') ?? []
+          ;(buttons[index] ?? upNextHeading.value)?.focus()
+        }
+      }
     }
   }
 }
