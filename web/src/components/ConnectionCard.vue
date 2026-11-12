@@ -9,6 +9,7 @@
 // the command prompts for the secret itself.
 import { computed } from 'vue'
 import { ago, when } from '../format.js'
+import { fixLabel } from '../connections.js'
 import StateChip from './StateChip.vue'
 
 const props = defineProps({
@@ -58,7 +59,7 @@ const times = computed(() => {
     <div class="conn-body"><slot /></div>
 
     <details v-if="fix" class="conn-fix">
-      <summary>See how to fix</summary>
+      <summary>{{ fixLabel(item) }}</summary>
       <p v-if="fix.note" class="conn-fix-note">{{ fix.note }}</p>
       <pre v-for="c in fix.commands" :key="c" class="code-wrap conn-command">{{ c }}</pre>
     </details>

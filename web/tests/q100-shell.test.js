@@ -238,6 +238,59 @@ describe('the Auto-apply chip in the masthead', () => {
     expect(chip(w).exists()).toBe(true)
   })
 
+  // Q-104 (f): Settings -> Apply dispatches `jobscraper:apply-settings` after each successful save;
+  // the shell re-reads the apply status so the chip follows a mode change with no reload.
+  const statusReads = api => api.of('GET', 'apply/status').length
+  const statusAnswering = (state) => () => ({ mode: state.mode, missing: [], busy: false })
+
+  it('Q-104 f: the chip disappears after a save that switches auto to dry run, with no other refresh', async () => {
+    const state = { mode: 'auto' }
+    const { api, w } = await boot('#/inbox', { 'GET apply/status': statusAnswering(state) })
+    expect(chip(w).exists()).toBe(true)
+    const before = statusReads(api)
+    state.mode = 'dry_run'
+    window.dispatchEvent(new Event('jobscraper:apply-settings'))
+    await vi.waitFor(() => expect(chip(w).exists()).toBe(false))
+    expect(statusReads(api)).toBeGreaterThan(before)
+  })
+
+  it('Q-104 f: the chip appears after a save that switches dry run to auto', async () => {
+    const state = { mode: 'dry_run' }
+    const { w } = await boot('#/inbox', { 'GET apply/status': statusAnswering(state) })
+    expect(chip(w).exists()).toBe(false)
+    state.mode = 'auto'
+    window.dispatchEvent(new Event('jobscraper:apply-settings'))
+    await vi.waitFor(() => expect(chip(w).exists()).toBe(true))
+    expect(chip(w).text()).toContain('Auto-apply on')
+  })
+
+  it('Q-104 f: a failed re-read hides the chip (never a guess), and a later save can bring it back', async () => {
+    const state = { mode: 'auto', fail: false }
+    const { w } = await boot('#/inbox', {
+      'GET apply/status': () => (state.fail ? [500, { detail: 'boom' }] : { mode: state.mode, missing: [], busy: false }),
+    })
+    expect(chip(w).exists()).toBe(true)
+    state.fail = true
+    window.dispatchEvent(new Event('jobscraper:apply-settings'))
+    await vi.waitFor(() => expect(chip(w).exists()).toBe(false))
+    state.fail = false
+    window.dispatchEvent(new Event('jobscraper:apply-settings'))
+    await vi.waitFor(() => expect(chip(w).exists()).toBe(true))
+  })
+
+  it('Q-104 f: the listener is removed on unmount (the event no longer reads the status)', async () => {
+    const removed = vi.spyOn(window, 'removeEventListener')
+    const state = { mode: 'auto' }
+    const { api, w } = await boot('#/inbox', { 'GET apply/status': statusAnswering(state) })
+    w.unmount()
+    expect(removed.mock.calls.some(c => c[0] === 'jobscraper:apply-settings')).toBe(true)
+    const before = statusReads(api)
+    window.dispatchEvent(new Event('jobscraper:apply-settings'))
+    await flushPromises()
+    expect(statusReads(api)).toBe(before)
+    removed.mockRestore()
+  })
+
   it('is absent in dry run and when the status route is absent or fails', async () => {
     for (const status of [{ mode: 'dry_run', missing: [], busy: false }, [404, { detail: 'Not Found' }], [500, { detail: 'boom' }]]) {
       const { w } = await boot('#/inbox', { 'GET apply/status': status })

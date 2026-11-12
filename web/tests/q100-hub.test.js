@@ -122,6 +122,15 @@ describe('ConnectionsHub: every sample state shows the right chip', () => {
     const fix = card(w, 'apply-mailbox').find('.conn-fix')
     if (item.state === 'attention' || item.state === 'not_set_up') {
       expect(fix.exists()).toBe(true)
+      // Q-104 (c): an optional card that isn't set up invites ("Set it up"); only a card that
+      // needs the owner says "See how to fix". The commands inside are the same either way.
+      const label = fix.find('summary').text()
+      if (item.state === 'not_set_up' && item.optional) {
+        expect(label).toBe('Set it up')
+        expect(fix.text()).not.toContain('See how to fix')
+      } else if (item.state === 'attention') {
+        expect(label).toBe('See how to fix')
+      }
       // D-198 H1: run through run.ps1, introduced by where to run it
       expect(fix.text()).toContain('In PowerShell, in the JobScraper folder')
       expect(fix.text()).toContain('.\\run.ps1 mail set-password')

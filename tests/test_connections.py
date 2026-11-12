@@ -691,10 +691,67 @@ def test_connections_get_returns_the_hub_without_any_secret_path_or_url():
                 assert isinstance(val, bool), path
 
 
+# Q-104 (d): the GET sweep calls only routes named here. A parameter-free GET that is in neither
+# list fails `test_connections_every_parameter_free_get_route_is_allowlisted_or_skipped`, so a future
+# GET with a side effect is never called blindly. To add a route: read its handler first; put it in
+# SWEEP_GET_ALLOWLIST if a call is safe on the temp DB, else in SWEEP_GET_SKIP with the reason.
+SWEEP_GET_ALLOWLIST = (
+    "/api/applicant",
+    "/api/applicant/refresh",
+    "/api/applications",
+    "/api/apply/settings",
+    "/api/apply/status",
+    "/api/companies/export.csv",
+    "/api/companies/health",
+    "/api/companies/list",
+    "/api/connections",
+    "/api/healthz",
+    "/api/jobs/current",
+    "/api/mail",
+    "/api/mail/suggestions",
+    "/api/profile",
+    "/api/questions",
+    "/api/runs",
+    "/api/settings",
+    "/api/shortlist",
+    "/api/stats",
+    "/api/titles",
+)
+SWEEP_GET_SKIP = {}  # route -> reason the sweep must not call it (none today)
+
+
+def _parameter_free_get_routes(app):
+    return sorted(p for p, ops in app.openapi()["paths"].items()
+                  if "get" in ops and "{" not in p and p.startswith("/api"))
+
+
+def test_connections_every_parameter_free_get_route_is_allowlisted_or_skipped():
+    with _web() as w:
+        found = _parameter_free_get_routes(w.app)
+    unlisted = [p for p in found if p not in SWEEP_GET_ALLOWLIST and p not in SWEEP_GET_SKIP]
+    assert not unlisted, (
+        f"new parameter-free GET route(s) {unlisted}: read the handler, then add each to "
+        "SWEEP_GET_ALLOWLIST (safe to call) or SWEEP_GET_SKIP (with a reason) in tests/test_connections.py")
+    # the lists may not name a route that no longer exists, or overlap
+    gone = [p for p in (*SWEEP_GET_ALLOWLIST, *SWEEP_GET_SKIP) if p not in found]
+    assert not gone, f"allowlist/skip names routes that are gone: {gone}"
+    assert not set(SWEEP_GET_ALLOWLIST) & set(SWEEP_GET_SKIP)
+
+
+def test_connections_the_get_sweep_guard_names_an_unlisted_route():
+    # the guard's own logic on a fake app: a new GET must show up as unlisted
+    class _App:
+        def openapi(self):
+            return {"paths": {"/api/stats": {"get": {}}, "/api/brand_new": {"get": {}},
+                              "/api/post_only": {"post": {}}, "/api/x/{id}": {"get": {}}}}
+    found = _parameter_free_get_routes(_App())
+    assert found == ["/api/brand_new", "/api/stats"]
+    assert [p for p in found if p not in SWEEP_GET_ALLOWLIST and p not in SWEEP_GET_SKIP] == ["/api/brand_new"]
+
+
 def test_connections_no_api_get_ever_returns_the_marker_a_vault_target_the_model_url_or_the_user_dir():
     with _web() as w:
-        paths = sorted(p for p, ops in w.app.openapi()["paths"].items()
-                       if "get" in ops and "{" not in p and p.startswith("/api"))
+        paths = [p for p in _parameter_free_get_routes(w.app) if p in SWEEP_GET_ALLOWLIST]
         assert "/api/connections" in paths and len(paths) >= 8, paths
         home = str(Path.home())
         needles = (MARKER, "jobscraper:imap", "jobscraper:workday", "ollama-host.test", "11434",
