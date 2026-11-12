@@ -110,3 +110,8 @@ One entry per session. Older handover notes end up here, so `handover.md` stays 
 - Lesson: a shared component contract committed first lets two UI lanes build in parallel without touching each other's files; the second lane branches from that one commit.
 - Lesson: look at the built page at phone width before the tests are retargeted: the clipped descriptions (a global `button { white-space: nowrap }`) were invisible to vitest and to the compile check.
 - Lesson: Chrome's window will not shrink below about 500px or when maximised; a ten-line headless Edge script gives real 390px screenshots plus a target-size and overflow probe.
+
+## 2026-11-12 · session jobscraper-4a (resumed jobscraper-72): Q-104 follow-ups
+- One engineer lane (b/c/f: App.vue listens for `jobscraper:apply-settings` with a sequence guard, `fixLabel` gives "Set it up" for an optional not-set-up card, `COPY.readPassword` shows `.un.ps1 accounts export-edge`) and one tester lane (pins first, red until the engineer's branch merged in; d: GET sweep allowlist + guard). Mutation: removing the listener turned 3 pins red, removing the unmount cleanup turned 1 red.
+- Checked the rendered page in headless Edge on a DB copy (one backslash in the DOM, "Set it up" shown, chip unchanged under mode auto); read-only requests only.
+- Lesson: a guard test that lists every parameter-free GET route turns a peer's new route into a test failure on the merged tree; tell peers to add their routes to the allowlist when they build one.
