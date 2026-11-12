@@ -71,9 +71,10 @@ def test_generic_labels_are_already_normalised_and_contain_the_q30_cases():
 
 
 def test_fill_sources_match_the_model_output_schema_enum():
-    """LF §6.3: the `source` enum the model answers with."""
+    """LF §6.3: the `source` enum the model answers with. Contract v7 (D-208, llm_first_fill_design
+    §5.1) adds default / assumption / none, used under fill_policy `always` only."""
     assert [s.value for s in FillSource] == ["profile", "extra", "standing", "resume", "job",
-                                             "keep", "unknown"]
+                                             "keep", "unknown", "default", "assumption", "none"]
 
 
 def test_page_field_defaults_and_immutability():
