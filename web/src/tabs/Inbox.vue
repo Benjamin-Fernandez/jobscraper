@@ -310,7 +310,9 @@ function chooseRuns() {
   window.location.hash = '#/runs'
 }
 
-// ---- Auto-apply (Q-110, F-30, D-200): the owner's click is the only trigger ----
+// ---- Auto-apply (Q-110, F-30, D-200, D-203): the owner's click is the only trigger ----
+// D-203: the click is the consent. In auto mode it fills the form and submits it, with
+// no confirm dialog in any mode; dry_run only fills and never submits.
 // `applyState` is GET /api/apply/status ({mode, missing, busy}); null until it
 // loads or when it cannot, which keeps the button off rather than guessing.
 const applyState = ref(null)
@@ -338,15 +340,15 @@ function refusalText(body) {
 
 async function autoApply(job) {
   if (!applyReady.value || starting.value) return
-  if (applyState.value.mode === 'auto'
-    && !window.confirm(`Send an application to ${job.company} now? JobScraper fills and submits it in Edge.`)) return
   starting.value = true
   try {
     const r = await startAutoApply([job.id])
     const refused = Array.isArray(r?.refused) ? r.refused.map(x => x.text).filter(Boolean) : []
     showToast({
       message: ['Auto-apply started.',
-        r?.mode === 'dry_run' ? 'Dry run: the form is filled in Edge and left open; nothing is submitted.' : '',
+        (r?.mode || applyState.value?.mode) === 'dry_run'
+          ? 'Dry run: the form is filled in Edge and left open; nothing is submitted.'
+          : 'JobScraper fills the form in Edge and submits it.',
         ...refused].filter(Boolean).join(' '),
       link: { label: 'Follow it in Runs', href: '#/runs' },
     })
@@ -586,6 +588,9 @@ onDeactivated(() => window.removeEventListener('keydown', onShortcut))
                 type="button"
                 class="button primary auto-apply"
                 :disabled="!applyReady || busy || starting"
+                :title="applyState?.mode === 'dry_run'
+                  ? 'Auto-apply mode: dry run (fills, never submits)'
+                  : 'Auto-apply fills the form and submits it for you.'"
                 @click="autoApply(selected)"
               >
                 <Icon name="briefcase" /> Auto-apply
@@ -618,7 +623,7 @@ onDeactivated(() => window.removeEventListener('keydown', onShortcut))
                 ({{ applyState.missing.length }} missing).
               </template>
               <template v-else-if="applyState.busy">Another job is running.</template>
-              <template v-if="applyState.mode === 'auto'">Auto-apply mode: automatic submit</template>
+              <template v-if="applyState.mode === 'auto'">Auto-apply fills the form and submits it for you.</template>
               <template v-else>Auto-apply mode: dry run (fills, never submits)</template>
             </p>
             <p class="shortcuts muted">

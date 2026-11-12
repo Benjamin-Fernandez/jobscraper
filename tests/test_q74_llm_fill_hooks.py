@@ -324,7 +324,7 @@ def _d201_run_page():
 def test_d201_f1_no_newly_readable_value_reaches_the_job_log_or_the_audit_notes():
     """F1 (review): flag effective, one llm_fill page (`_d201_run_page`). The model reads every value (the
     precondition); the job log, the result detail and the audit `note`, `source`, `prompt_hash` and `rule_id`
-    hold none. The audit `evidence` column is the known gap Q-113 (next test).
+    hold none. The audit `evidence` column is D-202's (next test).
     `debug_dump` is a config key only: nothing in src/ writes a dump, so there is no dump to assert on.
     A deliberate log line naming the string values stands in for any leak: `_Log` must scrub it."""
     _inner, _seen, r, say, rows = _d201_run_page()
@@ -338,16 +338,20 @@ def test_d201_f1_no_newly_readable_value_reaches_the_job_log_or_the_audit_notes(
     assert "[redacted]" in say.text, "the stand-in leak line was scrubbed, not dropped"
 
 
-def test_d201_known_gap_q113_a_rejected_quote_is_stored_verbatim_in_evidence():
-    """Known gap Q-113 (review docs/reviews/Q-112-d201-profile-read.md F1): flip this to 'evidence holds no
-    newly readable value' when Q-113 lands; the same applies to the fill_cache row's evidence.
-    Today a quote G3 rejects is still kept verbatim (up to 240 chars) in `apply_answers.evidence`."""
+def test_d202_a_rejected_quote_is_stored_redacted_in_evidence():
+    """D-202 (Q-113; was the known-gap pin): a quote G3 rejects is stored with private values as "[private]" in
+    `apply_answers.evidence`. The pronouns, the sensitive extra answer and the salary amount are gone; the legal and
+    preferred names stay (not private by design, spec section 3). The fill_cache half is in
+    tests/test_q113_evidence_redaction.py."""
     _inner, _seen, _r, _say, rows = _d201_run_page()
     row = rows[0]
     assert row["status"] == "ungrounded" and str(row["note"]).startswith("G3"), (row["status"], row["note"])
     ev = str(row["evidence"] or "")
-    for m in DISTINCT + (SALARY,):
-        assert m in ev, f"today's behaviour: the rejected quote keeps {m[:3]!r}... in evidence"
+    assert "[private]" in ev, ev
+    for m in ("xe/xem", "Plumbago-7731", SALARY):
+        assert m not in ev, f"the rejected quote still keeps {m[:3]!r}... in evidence"
+    for name in ("Zyxquill", "Vandermoot", "Quillo"):
+        assert name in ev, f"the legal/preferred name is not private by design and stays ({name[:3]}...)"
 
 
 def test_d201_f2_tier5_salary_text_is_never_filled_from_the_current_salary():

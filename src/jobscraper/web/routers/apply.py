@@ -133,13 +133,13 @@ def start_apply(body: StartBody, request: Request, cfg: Any = Depends(get_config
             if dup:
                 refused.append(_refusal(job_id, ReasonCode.DUPLICATE, dup))
                 continue
-            if mode == "auto":                                     # (3) caps; dry runs never click
+            if mode == "auto":                                     # (3) caps (0 = no limit, D-204); dry runs never click
                 total, employer = store.apply_counts(job.get("company_id"), day_start)
-                if total >= caps.daily_cap:
+                if caps.daily_cap > 0 and total >= caps.daily_cap:
                     refused.append(_refusal(job_id, ReasonCode.CAP_REACHED,
                                             f"{total} of {caps.daily_cap} today"))
                     continue
-                if employer >= caps.per_employer_daily_cap:
+                if caps.per_employer_daily_cap > 0 and employer >= caps.per_employer_daily_cap:
                     refused.append(_refusal(
                         job_id, ReasonCode.CAP_REACHED,
                         f"{employer} of {caps.per_employer_daily_cap} today at "
