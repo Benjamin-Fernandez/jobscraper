@@ -101,6 +101,7 @@ class _Run:
     sv_prompt: list = dc_field(default_factory=list)        # what prompts redact: [] when sees (D-105)
     sees: bool = False                                      # effective model_sees_sensitive (D-105)
     deny: list = dc_field(default_factory=list)             # enum S values: refused in pick prompts
+    qv: list = dc_field(default_factory=list)               # D-202: values blanked in a stored unchecked quote
     hkey: bytes = b""                                       # facts.hash_key(rctx): keyed field_sig (D-86)
     blocks: dict = dc_field(default_factory=dict)
     today: str = ""
@@ -143,6 +144,7 @@ def fill_page(page: Any, nav: Any, ctx: AttemptContext, rctx: ResolveContext, se
     run.sees = bool(getattr(rctx, "model_sees_sensitive", False))
     run.sv_prompt = [] if run.sees else run.sv
     run.deny = F.enum_s_values(rctx.profile)
+    run.qv = F.quote_s_values(rctx, run.today)          # D-202: the switch does not change it
     run.hkey = F.hash_key(rctx)
     run.blocks = F.entry_blocks(rctx)
     run.inputs_hash = F.inputs_hash(L.redact(rctx.resume_text or "", run.sv_prompt), rctx.jd_text or "",
@@ -711,6 +713,34 @@ def _cached(run: _Run, fields: Sequence[PageField]) -> list[ModelDecision]:
     return out
 
 
+def stored_quote(evidence: str, a: Optional[Answer], values: Sequence[str]) -> str:
+    """D-202 (Q-113): the model's quote as the audit row and the decision cache store it.
+    Verbatim only when the guards checked it and the field took a value
+    (`guards.quote_checked`: resume, posting or non-private-fact text, which a replay
+    re-reads in G3); every other quote (rejected, fact-cited, unknown, a trusted keep)
+    with each of `values` (`facts.quote_s_values`) as "[private]". The same with the
+    switch on or off. A row with no quote (locks, resolve tiers, composed texts) stays ""."""
+    if a is not None and G.quote_checked(a):
+        return evidence
+    return L.redact(evidence or "", values)
+
+
+def _stored_value(value: Any, a: Optional[Answer], values: Sequence[str]) -> Any:
+    """D-202 (Q-113 tester O1): a cached resume/job/keep decision's model value, by the same
+    rule as its quote: verbatim when the guards checked the quote and the field took it,
+    else each string (a list: each string item) redacted; None, bools and numbers as they
+    are. Replay never fills from a redacted value: the resume/job route takes a model value
+    only through a checked quote (and "[private]" fails G3 there), a keep fills the shown
+    value, and a fact decision is cached with no value."""
+    if a is not None and G.quote_checked(a):
+        return value
+    if isinstance(value, str):
+        return L.redact(value, values)
+    if isinstance(value, (list, tuple)):
+        return [L.redact(x, values) if isinstance(x, str) else x for x in value]
+    return value
+
+
 def _cache_put(run: _Run, unknown: Sequence[str] = ()) -> None:
     """The latest fresh decision per field (no G5 or corrective replies, no required `unknown` (F13);
     no value for a fact decision: the program recomputes it, §13.3). `unknown`: the fields the
@@ -742,8 +772,10 @@ def _cache_put(run: _Run, unknown: Sequence[str] = ()) -> None:
         rows.append({"field_sig": sig, "prompt_version": L.FILL_PROMPT_VERSION, "model": run.services.model,
                      "inputs_hash": run.inputs_hash,
                      "facts_used_hash": F.facts_used_hash([d.ref] if d.ref else [], run.rctx, today=run.today),
-                     "decision": {"source": d.source.value, "ref": d.ref, "evidence": d.evidence,
-                                  "value": d.value if keep_value else None, "via": d.via}})
+                     "decision": {"source": d.source.value, "ref": d.ref,
+                                  "evidence": stored_quote(d.evidence, run.answers.get(key), run.qv),
+                                  "value": (_stored_value(d.value, run.answers.get(key), run.qv)
+                                            if keep_value else None), "via": d.via}})
     if rows:
         run.services.cache_put(_job_id(run), rows)
 

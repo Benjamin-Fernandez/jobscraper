@@ -984,9 +984,10 @@ def s_values(profile: dict, account_email: str) -> list[str]:
 def enum_s_values(profile: dict) -> list[str]:
     """The applicant's private values that `s_values` leaves out because they are ordinary
     words (gender, race, residency, NS, marital status, nationality, EEO answers): each
-    private leaf's value and its Profile-form wording. `redact` must not use them (they
-    would blank "Chinese" the language); `llm_fill.pick_option` refuses to send any of
-    them to the model (review F1). Lowercase, 2+ characters."""
+    private leaf's value and its Profile-form wording. The job log (`apply_flow.redact`)
+    must not use them (they would blank "Chinese" the language); `llm_fill.redact` uses
+    them for compose prompts and stored unchecked quotes (D-202); `llm_fill.pick_option`
+    refuses to send any of them to the model (review F1). Lowercase, 2+ characters."""
     p = applicant.normalise(profile or {})
     out: set[str] = set()
     for path, v in _leaves(p):
@@ -999,6 +1000,38 @@ def enum_s_values(profile: dict) -> list[str]:
         for labels in _form_value_map(path, text).values():
             out.update(x.strip().lower() for x in labels if len(x.strip()) >= 2)
     return sorted(out)
+
+
+QUOTE_KEEP_WORDS = frozenset({"yes", "no", "true", "false"})
+
+
+def quote_s_values(rctx: ResolveContext, today: str) -> list[str]:
+    """D-202 (Q-113 §3): the values `llm_fill.redact` blanks in a stored model quote the
+    guards did not check (a rejected quote, a fact-cited or unknown decision's quote, a
+    trusted keep). A union of existing lists, no hand-kept list: `s_values` (contact,
+    dates, NRIC, account email), `enum_s_values` (ordinary-word private answers), and the
+    `private: <value>` text `fact_catalogue` prints, built with the switch forced on so the
+    set is the same with `model_sees_sensitive` on or off (constraint 3). That adds the two
+    leaves the first two miss: `pay.current_salary` (a mapping) and sensitive `extra`
+    answers (`extra` is in SKIP_KEYS). A private salary or number fact also gives each of
+    its 3+ digit runs as its own token, so "4321" goes from "4321 SGD monthly" while
+    "43210" and "ID4321" stay (`redact` matches whole runs only).
+    Left out on purpose: "yes"/"no"/"true"/"false" and boolean facts (ordinary words; the
+    value is one bit the employer gets anyway, lock L5 / D-87); values under 3 characters,
+    e.g. `months_per_year` (`redact` skips them; "12 months" is ordinary text); the legal
+    and preferred names (not private: NAME_PATHS, in the resume, typed into every form);
+    a bare year of birth (the full date forms are in `s_values`; a year is also a
+    graduation or job year). Deduplicated, longest first."""
+    seen = dataclasses.replace(rctx, model_sees_sensitive=True)
+    vals = list(s_values(rctx.profile, rctx.account_email)) + list(enum_s_values(rctx.profile))
+    for f in fact_catalogue(rctx.profile, seen, today=today):
+        if not (f.private and f.value and f.kind != "bool"):
+            continue
+        vals.append(f.value)
+        if f.kind in ("salary", "number"):
+            vals += re.findall(r"\d{3,}", f.value)
+    uniq = {v.strip() for v in vals if v and v.strip() and v.strip().lower() not in QUOTE_KEEP_WORDS}
+    return sorted(uniq, key=lambda s: (-len(s), s))
 
 
 def today_sg(now_utc: float) -> str:

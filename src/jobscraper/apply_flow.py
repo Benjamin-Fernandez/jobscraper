@@ -52,7 +52,8 @@ from .apply.contracts import (
     FieldType, FormField, PageOutcome, PrefillPolicy, ReasonCode, ResolveContext, SignUpOutcome,
 )
 from .apply.detect import detect
-from .apply.pagefill import ENTRY_NOTE_PREFIX, ENTRY_NOTE_TAIL, TYPED_BEFORE_STOP_NOTE, fill_page
+from .apply.pagefill import (ENTRY_NOTE_PREFIX, ENTRY_NOTE_TAIL, TYPED_BEFORE_STOP_NOTE, fill_page,
+                             stored_quote)
 from .apply.plan import norm_label
 from .config import ApplyConfig, Config
 from .scrape.net import HttpClient
@@ -202,6 +203,9 @@ class _Attempt:
         self.recorded: set[str] = set()
         self.page = None
         self.tailored_id: Optional[int] = None
+        # D-202: the values blanked in a stored unchecked model quote (`facts.quote_s_values`),
+        # set from every ResolveContext the attempt fills with, before its first `record`
+        self.quote_values: tuple[str, ...] = ()
 
     # -- state
 
@@ -266,7 +270,7 @@ class _Attempt:
             if a is None:
                 continue
             self.recorded.add(f.key)
-            rows.append(audit_row(step, f, a))
+            rows.append(audit_row(step, f, a, self.quote_values))
         if rows:
             self.store.add_answers(self.id, rows)
             self.store.commit()
@@ -311,7 +315,11 @@ def _sent_value(f: FormField, a: Answer) -> Any:
     return a.value
 
 
-def audit_row(step: str, f: FormField, a: Answer) -> dict[str, Any]:
+def audit_row(step: str, f: FormField, a: Answer,
+              quote_values: Sequence[str] = ()) -> dict[str, Any]:
+    """One `apply_answers` row. `evidence` (D-202): a quote the guards checked on a field
+    that took a value is kept verbatim, any other with `quote_values` redacted
+    (`pagefill.stored_quote`); rows with no quote stay None."""
     return {
         "step": step, "field_key": f.key, "label": f.label, "label_norm": norm_label(f.label),
         "field_type": f.type.value, "required": f.required, "section": f.section,
@@ -321,7 +329,7 @@ def audit_row(step: str, f: FormField, a: Answer) -> dict[str, Any]:
         "model": a.model, "prompt_hash": a.prompt_hash, "note": a.note,
         "sensitive": a.sensitive or f.section in ("compliance", "demographic"),
         # D-78 columns (llm_fill_design §14): local DB only; empty on the pre-D-78 path.
-        "evidence": a.evidence or None,
+        "evidence": stored_quote(a.evidence, a, quote_values) or None,
         "shown_json": a.shown if a.shown not in _BLANK else None,
         "shown_origin": a.origin or None, "entry": a.entry or None,
     }
@@ -1050,6 +1058,7 @@ class _Run:
                                step="planning")
         ctx = self.context(at, job, adapter, tenant, resume_path)
         rctx = self.resolve_ctx(job, tenant, adapter, resume_path, attempt_id=at.id)
+        at.quote_values = tuple(F.quote_s_values(rctx, F.today_sg(self.now())))      # D-202
         plan = adapter.plan_from_schema(ctx)
         if plan is not None:
             self.store.update_attempt(at.id, plan_source=plan.source)
@@ -1184,6 +1193,7 @@ class _Run:
         acfg = self.acfg
         ctx = self.context(at, job, nav, tenant, resume_path)
         rctx = self.resolve_ctx(job, tenant, nav, resume_path, attempt_id=at.id)
+        at.quote_values = tuple(F.quote_s_values(rctx, F.today_sg(self.now())))      # D-202
         self.store.update_attempt(at.id, plan_source="page")
         nav.precheck(ctx)                                 # POSTING_CLOSED before the model or Edge
         self.check_deadline(ctx)
@@ -1574,7 +1584,9 @@ class _Run:
             self.sign_in(page, ctx, adapter, at, job, service)
         else:
             self.sign_up(page, ctx, adapter, at, job, service, primary, backup)
-        return dataclasses.replace(rctx, account_email=ctx.email)
+        swapped = dataclasses.replace(rctx, account_email=ctx.email)
+        at.quote_values = tuple(F.quote_s_values(swapped, F.today_sg(self.now())))   # D-202 (F3)
+        return swapped
 
     def _account_id(self, adapter: Any, ctx: AttemptContext, service: str, at: _Attempt,
                     status: str) -> int:
