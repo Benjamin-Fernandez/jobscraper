@@ -95,8 +95,10 @@ class ApplyQueueRunner:
     def gate_closed(self) -> bool:
         return self._gate_closed
 
-    def startup(self) -> None:
-        """The start-up hook, registered before `start_timer` (M2): drop a stale
+    # The handler names are distinct from MailSyncRunner's (`start_timer`, `stop`):
+    # pins find the mail timer among the start-up handlers by `__name__`.
+    def pause_apply_queue_on_startup(self) -> None:
+        """The start-up hook, registered before `start_apply_queue` (M2): drop a stale
         yield (L4) and pause `restarted` when roles wait. The gate opens only when
         both writes went through; on any error it stays closed for this process."""
         store = None
@@ -188,7 +190,7 @@ class ApplyQueueRunner:
 
     # ---------------------------------------------------------------- tick
 
-    def start_timer(self) -> None:
+    def start_apply_queue(self) -> None:
         """A daemon thread kicking every `tick_s` while enabled (the MailSyncRunner
         pattern): the worker starts once the slot frees, a deferred run after it."""
         if not self.enabled or self._thread is not None:
@@ -197,7 +199,7 @@ class ApplyQueueRunner:
         self._thread = threading.Thread(target=self._loop, name="apply-queue-tick", daemon=True)
         self._thread.start()
 
-    def stop(self) -> None:
+    def stop_apply_queue(self) -> None:
         self._stop.set()
         thread, self._thread = self._thread, None
         if thread is not None and thread is not threading.current_thread():
