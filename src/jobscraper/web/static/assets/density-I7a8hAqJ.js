@@ -1,0 +1,1 @@
+const e="jobscraper.companies.density",o="jobscraper:density";function a(){try{return window.localStorage.getItem(e)==="compact"}catch{return!1}}function c(t){try{window.localStorage.setItem(e,t?"compact":"comfortable")}catch{}window.dispatchEvent(new CustomEvent(o,{detail:{on:!!t}}))}export{o as D,a as d,c as s};
