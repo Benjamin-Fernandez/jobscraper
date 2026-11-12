@@ -158,18 +158,24 @@ class ApplyConfig:
     # Settings → Apply keys that override this block (apply_design §14.3).
     SETTING_KEYS = ("mode", "daily_cap", "per_employer_daily_cap", "headed", "captcha_wait_s")
     MAIL_SETTING_KEYS = ("host", "port", "username")
+    COMPOSE_SETTING_KEY = "compose.enabled"          # stored as `apply.compose.enabled`
 
     def with_settings(self, get: Any) -> "ApplyConfig":
         """The effective settings: each `apply.*` key present in the settings
         table (`get(key) -> str | None`, e.g. `store.get_setting`) replaces the
-        config value; absent keys fall back to config (§14.3)."""
+        config value; absent keys fall back to config (§14.3). The cover-letter
+        opt-in (`apply.compose.enabled`, Q-111) is the one nested key honoured:
+        it rebuilds `compose` with only `enabled` changed."""
         from dataclasses import replace
 
         top = {k: get(f"apply.{k}") for k in self.SETTING_KEYS}
         mail = {k: get(f"apply.mail.{k}") for k in self.MAIL_SETTING_KEYS}
+        compose = {"enabled": get(f"apply.{self.COMPOSE_SETTING_KEY}")}
         top = _coerce(ApplyConfig, {k: v for k, v in top.items() if v is not None})
         mail = _coerce(ApplyMailConfig, {k: v for k, v in mail.items() if v is not None})
-        return replace(self, **top, mail=replace(self.mail, **mail))
+        compose = _coerce(ComposeConfig, {k: v for k, v in compose.items() if v is not None})
+        return replace(self, **top, mail=replace(self.mail, **mail),
+                       compose=replace(self.compose, **compose))
 
 
 def _coerce(klass: type, raw: dict[str, Any], skip: frozenset | set = frozenset()) -> dict[str, Any]:

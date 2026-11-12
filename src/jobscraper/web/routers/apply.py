@@ -9,6 +9,12 @@ sentence at click time instead of as a failed attempt minutes later, then
 starts an `apply` job. The orchestrator re-runs every guard (the child process
 is the authority); this is only the early, friendly answer.
 
+`GET/PUT /api/apply/settings` (Q-111, apply_design section 14.3) read and change the
+owner's six knobs: mode, the two daily caps (0 = no limit, D-204), the browser
+window, the human-check wait and the cover-letter opt-in. They live in the
+settings table (`apply.<field>`) and override config.yaml at the next apply job;
+no job is started and nothing else is touched.
+
 Responses of `POST`:
 - 202 `{job, accepted, refused, mode}` - at least one id was started;
 - 422 `{detail: "profile_incomplete", missing}` - nothing started, details missing;
@@ -25,12 +31,13 @@ import re
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Body, Depends, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, field_validator
 
 from jobscraper import applicant
 from jobscraper.apply.contracts import REASON_TEXTS, ReasonCode
+from jobscraper.config import ApplyConfig
 from jobscraper.store import TIME_FMT
 from jobscraper.web.deps import get_config, get_jobs, open_store
 from jobscraper.web.jobs import JobBusy
@@ -103,6 +110,69 @@ def apply_status(request: Request, cfg: Any = Depends(get_config),
     with open_store(request) as store:
         mode = _mode(cfg, store)
     return {"mode": mode, "missing": _missing(cfg), "busy": _busy(jobs)}
+
+
+def _settings_view(cfg: Any, store: Any) -> dict[str, Any]:
+    """The six owner-editable apply settings: the effective values (settings table
+    over config.yaml) and, as `defaults`, what config.yaml alone gives."""
+    def six(ac: Any) -> dict[str, Any]:
+        return {"mode": ac.mode, "daily_cap": ac.daily_cap,
+                "per_employer_daily_cap": ac.per_employer_daily_cap,
+                "headed": ac.headed, "captcha_wait_s": ac.captcha_wait_s,
+                "compose_enabled": ac.compose.enabled}
+    return {**six(cfg.apply.with_settings(store.get_setting)), "writable": True,
+            "defaults": six(cfg.apply)}
+
+
+def _whole(lo: int, hi: int, what: str, zero_note: str = "") -> tuple[Any, str]:
+    return (lambda v: type(v) is int and lo <= v <= hi,
+            f"{what} must be a whole number from {lo} to {hi}{zero_note}")
+
+
+# field -> (is this value allowed?, the plain-words message when it is not)
+_SETTING_RULES: dict[str, tuple[Any, str]] = {
+    "mode": (lambda v: v in MODES,
+             'Mode must be "auto" (submits applications) or "dry_run" (fills only)'),
+    "daily_cap": _whole(0, 500, "Applications a day", "; 0 means no limit"),
+    "per_employer_daily_cap": _whole(0, 100, "Applications per employer a day", "; 0 means no limit"),
+    "headed": (lambda v: type(v) is bool, "Show the browser window must be true or false"),
+    "captcha_wait_s": _whole(0, 600, "The human-check wait (seconds)", "; 0 means do not wait"),
+    "compose_enabled": (lambda v: type(v) is bool, "Cover letters must be true or false"),
+}
+# field -> the settings-table key (`ApplyConfig.with_settings` reads these back)
+_SETTING_KEYS = {k: f"apply.{k}" for k in _SETTING_RULES}
+_SETTING_KEYS["compose_enabled"] = f"apply.{ApplyConfig.COMPOSE_SETTING_KEY}"
+
+
+@router.get("/apply/settings")
+def get_apply_settings(request: Request, cfg: Any = Depends(get_config)) -> dict[str, Any]:
+    with open_store(request) as store:
+        return _settings_view(cfg, store)
+
+
+@router.put("/apply/settings")
+def put_apply_settings(request: Request, body: Any = Body(...),
+                       cfg: Any = Depends(get_config)) -> Any:
+    """Store any non-empty subset of the six settings. All values are checked
+    before any is written; a bad one answers 422 `{detail: "invalid", errors:
+    [{field, message}]}` and changes nothing. Takes effect on the next apply job."""
+    errors: list[dict[str, str]] = []
+    if not isinstance(body, dict) or not body:
+        errors.append({"field": "", "message": "Send at least one setting to change"})
+    else:
+        for field, value in body.items():
+            rule = _SETTING_RULES.get(field)
+            if rule is None:
+                errors.append({"field": str(field), "message": f"{field} is not an apply setting"})
+            elif not rule[0](value):
+                errors.append({"field": field, "message": rule[1]})
+    if errors:
+        return JSONResponse({"detail": "invalid", "errors": errors}, status_code=422)
+    with open_store(request) as store:
+        for field, value in body.items():
+            store.set_setting(_SETTING_KEYS[field],
+                              str(value).lower() if isinstance(value, bool) else value)
+        return _settings_view(cfg, store)
 
 
 @router.post("/apply", status_code=202)
