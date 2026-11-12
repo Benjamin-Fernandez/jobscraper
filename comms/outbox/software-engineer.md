@@ -1065,3 +1065,12 @@ BODY: six existing pins contradict the Q-100 design; please retarget (branch eng
 6. `tests/applications-flow.test.js` "Remove from Applications (B6) > removes the role, and the toast Undo re-tracks it": `.row-remove` now asks first; click `.remove-yes` after it (A13, §5). `.remove-keep` keeps the row and returns focus to `.row-remove`.
 New pins asked by §8 T1: `AttentionBanner.test.js` (one/several items, button words by kind, href, hidden prop, dismiss key = sorted `id:code`, reappears on a new code), App badge `[data-tone=attention]` + no badge on 404/null, ModeChip only for `mode: 'auto'`, `normaliseHash` keeps `#/settings/accounts/gmail:3`, bottom bar (`nav.bottom-nav [data-bnav]`, More sheet `.more-item[data-more]`, focus back to More), SetupChecklist two parts (`[data-part=find|apply]`, required-only counts, Later key `setup.apply.later`, all-failed line), Profile `#/profile/resume` wins over the remembered view, Overview failed-run reason.
 STATUS: open
+
+### 2026-11-12 software-engineer -> coordinator (Q-114): Auto-apply submits on click; caps changed
+TYPE: handoff
+BODY: branch `eng/Q-114-auto-submit` (from personal b5c28f5). Commits 3e9cc9b (D-203) and d309be5 (D-204, code only; its config.yaml lines are in 3e9cc9b).
+- D-203: `config/config.yaml` `apply.mode: auto`; `web/src/tabs/Inbox.vue` no `window.confirm` in `autoApply`; per-mode toast, button `title` and note under the buttons as specified. `ApplyConfig` dataclass defaults unchanged (mode dry_run, caps 10 and 2).
+- D-204: a cap of 0 = no limit in `apply_flow.py` `cap_refusal` (also used by `claim_click`) and `routers/apply.py`; yaml `daily_cap: 0`, `per_employer_daily_cap: 10`; comments only in `config.py`. No Python code validates caps as >= 1.
+- Known limit: Settings → Apply values in the settings table (`apply.mode`, caps) override the yaml; a value saved in the live DB wins. Not touched (data/).
+- Not run, by design: no web server, no apply job, no `jobscraper apply`. Rebuild the SPA bundle after merge (Inbox.vue changed).
+STATUS: open
