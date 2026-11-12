@@ -26,6 +26,7 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from jobscraper.config import Config, load_config
 from jobscraper.web import routers
+from jobscraper.web.applyqueue import ApplyQueueRunner
 from jobscraper.web.connections import ModelHealth
 from jobscraper.web.jobs import CommandBuilder, JobManager, cli_command
 from jobscraper.web.mailsync import MailCommand, MailSyncRunner, cli_mail_command
@@ -225,7 +226,8 @@ def create_app(cfg: Optional[Config] = None,
                job_command: Optional[CommandBuilder] = None,
                config_path: Optional[str | os.PathLike] = None,
                mail_timer: bool = False,
-               mail_command: Optional[MailCommand] = None) -> FastAPI:
+               mail_command: Optional[MailCommand] = None,
+               apply_queue_worker: bool = False) -> FastAPI:
     """Build the app. Every argument has a production default.
 
     `allowed_hosts` defaults to `web.allowed_hosts` in config.yaml, else the
@@ -245,6 +247,14 @@ def create_app(cfg: Optional[Config] = None,
 
     `app.state.model_health` is the Q-100 `ModelHealth` cache behind
     `/api/connections` (q100_ui_design §3.3); tests may replace it.
+
+    `app.state.apply_queue` is the Q-120 `ApplyQueueRunner` (apply_queue_design
+    §3.4). It starts the auto-apply worker only with `apply_queue_worker=True`,
+    which `cmd_web` passes per `applyqueue.apply_queue_wanted(os.environ)`: tests
+    and the default never start a worker and run no tick (review H1), and a
+    disabled app still records clicks but shows the queue as `disabled` (H2). The
+    runner looks `app.state.jobs` and `app.state.store_factory` up at every kick,
+    so a fake swapped in after this returns is the only manager it can reach.
     """
     cfg = cfg or load_config()
     app = FastAPI(title="JobScraper", version="2")
@@ -265,6 +275,13 @@ def create_app(cfg: Optional[Config] = None,
     # Q-100 §3.3: the hub's cached model check. Its probe runs on a daemon thread,
     # so no request ever waits on Ollama.
     app.state.model_health = ModelHealth(lambda: cfg.budget)
+    app.state.apply_queue = ApplyQueueRunner(app.state, enabled=apply_queue_worker)
+    if apply_queue_worker:
+        # M2: the restart pause first; the tick only after it (Starlette runs
+        # startup handlers in registration order). Disabled: neither runs.
+        app.router.add_event_handler("startup", app.state.apply_queue.startup)
+        app.router.add_event_handler("startup", app.state.apply_queue.start_timer)
+        app.router.add_event_handler("shutdown", app.state.apply_queue.stop)
     if mail_timer:
         app.router.add_event_handler("startup", app.state.mail.start_timer)
     app.router.add_event_handler("shutdown", app.state.mail.stop)
