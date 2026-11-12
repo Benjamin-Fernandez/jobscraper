@@ -287,7 +287,11 @@ a.role-title .icon { color: var(--muted); }
   .app-grip { display: none; }
   .app-state { justify-content: flex-start; }
   .app-move { justify-self: start; }
+  /* 44px tap targets (Q-118 phone check): the buttons grow, the pill and the title
+     text keep their size (the trigger has no chrome, so only the box gets taller). */
+  .app-row .app-move :deep(.ui-move-trigger) { min-height: var(--touch-min); min-width: var(--touch-min); }
   .app-more :deep(.app-more-trigger) { min-height: var(--touch-min); min-width: var(--touch-min); }
+  a.role-title { min-height: var(--touch-min); }
   .app-state { max-width: none; }
   .app-act { min-height: var(--touch-min); }
 }
