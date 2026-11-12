@@ -67,12 +67,22 @@ describe('go-to keys (N16)', () => {
   })
 
   it('"g" then a letter goes to that tab; the panel takes the focus', async () => {
+    // Pin the Profile view. With none remembered, Profile probes the server on its first
+    // visit and, when answers are waiting (QUESTIONS has two open), switches itself to
+    // Application details and rewrites the hash to `#/profile/details`. That lands a few
+    // fetches after the key press, so the hash assertion below passed or failed on timing
+    // (the flake seen only in full runs under load). A remembered view is the owner's
+    // choice, so Profile leaves it and the hash stays `#/profile`.
+    window.localStorage.setItem('profile.view', 'resume')
     await mountApp()
     for (const [letter, id] of Object.entries(TARGETS)) {
       // Start each hop from somewhere else so that going "to" the same tab proves nothing.
-      setHash(id === 'overview' ? '#/runs' : '#/overview')
+      const from = id === 'overview' ? 'runs' : 'overview'
+      setHash(`#/${from}`)
       window.dispatchEvent(new HashChangeEvent('hashchange'))
-      await flushPromises()
+      // Wait for that tab to be on screen, so no earlier hashchange is still in flight
+      // when the key goes in.
+      await vi.waitFor(() => expect(document.querySelector('main.panel')?.id).toBe(`panel-${from}`))
       await press('g')
       await press(letter)
       expect(window.location.hash, `g ${letter}`).toBe(`#/${id}`)
