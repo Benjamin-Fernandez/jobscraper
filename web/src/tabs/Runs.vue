@@ -595,6 +595,8 @@ onMounted(async () => {
   .history td.status { order: 1; margin-left: auto; }
   .history td[data-label] { order: 2; }
   .history td.is-empty { display: none; }
+  /* The box itself is 44px tall at phone width, not only its ::after hit area. */
+  .failed-link { min-height: var(--touch-min); min-width: var(--touch-min); }
   .failed-link::after {
     content: ''; position: absolute; left: 50%; top: 50%;
     width: max(100%, var(--touch-min)); height: var(--touch-min); transform: translate(-50%, -50%);
