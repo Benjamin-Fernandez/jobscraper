@@ -107,6 +107,8 @@ async function loadApply() {
 // status (mode, busy) because the mode chip and "an application is running" depend on it.
 async function onApplySaved(next) {
   if (apply.value && next) apply.value = { ...apply.value, settings: next }
+  // Tells the shell (App.vue) to re-read the apply status for its mode chip.
+  window.dispatchEvent(new Event('jobscraper:apply-settings'))
   try {
     const status = await getApplyStatus()
     if (status && apply.value) apply.value = { ...apply.value, status }
@@ -196,7 +198,7 @@ onBeforeUnmount(() => {
     <header class="page-head">
       <div>
         <h2 class="page-title">{{ COPY.title }}</h2>
-        <p class="page-sub">{{ COPY.subtitle }}</p>
+        <p v-if="!phone || showList" class="page-sub">{{ COPY.subtitle }}</p>
       </div>
     </header>
 

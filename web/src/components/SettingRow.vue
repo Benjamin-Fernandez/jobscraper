@@ -184,6 +184,9 @@ defineExpose({ focus: () => control.value?.focus() })
   font: inherit;
   text-align: left;
   text-decoration: none;
+  /* The global button style is `nowrap` (style.css), which text inside would inherit. */
+  white-space: normal;
+  box-shadow: none;
 }
 button.setting-main, a.setting-main { cursor: pointer; }
 button.setting-main:hover:not(:disabled), a.setting-main:hover { background: var(--surface-2); color: var(--text); }
@@ -192,11 +195,11 @@ button.setting-main:disabled { cursor: progress; color: var(--text); opacity: 0.
 .setting-main:focus-visible { outline-offset: -2px; border-radius: 0; }
 
 .setting-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
-.setting-label { font-size: var(--text-sm); font-weight: 600; }
+.setting-label { font-size: var(--text-sm); font-weight: 600; overflow-wrap: anywhere; }
 .setting-desc { font-size: var(--text-sm); color: var(--muted); overflow-wrap: anywhere; }
 
-.setting-side { display: inline-flex; align-items: center; gap: var(--space-2); color: var(--text-2); font-size: var(--text-sm); }
-.setting-value { text-align: right; }
+.setting-side { display: inline-flex; align-items: center; gap: var(--space-2); min-width: 0; color: var(--text-2); font-size: var(--text-sm); }
+.setting-value { text-align: right; overflow-wrap: anywhere; }
 .setting-link-text { color: var(--accent); font-weight: 600; }
 .setting-chevron { color: var(--muted); transform: rotate(-90deg); transition: transform 0.15s ease; }
 .setting-chevron.open { transform: rotate(0deg); }
