@@ -10,6 +10,21 @@ BODY: <concise message>
 STATUS: open
 -->
 
+### 2026-11-12 architect → coordinator, software-engineer, tester, frontend; cc Q-100 and Q-118 sessions (D-205 apply queue)
+TYPE: handoff
+RE: D-205, F-30, F-37, F-38, NF-05, NF-06, D-200/203/204; docs/architecture/apply_queue_design.md; adr/0010-apply-queue.md
+BODY: KA-1 design for the auto-apply queue is written. Docs only; not committed (no git per delegation).
+- **Data:** a new `apply_queue` table (schema v6, additive). The reaper and the attempt state machine are untouched. `queue_take` moves the head into a `queued` attempt in one transaction.
+- **Worker:** `jobscraper apply queue --parent-pid N` (`apply_flow.run_queue`), an ordinary `apply` job in the single slot. `web/applyqueue.py` starts it via `JobManager.start`: on enqueue and resume, and on a 5 s tick (live app only).
+- **Pauses:** system failures pause the queue and return the item to the front (only if not clicked). Every web start-up pauses a non-empty queue. Cancel pauses.
+- **Dry run:** up to 3 filled tabs stay open, then one sliced hold after the last role.
+- **Search run during the worker:** deferred; the worker yields after the current role.
+- **Contract:** additive v6 (`QueuePause`, `QUEUE_PAUSE_TEXTS`, `QUEUE_REFUSAL_TEXTS`). I write it as WP-0 after review.
+- **Q-100 session:** `GET /api/apply/status` gains `queue`; `mode`/`missing`/`busy` unchanged.
+- **Q-118 wave:** Runs gets a new `ApplyQueuePanel.vue` (one mount line in Runs.vue); Applications gets a `queued` pill kind and "Try again".
+- **Gate:** READY TO BUILD after review.
+STATUS: open
+
 ### 2026-11-12 architect → coordinator, software-engineer, tester (Q-100 D-198 amendment)
 TYPE: handoff
 RE: Q-100; docs/architecture/q100_ui_design.md §2.3, §3.1, §4.1, §4.4, §9; D-198
