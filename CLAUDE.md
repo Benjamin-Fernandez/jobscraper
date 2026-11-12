@@ -26,7 +26,7 @@ A local, single-user app that finds new-grad roles in Singapore on company caree
 - Run anything: `$env:PYTHONPATH="src"; python -m jobscraper <verb>` (PowerShell) or `PYTHONPATH=src python -m jobscraper <verb>` (bash).
 - Python tests: `python tests/run_tests.py` (all, ~2 min) · `python tests/run_tests.py -k <needle>` (a file or test).
 - Web tests: `cd web; npx vitest run` · build the SPA: `cd web; npm run build` (writes `src/jobscraper/web/static/`; **build only in the main checkout**, after merging).
-- Dev web instance: copy `data/jobscraper.db` into the worktree, then `JOBSCRAPER_DB=<copy> JOBSCRAPER_PORT=8768 JOBSCRAPER_MAIL_SYNC=0 python -m jobscraper web` in the background; stop it by PID. (`JOBSCRAPER_MAIL_SYNC=0` keeps a dev copy from reading the owner's real Gmail.)
+- Dev web instance: copy `data/jobscraper.db` into the worktree, then `JOBSCRAPER_DB=<copy> JOBSCRAPER_PORT=8768 JOBSCRAPER_MAIL_SYNC=0 JOBSCRAPER_APPLY_QUEUE=0 python -m jobscraper web` in the background; stop it by PID. (`JOBSCRAPER_MAIL_SYNC=0` keeps a dev copy from reading the owner's real Gmail; `JOBSCRAPER_APPLY_QUEUE=0` keeps it from starting the auto-apply worker; also set `apply.mode` to `dry_run` in the copy's settings table: the repository config is `auto`.)
 - Setup check: `python -m jobscraper doctor`.
 
 ## Gotchas
