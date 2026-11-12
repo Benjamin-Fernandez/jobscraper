@@ -20,6 +20,10 @@ const ICONS = {
   chevron: [['path', { d: 'm6.5 9.5 5.5 5.5 5.5-5.5' }]],
   inbox: [['path', { d: 'M3.5 13h4.5l1.5 2.5h5L16 13h4.5' }], ['path', { d: 'M6 5h12l2.5 8v5.5a1.5 1.5 0 0 1-1.5 1.5H5a1.5 1.5 0 0 1-1.5-1.5V13z' }]],
   target: [['circle', { cx: 12, cy: 12, r: 8.5 }], ['circle', { cx: 12, cy: 12, r: 4.5 }], ['circle', { cx: 12, cy: 12, r: 0.8 }]],
+  // Settings categories (Q-116): Accounts, Apply, Preferences.
+  key: [['circle', { cx: 8, cy: 15, r: 4 }], ['path', { d: 'M11 12l8.5-8.5M16 7l2.5 2.5M14 9l2 2' }]],
+  send: [['path', { d: 'M4 12 20 4l-4 16-4-7z' }], ['path', { d: 'M12 13 20 4' }]],
+  sliders: [['path', { d: 'M4 7h9M17 7h3M4 17h3M11 17h9' }], ['circle', { cx: 15, cy: 7, r: 2 }], ['circle', { cx: 9, cy: 17, r: 2 }]],
   layers: [['path', { d: 'm12 4 8.5 4.5L12 13 3.5 8.5z' }], ['path', { d: 'm3.5 12.5 8.5 4.5 8.5-4.5' }], ['path', { d: 'm3.5 16.5 8.5 4.5 8.5-4.5' }]],
 }
 

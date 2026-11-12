@@ -1,65 +1,71 @@
 <script setup>
-// The cycle (M15): how often every company is checked again. The choices are
-// the plan's (`cycle_day_options`), so a future tier changes what is offered
-// here without a code change; picking one saves it at once.
+// Settings: one page, four categories (Q-116 design; it grows Q-100's four views).
 //
-// Companies per run (M12-T4): how many watchlist companies one run takes. Both
-// are stored settings on the server, not config edits (config/ is read-only in
-// Docker - M11), and every run uses them.
+//   Accounts      the Connected accounts hub (ConnectionsHub), unchanged
+//   Apply         how applying works, limits, writing, what to fill in (ApplySettings)
+//   Search        the cycle and companies per run, pointers to titles and companies
+//   Preferences   theme, compact company list, keyboard shortcuts (this browser only)
 //
-// The hint does the cadence arithmetic the user would otherwise do by hand: at
-// this size, how many runs a day it takes to sweep every company once per cycle.
+// This file is the shell: the header, the category rail (SettingsRail), the phone
+// screens, the routes and the two reads the panels share. The rows live in the panels.
 //
-// Cycle by keyboard (Q-75 N17): an arrow key moves the radio but does not save;
-// Enter or leaving the group does, Escape drops it (the status select's rule,
-// Q-70 B3). A click or Space saves at once. Notices clear on the next edit.
+// Routes (`#/settings/<category>[/<row-id>]`, design section 4). The category is read by
+// `useView`; a row id by the panel itself (`useHashItem`), and a panel is mounted only
+// while its category is open, so only that panel acts on the id. The hub is mounted the
+// same way (`v-if`, never `v-show`): it reads the hash item without checking the
+// category, so a mounted hub would act on another category's row id.
+//   - `#/settings`          Accounts on a desktop (hash left alone); on a phone the list.
+//   - `#/settings/appearance[/...]` was the old name of Preferences: it is rewritten with
+//     `replaceState` before `useView` reads it, and again on each `hashchange` by a
+//     listener registered before `useView`'s.
+//   - an unknown category becomes `#/settings/accounts` (`useView` writes it).
 //
-// Appearance (Q-75 G40): Light, Dark or System, kept in this browser (theme.js).
+// Phone (<= 640px): with no category in the hash the page is the category list; a
+// category is its own screen with a "Settings" back link. The list's links are plain
+// anchors, so choosing one pushes a history entry and the phone's Back returns to the
+// list. Focus follows (design section 6): a drill-in focuses the category title, Back
+// focuses the entry just left.
 //
-// Email (Q-60, F-50): the Gmail mailboxes JobScraper reads for application
-// updates. MailCard loads and saves its own data (GET /api/mail), so a server
-// without those routes still shows the rest of this tab.
-//
-// Four views (Q-100 design section 1), picked like Profile's and kept in the hash
-// (`#/settings/<view>[/<item>]`): Accounts (the Connected accounts hub, the default),
-// Apply, Search (the cycle and companies per run) and Appearance. The hub's data -
-// GET /api/connections - is loaded here, because the Accounts tab carries the
-// attention count and Apply shows the mailbox row from the same answer. A missing
-// or failed answer never reads as "all good": no count, and the hub says so.
-import { computed, onMounted, ref } from 'vue'
-import { ApiError, describeError, getSettings, saveSettings } from '../api.js'
+// Data: ONE GET /api/connections (the hub, the Accounts badge and the mailbox row of
+// Apply) and ONE loadApplyData() (status, settings, details), loaded when the page
+// opens and again when it is re-activated. A missing or failed answer is never "all
+// good": no badge, and the hub or the Apply rows say so.
+import { computed, nextTick, onActivated, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { loadApplyData, missingLabels } from '../applyData.js'
 import { attentionCount } from '../connections.js'
-import { getConnections } from '../connections_api.js'
-import { plural } from '../format.js'
-import { useView } from '../route.js'
-import { cycleLabel, num, runsPerDayLabel } from '../runs.js'
+import { getApplyStatus, getConnections } from '../connections_api.js'
+import { parseHash, useView } from '../route.js'
+import { COPY } from '../settingsRows.js'
 import { tabEmits, tabProps } from '../shell.js'
-import { THEMES, setTheme, storedTheme } from '../theme.js'
 import ApplySettings from '../components/ApplySettings.vue'
 import ConnectionsHub from '../components/ConnectionsHub.vue'
-import CountPicker from '../components/CountPicker.vue'
+import Icon from '../components/Icon.vue'
+import PreferencesSettings from '../components/PreferencesSettings.vue'
+import SearchSettings from '../components/SearchSettings.vue'
+import SettingsRail from '../components/SettingsRail.vue'
 import TabLoading from '../components/TabLoading.vue'
 
 defineProps(tabProps)
 defineEmits(tabEmits)
 
-// ---- views (Q-100) ----
-const VIEWS = [
-  { id: 'accounts', label: 'Accounts' },
-  { id: 'apply', label: 'Apply' },
-  { id: 'search', label: 'Search' },
-  { id: 'appearance', label: 'Appearance' },
-]
-const view = useView('settings', VIEWS, 'accounts')
-
-function onViewKey(e, i) {
-  const next = { ArrowRight: i + 1, ArrowLeft: i - 1, Home: 0, End: VIEWS.length - 1 }[e.key]
-  if (next === undefined) return
-  e.preventDefault()
-  const v = VIEWS[(next + VIEWS.length) % VIEWS.length]
-  view.value = v.id
-  document.getElementById(`settings-tab-${v.id}`)?.focus()
+// ---- the old name of Preferences ----
+// Registered BEFORE useView's own listener, so a `hashchange` is rewritten first.
+function aliasAppearance() {
+  const h = window.location.hash
+  if (!/^#\/settings\/appearance(?:\/|$)/.test(h)) return
+  window.history.replaceState(window.history.state, '', h.replace('#/settings/appearance', '#/settings/preferences'))
 }
+aliasAppearance()
+window.addEventListener('hashchange', aliasAppearance)
+
+// ---- categories ----
+const CATEGORIES = [
+  { id: 'accounts', label: COPY.categories.accounts, icon: 'key' },
+  { id: 'apply', label: COPY.categories.apply, icon: 'send' },
+  { id: 'search', label: COPY.categories.search, icon: 'search' },
+  { id: 'preferences', label: COPY.categories.preferences, icon: 'sliders' },
+]
+const view = useView('settings', CATEGORIES, 'accounts')
 
 // ---- connections (the hub's data) ----
 const connections = ref(null)
@@ -85,164 +91,100 @@ async function loadConnections() {
   }
 }
 
-const settings = ref(null)
-const loadError = ref('')
-const loading = ref(true)
-const draft = ref('')
-const saving = ref(false)
-const saveError = ref('')
-const saved = ref('')
-
-const max = computed(() => settings.value?.enabled_companies ?? 0)
-// Before the first sync no company is enabled and the server refuses every
-// value. The form then does not guess an upper bound: the server says why.
-const noneEnabled = computed(() => Boolean(settings.value) && max.value < 1)
-
-const invalid = computed(() => {
-  const n = draft.value
-  if (n === '' || n === null) return 'Enter how many companies a run should take.'
-  if (!Number.isInteger(n)) return 'Enter a whole number.'
-  if (n < 1) return 'A run needs at least 1 company.'
-  if (!noneEnabled.value && n > max.value) return `At most ${num(max.value)} - that is every enabled company.`
-  return ''
-})
-
-const unchanged = computed(() => draft.value === settings.value?.batch_size)
-
-function oneDecimal(x) {
-  return Math.round(x * 10) / 10
+// ---- Apply's data: { status, settings, summary }, each null when unavailable ----
+const apply = ref(null)        // null until the first answer
+let applySeq = 0
+async function loadApply() {
+  const seq = ++applySeq
+  const data = await loadApplyData()
+  if (seq === applySeq) apply.value = data
 }
 
-// The server's figure for the saved size; the same arithmetic for a draft.
-const cadence = computed(() => {
-  const s = settings.value
-  if (!s || invalid.value) return ''
-  if (noneEnabled.value) return 'No companies yet. Add some in Companies, or start a run to load your watchlist.'
-  const runsPerCycle = Math.ceil(s.enabled_companies / draft.value)
-  const perDay = unchanged.value && s.runs_per_day_needed !== undefined
-    ? s.runs_per_day_needed
-    : oneDecimal(runsPerCycle / s.cycle_days)
-  return `A full ${s.cycle_days}-day sweep takes ${runsPerDayLabel(perDay)} at this size `
-    + `(${plural(runsPerCycle, 'run')} to cover ${plural(s.enabled_companies, 'company', 'companies')}).`
-})
-
-async function load() {
-  loading.value = true
-  loadError.value = ''
+// A save in the Apply panel: take the saved settings as they are, and re-read the
+// status (mode, busy) because the mode chip and "an application is running" depend on it.
+async function onApplySaved(next) {
+  if (apply.value && next) apply.value = { ...apply.value, settings: next }
   try {
-    settings.value = await getSettings()
-    draft.value = settings.value.batch_size
-  } catch (e) {
-    loadError.value = describeError(e)
-  } finally {
-    loading.value = false
-  }
+    const status = await getApplyStatus()
+    if (status && apply.value) apply.value = { ...apply.value, status }
+  } catch { /* keep the status we had */ }
 }
 
-// The server's 422 in words: a plain message, or FastAPI's list of field errors.
-function reason(detail) {
-  if (typeof detail === 'string' && detail) return detail
-  if (Array.isArray(detail) && detail.length) return detail.map(d => d?.msg ?? String(d)).join('; ')
-  return 'out of range'
-}
+const missingCount = computed(() => missingLabels(apply.value?.summary).length)
 
-async function save() {
-  if (invalid.value || unchanged.value || saving.value) return
-  saving.value = true
-  saveError.value = ''
-  saved.value = ''
-  try {
-    settings.value = await saveSettings({ batch_size: draft.value })
-    draft.value = settings.value.batch_size
-    saved.value = `Saved: ${plural(settings.value.batch_size, 'company', 'companies')} per run.`
-  } catch (e) {
-    saveError.value = e instanceof ApiError && e.status === 422
-      ? `The server did not accept ${draft.value}: ${reason(e.detail)}`
-      : `Could not save: ${describeError(e)}`
-  } finally {
-    saving.value = false
-  }
-}
+const categories = computed(() => CATEGORIES.map(c => ({
+  ...c,
+  badge: c.id === 'accounts' ? attention.value : c.id === 'apply' ? missingCount.value : 0,
+  badgeText: c.id === 'accounts' ? 'need attention' : 'details to fill in',
+})))
+const current = computed(() => categories.value.find(c => c.id === view.value) ?? categories.value[0])
 
-// ---- the cycle (M15) ----
-const savingCycle = ref(false)
-const cycleError = ref('')
-const cycleSaved = ref('')
-
-const cycleHint = computed(() => {
-  const s = settings.value
-  if (!s) return ''
-  const every = `Every company is checked again ${s.cycle_days === 1 ? 'every day' : `every ${plural(s.cycle_days, 'day')}`}.`
-  if (!s.enabled_companies) return every
-  return `${every} At ${plural(s.batch_size, 'company', 'companies')} per run that is `
-    + `${runsPerDayLabel(s.runs_per_day_needed)}.`
-})
-
-const cyclePending = ref(null)           // an arrow-key choice waiting for Enter or blur
-let arrowed = false
-const shownCycle = computed(() => cyclePending.value ?? settings.value?.cycle_days)
-
-function onCycleKey(e) {
-  if (e.key === 'Enter') {
-    e.preventDefault()
-    commitCycle()
-  } else if (e.key === 'Escape') {
-    cyclePending.value = null
-    arrowed = false
-  } else {
-    arrowed = e.key.startsWith('Arrow')
-  }
-}
-
-function onCycleChange(days) {
-  cycleSaved.value = ''
-  cycleError.value = ''
-  if (arrowed) {
-    arrowed = false
-    cyclePending.value = days === settings.value.cycle_days ? null : days
-  } else {
-    cyclePending.value = null
-    chooseCycle(days)
-  }
-}
-
-function commitCycle() {
-  const days = cyclePending.value
-  cyclePending.value = null
-  if (days !== null) chooseCycle(days)
-}
-
-function onCycleFocusout(e) {
-  if (!e.currentTarget.contains(e.relatedTarget)) commitCycle()
-}
-
-async function chooseCycle(days) {
-  if (!settings.value || days === settings.value.cycle_days || savingCycle.value) return
-  savingCycle.value = true
-  cycleError.value = ''
-  cycleSaved.value = ''
-  try {
-    settings.value = await saveSettings({ cycle_days: days })
-    cycleSaved.value = `Saved: ${cycleLabel(days).toLowerCase()}. The next run uses it.`
-  } catch (e) {
-    cycleError.value = e instanceof ApiError && e.status === 422
-      ? `The server did not accept that cycle: ${reason(e.detail)}`
-      : `Could not save: ${describeError(e)}`
-  } finally {
-    savingCycle.value = false
-  }
-}
-
-// ---- appearance (G40) ----
-const theme = ref(storedTheme())
-function chooseTheme(id) {
-  theme.value = id
-  setTheme(id)
-}
-
-onMounted(() => {
-  load()
+function reload() {
   loadConnections()
+  loadApply()
+}
+let shownOnce = false
+onMounted(() => {
+  shownOnce = true
+  reload()
+})
+onActivated(() => {
+  if (shownOnce) {
+    shownOnce = false     // the mount already loaded
+    return
+  }
+  reload()
+})
+
+// ---- phone ----
+const mq = typeof window.matchMedia === 'function' ? window.matchMedia('(max-width: 640px)') : null
+const phone = ref(Boolean(mq?.matches))
+const onMedia = e => { phone.value = e.matches }
+if (mq?.addEventListener) mq.addEventListener('change', onMedia)
+else mq?.addListener?.(onMedia)
+
+// Is a category named in the hash? (`useView` leaves `#/settings` alone, so the view
+// alone can't tell the phone whether to show the list.) A replaceState fires no
+// `hashchange`, so a rail click bumps the tick itself.
+const hashTick = ref(0)
+const bump = () => { hashTick.value += 1 }
+window.addEventListener('hashchange', bump)
+const hashParts = computed(() => {
+  void hashTick.value
+  return parseHash(window.location.hash, ['settings'])
+})
+const showList = computed(() => phone.value && hashParts.value.view === null)
+
+function selectView(id) {
+  view.value = id
+  bump()
+}
+
+const titleEl = ref(null)
+let lastView = null
+watch(showList, async list => {
+  if (!phone.value) return
+  if (!list) lastView = view.value
+  await nextTick()
+  if (list) {
+    document.getElementById(`settings-list-${lastView ?? view.value}`)?.focus()
+    return
+  }
+  if (hashParts.value.item) return        // the hub scrolls to and focuses its card
+  const title = view.value === 'accounts'
+    ? document.querySelector('#settings-panel-accounts .hub-title')
+    : titleEl.value
+  if (title) {
+    title.setAttribute('tabindex', '-1')
+    title.focus()
+  }
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener('hashchange', aliasAppearance)
+  window.removeEventListener('hashchange', bump)
+  if (mq?.removeEventListener) mq.removeEventListener('change', onMedia)
+  else mq?.removeListener?.(onMedia)
 })
 </script>
 
@@ -250,221 +192,96 @@ onMounted(() => {
   <section class="settings">
     <header class="page-head">
       <div>
-        <h2 class="page-title">Settings</h2>
-        <p class="page-sub">Accounts, applying, search and appearance.</p>
-      </div>
-      <div class="views" role="tablist" aria-label="Settings sections">
-        <button
-          v-for="(v, i) in VIEWS"
-          :id="`settings-tab-${v.id}`"
-          :key="v.id"
-          type="button"
-          role="tab"
-          class="view-tab"
-          :class="[`view-${v.id}`, { active: view === v.id }]"
-          :aria-selected="view === v.id ? 'true' : 'false'"
-          :aria-controls="`settings-panel-${v.id}`"
-          :tabindex="view === v.id ? 0 : -1"
-          @click="view = v.id"
-          @keydown="onViewKey($event, i)"
-        >
-          {{ v.label }}
-          <span v-if="v.id === 'accounts' && attention > 0" class="view-badge">
-            <span aria-hidden="true">{{ attention }}</span>
-            <span class="visually-hidden">{{ attention }} need attention</span>
-          </span>
-        </button>
+        <h2 class="page-title">{{ COPY.title }}</h2>
+        <p class="page-sub">{{ COPY.subtitle }}</p>
       </div>
     </header>
 
-    <div
-      v-if="view === 'accounts'"
-      id="settings-panel-accounts"
-      role="tabpanel"
-      aria-labelledby="settings-tab-accounts"
-    >
-      <ConnectionsHub :connections="connections" :loading="connLoading" :failed="connFailed" @reload="loadConnections" />
-    </div>
+    <!-- Phone, no category yet: the list. -->
+    <nav v-if="showList" class="cat-list" :aria-label="COPY.railLabel">
+      <ul>
+        <li v-for="c in categories" :key="c.id">
+          <a :id="`settings-list-${c.id}`" class="cat-link" :href="`#/settings/${c.id}`">
+            <Icon :name="c.icon" :size="18" />
+            <span class="cat-name">{{ c.label }}</span>
+            <span v-if="c.badge > 0" class="view-badge">
+              <span aria-hidden="true">{{ c.badge }}</span>
+              <span class="visually-hidden">{{ c.badge }} {{ c.badgeText }}</span>
+            </span>
+            <Icon class="cat-chevron" name="chevron" :size="16" />
+          </a>
+        </li>
+      </ul>
+    </nav>
 
-    <div
-      v-else-if="view === 'apply'"
-      id="settings-panel-apply"
-      role="tabpanel"
-      aria-labelledby="settings-tab-apply"
-    >
-      <ApplySettings :connections="connections" />
-    </div>
+    <div v-else class="settings-grid">
+      <SettingsRail v-if="!phone" :categories="categories" :model-value="view" @update:model-value="selectView" />
 
-    <div
-      v-else-if="view === 'search'"
-      id="settings-panel-search"
-      role="tabpanel"
-      aria-labelledby="settings-tab-search"
-    >
-    <h3 class="section-title">Cycle</h3>
-    <TabLoading v-if="loading" :rows="1" />
-    <div v-else-if="settings" class="panel-box cycle">
-      <p id="cycle-label" class="question">How often every company is checked again</p>
-      <div
-        class="cycle-options"
-        role="radiogroup"
-        aria-labelledby="cycle-label"
-        @keydown="onCycleKey"
-        @pointerdown="arrowed = false"
-        @focusout="onCycleFocusout"
-      >
-        <label
-          v-for="d in settings.cycle_day_options"
-          :key="d"
-          class="cycle-option"
-          :class="{ active: d === shownCycle }"
-          :data-days="d"
+      <div class="settings-main">
+        <a v-if="phone" class="back-link" href="#/settings" :aria-label="COPY.backLabel">
+          <span aria-hidden="true">‹</span> {{ COPY.title }}
+        </a>
+
+        <div
+          :id="`settings-panel-${view}`"
+          :role="phone ? undefined : 'tabpanel'"
+          :aria-labelledby="phone ? undefined : `settings-tab-${view}`"
         >
-          <input
-            type="radio"
-            name="cycle"
-            class="visually-hidden"
-            :value="d"
-            :checked="d === shownCycle"
-            :disabled="savingCycle"
-            @change="onCycleChange(d)"
-          >
-          <span class="cycle-name">{{ cycleLabel(d) }}</span>
-          <span class="cycle-days">{{ plural(d, 'day') }}</span>
-        </label>
-      </div>
-      <p v-if="cyclePending !== null" class="hint cycle-pending" role="status">
-        {{ cycleLabel(cyclePending) }} is selected but not saved. Press Enter to save, or Esc to keep {{ cycleLabel(settings.cycle_days).toLowerCase() }}.
-      </p>
-      <p class="hint cycle-hint">{{ cycleHint }}</p>
-      <p class="muted small">
-        The config default is {{ cycleLabel(settings.cycle_days_default).toLowerCase() }}.
-      </p>
-    </div>
-    <p v-if="cycleError" class="notice error" role="alert">{{ cycleError }}</p>
-    <p v-if="cycleSaved" class="notice ok cycle-saved" role="status">{{ cycleSaved }}</p>
+          <h3 v-if="view !== 'accounts'" ref="titleEl" class="section-title cat-title" tabindex="-1">{{ current.label }}</h3>
 
-    <h3 class="section-title">Companies per run</h3>
-    <TabLoading v-if="loading" :rows="1" />
-    <div v-else-if="loadError" class="notice error" role="alert">
-      <p>Could not load settings: {{ loadError }}</p>
-      <button type="button" @click="load">Try again</button>
-    </div>
-    <form v-else class="batch" novalidate @submit.prevent="save">
-      <label for="batch-size">How many watchlist companies one run fetches</label>
-      <div class="row">
-        <CountPicker
-          v-model="draft"
-          input-id="batch-size"
-          label="Companies per run"
-          :max="noneEnabled ? null : max"
-          :invalid="Boolean(invalid)"
-          describedby="batch-size-hint"
-          @update:model-value="saved = ''; saveError = ''"
-        />
-        <button type="submit" class="primary save" :disabled="Boolean(invalid) || unchanged || saving">
-          {{ saving ? 'Saving…' : 'Save' }}
-        </button>
+          <ConnectionsHub
+            v-if="view === 'accounts'"
+            :connections="connections"
+            :loading="connLoading"
+            :failed="connFailed"
+            @reload="loadConnections"
+          />
+          <template v-else-if="view === 'apply'">
+            <ApplySettings v-if="apply" :connections="connections" :apply="apply" @saved="onApplySaved" />
+            <TabLoading v-else :rows="3" />
+          </template>
+          <SearchSettings v-else-if="view === 'search'" />
+          <PreferencesSettings v-else />
+        </div>
       </div>
-      <p id="batch-size-hint" class="hint" :class="{ invalid }">
-        <template v-if="invalid">{{ invalid }}</template>
-        <template v-else>{{ cadence }}</template>
-      </p>
-      <p class="muted small">
-        <template v-if="!noneEnabled">Between 1 and {{ num(max) }}. </template>The config default is {{ settings.batch_size_default }}.
-        A run started with its own count (Runs tab) uses that instead.
-      </p>
-    </form>
-    <p v-if="saveError" class="notice error" role="alert">{{ saveError }}</p>
-    <p v-if="saved" class="notice ok" role="status">{{ saved }}</p>
-    </div>
-
-    <div
-      v-else
-      id="settings-panel-appearance"
-      role="tabpanel"
-      aria-labelledby="settings-tab-appearance"
-    >
-    <h3 class="section-title">Appearance</h3>
-    <div class="panel-box appearance">
-      <p id="theme-label" class="question">Colour theme</p>
-      <div class="cycle-options" role="radiogroup" aria-labelledby="theme-label">
-        <label
-          v-for="t in THEMES"
-          :key="t.id"
-          class="theme-option"
-          :class="{ active: t.id === theme }"
-          :data-choice="t.id"
-        >
-          <input
-            type="radio"
-            name="theme"
-            class="visually-hidden"
-            :value="t.id"
-            :checked="t.id === theme"
-            @change="chooseTheme(t.id)"
-          >
-          <span class="cycle-name">{{ t.label }}</span>
-        </label>
-      </div>
-      <p class="muted small">Saved in this browser only. System follows your device's light or dark setting.</p>
-    </div>
     </div>
   </section>
 </template>
 
 <style scoped>
-.views {
-  display: inline-flex; flex-wrap: wrap; gap: 2px; padding: 2px;
-  background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius);
+.settings-grid {
+  display: grid; grid-template-columns: 15rem minmax(0, 44rem); gap: var(--space-6); align-items: start;
 }
-.view-tab {
-  border: 1px solid transparent; background: transparent; box-shadow: none; color: var(--text-2);
-  border-radius: calc(var(--radius) - 2px);
-}
-.view-tab:hover:not(:disabled) { background: var(--surface); color: var(--text); }
-.view-tab.active, .view-tab.active:hover:not(:disabled) {
-  background: var(--surface); border-color: var(--border-strong); box-shadow: var(--shadow-sm);
-  color: var(--text); font-weight: 650;
-}
+.settings-main { min-width: 0; }
+.cat-title { margin-top: 0; }
+.cat-title:focus-visible { outline-offset: 4px; }
 /* The attention count: a dot and a number, so it is not colour alone. */
 .view-badge {
   display: inline-flex; align-items: center; gap: var(--space-1);
   font-size: var(--text-xs); font-weight: 700; color: var(--state-attention-fg);
 }
 .view-badge::before { content: ''; width: 0.5rem; height: 0.5rem; border-radius: 50%; background: currentColor; }
+
+/* The phone's category list. */
+.cat-list ul { list-style: none; margin: 0; padding: 0; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); overflow: hidden; }
+.cat-list li + li { border-top: 1px solid var(--border); }
+.cat-link {
+  display: flex; align-items: center; gap: var(--space-3); min-height: 3rem; box-sizing: border-box;
+  padding: var(--space-3) var(--space-4); color: var(--text); text-decoration: none; font-weight: 600;
+}
+.cat-link:hover { background: var(--surface-2); color: var(--text); }
+.cat-link:focus-visible { outline-offset: -2px; }
+.cat-name { flex: 1 1 auto; min-width: 0; }
+.cat-chevron { color: var(--muted); transform: rotate(-90deg); }
+.back-link {
+  display: inline-flex; align-items: center; gap: var(--space-1); min-height: var(--touch-min);
+  margin-bottom: var(--space-2); font-weight: 600; text-decoration: none;
+}
+
+@media (max-width: 900px) {
+  .settings-grid { grid-template-columns: 12rem minmax(0, 1fr); gap: var(--space-5); }
+}
 @media (max-width: 640px) {
-  .views { display: flex; width: 100%; }
-  .view-tab { flex: 1 1 40%; min-height: var(--touch-min); }
+  .settings-grid { grid-template-columns: minmax(0, 1fr); }
 }
-.batch, .panel-box {
-  display: grid; gap: var(--space-2); max-width: 40rem;
-  padding: var(--space-4); background: var(--surface);
-  border: 1px solid var(--border); border-radius: var(--radius-lg); box-shadow: var(--shadow);
-}
-.batch label { font-weight: 600; font-size: var(--text-sm); }
-.row { display: flex; flex-wrap: wrap; gap: var(--space-2) var(--space-3); align-items: center; }
-.hint { margin: 0; color: var(--text); font-size: var(--text-sm); }
-.hint.invalid { color: var(--danger); }
-.small { font-size: var(--text-sm); margin: 0; }
-.question { margin: 0; font-weight: 600; font-size: var(--text-sm); }
-.cycle-options {
-  display: flex; flex-wrap: wrap; gap: var(--space-1); padding: var(--space-1);
-  background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius-lg);
-}
-.cycle-option, .theme-option {
-  flex: 1 1 6.5rem; display: flex; flex-direction: column; align-items: center;
-  padding: var(--space-2) var(--space-3); border-radius: var(--radius); cursor: pointer;
-  border: 1px solid transparent; color: var(--text-2);
-}
-.cycle-option:hover, .theme-option:hover { background: var(--surface); }
-.cycle-option.active, .theme-option.active {
-  background: var(--surface); border-color: var(--border); box-shadow: var(--shadow);
-  color: var(--text);
-}
-.cycle-option:has(input:focus-visible), .theme-option:has(input:focus-visible) { outline: 2px solid var(--focus); outline-offset: 2px; }
-.cycle-name { font-weight: 600; font-size: var(--text-sm); }
-.theme-option { flex-basis: 5rem; }
-.cycle-days { font-size: var(--text-xs); color: var(--muted); }
-.notice { margin-top: var(--space-4); max-width: 34rem; }
 </style>

@@ -9,8 +9,9 @@
 // one line (the choice is remembered in this browser), and above 20 companies
 // an A-Z strip jumps to a letter. Off-screen rows are not laid out
 // (content-visibility, G41), so a thousand companies scroll smoothly.
-import { computed, nextTick, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { COMPANY_EXPORT_URL } from '../api.js'
+import { DENSITY_EVENT, densityCompact, setDensityCompact } from '../density.js'
 import { ago, plural } from '../format.js'
 import CompanyMark from './CompanyMark.vue'
 import Icon from './Icon.vue'
@@ -94,15 +95,19 @@ const sort = ref('az')
 const searchEl = ref(null)
 const openAll = ref(false)             // every failure's detail open at once
 
-// ---- density (G30): remembered in this browser ----
-const DENSITY_KEY = 'jobscraper.companies.density'
-function rememberedDensity() {
-  try { return window.localStorage.getItem(DENSITY_KEY) === 'compact' } catch { return false }
+// ---- density (G30): remembered in this browser (density.js) ----
+// The button here and the Settings -> Preferences switch write the same key and tell
+// each other through a window event, so whichever is open follows the other.
+const compact = ref(densityCompact())
+function toggleDensity() {
+  setDensityCompact(!compact.value)
+  compact.value = densityCompact()
 }
-const compact = ref(rememberedDensity())
-watch(compact, on => {
-  try { window.localStorage.setItem(DENSITY_KEY, on ? 'compact' : 'comfortable') } catch { /* private window */ }
-})
+function onDensity(e) {
+  compact.value = typeof e.detail?.on === 'boolean' ? e.detail.on : densityCompact()
+}
+window.addEventListener(DENSITY_EVENT, onDensity)
+onBeforeUnmount(() => window.removeEventListener(DENSITY_EVENT, onDensity))
 
 watch(state, () => { cause.value = 'all' })
 
@@ -250,7 +255,7 @@ const safe = url => (/^https?:\/\//i.test(url || '') ? url : null)
           class="density"
           :class="{ active: compact }"
           :aria-pressed="compact ? 'true' : 'false'"
-          @click="compact = !compact"
+          @click="toggleDensity"
         >Compact rows</button>
         <a class="button health-csv" :href="COMPANY_EXPORT_URL" download>
           Download all (.csv)
