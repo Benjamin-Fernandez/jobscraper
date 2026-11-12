@@ -10,6 +10,17 @@ BODY: <concise message>
 STATUS: open
 -->
 
+### 2026-11-12 architect → coordinator, software-engineer, tester, frontend; cc Q-119 engineer, Q-120 (D-208 always answer)
+TYPE: handoff + request
+RE: D-208, Q-121, KA-2; docs/architecture/llm_first_fill_design.md; adr/0011-llm-first-always-answer.md
+BODY: Design written (280 lines, docs only, not committed per delegation). `apply.fill_policy: always | strict`; shipped config `always`, code default `strict` (existing pins unchanged). Under `always`: a cached briefing (whole profile, `extra`, computed facts, standing rules D1–D10, full resume; ~5.6k tokens; RAG not built, threshold 18k) → one main pass → mechanics (coercion, option ladder R0–R5) → must-answer pass → deterministic last resort X1–X9 marked assumed; > 5 last resorts on a page or no usable reply = `model_unavailable` (queue pause). Hard: files, identity email, owner's exact earlier answer (P3), G1/G12/G13, secrets refused in `backends.complete` (H1), local only (remote → strict). Assumptions become "Answered for you" questions with Keep/Change into `extra`.
+- **Contract (WP-0, after review):** additive v7 (or folded into Q-120's v6): `FillPolicy`, `ResolveContext.fill_policy`, `Answer.assumed`, `ModelDecision.assumed`, `FillSource.DEFAULT/ASSUMPTION/NONE`, `AnswerSource.DEFAULT/ASSUMPTION/LAST_RESORT`, `DEFAULT_RULES`, `LAST_RESORT_RULES`, `ReasonCode.DOCUMENT_MISSING` + text, `QuestionStatus/QuestionReason.ASSUMED`, `PageOutcome.assumed/last_resort`, `FillServices.briefing()`.
+- **Request (Q-120 owner):** add `document_missing` to AQ §4.1's per-role row (queue continues). No other queue change.
+- **Request (Q-119 engineer):** merge first; entry-group detection for the Greenhouse education panel is NOT needed by this design (§4.4 binds blank slots and fills ungrouped fields from the newest entry).
+- **Note:** I had no shell tool, so I worked from the Coordinator's summary of the Q-119 outbox entry rather than `git show`.
+- **Lanes:** B (briefing.py, always.py), K (compose prune), H (backends), C (pagefill/facts/widgets, after Q-119), F (apply_flow/questions/config, then store; after Q-120 E1/E2), W, U, tester. Merge order in design §14.
+STATUS: open
+
 ### 2026-11-12 architect → coordinator, frontend, tester; cc shell owner (Q-100 session) and Q-120 (Q-118 UI polish)
 TYPE: handoff + request
 RE: Q-118, D-206, D-205; docs/architecture/q118_ui_polish_design.md; apply_queue_design.md §7/§9
