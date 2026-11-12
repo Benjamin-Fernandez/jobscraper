@@ -232,24 +232,27 @@ describe('Runs: error state, aborted reason, separators (G20, G27, G37)', () => 
   it('an aborted run says why, in the pill\'s title and for screen readers', async () => {
     const w = mountRuns({ runs: [aborted] })
     await flushPromises()
-    const pill = w.find('.pill')
-    expect(pill.text()).toBe('aborted')
+    // Q-118 LC: the status is a badge (word "Aborted", tone warn) in the status cell.
+    const pill = w.find('td.status .ui-badge')
+    expect(pill.text()).toBe('Aborted')
+    expect(pill.attributes('data-tone')).toBe('warn')
     expect(pill.attributes('title')).toContain('network problem on this computer')
     expect(pill.attributes('title')).toContain('Run again to retry')
-    expect(w.find('td .visually-hidden').text()).toContain('network problem')
+    expect(w.find('td.status .visually-hidden').text()).toContain('network problem')
   })
 
   it('a successful run has no extra note', async () => {
     const w = mountRuns({ runs: [{ ...aborted, run_no: 2, status: 'ok' }] })
     await flushPromises()
-    expect(w.find('.pill').attributes('title')).toBeUndefined()
-    expect(w.find('td .visually-hidden').exists()).toBe(false)
+    expect(w.find('td.status .ui-badge').text()).toBe('Success')
+    expect(w.find('td.status .ui-badge').attributes('title')).toBeUndefined()
+    expect(w.find('td.status .visually-hidden').exists()).toBe(false)
   })
 
   it('counts get thousands separators, in the table and the failed link', async () => {
     const w = mountRuns({ runs: [{ ...aborted, stats: { companies_due: 1500, postings_seen: 41200, companies_failed: 1234 } }] })
     await flushPromises()
-    const cells = w.findAll('tr[data-run="1"] td.num').map(c => c.text())
+    const cells = w.findAll('tr[data-run="1"] td.col-num').map(c => c.text())
     expect(cells).toContain('1,500')
     expect(cells).toContain('41,200')
     expect(w.find('.failed-link').text()).toBe('1,234')
