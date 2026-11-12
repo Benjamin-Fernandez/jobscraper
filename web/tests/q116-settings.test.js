@@ -306,13 +306,13 @@ describe('Q-116 Preferences stay in step with where the setting acts', () => {
       open_roles: 1, reason: '', kind: '',
     }))
     const companies = mount(WatchedCompanies, { props: { health: { total: 3, counts: {}, items } }, attachTo: document.body })
-    expect(companies.find('.dir').classes()).not.toContain('compact')
+    expect(companies.find('table.companies-table').classes()).not.toContain('is-compact')
     const w = await settings('#/settings/preferences')
     expect(DENSITY_KEY).toBe('jobscraper.companies.density')
     await rowBtn(w, 'density').trigger('click')
     expect(window.localStorage.getItem(DENSITY_KEY)).toBe('compact')
     await flushPromises()
-    expect(companies.find('.dir').classes()).toContain('compact')                // the open list followed the Settings row
+    expect(companies.find('table.companies-table').classes()).toContain('is-compact')              // the open list followed the Settings row
     await companies.find('.density').trigger('click')                            // ... and the other way round
     await flushPromises()
     expect(window.localStorage.getItem(DENSITY_KEY)).toBe('comfortable')

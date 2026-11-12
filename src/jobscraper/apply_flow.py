@@ -1,7 +1,9 @@
 """Auto-apply orchestrator: queue -> guards -> tailor -> detect -> plan ->
 resolve -> browser -> submit -> record (apply_design §3, KA-1).
 
-`run()` is the only public entry point; `cmd_apply` calls it. One Edge
+`run()` (the batch, `apply <ids>`) and `run_queue()` (the auto-apply queue
+worker, `apply queue`, apply_queue_design §3.2) are the public entry points;
+`cmd_apply` calls them. One Edge
 session serves the whole run, one tab per attempt, attempts run one after the
 other. Every decision the design leaves to "the flow" lives here:
 
@@ -51,6 +53,7 @@ from .apply.contracts import (
     AnswerStatus, AnswerTier, ApplyFailure, AttemptContext, AttemptResult, AttemptState, Canonical,
     FieldType, FormField, PageOutcome, PrefillPolicy, ReasonCode, ResolveContext, SignUpOutcome,
 )
+from .apply.contracts import QUEUE_PAUSE_TEXTS, RETURNS_ITEM, QueuePause
 from .apply.detect import detect
 from .apply.pagefill import (ENTRY_NOTE_PREFIX, ENTRY_NOTE_TAIL, TYPED_BEFORE_STOP_NOTE, fill_page,
                              stored_quote)
@@ -750,12 +753,32 @@ class _Run:
         self._aliases = None
         self.compose_files: dict[str, str] = {}               # audit key -> path of the composed letter file
         self.compose_meta: dict[str, tuple[str, str]] = {}    # audit key -> (model, prompt hash) of a composed text
+        # The auto-apply queue (apply_queue_design §3.2); the batch `run()` never sets these.
+        self.queue = False                    # run_queue() is driving: reopen a closed window
+        self.last_cap = ""                    # "daily" | "employer": which cap refused (review M5)
+        self.browser_failed = ""              # why Edge could not start (pause browser_unavailable)
+        self.kept_tabs: list[Any] = []        # dry-run tabs left open on a filled form (§5)
+        self.item: Optional[dict[str, Any]] = None             # the queue item in flight
+        self.apply_cfg_fn: Callable[[], ApplyConfig] = lambda: self.acfg
+        self.should_stop: Callable[[], bool] = lambda: False   # the web parent is gone
+        self.force_dry_run = False
 
     # -- browser
 
     def browser(self):
+        if self.session is not None and self.queue and not _session_alive(self.session):
+            self.log("apply: the Edge window was closed; opening a new one")
+            self.kept_tabs = []
+            self.close()
         if self.session is None:
-            self.session = self.browser_factory(self.acfg)
+            try:
+                self.session = self.browser_factory(self.acfg)
+            except Exception as exc:
+                self.browser_failed = (
+                    "the JobScraper Edge profile is in use"
+                    if _names_profile_dir(exc, os.path.expandvars(self.acfg.profile_dir))
+                    else f"Edge could not start ({type(exc).__name__})")
+                raise
         return self.session
 
     def close(self) -> None:
@@ -787,11 +810,14 @@ class _Run:
 
     def cap_refusal(self, job: dict[str, Any]) -> Optional[ApplyFailure]:
         """§12.1 (3): today's clicks against the caps (Asia/Singapore day).
-        A cap of 0 means no limit (D-204)."""
+        A cap of 0 means no limit (D-204). `last_cap` says which one refused
+        (the queue pauses on the daily one only, review M5)."""
         total, employer = self.store.apply_counts(job.get("company_id"), day_start_utc())
         if self.acfg.daily_cap > 0 and total >= self.acfg.daily_cap:
+            self.last_cap = "daily"
             return ApplyFailure(ReasonCode.CAP_REACHED, f"{total} of {self.acfg.daily_cap} today")
         if self.acfg.per_employer_daily_cap > 0 and employer >= self.acfg.per_employer_daily_cap:
+            self.last_cap = "employer"
             return ApplyFailure(ReasonCode.CAP_REACHED,
                                 f"{employer} of {self.acfg.per_employer_daily_cap} today at "
                                 f"{job.get('company') or 'this employer'}")
@@ -965,12 +991,15 @@ class _Run:
 
     # -- one job
 
-    def attempt(self, job_id: str) -> AttemptResult:
+    def attempt(self, job_id: str, *, attempt_id: Optional[int] = None) -> AttemptResult:
+        """One job. The batch creates the attempt row here; the queue worker passes
+        the `queued` row `queue_take` created (its mode already set by `set_mode`)."""
         job = self.store.job_for_apply(job_id)
-        now = utcnow()
-        attempt_id = self.store.create_attempt(job_id, job.get("company_id") if job else None,
-                                               self.mode, now)
-        self.store.commit()
+        taken = attempt_id is not None
+        if attempt_id is None:
+            attempt_id = self.store.create_attempt(job_id, job.get("company_id") if job else None,
+                                                   self.mode, utcnow())
+            self.store.commit()
         at = _Attempt(self.store, self.log, attempt_id, job_id, self.evidence)
         self.log(f"[attempt {attempt_id}] queued job={job_id} mode={self.mode}")
         adapter = ctx = None
@@ -994,7 +1023,9 @@ class _Run:
                 self.fail(at, ReasonCode.ERROR, type(exc).__name__)
         except BaseException:                             # cancel (JobCancelled), Ctrl+C
             try:
-                if at.state not in TERMINAL_STATES:
+                if taken and at.state is S.QUEUED:        # never started: back to the front (M3)
+                    self.unstarted(attempt_id, job_id, job.get("company_id") if job else None)
+                elif at.state not in TERMINAL_STATES:
                     if at.clicked:
                         self.unconfirmed(at, "interrupted after submit")
                     else:
@@ -1010,6 +1041,8 @@ class _Run:
                     at.page.close()
                 except Exception:
                     pass
+            elif at.page is not None and taken:            # a dry run's filled tab stays (§5)
+                self.kept_tabs.append(at.page)
         at.result.answers = list(at.answers.values())
         return at.result
 
@@ -1809,6 +1842,344 @@ class _Run:
                 lock.release()
         return results
 
+    # -- the auto-apply queue (apply_queue_design §3.2, §4, §5; D-205, ADR-0010)
+
+    def set_mode(self, mode: str) -> None:
+        """The mode of the item about to run. Anything but exactly "auto" is a dry run
+        (I5): `_Run.dry_run` is what decides the click."""
+        self.mode = "auto" if mode == "auto" else "dry_run"
+        self.dry_run = self.mode != "auto"
+
+    def begin_item(self) -> None:
+        """Fresh per-item state (§3.2, review L1/P15): the profile is read again, so an
+        answer the owner added mid-queue is seen by the next role; the caches the batch
+        keeps for a whole run are dropped. `seen` is reset: the queue's UNIQUE(job_id)
+        and live-attempt checks (I2) replace the batch-duplicate guard. The redaction
+        list keeps the earlier values too (a value removed from the profile must still
+        never reach the log)."""
+        self.profile, self.profile_error = {}, ""
+        try:
+            self.profile = applicant.load(self.cfg.applicant_path)
+        except applicant.ApplicantError as exc:
+            self.profile_error = str(exc)
+        self.log.values = list(dict.fromkeys(
+            [*self.log.values, *applicant.redaction_values(self.profile)]))
+        self.rules = None
+        self._resume_text = None
+        self._resume_entries = None
+        self._aliases = None
+        self.reopened = False
+        self.compose_files = {}
+        self.compose_meta = {}
+        self.last_cap = ""
+        self.browser_failed = ""
+        self.seen = set()
+
+    def unstarted(self, attempt_id: int, job_id: str, company_id: Optional[int]) -> None:
+        """An item interrupted while its attempt row is still `queued` (nothing was done
+        on the site): the row ends failed(cancelled) and the role goes back to the front
+        with the mode it was queued with (review M3). Idempotent; never raises."""
+        try:
+            row = self.store.attempt(attempt_id)
+            if row is not None and row["state"] == S.QUEUED.value:
+                self.store.set_attempt_state(attempt_id, S.FAILED.value,
+                                             reason=ReasonCode.CANCELLED.value,
+                                             detail="interrupted before start")
+                self.store.commit()
+            item = self.item or {}
+            self.store.queue_return(job_id, company_id, item.get("item_mode") or "dry_run",
+                                    "returned: interrupted before start", utcnow())
+            self.log(f"[attempt {attempt_id}] interrupted before start; back at the front")
+        except Exception as exc:                          # noqa: BLE001 - the interrupt goes on
+            self.log(f"[attempt {attempt_id}] could not return the role ({type(exc).__name__})")
+
+    def queue_waiting(self) -> bool:
+        return bool(self.store.queue_positions())
+
+    def pause(self, reason: QueuePause, detail: Optional[str] = None) -> None:
+        """Pause the queue (first reason wins) and say why in the job log."""
+        detail = redact(detail, self.log.values) if detail else detail
+        wrote = self.store.queue_pause(reason.value, detail, utcnow())
+        rt = QUEUE_PAUSE_TEXTS.get(reason)
+        text = f" {rt.text.format(detail=detail or '')} {rt.hint}" if rt else ""
+        self.log(f"queue: paused reason={reason.value}"
+                 + ("" if wrote else " (already paused)") + text)
+
+    def precheck(self) -> Optional[tuple[QueuePause, str]]:
+        """The system checks made BEFORE a take (§4.1), so a known stop leaves no
+        failed row and the head stays where it is."""
+        if self.profile_error:
+            return QueuePause.PROFILE_INCOMPLETE, "applicant.yaml could not be read"
+        missing = applicant.missing_for_apply(self.profile, self.cfg.resume_dir)
+        if missing:
+            return QueuePause.PROFILE_INCOMPLETE, ", ".join(missing)
+        if self.acfg.fill == "llm" and not getattr(self.backend, "available", False):
+            return (QueuePause.MODEL_UNAVAILABLE,
+                    str(getattr(self.backend, "unavailable_code", "") or "not running"))
+        return None
+
+    def keep_tabs(self) -> None:
+        """At most DRY_RUN_TABS filled dry-run tabs stay open; a newer one closes the
+        oldest (§5)."""
+        while len(self.kept_tabs) > DRY_RUN_TABS:
+            old = self.kept_tabs.pop(0)
+            try:
+                old.close()
+            except Exception:                             # noqa: BLE001 - the owner may have closed it
+                pass
+            self.log(f"queue: closed the oldest dry-run tab (at most {DRY_RUN_TABS} stay open)")
+
+    def hold(self) -> bool:
+        """With the queue empty and a filled dry-run tab open, keep the window for up
+        to `dry_run_hold_s`, in 5 s slices (§5). True = go round the loop again (a role
+        is waiting, a yield is asked for or the parent is gone: the loop top handles
+        those); False = finish (paused, window closed, time up, nothing to hold)."""
+        if not self.kept_tabs or self.session is None or self.acfg.dry_run_hold_s <= 0:
+            return False
+        self.log(f"apply: dry run - the filled form(s) stay open for up to "
+                 f"{self.acfg.dry_run_hold_s} s; close the window to finish sooner")
+        for _ in range(max(1, -(-int(self.acfg.dry_run_hold_s) // HOLD_SLICE_S))):
+            if self.should_stop():
+                return True
+            if self.store.queue_pause_state():
+                self.log("queue: paused; the dry-run hold ends")
+                return False
+            if self.store.get_setting(Store.QUEUE_YIELD):
+                return True
+            if self.queue_waiting():
+                return True
+            if self.session.hold(HOLD_SLICE_S) is False:
+                self.log("queue: the Edge window was closed; the dry-run hold ends")
+                self.kept_tabs = []
+                return False
+        return False
+
+    def run_queue(self) -> "QueueOutcome":
+        """Drain the queue one role at a time (§3.2). At most one attempt in flight
+        (RunLock + one loop), a role is taken in the store's own transaction, its
+        mode is `pick_mode`'s, and every ending is judged by `pause_for` from the
+        store row. Orderly ends (drained, paused, yielded) return normally."""
+        out = QueueOutcome()
+        lock = RunLock(self.evidence / "run.lock")
+        if not lock.acquire():
+            self.log("apply: another apply run is in progress; the queue waits")
+            out.lock_refused = True
+            return out
+        self.queue = True
+        try:
+            reaped = self.store.reap_attempts(utcnow())           # THE reaper of the web path (M1)
+            if reaped:
+                self.log(f"apply: closed {reaped} interrupted attempt(s)")
+            self.purge_fill_cache()
+            while True:
+                if self.should_stop():
+                    self.pause(QueuePause.APP_CLOSED)
+                    break
+                if self.store.queue_take_yield():
+                    self.log("queue: a search run goes first; the queue continues after it")
+                    out.yielded = True
+                    break
+                state = self.store.queue_pause_state()
+                if state:
+                    self.log(f"queue: paused reason={state['reason']}; nothing taken")
+                    break
+                self.acfg = self.apply_cfg_fn()                    # L1: caps, timeouts, fill per item
+                self.begin_item()
+                if self.queue_waiting():
+                    stop = self.precheck()
+                    if stop:
+                        self.pause(*stop)
+                        break
+                self.item = None
+                item, dropped = self.store.queue_take(utcnow())
+                for job_id in dropped:
+                    self.log(f"queue: job={job_id} no longer To apply; skipped")
+                if item is None:
+                    if self.hold():
+                        continue
+                    break
+                self.item = item
+                try:
+                    mode = pick_mode(item.get("item_mode"), self.acfg.mode, self.force_dry_run)
+                    self.set_mode(mode)
+                    self.store.update_attempt(item["attempt_id"], mode=self.mode)
+                    self.store.commit()
+                except BaseException:
+                    job = self.store.job_for_apply(item["job_id"]) or {}
+                    self.unstarted(item["attempt_id"], item["job_id"], job.get("company_id"))
+                    raise
+                r = self.attempt(item["job_id"], attempt_id=item["attempt_id"])
+                out.results.append(r)
+                row = self.store.attempt(r.attempt_id) or {}
+                reason = row.get("reason_code") or ""
+                self.log(f"queue: job={item['job_id']} attempt={r.attempt_id} mode={self.mode} "
+                         f"-> {row.get('state') or r.state.value}"
+                         + (f" reason={reason}" if reason else ""))
+                if row.get("state") == S.READY_TO_SUBMIT.value:
+                    self.keep_tabs()
+                streak = self.store.queue_streak(self.window_start(), limit=3)
+                p = pause_for(row, self.last_cap, streak, browser_failed=self.browser_failed)
+                if p is None:
+                    continue
+                why, detail = p
+                if (why in RETURNS_ITEM and row.get("state") == S.FAILED.value
+                        and row.get("submit_clicked_at") is None):
+                    self.store.queue_return(item["job_id"], row.get("company_id"),
+                                            item.get("item_mode") or "dry_run",
+                                            f"returned: {why.value}", utcnow())
+                    self.log(f"queue: job={item['job_id']} is back at the front")
+                self.pause(why, detail)
+                break
+        except Exception as exc:                          # a worker bug: fail closed, then crash
+            try:
+                self.pause(QueuePause.WORKER_FAILED, type(exc).__name__)
+            except Exception:                             # noqa: BLE001
+                pass
+            raise
+        except BaseException:                             # cancel / Ctrl+C: nothing more is taken
+            try:
+                self.pause(QueuePause.CANCELLED)
+            except Exception:                             # noqa: BLE001
+                pass
+            raise
+        finally:
+            try:
+                self.close()
+            finally:
+                lock.release()
+        st = self.store.queue_pause_state()
+        out.paused = st["reason"] if st else ""
+        out.waiting = len(self.store.queue_positions())
+        return out
+
+    def window_start(self) -> str:
+        """The streak window (§4.1): the later of the last Resume and 24 h ago."""
+        day_ago = shift(_stamp(self.now()), days=-1)
+        resumed = self.store.get_setting(Store.QUEUE_RESUMED_AT) or ""
+        return max(day_ago, resumed)
+
+
+# ---------------------------------------------------------------- the queue's rules (§2 I5, §4.1)
+
+DRY_RUN_TABS = 3                 # filled dry-run tabs kept open (§5)
+HOLD_SLICE_S = 5                 # the dry-run hold checks the queue this often (§5)
+
+
+@dataclasses.dataclass
+class QueueOutcome:
+    """What `run_queue` did (internal to the flow and the CLI)."""
+    results: list = dataclasses.field(default_factory=list)
+    lock_refused: bool = False   # another apply run holds RunLock: cli exits 3 (L2)
+    yielded: bool = False        # a search run goes first (§6)
+    paused: str = ""             # the stored pause reason at the end, "" when not paused
+    waiting: int = 0             # roles still waiting at the end
+
+
+def pick_mode(item_mode: Any, effective_mode: Any, force_dry_run: bool) -> str:
+    """I5 (review H4): "auto" only when the item was queued in exactly "auto", the
+    effective mode at pick is exactly "auto" and no --dry-run; anything else,
+    an unknown or empty value included, is "dry_run". Never a string min/max."""
+    if not force_dry_run and item_mode == "auto" and effective_mode == "auto":
+        return "auto"
+    return "dry_run"
+
+
+# Fill CONTENT failures (the model gave no usable answers, or a page would be guesses:
+# Q-121 A6), not transport ones: they pause `fill_failed` and the role is NOT returned,
+# since it would fail the same page on every Resume (Coordinator, 2026-11-12).
+# Review F3: the signal is data, not prose found anywhere. The filler that stops on such a
+# failure writes one of these constants as the START of the attempt's own `reason_detail`
+# (build it with `content_failure_detail`); `pause_for` matches nothing else. These are the
+# only spellings: the always-answer lane (Q-121) imports them, never retypes them.
+FILL_NO_USABLE_ANSWERS = "no usable answers"
+FILL_WOULD_BE_GUESSES = "would be guesses"
+FILL_LAST_RESORT = "last resort"
+CONTENT_FAILURE_DETAILS = (FILL_NO_USABLE_ANSWERS, FILL_WOULD_BE_GUESSES, FILL_LAST_RESORT)
+CONTENT_FAILURE_MARKERS = CONTENT_FAILURE_DETAILS          # the earlier name, same values
+# A `validation_error` detail is the employer's own error text (`res.errors`), so it is
+# never read as a content failure even when that text happens to begin with a marker.
+_PAGE_TEXT_REASONS = frozenset({ReasonCode.VALIDATION_ERROR.value})
+TRANSPORT_FAILURE_MARKERS = ("model unavailable",)
+
+
+def content_failure_detail(marker: str, rest: str = "") -> str:
+    """The `reason_detail` a content-failure stop writes: the marker first, then an
+    optional plain note (no personal value). Raises on a marker not in the list."""
+    if marker not in CONTENT_FAILURE_DETAILS:
+        raise ValueError(f"not a content-failure marker: {marker!r}")
+    return f"{marker}: {rest}" if rest else marker
+
+
+def is_content_failure(row: dict) -> bool:
+    """A failed attempt whose own `reason_detail` STARTS with a content-failure marker
+    (review F3). A marker later in the text, or in a page-text detail, does not count."""
+    if row.get("state") != S.FAILED.value or row.get("reason_code") in _PAGE_TEXT_REASONS:
+        return False
+    detail = str(row.get("reason_detail") or "").lstrip().lower()
+    return any(detail.startswith(m) for m in CONTENT_FAILURE_DETAILS)
+_BOT_REASONS = frozenset({ReasonCode.CAPTCHA.value, ReasonCode.BOT_CHALLENGE.value})
+_BOT_NOTES = ("captcha after submit", "bot check after submit")
+# Per-role endings before any form or account: never a "same way three times" pause.
+_NOT_REPEATED = frozenset({ReasonCode.DUPLICATE.value, ReasonCode.POSTING_CLOSED.value,
+                           ReasonCode.CAP_REACHED.value, ReasonCode.CANCELLED.value,
+                           ReasonCode.UNSUPPORTED_ATS.value})
+
+
+def _bot_ending(r: dict) -> bool:
+    detail = str(r.get("reason_detail") or "").lower()
+    return (r.get("state") == S.FAILED.value and r.get("reason_code") in _BOT_REASONS) or \
+        any(n in detail for n in _BOT_NOTES)
+
+
+def pause_for(row: Optional[dict], last_cap: str, streak: Sequence[dict], *,
+              browser_failed: str = "") -> Optional[tuple[QueuePause, Optional[str]]]:
+    """§4.1, checked top to bottom: the pause one finished item causes, with its
+    detail, or None (the queue goes on). `row` is the store row (M5), `streak`
+    `queue_streak`'s newest-first finished attempts in the window (M4). Whether the
+    role goes back is the caller's: RETURNS_ITEM, a `failed` row, no Submit click.
+    Deterministic, no model."""
+    if not row:
+        return QueuePause.WORKER_FAILED, "the attempt row is missing"
+    reason = str(row.get("reason_code") or "")
+    detail = str(row.get("reason_detail") or "")
+    low = detail.lower()
+    failed = row.get("state") == S.FAILED.value
+    if reason == ReasonCode.PROFILE_INCOMPLETE.value:
+        return QueuePause.PROFILE_INCOMPLETE, detail or None
+    if is_content_failure(row):
+        return QueuePause.FILL_FAILED, None
+    if reason == ReasonCode.MODEL_UNAVAILABLE.value or (
+            failed and any(m in low for m in TRANSPORT_FAILURE_MARKERS)):
+        return QueuePause.MODEL_UNAVAILABLE, None
+    if browser_failed:
+        return QueuePause.BROWSER_UNAVAILABLE, browser_failed
+    if reason == ReasonCode.CAP_REACHED.value and last_cap == "daily":
+        return QueuePause.DAILY_LIMIT, detail or None
+    recent = list(streak)
+    if len(recent) >= 2 and all(_bot_ending(r) for r in recent[:2]):
+        return QueuePause.BOT_CHECKS, None
+    last3 = recent[:3]
+    if len(last3) == 3 and all(r.get("state") == S.FAILED.value
+                               and r.get("reason_code") == ReasonCode.ERROR.value for r in last3):
+        return QueuePause.REPEATED_ERRORS, None
+    if (len(last3) == 3 and all(r.get("state") == S.FAILED.value for r in last3)
+            and len({r.get("reason_code") for r in last3}) == 1):
+        same = str(last3[0].get("reason_code") or "")
+        if same and same not in _NOT_REPEATED and same != ReasonCode.ERROR.value:
+            return QueuePause.REPEATED_FAILURES, same.replace("_", " ")
+    return None
+
+
+def _session_alive(session: Any) -> bool:
+    """`session.alive()` when the session has one (a fake may not: then it is alive)."""
+    alive = getattr(session, "alive", None)
+    if alive is None:
+        return True
+    try:
+        return bool(alive())
+    except Exception:                                     # noqa: BLE001 - unknown = reopen
+        return False
+
 
 OPEN_PROFILE_URL = "https://my.greenhouse.io/"
 OPEN_PROFILE_HOLD_S = 3600
@@ -1868,3 +2239,27 @@ def run(cfg: Config, store: Store, job_ids: list[str], *, dry_run: bool, backend
              browser_factory=browser_factory or default_browser_factory,
              acfg=apply_cfg or cfg.apply, say=say, evidence=evidence_dir, now=now)
     return r.run(job_ids)
+
+
+def run_queue(cfg: Config, store: Store, *, backend: Any,
+              apply_cfg_fn: Callable[[], ApplyConfig], http: Any = None,
+              browser_factory: Optional[Callable[[ApplyConfig], Any]] = None,
+              say: Callable[[str], None] = print, evidence_dir: Optional[Path] = None,
+              now: Optional[Callable[[], float]] = None,
+              should_stop: Optional[Callable[[], bool]] = None,
+              force_dry_run: bool = False) -> QueueOutcome:
+    """The auto-apply queue worker (apply_queue_design §3.2, D-205): take the head
+    role, apply to it, judge the ending (§4.1), repeat until the queue is empty,
+    paused or a search run asks to go first. `apply_cfg_fn` gives the effective
+    settings and is called again for every role (L1); `should_stop` is True once
+    the web process that started the worker is gone (§3.3); `force_dry_run` is
+    `apply queue --dry-run`. The mode of each role is `pick_mode`'s (I5)."""
+    acfg = apply_cfg_fn()
+    r = _Run(cfg, store, dry_run=True, backend=backend,
+             http=http if http is not None else make_http(cfg),
+             browser_factory=browser_factory or default_browser_factory,
+             acfg=acfg, say=say, evidence=evidence_dir, now=now)
+    r.apply_cfg_fn = apply_cfg_fn
+    r.should_stop = should_stop or (lambda: False)
+    r.force_dry_run = bool(force_dry_run)
+    return r.run_queue()

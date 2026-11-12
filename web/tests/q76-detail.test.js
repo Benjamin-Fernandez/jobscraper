@@ -64,7 +64,24 @@ async function mountTab(options = {}) {
   return w
 }
 const row = (w, id) => w.find(`.app-row[data-job="${id}"]`)
-const toggle = (w, id) => row(w, id).find('.details-toggle')
+// Q-118 LB: the Details toggle moved into the row's "⋯" menu ("Show details" /
+// "Hide details"). `detailsItem` opens the menu and returns that item; `toggle` chooses it.
+const moreTrigger = (w, id) => row(w, id).find('.app-more-trigger')
+async function detailsItem(w, id) {
+  await moreTrigger(w, id).trigger('click')
+  await flushPromises()
+  return row(w, id).findAll('[role="menuitem"]').find(b => /^(Show|Hide) details$/.test(b.text().trim()))
+}
+async function detailsLabel(w, id) {
+  const label = (await detailsItem(w, id)).text().trim()
+  await row(w, id).find('[role="menu"]').trigger('keydown', { key: 'Escape' })
+  await flushPromises()
+  return label
+}
+async function toggle(w, id) {
+  await (await detailsItem(w, id)).trigger('click')
+  await flushPromises()
+}
 const panels = w => w.findAll('.app-detail')
 const attemptCalls = () => api.calls.filter(c => /\/attempts$/.test(c.url))
 
@@ -97,56 +114,71 @@ describe('attempts.js wording', () => {
 
 // ------------------------------------------------------------------ the pill
 
-describe('the auto-apply pill on a row (N11)', () => {
+// Q-118 LB + Q-120 U3: the row's attempt pill became one chip in the `.app-state` slot
+// (`.ui-badge.app-chip[data-kind][data-tone]`), worded by `rowState`. Stopped, cancelled
+// and needs-input show only while the role is still To apply (the owner moved on
+// otherwise), so these rows are To apply. The attempt LIST under Details keeps
+// `.pill.attempt` and `attemptLabel` (below).
+describe('the auto-apply chip on a row (N11, Q-120 U3)', () => {
   const KINDS = [
-    ['running', 'Auto-apply running'], ['sent', 'Sent by auto-apply'], ['unconfirmed', 'Sent, not confirmed'],
-    ['dry_run', 'Dry run ready'], ['cancelled', 'Auto-apply cancelled'], ['stopped', 'Auto-apply stopped'],
+    ['running', 'Applying…', 'info'], ['sent', 'Sent by auto-apply', 'ok'], ['unconfirmed', 'Sent, not confirmed', 'warn'],
+    ['dry_run', 'Dry run ready', 'info'], ['cancelled', 'Cancelled', 'neutral'],
+    ['stopped', 'Stopped: The site asked for a CAPTCHA.', 'warn'],
   ]
+  const TO_APPLY = { a1b2c3: 'to_apply', d4e5f6: 'to_apply' }
+  const chip = (w, id) => row(w, id).find('.app-state .app-chip')
 
-  it.each(KINDS)('%s reads "%s" and carries its kind', async (kind, label) => {
-    const w = await mountTab({ attempts: { a1b2c3: [attempt(kind, { text: kind === 'stopped' ? 'The site asked for a CAPTCHA.' : '' })] } })
-    const pill = row(w, 'a1b2c3').find('.pill.attempt')
-    expect(pill.text()).toBe(label)
-    expect(pill.attributes('data-kind')).toBe(kind)
-    expect(pill.element.tagName).toBe('SPAN')
-    expect(pill.attributes('title')).toBe(kind === 'stopped' ? 'The site asked for a CAPTCHA.' : undefined)
+  it.each(KINDS)('%s reads "%s" and carries its kind and tone', async (kind, label, tone) => {
+    const w = await mountTab({ statuses: TO_APPLY, attempts: { a1b2c3: [attempt(kind, { text: kind === 'stopped' ? 'The site asked for a CAPTCHA.' : '' })] } })
+    const c = chip(w, 'a1b2c3')
+    expect(c.text()).toBe(label)
+    expect(c.attributes('data-kind')).toBe(kind)
+    expect(c.attributes('data-tone')).toBe(tone)
+    expect(c.element.tagName).toBe('SPAN')
+    expect(c.attributes('title')).toBe(kind === 'stopped' ? 'The site asked for a CAPTCHA.' : undefined)
+    expect(row(w, 'a1b2c3').find('.pill.attempt').exists()).toBe(false)   // the old pill is gone
   })
 
-  it('no attempt, no pill; only the row with an attempt has one', async () => {
-    const w = await mountTab({ attempts: { a1b2c3: [attempt('sent')] } })
-    expect(row(w, 'a1b2c3').find('.pill.attempt').exists()).toBe(true)
-    expect(row(w, 'd4e5f6').find('.pill.attempt').exists()).toBe(false)
+  it('no attempt, no chip; only the row with an attempt has one', async () => {
+    const w = await mountTab({ statuses: TO_APPLY, attempts: { a1b2c3: [attempt('dry_run')] } })
+    expect(chip(w, 'a1b2c3').exists()).toBe(true)
+    expect(chip(w, 'd4e5f6').exists()).toBe(false)
+    expect(row(w, 'd4e5f6').find('.app-state').text()).toBe('')
   })
 
-  it('the pill shows the newest attempt only', async () => {
-    const w = await mountTab({ attempts: { a1b2c3: [attempt('sent', { id: 2 }), attempt('stopped', { id: 1 })] } })
-    expect(row(w, 'a1b2c3').findAll('.pill.attempt')).toHaveLength(1)
-    expect(row(w, 'a1b2c3').find('.pill.attempt').text()).toBe('Sent by auto-apply')
+  it('the chip shows the newest attempt only', async () => {
+    const w = await mountTab({ statuses: TO_APPLY, attempts: { a1b2c3: [attempt('sent', { id: 2 }), attempt('stopped', { id: 1 })] } })
+    expect(row(w, 'a1b2c3').findAll('.app-chip')).toHaveLength(1)
+    expect(chip(w, 'a1b2c3').text()).toBe('Sent by auto-apply')
   })
 
-  it('"Needs your input" is a button with the reason in its title', async () => {
-    const w = await mountTab({ attempts: { a1b2c3: [NEEDS] } })
-    const pill = row(w, 'a1b2c3').find('.pill.attempt')
-    expect(pill.element.tagName).toBe('BUTTON')
-    expect(pill.text()).toBe('Needs your input')
-    expect(pill.attributes('title')).toContain('Why us?')
+  it('"Needs your answers" carries the reason in its title, with an "Answer in Profile" link', async () => {
+    const w = await mountTab({ statuses: TO_APPLY, attempts: { a1b2c3: [NEEDS] } })
+    const c = chip(w, 'a1b2c3')
+    expect(c.text()).toBe('Needs your answers')
+    expect(c.attributes('data-tone')).toBe('warn')
+    expect(c.attributes('title')).toContain('Why us?')
+    const answer = row(w, 'a1b2c3').find('.app-answer')
+    expect(answer.element.tagName).toBe('A')
+    expect(answer.text()).toBe('Answer in Profile')
+    expect(answer.attributes('href')).toBe('#/profile')
   })
 
-  it('clicking it remembers Application details and goes to Profile', async () => {
-    const w = await mountTab({ attempts: { a1b2c3: [NEEDS] } })
-    await row(w, 'a1b2c3').find('.pill.attempt').trigger('click')
+  it('"Answer in Profile" remembers Application details and goes to Profile', async () => {
+    const w = await mountTab({ statuses: TO_APPLY, attempts: { a1b2c3: [NEEDS] } })
+    await row(w, 'a1b2c3').find('.app-answer').trigger('click')
     expect(window.localStorage.getItem(PROFILE_VIEW_KEY)).toBe('details')
     expect(window.location.hash).toBe('#/profile')
   })
 
   it('end to end in the app: the click lands on the Application details view', async () => {
-    useApi({ statuses: { a1b2c3: 'applied' }, attempts: { a1b2c3: [NEEDS] } })
+    useApi({ statuses: { a1b2c3: 'to_apply' }, attempts: { a1b2c3: [NEEDS] } })
     // The owner last looked at Resume and titles.
     window.localStorage.setItem(PROFILE_VIEW_KEY, 'resume')
     setHash('#/applications')
     const w = mount(App, { attachTo: document.body })
-    await vi.waitFor(async () => { await flushPromises(); expect(w.find('.app-row .attempt-link').exists()).toBe(true) })
-    await w.find('.app-row .attempt-link').trigger('click')
+    await vi.waitFor(async () => { await flushPromises(); expect(w.find('.app-row .app-answer').exists()).toBe(true) })
+    await w.find('.app-row .app-answer').trigger('click')
     await vi.waitFor(async () => {
       await flushPromises()
       expect(window.location.hash).toBe('#/profile')
@@ -167,49 +199,49 @@ describe('the auto-apply pill on a row (N11)', () => {
 // ------------------------------------------------------------------ Details
 
 describe('Details opens one row at a time (N12)', () => {
-  it('starts closed, with the toggle named for its row and wired to its panel', async () => {
+  // Q-118 LB: the toggle is the "⋯" menu's "Show details" item (a menu item carries no
+  // aria-expanded/aria-controls); the menu trigger is named for its row, and the panel
+  // is a region labelled by the posting's title.
+  it('starts closed, with the menu named for its row and the panel labelled by its title', async () => {
     const w = await mountTab()
     expect(panels(w)).toHaveLength(0)
-    const t = toggle(w, 'a1b2c3')
-    expect(t.text()).toBe('Details')
-    expect(t.attributes('aria-expanded')).toBe('false')
-    expect(t.attributes('aria-controls')).toBe('app-panel-a1b2c3')
-    expect(t.attributes('aria-label')).toMatch(/^Details: OKX · /)
+    expect(moreTrigger(w, 'a1b2c3').attributes('aria-label')).toMatch(/^More actions for .+ at OKX$/)
+    expect(await detailsLabel(w, 'a1b2c3')).toBe('Show details')
     expect(attemptCalls()).toHaveLength(0)
+    await toggle(w, 'a1b2c3')
+    const panel = w.find('#app-panel-a1b2c3')
+    expect(panel.attributes('role')).toBe('region')
+    expect(panel.attributes('aria-labelledby')).toBe('app-detail-a1b2c3')
+    expect(panel.find('#app-detail-a1b2c3').exists()).toBe(true)
   })
 
-  it('opening one row closes the other; a second click closes it', async () => {
+  it('opening one row closes the other; choosing it again closes it', async () => {
     const w = await mountTab()
-    await toggle(w, 'a1b2c3').trigger('click')
-    await flushPromises()
+    await toggle(w, 'a1b2c3')
     expect(panels(w)).toHaveLength(1)
-    expect(toggle(w, 'a1b2c3').attributes('aria-expanded')).toBe('true')
-    expect(toggle(w, 'a1b2c3').text()).toBe('Hide details')
+    expect(await detailsLabel(w, 'a1b2c3')).toBe('Hide details')
     expect(w.find('#app-panel-a1b2c3').attributes('role')).toBe('region')
 
-    await toggle(w, 'd4e5f6').trigger('click')
-    await flushPromises()
+    await toggle(w, 'd4e5f6')
     expect(panels(w)).toHaveLength(1)
     expect(row(w, 'd4e5f6').find('.app-detail').exists()).toBe(true)
-    expect(toggle(w, 'a1b2c3').attributes('aria-expanded')).toBe('false')
-    expect(toggle(w, 'd4e5f6').attributes('aria-expanded')).toBe('true')
+    expect(await detailsLabel(w, 'a1b2c3')).toBe('Show details')
+    expect(await detailsLabel(w, 'd4e5f6')).toBe('Hide details')
 
-    await toggle(w, 'd4e5f6').trigger('click')
+    await toggle(w, 'd4e5f6')
     expect(panels(w)).toHaveLength(0)
-    expect(toggle(w, 'd4e5f6').text()).toBe('Details')
+    expect(await detailsLabel(w, 'd4e5f6')).toBe('Show details')
   })
 
   it('opening asks for that row\'s attempts, once', async () => {
     const w = await mountTab()
-    await toggle(w, 'a1b2c3').trigger('click')
-    await flushPromises()
+    await toggle(w, 'a1b2c3')
     expect(attemptCalls().map(c => c.url)).toEqual(['api/applications/a1b2c3/attempts'])
   })
 
   it('a row left off the shortlist still opens (no posting facts, no crash)', async () => {
     const w = await mountTab({ statuses: { gone99: 'applied' } })
-    await toggle(w, 'gone99').trigger('click')
-    await flushPromises()
+    await toggle(w, 'gone99')
     const panel = w.find('.app-detail')
     expect(panel.exists()).toBe(true)
     expect(panel.find('.why .reason').exists()).toBe(false)
@@ -220,7 +252,7 @@ describe('Details opens one row at a time (N12)', () => {
 // ------------------------------------------------------------------ attempts list
 
 describe('the attempts list (N11)', () => {
-  const open = async (w, id = 'a1b2c3') => { await toggle(w, id).trigger('click'); await flushPromises() }
+  const open = (w, id = 'a1b2c3') => toggle(w, id)
 
   it('says Loading while the request is out', async () => {
     useApi({ statuses: { a1b2c3: 'applied' } })
@@ -231,8 +263,7 @@ describe('the attempts list (N11)', () => {
       : real(url, init))))
     const w = mount(Applications, { props: { run: 12, runs: runsFrom(), jobs: [] }, attachTo: document.body })
     await flushPromises()
-    await toggle(w, 'a1b2c3').trigger('click')
-    await flushPromises()
+    await toggle(w, 'a1b2c3')
     expect(w.find('.attempts-status').text()).toBe('Loading…')
     release()
     await flushPromises()

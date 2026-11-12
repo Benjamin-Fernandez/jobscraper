@@ -135,6 +135,30 @@ export function defaultHealth() {
   }
 }
 
+// Q-118 LD (the Companies table). A health payload from rows: `last_scan` is a UTC stamp
+// without a zone ("2026-11-12 08:50"), as the server sends it; `utcStamp(3)` = three days ago.
+export function utcStamp(daysAgo = 0, now = Date.now()) {
+  return new Date(now - daysAgo * 86400000).toISOString().slice(0, 16).replace('T', ' ')
+}
+export function healthOf(items) {
+  const counts = { ok: 0, failed: 0, not_scanned: 0 }
+  for (const i of items) counts[i.state] = (counts[i.state] ?? 0) + 1
+  return { total: items.length, counts, items }
+}
+// The Companies page, read the way a person reads it.
+export const companyRows = w => w.findAll('.companies-table tbody tr')
+  .map(r => [r.find('.co-name').text(), r.find('.ui-badge').text()])
+export const legendOf = w => w.findAll('.ui-progress-item')
+  .map(b => [b.find('.ui-progress-label').text(), Number(b.find('.ui-progress-n').text())])
+export const legendItem = (w, label) => w.findAll('.ui-progress-item')
+  .find(b => b.find('.ui-progress-label').text() === label)
+export const openMore = w => w.find('button.more-actions').trigger('click')
+export const moreItem = (w, label) => w.findAll('[role="menuitem"]').find(b => b.text().trim() === label)
+export async function chooseMore(w, label) {
+  await openMore(w)
+  await moreItem(w, label).trigger('click')
+}
+
 // statuses: { job_id: status } - seeded as if each was set once.
 // vocabulary: the ordered status list config serves via /api/stats (M8-T2).
 // postings: { job_id: description } overrides (M16); '' for a posting with none.

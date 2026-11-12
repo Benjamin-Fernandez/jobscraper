@@ -32,9 +32,9 @@ from jobscraper import applicant
 from jobscraper.config import Config
 from jobscraper.store import utcnow
 from jobscraper.web.deps import get_config, get_jobs, open_store
-from jobscraper.web.jobs import JobBusy
 from jobscraper.web.routers.applicant import (PROFILE_WRITE_LOCK, invalid, load_for_write,
                                               model_sees_private)
+from jobscraper.web.routers.apply import enqueue
 
 router = APIRouter(tags=["questions"])
 
@@ -291,9 +291,12 @@ def dismiss_question(key: str, request: Request) -> Response:
 
 
 @router.post("/questions/retry", status_code=202)
-def retry_applications(body: RetryBody, request: Request, jobs: Any = Depends(get_jobs)) -> Any:
-    """Start a new `apply` job for applications that wait on nothing (F-38).
-    No dry_run flag: `jobscraper apply` uses the effective mode (AD §14.1)."""
+def retry_applications(body: RetryBody, request: Request,
+                       cfg: Config = Depends(get_config)) -> Any:
+    """Queue the applications that wait on nothing for another attempt (F-38, Q-120):
+    a fresh click, through the same enqueue helper as the Inbox (source `retry`).
+    Never a 409 - a running job only means they wait. The queue row records the
+    effective mode at this click (apply_queue_design §3.5)."""
     ids = [str(j) for j in body.job_ids]
     if not 1 <= len(ids) <= RETRY_MAX:
         raise HTTPException(status_code=422, detail=f"send 1 to {RETRY_MAX} job_ids")
@@ -302,10 +305,4 @@ def retry_applications(body: RetryBody, request: Request, jobs: Any = Depends(ge
     not_ready = [j for j in ids if j not in ready]
     if not_ready:
         return JSONResponse({"detail": "not_ready", "job_ids": not_ready}, status_code=422)
-    try:
-        job = jobs.start("apply", {"job_ids": ids})
-    except JobBusy:
-        return JSONResponse({"detail": "busy"}, status_code=409)
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
-    return {"job": job}
+    return enqueue(request, cfg, ids, "retry")

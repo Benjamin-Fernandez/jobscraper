@@ -1,11 +1,12 @@
 // Q-70 lane E: the pure rules behind the Overview tab (web/src/overview.js).
 // The clock is always passed in, so nothing here depends on today's date.
-// Spec: docs/architecture/ux/overview_design.md §3. (Named .helpers.test.js because
+// Spec: docs/architecture/ux/overview_design.md §3, pipeline and KPI shapes as reshaped by Q-118 LA
+// (docs/architecture/q118_ui_polish_design.md §2, D-207). (Named .helpers.test.js because
 // "overview.test.js" and "Overview.test.js" are the same file on Windows.)
 import { describe, expect, it } from 'vitest'
 import {
   DAY_MS, FOLLOW_UP_SHOWN, HARD_RUN_FAILURES, STALE_RUN_DAYS, WINDOW_DAYS,
-  followUps, lastRunState, nextUp, openStages, pastWeek, pipeline, responseRate,
+  PIPELINE_STAGES, followUps, kpis, lastRunState, nextUp, openStages, pastWeek, pipeline, responseRate,
 } from '../src/overview.js'
 
 const NOW = Date.parse('2026-09-29T12:00:00Z')
@@ -39,39 +40,77 @@ describe('openStages', () => {
     expect(openStages(VOCAB, rows)).toEqual(['to_apply', 'applied', 'interviewing', 'offer', 'on_hold', 'revisit'])
   })
 
-  it('never lists closed statuses, and falls back to the four stages when stats failed', () => {
+  it('never lists closed statuses, and falls back to the three stages when stats failed', () => {
+    // D-207: `to_apply` is no pipeline stage, so the fallback is Applied, Interviewing, Offer.
     expect(openStages(VOCAB, [row('a', 'rejected'), row('b', 'withdrawn')])).not.toContain('rejected')
-    expect(openStages([], [])).toEqual(['to_apply', 'applied', 'interviewing', 'offer'])
-    expect(openStages(undefined, undefined)).toEqual(['to_apply', 'applied', 'interviewing', 'offer'])
-    expect(openStages(['rejected', 'withdrawn'])).toEqual(['to_apply', 'applied', 'interviewing', 'offer'])
+    expect(openStages([], [])).toEqual(['applied', 'interviewing', 'offer'])
+    expect(openStages(undefined, undefined)).toEqual(['applied', 'interviewing', 'offer'])
+    expect(openStages(['rejected', 'withdrawn'])).toEqual(['applied', 'interviewing', 'offer'])
   })
 })
 
 describe('pipeline', () => {
-  it('counts closed apart', () => {
+  it('counts closed apart: Rejected is the fourth segment and holds the withdrawn', () => {
     const rows = [
       row('a', 'to_apply'), row('b', 'applied'), row('c', 'applied'), row('d', 'interviewing'),
       row('e', 'rejected'), row('f', 'rejected'), row('g', 'withdrawn'),
     ]
-    const p = pipeline(rows, VOCAB)
-    expect(p.stages.map(s => [s.status, s.n])).toEqual([
-      ['to_apply', 1], ['applied', 2], ['interviewing', 1], ['offer', 0],   // zero stays: the flow reads left to right
+    const p = pipeline(rows)
+    expect(p.segments.map(s => [s.id, s.n])).toEqual([
+      ['applied', 2], ['interviewing', 1], ['offer', 0], ['rejected', 3],    // zero stays: the flow reads left to right
     ])
-    expect(p.stages.map(s => s.label)).toEqual(['Saved', 'Applied', 'Interviewing', 'Offer'])
-    expect(p.closed).toEqual({ n: 3, rejected: 2, withdrawn: 1 })
+    expect(p.segments.map(s => s.label)).toEqual(['Applied', 'Interviewing', 'Offer', 'Rejected'])
+    expect(p.segments.map(s => s.id)).toEqual(PIPELINE_STAGES)
+    expect([p.rejected, p.withdrawn]).toEqual([2, 1])                         // the legend note's parts
+    expect(p.toApply).toBe(1)                                                 // in no segment, still in the total
     expect(p.total).toBe(7)
   })
 
+  it('counts an assessment under Interviewing and keeps its own count', () => {
+    const p = pipeline([row('a', 'assessment'), row('b', 'interviewing')])
+    expect(p.segments.find(s => s.id === 'interviewing').n).toBe(2)
+    expect(p.assessment).toBe(1)
+  })
+
   it('copes with nothing at all', () => {
-    expect(pipeline(null, VOCAB)).toEqual({
-      stages: ['to_apply', 'applied', 'interviewing', 'offer'].map(status => expect.objectContaining({ status, n: 0 })),
-      closed: { n: 0, rejected: 0, withdrawn: 0 }, total: 0,
+    expect(pipeline(null)).toEqual({
+      segments: PIPELINE_STAGES.map(id => expect.objectContaining({ id, n: 0 })),
+      toApply: 0, assessment: 0, rejected: 0, withdrawn: 0, total: 0,
     })
   })
 
-  it('counts a status the vocabulary lacks, with a readable label', () => {
-    const p = pipeline([row('a', 'on_hold')], VOCAB)
-    expect(p.stages.at(-1)).toEqual({ status: 'on_hold', label: 'On hold', n: 1 })
+  it('counts a status the vocabulary lacks in the total only: no segment takes it', () => {
+    const p = pipeline([row('a', 'on_hold')])
+    expect(p.segments.every(s => s.n === 0)).toBe(true)
+    expect(p.total).toBe(1)
+  })
+})
+
+describe('kpis', () => {
+  const at = '2026-09-20T10:00:00'
+  const rows = [
+    row('s', 'to_apply', [['to_apply', at]]),
+    row('p', 'applied', [['to_apply', at], ['applied', at]]),
+    row('i', 'interviewing', [['applied', at], ['interviewing', at]]),
+    row('t', 'assessment', [['applied', at], ['assessment', at]]),
+    row('o', 'offer', [['applied', at], ['offer', at]]),
+    row('r', 'rejected', [['applied', at], ['rejected', at]]),
+    row('w', 'withdrawn', [['to_apply', at], ['withdrawn', at]]),
+  ]
+
+  it('active is everything not rejected or withdrawn, to-apply included; interviews fold in assessments', () => {
+    const k = kpis(rows, [], VOCAB)
+    expect(k.active).toBe(5)           // s, p, i, t, o
+    expect(k.interviews).toBe(2)       // i + t
+    expect(k.offers).toBe(1)
+  })
+
+  it('carries the unchanged response rate and copes with nothing', () => {
+    expect(kpis(rows, [], VOCAB).reply).toEqual(responseRate(rows, VOCAB))
+    expect(kpis(rows, [], VOCAB).reply).toEqual({ applied: 5, heard: 4, rate: 80 })
+    expect(kpis(null, null, undefined)).toEqual({
+      newRoles: 0, active: 0, interviews: 0, offers: 0, reply: { applied: 0, heard: 0, rate: null },
+    })
   })
 })
 

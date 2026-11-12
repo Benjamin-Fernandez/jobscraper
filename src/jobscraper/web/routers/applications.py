@@ -14,10 +14,11 @@ from typing import Any, Optional
 from urllib.parse import urlparse
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Request
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, field_validator
 
-from jobscraper.apply.contracts import (REASON_TEXTS, STATE_TEXTS, TERMINAL_STATES,
-                                        AttemptState, ReasonCode)
+from jobscraper.apply.contracts import (QUEUE_REFUSAL_TEXTS, REASON_TEXTS, STATE_TEXTS,
+                                        TERMINAL_STATES, AttemptState, ReasonCode)
 from jobscraper.config import Config
 from jobscraper.web.data import load_shortlist
 from jobscraper.web.deps import get_config, open_store
@@ -73,6 +74,9 @@ def list_applications(request: Request,
         evidence_for = getattr(store, "mail_evidence_for", None)
         evidence = evidence_for([r["job_id"] for r in rows]) if callable(evidence_for) else {}
         latest = store.last_attempts()      # one query for every row (Q-76), never N+1
+        # Q-120 (apply_queue_design §3.5): where each waiting role stands in the queue.
+        positions_of = getattr(store, "queue_positions", None)
+        positions = positions_of() if callable(positions_of) else {}
     for row in rows:
         for event in row["events"]:
             event.setdefault("by", None)
@@ -86,6 +90,12 @@ def list_applications(request: Request,
         last = latest.get(row["job_id"])
         row["last_attempt"] = attempt_view(last) if last else None
         row["attempts"] = int(last["attempts"]) if last else 0
+        position = positions.get(row["job_id"])
+        row["queue"] = {"position": position} if position else None
+        if position:
+            # Waiting for auto-apply: the pill says "Queued", not the earlier
+            # attempt's outcome (that attempt stays in the role's history).
+            row["last_attempt"] = _queued_view(row["last_attempt"])
         # What the detail panel shows; null once the job left the shortlist.
         row["posting"] = ({k: job.get(k) for k in _POSTING_KEYS} if job else None)
     return rows
@@ -141,6 +151,16 @@ def attempt_view(row: dict[str, Any]) -> dict[str, Any]:
             "resume_source": row.get("resume_source")}
 
 
+def _queued_view(last: Optional[dict[str, Any]]) -> dict[str, Any]:
+    """`last_attempt` for a role waiting in the auto-apply queue (Q-120 §3.5): kind
+    `queued`, the same keys as `attempt_view`. No attempt row exists for a waiting
+    role (I2), so the attempt fields are empty."""
+    return {"id": None, "mode": None, "state": "queued", "kind": "queued",
+            "reason_code": None, "text": "", "hint": "", "queued_at": None,
+            "finished_at": None, "submit_clicked_at": None,
+            "resume_source": (last or {}).get("resume_source")}
+
+
 @router.get("/applications/{job_id}/attempts")
 def list_attempts(request: Request, job_id: str = JOB_ID) -> list[dict[str, Any]]:
     """Every auto-apply attempt for a job, newest first. `[]` when there is none:
@@ -180,14 +200,41 @@ def set_status(body: StatusChange, request: Request, job_id: str = JOB_ID,
 
 
 @router.delete("/applications/{job_id}")
-def untrack(request: Request, job_id: str = JOB_ID) -> dict[str, Any]:
+def untrack(request: Request, job_id: str = JOB_ID) -> Any:
     """Undo tracking: the role returns to the Inbox with no status (M13).
 
     Deleting what is not there is a 404, never a 500, so a double click on Undo
     is harmless.
+
+    Auto-apply (Q-120 H3): a role waiting in the queue leaves it in the same
+    transaction (the store). A role being applied to right now is refused with
+    409 `in_progress` and nothing is deleted: a cancel could land after the
+    Submit click, and that attempt's audit should keep its application row.
+
+    The check and the delete are one write transaction (review F5): BEGIN
+    IMMEDIATE takes SQLite's write lock before the check, so the worker's
+    `queue_take` (itself BEGIN IMMEDIATE) either committed before it - and the
+    role reads as in flight - or waits until the role and its queue row are gone,
+    and then finds nothing to take.
     """
     with open_store(request) as store:
-        deleted = store.delete_application(job_id)
+        begin = getattr(store, "begin_immediate", None)
+        live_of = getattr(store, "live_attempt", None)
+        rollback = getattr(store, "rollback", None)
+        if callable(begin):
+            begin()
+        try:
+            if callable(live_of) and live_of(job_id) is not None:
+                if callable(rollback):
+                    rollback()                              # release the write lock
+                copy = QUEUE_REFUSAL_TEXTS["in_progress"]
+                return JSONResponse({"detail": "in_progress", "text": copy.text,
+                                     "hint": copy.hint}, status_code=409)
+            deleted = store.delete_application(job_id)      # commits the transaction
+        except BaseException:
+            if callable(rollback):
+                rollback()
+            raise
     if not deleted:
         raise HTTPException(status_code=404, detail=f"no application for {job_id!r}")
     return {"job_id": job_id, "deleted": True}

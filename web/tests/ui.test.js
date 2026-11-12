@@ -13,7 +13,7 @@ import WatchedCompanies from '../src/components/WatchedCompanies.vue'
 import { requestCompanyFilter } from '../src/companyFilter.js'
 import { resetSeenJobs } from '../src/composables/useJob.js'
 import { ago, duration } from '../src/format.js'
-import { fakeApi, runsFrom, setHash } from './helpers.js'
+import { companyRows, fakeApi, healthOf, legendItem, runsFrom, setHash, utcStamp } from './helpers.js'
 
 let api
 function useApi(options) {
@@ -93,7 +93,12 @@ describe('Runs: choosing how many companies', () => {
   it('All sends every enabled company', async () => {
     const w = await mountRuns()
     await w.find('[data-preset="all"]').trigger('click')
-    expect(w.find('#run-batch').element.value).toBe('224')
+    // Q-118 LC: All lights its segment, the field (Custom only) goes away, and
+    // the button carries the count.
+    expect(w.find('[data-preset="all"]').attributes('aria-pressed')).toBe('true')
+    expect(w.find('[data-preset="all"]').attributes('aria-label')).toBe('All 224 companies')
+    expect(w.find('#run-batch').exists()).toBe(false)
+    expect(w.find('button.start-run').text()).toBe('Check all 224 companies')
     await w.find('form.start').trigger('submit')
     await flushPromises()
     expect(JSON.parse(posts('api/jobs/run')[0].body)).toEqual({ batch_size: 224 })
@@ -106,9 +111,10 @@ describe('Runs: choosing how many companies', () => {
     ]
     const w = await mountRuns({ runs })
     // 600 s for 100 companies = 6 s each; 10 companies -> 1 min.
-    expect(w.find('.estimate').text()).toBe('About 1 min at the pace of your recent runs.')
+    // Q-118 LC: the estimate sits in the count's hint.
+    expect(w.find('#run-batch-hint').text()).toContain('10 of 224 companies · about 1 min.')
     await w.find('[data-preset="200"]').trigger('click')
-    expect(w.find('.estimate').text()).toBe('About 20 min at the pace of your recent runs.')
+    expect(w.find('#run-batch-hint').text()).toContain('200 of 224 companies · about 20 min.')
   })
 
   it('says when the last run finished and what it found', async () => {
@@ -156,13 +162,14 @@ describe('Watched companies', () => {
   function watched(props = {}) {
     return mount(WatchedCompanies, { props: { health: health(), ...props } })
   }
-  const names = w => w.findAll('.co .co-name').map(n => n.text())
-  const letters = w => w.findAll('.letter').map(n => n.text())
+  const names = w => w.findAll('.companies-table .co-name').map(n => n.text())
 
-  it('lists every company A-Z, ignoring case, under letter headings', () => {
+  // Q-118 LD: one table, no letter headings; the default sort is Company A-Z (case ignored).
+  it('lists every company A-Z, ignoring case, in one table', () => {
     const w = watched()
     expect(names(w)).toEqual(['adyen', 'Akamai', 'BitMEX', 'Garena', 'Grab', 'Zalando'])
-    expect(letters(w)).toEqual(['A', 'B', 'G', 'Z'])
+    expect(w.find('th[aria-sort="ascending"]').text()).toBe('Company')
+    expect(w.find('.letter').exists()).toBe(false)
     expect(w.find('.result-line').text()).toContain('6 companies')
   })
 
@@ -172,7 +179,7 @@ describe('Watched companies', () => {
     expect(names(w)).toEqual(['Grab'])
     await w.find('input.company-search').setValue('LEVER')
     expect(names(w)).toEqual(['adyen'])
-    expect(w.find('.co .co-meta').text()).toContain('Lever')
+    expect(w.find('tbody tr td[data-label="Job board"]').text()).toBe('Lever')
     await w.find('input.company-search').setValue('blocks')
     expect(names(w)).toEqual(['Akamai'])
     await w.find('input.company-search').setValue('nothing like it')
@@ -181,15 +188,19 @@ describe('Watched companies', () => {
     expect(names(w)).toHaveLength(6)
   })
 
-  it('the Failed tile shows only failures, each saying why, grouped by cause', async () => {
+  it('the Failed legend shows only failures, each saying why, grouped by cause', async () => {
     const w = watched()
-    await w.find('.tile[data-state="failed"]').trigger('click')
+    await legendItem(w, 'Failed').trigger('click')
     expect(names(w)).toEqual(['Akamai', 'BitMEX', 'Garena'])
-    expect(w.findAll('.co .why-text').map(n => n.text()))
-      .toEqual(['Blocks automated access', 'Careers page gone', 'Temporary error'])
-    expect(w.find('.co[data-state="failed"] .paused').text()).toBe('paused, retried later')
-    expect(w.find('.co[data-state="failed"] .err').text()).toBe('HTTP 403 for https://www.akamai.com/careers')
-    expect(w.find('.co[data-state="failed"] .reason').text()).toContain('the site blocks automated access')
+    // The reason is the second line of the status cell (it replaced the per-row details).
+    expect(w.findAll('tr[data-bucket="failed"] .status-note').map(n => n.text())).toEqual([
+      'the site blocks automated access; paused after repeated failures, retried later',
+      'the careers page no longer exists',
+      'a temporary error (timeout or server error) - retried on the next scan',
+    ])
+    // ... and the facts that sat in the opened details are the badge's title.
+    expect(w.find('tr[data-bucket="failed"] .ui-badge').attributes('title'))
+      .toBe('4 failures in a row · never worked · error: HTTP 403 for https://www.akamai.com/careers')
 
     expect(w.findAll('.cause').map(c => c.findAll('span').map(s => s.text()).join(' ')))
       .toEqual(['Every cause 3', 'Blocks automated access 1', 'Careers page gone 1', 'Temporary error 1'])
@@ -203,18 +214,18 @@ describe('Watched companies', () => {
     expect(names(w)).toEqual(['Akamai', 'BitMEX', 'Garena'])
   })
 
-  it('sorts by open roles, and filters by source when your list adds companies', async () => {
+  // Q-118 LD: the sort select is the Open roles header (biggest first, unknown last either way).
+  // The "filter by source" half of this pin is gone by design (the select was removed);
+  // q118-companies.test.js pins its absence. The CSV link moved to the tab's More menu (m17.test.js).
+  it('sorts by open roles from the column header', async () => {
     const w = watched()
-    await w.find('select.sort').setValue('roles')
-    expect(names(w).slice(0, 2)).toEqual(['adyen', 'Grab'])
-    expect(letters(w)).toEqual([])
-    await w.find('select.source').setValue('your list')
-    expect(names(w)).toEqual(['Zalando'])
-  })
-
-  it('offers the CSV of every company', () => {
-    const w = watched()
-    expect(w.find('a.health-csv').attributes('href')).toBe('api/companies/export.csv')
+    const roles = () => w.findAll('th.ui-th').find(th => th.text() === 'Open roles')
+    await roles().find('button').trigger('click')
+    expect(roles().attributes('aria-sort')).toBe('descending')
+    expect(names(w)).toEqual(['adyen', 'Grab', 'Zalando', 'Akamai', 'BitMEX', 'Garena'])
+    await roles().find('button').trigger('click')
+    expect(roles().attributes('aria-sort')).toBe('ascending')
+    expect(names(w)).toEqual(['Zalando', 'Grab', 'adyen', 'Akamai', 'BitMEX', 'Garena'])
   })
 
   it('says so when the companies cannot be read, and retries', async () => {
@@ -226,19 +237,16 @@ describe('Watched companies', () => {
 })
 
 describe('Companies tab', () => {
-  it('opens on the watched companies, and remembers the view last used', async () => {
+  // Q-118 LD: no two views and no remembered view: the tab always opens on the one table.
+  it('opens on the one table with the failed count in its legend, and ignores the old remembered view', async () => {
+    window.localStorage.setItem('jobscraper.companies.view', 'list')    // the key the toggle used to write
     useApi({ health: health() })
     const w = mount(Companies, { props: { run: 'all', jobs: [] } })
     await flushPromises()
     expect(w.find('.watched').exists()).toBe(true)
-    expect(w.find('.view-watched').text()).toContain('3 failed')
-    await w.find('.view-list').trigger('click')
-    expect(w.find('.watched').exists()).toBe(false)
-    w.unmount()
-
-    const again = mount(Companies, { props: { run: 'all', jobs: [] } })
-    await flushPromises()
-    expect(again.find('.view-list').attributes('aria-pressed')).toBe('true')
+    expect(w.find('.companies-table').exists()).toBe(true)
+    expect(legendItem(w, 'Failed').find('.ui-progress-n').text()).toBe('3')
+    expect(legendItem(w, 'All').attributes('aria-pressed')).toBe('true')
   })
 
   it('a request from the Runs tab opens the Failed list whatever was last used', async () => {
@@ -247,25 +255,28 @@ describe('Companies tab', () => {
     requestCompanyFilter('failed')
     const w = mount(Companies, { props: { run: 'all', jobs: [] } })
     await flushPromises()
-    expect(w.find('.tile[data-state="failed"]').attributes('aria-pressed')).toBe('true')
+    expect(legendItem(w, 'Failed').attributes('aria-pressed')).toBe('true')
+    expect(companyRows(w).map(r => r[0])).toEqual(['Akamai', 'BitMEX', 'Garena'])
   })
 
   it('your list can be searched and shown A-Z', async () => {
-    useApi({ companies: [
-      { name: 'Zalando', status: 'found' }, { name: 'Grab', status: 'failed', detail: 'no careers site found' },
-      { name: 'Adyen', status: 'pending' },
-    ] })
+    useApi({
+      companies: [
+        { name: 'Zalando', status: 'found' }, { name: 'Grab', status: 'failed', detail: 'no careers site found' },
+        { name: 'Adyen', status: 'pending' },
+      ],
+      health: healthOf([{ company: 'Zalando', state: 'ok', reason: '', open_roles: 5, last_scan: utcStamp(1) }]),
+    })
     const w = mount(Companies, { props: { run: 'all', jobs: [] } })
     await flushPromises()
-    await w.find('.view-list').trigger('click')
-    const listNames = () => w.findAll('.list .row:not(.none) .name').map(n => n.text())
+    const listNames = () => companyRows(w).map(r => r[0])
+    expect(listNames()).toEqual(['Adyen', 'Grab', 'Zalando'])                // A-Z by default
+    await w.find('th[aria-sort] button').trigger('click')                   // Company header flips it
     expect(listNames()).toEqual(['Zalando', 'Grab', 'Adyen'])
-    await w.find('select.list-sort').setValue('az')
-    expect(listNames()).toEqual(['Adyen', 'Grab', 'Zalando'])
-    await w.find('input.list-search').setValue('careers site')
+    await w.find('input.company-search').setValue('careers site')           // the reason is searched too
     expect(listNames()).toEqual(['Grab'])
-    await w.find('input.list-search').setValue('xyz')
-    expect(w.find('.row.none').text()).toContain('No company in your list matches “xyz”')
+    await w.find('input.company-search').setValue('xyz')
+    expect(w.find('.empty-title').text()).toBe('No companies match.')
   })
 })
 

@@ -699,6 +699,7 @@ SWEEP_GET_ALLOWLIST = (
     "/api/applicant",
     "/api/applicant/refresh",
     "/api/applications",
+    "/api/apply/queue",          # Q-120 P21 (M1): reads only, no reaper, no kick
     "/api/apply/settings",
     "/api/apply/status",
     "/api/companies/export.csv",

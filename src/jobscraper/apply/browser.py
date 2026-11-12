@@ -93,6 +93,11 @@ class BrowserSession:
         except Exception:
             self._cm.__exit__(None, None, None)
             raise
+        self._closed = False
+        try:                                      # the owner closed the window (alive(), Q-120 §3.2)
+            self.context.on("close", lambda *_: setattr(self, "_closed", True))
+        except Exception:
+            pass
         _SESSIONS[id(self.context)] = self
         return self
 
@@ -106,21 +111,40 @@ class BrowserSession:
             return pages[0]
         return self.context.new_page()
 
-    def hold(self, seconds: float) -> None:
+    def hold(self, seconds: float) -> bool:
         """Keep the window open for up to `seconds` (a dry run's filled form,
-        F-37). Returns as soon as the owner closes the last tab or the window."""
+        F-37). Returns as soon as the owner closes the last tab or the window.
+        True when the window is still open at the end (the queue worker holds in
+        5 s slices and stops early on False, apply_queue_design §5)."""
         end = time.monotonic() + max(0.0, seconds)
         while time.monotonic() < end:
             try:
                 pages = self.context.pages
             except Exception:
-                return
+                return False
             if not pages:
-                return
+                return False
             try:                                  # a Playwright wait also pumps the close events
                 pages[0].wait_for_timeout(min(1000.0, max(1.0, (end - time.monotonic()) * 1000)))
             except Exception:
                 continue
+        return self.alive()
+
+    def alive(self) -> bool:
+        """Is the window still usable? False once the context is closed (the
+        owner closed Edge, or `close()`), so the queue worker opens a new
+        session for the next role instead of failing on a dead one (§3.2). A
+        context with no tab left is still alive (auto mode closes each tab and
+        the next `new_page` opens a window); the context's "close" event decides."""
+        if self.context is None or getattr(self, "_closed", False):
+            return False
+        try:
+            pages = self.context.pages
+            if pages:                             # a round trip pumps a pending close event
+                pages[0].wait_for_timeout(1)
+        except Exception:
+            return False
+        return not getattr(self, "_closed", False)
 
     def close(self) -> None:
         if self.context is not None:

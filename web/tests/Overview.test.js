@@ -1,6 +1,7 @@
 // Q-70 lane E: the Overview home page, inside the app shell with the fake API.
 // Only Date is faked (vi.setSystemTime), so waits and fetch promises run normally.
-// Spec: docs/architecture/ux/overview_design.md §4 and §8.
+// Spec: docs/architecture/ux/overview_design.md §4 and §8, retargeted to the Q-118 page
+// (docs/architecture/q118_ui_polish_design.md §2, D-207): KPI row, To do rows, clickable pipeline.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils'
 import App from '../src/App.vue'
@@ -82,11 +83,14 @@ async function mountOverview() {
   return wrapper
 }
 
-const kinds = wrapper => wrapper.findAll('.next-card').map(c => c.attributes('data-kind'))
-const card = (wrapper, kind) => wrapper.find(`.next-card[data-kind="${kind}"]`)
+// A "To do" row is an `li.todo-row[data-kind]`; its words are `.ui-list-row-title` / `-desc`.
+const kinds = wrapper => wrapper.findAll('.todo-row').map(c => c.attributes('data-kind'))
+const card = (wrapper, kind) => wrapper.find(`.todo-row[data-kind="${kind}"]`)
 const week = wrapper => Object.fromEntries(
-  wrapper.findAll('.week-tile').map(t => [t.find('dt').text(), Number(t.find('dd').text())]),
+  wrapper.findAll('.week-stat').map(t => [t.find('dt').text(), Number(t.find('dd').text())]),
 )
+const kpi = (wrapper, id) => wrapper.find(`[data-kpi="${id}"]`)
+const lastRunCard = wrapper => wrapper.find('section[aria-labelledby="run-title"]')
 
 describe('Overview: first load and the default route', () => {
   it('shows TabLoading until data settles', async () => {
@@ -99,13 +103,16 @@ describe('Overview: first load and the default route', () => {
     const wrapper = mount(App, { attachTo: document.body })
     await vi.waitFor(() => expect(loading(wrapper).exists()).toBe(true))
     expect(wrapper.find('.overview h2.page-title').text()).toBe('Overview')   // the heading is there at once
-    expect(wrapper.find('.next-card').exists()).toBe(false)
-    expect(wrapper.text()).not.toContain('Next up')
+    expect(wrapper.find('.todo-row').exists()).toBe(false)
+    expect(wrapper.findAll('.overview .ui-skeleton')).toHaveLength(6)          // four number cards, two cards
+    expect(wrapper.find('.overview [data-kpi]').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('To do')
     expect(wrapper.text()).not.toContain('Pipeline')
 
     release()
     await vi.waitFor(() => expect(card(wrapper, 'inbox').exists()).toBe(true))
     expect(loading(wrapper).exists()).toBe(false)
+    expect(wrapper.findAll('.overview [data-kpi]')).toHaveLength(4)
     expect(wrapper.text()).toContain('Pipeline')
   })
 
@@ -123,7 +130,7 @@ describe('Overview: first load and the default route', () => {
   })
 })
 
-describe('Overview: Next up', () => {
+describe('Overview: To do', () => {
   it('renders a card per pending item and only one primary CTA', async () => {
     vi.setSystemTime(new Date(LATER))
     useApi({
@@ -133,28 +140,32 @@ describe('Overview: Next up', () => {
     const wrapper = await mountOverview()
 
     expect(kinds(wrapper)).toEqual(['questions', 'inbox', 'follow-up', 'run'])
-    expect(card(wrapper, 'questions').find('.next-title').text()).toBe('2 questions waiting for your answer')
-    expect(card(wrapper, 'questions').find('.next-body').text()).toBe('Auto-apply is paused on 3 applications until you answer.')
-    expect(card(wrapper, 'inbox').find('.next-title').text()).toBe('5 new roles to triage')
+    expect(wrapper.find('#todo-title').text()).toBe('To do')
+    expect(card(wrapper, 'questions').find('.ui-list-row-title').text()).toBe('2 questions waiting for your answer')
+    expect(card(wrapper, 'questions').find('.ui-list-row-desc').text()).toBe('Auto-apply is paused on 3 applications until you answer.')
+    expect(card(wrapper, 'inbox').find('.ui-list-row-title').text()).toBe('Triage 5 new roles')
     expect(card(wrapper, 'inbox').find('a.button').attributes('href')).toBe('#/inbox')
-    expect(card(wrapper, 'follow-up').find('.next-title').text()).toBe('1 application to follow up')
-    expect(card(wrapper, 'follow-up').find('.follow-list').text()).toContain('Co late · Role late · 19 days')
-    expect(card(wrapper, 'follow-up').find('a.button').attributes('href')).toBe('#/applications')
-    expect(card(wrapper, 'run').find('.next-title').text()).toBe('Your last run was 15 days ago')
+    expect(card(wrapper, 'follow-up').find('.ui-list-row-title').text()).toBe('Follow up on 1 application')
+    const sub = card(wrapper, 'follow-up').findAll('.todo-sub li')
+    expect(sub).toHaveLength(1)
+    expect(sub[0].find('.todo-sub-name').text()).toBe('Co late · Role late')
+    expect(sub[0].find('.todo-sub-days').text()).toBe('19 days')
+    expect(card(wrapper, 'follow-up').find('a.button').attributes('href')).toBe('#/applications/applied')
+    expect(card(wrapper, 'run').find('.ui-list-row-title').text()).toBe('Your last run was 15 days ago')
 
-    // One primary action on the whole page, and it is the first card's.
-    const primaries = wrapper.findAll('.overview .next-card .primary')
+    // One primary action on the whole page, and it is the first row's.
+    const primaries = wrapper.findAll('.overview .todo-row .primary')
     expect(primaries).toHaveLength(1)
     expect(primaries[0].text()).toBe('Answer questions')
     expect(card(wrapper, 'questions').find('.primary').exists()).toBe(true)
-    expect(card(wrapper, 'run').find('button').classes()).toContain('ghost')
+    expect(card(wrapper, 'run').find('button').classes()).not.toContain('primary')
   })
 
   it('the primary CTA moves to whichever card is first', async () => {
     vi.setSystemTime(new Date(LATER))
     const wrapper = await mountOverview()              // no questions (404), no follow-ups
     expect(kinds(wrapper)).toEqual(['inbox', 'run'])
-    const primaries = wrapper.findAll('.overview .next-card .primary')
+    const primaries = wrapper.findAll('.overview .todo-row .primary')
     expect(primaries).toHaveLength(1)
     expect(card(wrapper, 'inbox').find('.primary').text()).toBe('Open Inbox')
     expect(card(wrapper, 'run').find('.primary').exists()).toBe(false)
@@ -172,12 +183,15 @@ describe('Overview: Next up', () => {
       ],
     })
     const wrapper = await mountOverview()
-    expect(card(wrapper, 'follow-up').find('.next-title').text()).toBe('5 applications to follow up')
-    const items = card(wrapper, 'follow-up').findAll('.follow-list li').map(li => li.text())
-    expect(items).toEqual(['Co a · Role a · 28 days', 'Co b · Role b · 27 days', 'Co c · Role c · 26 days', 'and 2 more'])
+    expect(card(wrapper, 'follow-up').find('.ui-list-row-title').text()).toBe('Follow up on 5 applications')
+    const items = card(wrapper, 'follow-up').findAll('.todo-sub li')
+    expect(items.map(li => (li.find('.todo-sub-name').exists()
+      ? [li.find('.todo-sub-name').text(), li.find('.todo-sub-days').text()] : li.text()))).toEqual([
+      ['Co a · Role a', '28 days'], ['Co b · Role b', '27 days'], ['Co c · Role c', '26 days'], 'and 2 more',
+    ])
   })
 
-  it('a failed run gets its own red card with a link to Runs, not a Start button', async () => {
+  it('a failed run gets its own red row with a link to Runs, not a Start button', async () => {
     useApi({ fixture: { runs: [], jobs: [] }, questions: questionsOf(0) })
     // (the fake API stamps every run 'ok', so the failed run is served by hand)
     intercept(url => (url === 'api/runs'
@@ -187,42 +201,68 @@ describe('Overview: Next up', () => {
     expect(kinds(wrapper)).toEqual(['run'])
     const run = card(wrapper, 'run')
     expect(run.classes()).toContain('failed')
-    expect(run.find('.next-title').text()).toBe('Your last run failed')
+    expect(run.find('.ui-list-row-title').text()).toBe('Your last run failed')
     expect(run.find('a.button').attributes('href')).toBe('#/runs')
     expect(run.find('button').exists()).toBe(false)
-    expect(run.find('a.button').classes()).toContain('primary')       // first card, so primary
+    expect(run.find('a.button').classes()).toContain('primary')       // first row, so primary
   })
 
   it('caught up when nothing is pending', async () => {
     useApi({ statuses: ALL_TRACKED, questions: questionsOf(0) })
     const wrapper = await mountOverview()
     expect(kinds(wrapper)).toEqual([])
-    expect(wrapper.find('.empty-title').text()).toBe("You're all caught up.")
+    expect(wrapper.find('.ov-caught-up .ui-list-row-title').text()).toBe("You're all caught up.")
+    expect(wrapper.find('.ov-caught-up .ui-list-row-desc').text()).toBe('Nothing needs you right now. The next run brings new roles to your Inbox.')
     expect(wrapper.find('.overview .primary').exists()).toBe(false)
   })
 
   it('does not claim to be caught up when the questions check failed', async () => {
     useApi({ statuses: ALL_TRACKED })               // /api/questions answers 404
     const wrapper = await mountOverview()
-    expect(wrapper.find('.empty-title').exists()).toBe(false)
+    expect(wrapper.find('.ov-caught-up').exists()).toBe(false)
     const notice = wrapper.find('.notice.warn')
     expect(notice.text()).toContain('Could not check for open questions:')
     expect(notice.text()).not.toContain('..')
     expect(notice.find('button').text()).toBe('Try again')
   })
 
-  it('a run in progress is said so and hides the Start a run card', async () => {
+  it('a run in progress is said so and hides the Start a run row', async () => {
     vi.setSystemTime(new Date(LATER))
     useApi({ job: { id: 4, kind: 'run', state: 'running', started_at: '2026-10-09T11:50:00' } })
     const wrapper = await mountOverview()
-    expect(wrapper.find('.run-line').text()).toContain('A run is in progress.')
-    expect(wrapper.find('.run-line a').attributes('href')).toBe('#/runs')
+    const last = lastRunCard(wrapper)
+    expect(last.find('.ui-badge').text()).toBe('Running')
+    expect(last.find('.ui-badge').attributes('data-tone')).toBe('info')
+    expect(last.text()).toContain('Follow it on the Runs tab.')
+    expect(last.find('a.button').attributes('href')).toBe('#/runs')
     expect(kinds(wrapper)).toEqual(['inbox'])
   })
 
-  it('says when the last run was and how many roles it found', async () => {
+  it('the Last run card says when the last run was and how many roles it found', async () => {
     const wrapper = await mountOverview()
-    expect(wrapper.find('.run-line').text()).toBe('Last run 5 days ago: 3 new roles.')
+    const last = lastRunCard(wrapper)
+    expect(last.find('.ui-card-title').text()).toBe('Last run')
+    expect(last.find('.ui-badge').text()).toBe('Success')
+    expect(last.find('.ov-run-ago').text()).toBe('5 days ago')
+    expect(last.find('.ov-run-facts').text()).toBe('3 new roles')
+    expect(last.find('a.button').attributes('href')).toBe('#/runs')
+  })
+
+  it('the Last run card has its own words when there was no run, and when a run failed', async () => {
+    useApi({ fixture: { runs: [], jobs: [] }, questions: questionsOf(0) })
+    const none = await mountOverview()
+    expect(lastRunCard(none).text()).toContain('No runs yet.')
+    expect(lastRunCard(none).find('a.button').attributes('href')).toBe('#/runs')
+
+    useApi({ fixture: { runs: [], jobs: [] }, questions: questionsOf(0) })
+    intercept(url => (url === 'api/runs'
+      ? reply([{ run_no: 12, status: 'failed', started_at: '2026-09-28T09:00:00', finished_at: '2026-09-28T10:00:00', accepted: 0, stats: { reason: 'the network dropped' } }])
+      : undefined))
+    const failed = await mountOverview()
+    const last = lastRunCard(failed)
+    expect(last.find('.ui-badge').text()).toBe('Failed')
+    expect(last.find('.ui-badge').attributes('data-tone')).toBe('danger')
+    expect(last.text()).toContain('Reason: the network dropped.')
   })
 })
 
@@ -249,8 +289,8 @@ describe('Overview: the Questions card goes to Application details', () => {
   it('one question reads in the singular', async () => {
     useApi({ questions: questionsOf(1) })
     const wrapper = await mountOverview()
-    expect(card(wrapper, 'questions').find('.next-title').text()).toBe('1 question waiting for your answer')
-    expect(card(wrapper, 'questions').find('.next-body').text()).toBe('Answer once; every later form reuses it.')
+    expect(card(wrapper, 'questions').find('.ui-list-row-title').text()).toBe('1 question waiting for your answer')
+    expect(card(wrapper, 'questions').find('.ui-list-row-desc').text()).toBe('Answer once; every later form reuses it.')
   })
 })
 
@@ -262,7 +302,7 @@ describe('Overview: Start a run', () => {
     return mountOverview()
   }
 
-  it('posts jobs/run once and shows the toast; the card goes and the shell pill takes over', async () => {
+  it('posts jobs/run once and shows the toast; the row goes and the shell pill takes over', async () => {
     const wrapper = await staleOverview()
     const start = card(wrapper, 'run').find('button')
     expect(start.text()).toBe('Start a run')
@@ -277,7 +317,25 @@ describe('Overview: Start a run', () => {
     expect(toast.current.link).toEqual({ label: 'Open Runs', href: '#/runs' })
     await vi.waitFor(() => expect(card(wrapper, 'run').exists()).toBe(false))
     expect(wrapper.find('.masthead .job-pill').text()).toContain('Run running')
-    expect(wrapper.find('.run-line').text()).toContain('A run is in progress.')
+    expect(lastRunCard(wrapper).find('.ui-badge').text()).toBe('Running')
+    expect(lastRunCard(wrapper).text()).toContain('Follow it on the Runs tab.')
+  })
+
+  it('a deferred 202 (the apply worker holds the slot) starts no run and says when it will', async () => {
+    const wrapper = await staleOverview()
+    intercept((url, init) => (url === 'api/jobs/run' && init.method === 'POST'
+      ? { ok: true, status: 202, statusText: 'Accepted', json: async () => ({ deferred: true }) } : undefined))
+    await card(wrapper, 'run').find('button').trigger('click')
+    await vi.waitFor(() => expect(toast.current).not.toBeNull())
+
+    expect(toast.current.message).toBe('The search run starts when the current application finishes.')
+    expect(toast.current.link).toEqual({ label: 'Open Runs', href: '#/runs' })
+    await flushPromises()
+    expect(wrapper.find('.masthead .job-pill').exists()).toBe(false)       // nothing is tracked as a run
+    expect(lastRunCard(wrapper).find('.ui-badge').text()).not.toBe('Running')
+    expect(card(wrapper, 'run').exists()).toBe(true)                       // the row stays, usable again
+    expect(card(wrapper, 'run').find('button').text()).toBe('Start a run')
+    expect(card(wrapper, 'run').find('button').attributes('disabled')).toBeUndefined()
   })
 
   it('409 shows the already-running text and keeps the button', async () => {
@@ -329,37 +387,54 @@ describe('Overview: Pipeline and Past 7 days', () => {
     row('p5', 'to_apply', [['to_apply', '2026-09-28T08:00:00']]),
   ]
 
-  it('counts each open stage in order, closed apart, with the response rate', async () => {
-    useApi({ applicationRows: rows(), questions: questionsOf(0) })
-    const wrapper = await mountOverview()
-    const tiles = wrapper.findAll('.stage-tile:not(.closed)')
-    expect(tiles.map(t => [t.attributes('data-status'), t.find('.tile-label').text(), t.find('.tile-n').text()])).toEqual([
-      ['to_apply', 'Saved', '1'], ['applied', 'Applied', '1'], ['interviewing', 'Interviewing', '1'], ['offer', 'Offer', '0'],
-    ])
-    const closed = wrapper.find('.stage-tile.closed')
-    expect(closed.find('.tile-n').text()).toBe('2')
-    expect(closed.attributes('title')).toBe('Rejected 1 · Withdrawn 1')
-    expect(closed.find('.visually-hidden').text()).toBe('(rejected 1, withdrawn 1)')
-    expect(wrapper.find('.response').text()).toContain('67% response rate · 2 of 3 applications heard back')
-    expect(wrapper.find('.pipe-link a').attributes('href')).toBe('#/applications')
+  // The pipeline is the legend of the bar: a link per stage (D-207: Applied, Interviewing,
+  // Offer, then Rejected apart). "To apply" is not a stage; it is a muted line below.
+  const legend = wrapper => wrapper.findAll('.ui-progress-legend li').map(li => {
+    const a = li.find('a')
+    return [a.find('.ui-progress-label').text(), a.find('.ui-progress-n').text(), a.attributes('href')]
   })
 
-  it('past 7 days counts found, saved, applied and other updates', async () => {
+  it('counts each stage in order, closed apart, with the response rate as a headline number', async () => {
+    useApi({ applicationRows: rows(), questions: questionsOf(0) })
+    const wrapper = await mountOverview()
+    expect(legend(wrapper)).toEqual([
+      ['Applied', '1', '#/applications/applied'],
+      ['Interviewing', '1', '#/applications/interviewing'],
+      ['Offer', '0', '#/applications/offer'],
+      ['Rejected', '2', '#/applications/rejected'],
+    ])
+    // Rejected (1 rejected + 1 withdrawn) is set apart and says what it holds.
+    const closed = wrapper.findAll('.ui-progress-legend li')[3]
+    expect(closed.find('.ui-progress-note').text()).toBe('(1 withdrawn)')
+    expect(closed.find('a').attributes('aria-label')).toBe('Rejected, 2 (1 withdrawn)')
+    expect(wrapper.find('[aria-labelledby="pipe-title"] .ui-count').text()).toBe('5 tracked')
+    // The saved role is no stage; it is counted apart, as a link to the Active list.
+    expect(wrapper.find('.ov-foot').text()).toContain('1 to apply')
+    expect(wrapper.find('.ov-foot a').attributes('href')).toBe('#/applications/active')
+    // The response rate is a headline number now, not a sentence under the bar.
+    expect(kpi(wrapper, 'reply').find('.ui-kpi-value').text()).toBe('67%')
+    expect(kpi(wrapper, 'reply').find('.ui-kpi-caption').text()).toBe('2 of 3 heard back')
+  })
+
+  it('past 7 days counts found, to apply, applied and other updates', async () => {
     useApi({ applicationRows: rows(), questions: questionsOf(0) })
     const wrapper = await mountOverview()
     // Window starts 22 Sep 12:00: run 12 (3 accepted) is in, run 11 is not.
-    expect(week(wrapper)).toEqual({ 'New roles found': 3, Saved: 2, Applied: 1, 'Other updates': 1 })
+    expect(week(wrapper)).toEqual({ 'New roles found': 3, 'To apply': 2, Applied: 1, 'Other updates': 1 })
   })
 
   it('says so with nothing tracked or no applications sent', async () => {
     useApi({ applicationRows: [], questions: questionsOf(0) })
     const wrapper = await mountOverview()
     expect(wrapper.text()).toContain('Nothing tracked yet. Save a role in the Inbox and it shows up here.')
-    expect(wrapper.find('.stage-tiles').exists()).toBe(false)
+    expect(wrapper.find('.ui-progress').exists()).toBe(false)
+    expect(wrapper.find('[aria-labelledby="pipe-title"] .ui-count').exists()).toBe(false)
+    expect(kpi(wrapper, 'reply').find('.ui-kpi-caption').text()).toBe('No applications sent yet.')
 
     useApi({ applicationRows: [row('s', 'to_apply', [['to_apply', '2026-09-28T08:00:00']])], questions: questionsOf(0) })
     const saved = await mountOverview()
-    expect(saved.find('.response').text()).toContain('No applications sent yet.')
+    expect(kpi(saved, 'reply').find('.ui-kpi-caption').text()).toBe('No applications sent yet.')
+    expect(kpi(saved, 'reply').find('.ui-kpi-value').exists()).toBe(false)
   })
 
   it('a quiet week says so', async () => {
@@ -367,17 +442,17 @@ describe('Overview: Pipeline and Past 7 days', () => {
     useApi({ applicationRows: [], questions: questionsOf(0) })
     const wrapper = await mountOverview()
     expect(wrapper.text()).toContain('A quiet week: nothing found or changed in the past 7 days.')
-    expect(wrapper.find('.week-tiles').exists()).toBe(false)
+    expect(wrapper.find('.week-stats').exists()).toBe(false)
   })
 })
 
 describe('Overview: failures stay in their own section', () => {
-  it('an applications error keeps Next up and offers Try again', async () => {
+  it('an applications error keeps To do and offers Try again', async () => {
     let broken = true
     intercept(url => (broken && url === 'api/applications' ? failure(500, 'Internal Server Error') : undefined))
     const wrapper = await mountOverview()
 
-    expect(card(wrapper, 'inbox').exists()).toBe(true)                 // Next up still works
+    expect(card(wrapper, 'inbox').exists()).toBe(true)                 // To do still works
     const notices = wrapper.findAll('.notice.error')
     expect(notices).toHaveLength(2)                                    // Pipeline and Past 7 days
     for (const n of notices) {
@@ -385,20 +460,24 @@ describe('Overview: failures stay in their own section', () => {
       expect(n.text()).toContain('Could not load your applications:')
       expect(n.find('button').text()).toBe('Try again')
     }
-    expect(wrapper.find('.stage-tiles').exists()).toBe(false)
+    expect(wrapper.find('.ui-progress').exists()).toBe(false)
     expect(wrapper.text()).not.toContain('Nothing tracked yet')
+    // The three numbers that come from applications say so; New roles (the shell's list) stays.
+    expect(['active', 'interviews', 'reply'].map(id => kpi(wrapper, id).find('.ui-kpi-caption').text())).toEqual(['Unavailable', 'Unavailable', 'Unavailable'])
+    expect(kpi(wrapper, 'new').find('.ui-kpi-value').text()).toBe('5')
 
     broken = false
     await notices[0].find('button').trigger('click')
     await vi.waitFor(() => expect(wrapper.findAll('.notice.error')).toHaveLength(0))
-    expect(wrapper.find('.stage-tiles').exists() || wrapper.text().includes('Nothing tracked yet')).toBe(true)
+    expect(wrapper.find('.ui-progress').exists() || wrapper.text().includes('Nothing tracked yet')).toBe(true)
+    expect(kpi(wrapper, 'active').find('.ui-kpi-caption').text()).not.toBe('Unavailable')
   })
 
   it('a failed questions check skips only that card', async () => {
     const wrapper = await mountOverview()                              // /api/questions answers 404
     expect(wrapper.find('.notice.warn').text()).toContain('Could not check for open questions:')
     expect(kinds(wrapper)).toEqual(['inbox'])
-    expect(wrapper.find('.pipe-link').exists() || wrapper.text().includes('Pipeline')).toBe(true)
+    expect(wrapper.find('[aria-labelledby="pipe-title"]').exists()).toBe(true)          // the Pipeline card still renders
   })
 })
 
@@ -408,9 +487,9 @@ describe('Overview: before the first run', () => {
     const wrapper = await mountOverview()
     await vi.waitFor(() => expect(wrapper.find('.overview .setup').exists()).toBe(true))
     expect(wrapper.find('.overview .setup-title').text()).toBe('Get set up')
-    expect(wrapper.find('.run-line').exists()).toBe(false)
-    expect(wrapper.find('.next-card').exists()).toBe(false)
-    expect(wrapper.find('.empty-title').exists()).toBe(false)           // not "caught up" before the first run
+    expect(lastRunCard(wrapper).text()).toContain('No runs yet.')
+    expect(wrapper.find('.todo-row').exists()).toBe(false)
+    expect(wrapper.find('.ov-caught-up').exists()).toBe(false)          // not "caught up" before the first run
     expect(wrapper.text()).toContain('Pipeline')                        // the rest of the page still renders
   })
 

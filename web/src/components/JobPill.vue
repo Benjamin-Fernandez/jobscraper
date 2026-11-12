@@ -2,12 +2,19 @@
 // The background job, visible from every tab (Q-70 C3, G33): a small pill in the
 // masthead while a run or profile refresh is going, linking to the Runs tab.
 // Nothing renders when no job is running.
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+//
+// Auto-apply (Q-120, D-205): the worker runs the whole queue, so "1 of 4" would keep
+// changing. The pill reads GET /api/apply/queue every 10 s while it runs and says
+// "Auto-apply · {n} waiting", or "Auto-apply running" when nothing waits. A server
+// without the queue (404) gets the plain "Auto-apply".
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { ApiError, applyQueue } from '../api.js'
 import { duration, utcMs } from '../format.js'
 
 const props = defineProps({ job: { type: Object, default: null } })
 
 const KINDS = { run: 'Run', profile: 'Profile refresh', apply: 'Auto-apply' }
+const QUEUE_POLL_MS = 10000
 const now = ref(Date.now())
 let timer = null
 onMounted(() => { timer = setInterval(() => { now.value = Date.now() }, 15000) })
@@ -18,12 +25,59 @@ const elapsed = computed(() => {
   const t = utcMs(props.job?.started_at)
   return t === null ? '' : duration((now.value - t) / 1000)
 })
+
+// ---- the queue behind an apply job ----
+const waiting = ref(null)             // how many roles wait; null until known
+const queueMissing = ref(false)       // the server has no queue route (old backend)
+const watching = computed(() => props.job?.kind === 'apply' && props.job?.state === 'running')
+let poll = null
+let alive = true
+
+async function readQueue() {
+  try {
+    const q = await applyQueue()
+    if (!alive) return
+    waiting.value = Array.isArray(q?.waiting) ? q.waiting.length : null
+    queueMissing.value = false
+  } catch (e) {
+    if (alive && e instanceof ApiError && e.status === 404) queueMissing.value = true
+    // Any other failure keeps the last number: the pill must not flicker.
+  }
+}
+function stopPolling() {
+  clearInterval(poll)
+  poll = null
+}
+function startPolling() {
+  stopPolling()
+  waiting.value = null
+  queueMissing.value = false
+  readQueue()
+  poll = setInterval(readQueue, QUEUE_POLL_MS)
+}
+watch(watching, on => (on ? startPolling() : stopPolling()), { immediate: true })
+// The Inbox and Runs say when the queue changed: no need to wait for the next tick.
+const onQueueChanged = () => { if (watching.value) readQueue() }
+onMounted(() => window.addEventListener('jobscraper:apply-queue', onQueueChanged))
+onBeforeUnmount(() => {
+  alive = false
+  stopPolling()
+  window.removeEventListener('jobscraper:apply-queue', onQueueChanged)
+})
+
+const text = computed(() => {
+  if (props.job?.kind === 'apply') {
+    if (queueMissing.value) return 'Auto-apply'
+    return waiting.value ? `Auto-apply · ${waiting.value} waiting` : 'Auto-apply running'
+  }
+  return `${label.value} running${elapsed.value ? ` · ${elapsed.value}` : ''}`
+})
 </script>
 
 <template>
   <span v-if="job?.state === 'running'" class="job-pill" role="status">
     <span class="spinner" aria-hidden="true" />
-    <a href="#/runs"><span class="job-text">{{ label }} running<template v-if="elapsed"> · {{ elapsed }}</template></span></a>
+    <a href="#/runs"><span class="job-text">{{ text }}</span></a>
   </span>
 </template>
 
