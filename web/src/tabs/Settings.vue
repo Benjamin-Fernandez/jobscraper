@@ -196,7 +196,7 @@ onBeforeUnmount(() => {
     <header class="page-head">
       <div>
         <h2 class="page-title">{{ COPY.title }}</h2>
-        <p class="page-sub">{{ COPY.subtitle }}</p>
+        <p v-if="!phone || showList" class="page-sub">{{ COPY.subtitle }}</p>
       </div>
     </header>
 
