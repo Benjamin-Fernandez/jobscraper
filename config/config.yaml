@@ -138,9 +138,9 @@ retention:
 apply:
   # Auto-apply (M20, docs/architecture/apply_design.md §16). Settings → Apply
   # in the web app overrides mode, the caps, headed and captcha_wait_s.
-  mode: dry_run              # auto | dry_run. M20 ships dry_run; switch to auto after the M20 gate
-  daily_cap: 10              # D-61: Submit clicks per day (Asia/Singapore)
-  per_employer_daily_cap: 2  # D-61
+  mode: auto                 # auto | dry_run. auto = Auto-apply fills the form and clicks Submit (owner, D-203); dry_run = fill only, never Submit
+  daily_cap: 0               # D-204: Submit clicks per day (Asia/Singapore); 0 = no limit
+  per_employer_daily_cap: 10  # D-204: per employer per day; 0 = no limit
   headed: true               # D-53: show the Edge window
   captcha_wait_s: 0          # F-38: seconds to leave a CAPTCHA'd tab open for you
   profile_dir: "%LOCALAPPDATA%\\JobScraper\\apply-profile"
