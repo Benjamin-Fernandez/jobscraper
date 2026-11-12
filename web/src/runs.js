@@ -89,6 +89,20 @@ export function runStatusLabel(status) {
   return RUN_STATUS[status] ?? String(status).replace(/_/g, ' ')
 }
 
+// The run history's badge (Q-118 LC): the same words with a capital, a tone and an
+// icon. The word always carries the meaning; the tone and the icon only help.
+const RUN_STATUS_TITLE = { ok: 'Success', failed: 'Failed', aborted_unhealthy: 'Aborted', dry_run: 'Dry run', running: 'Running' }
+export function runStatusTitle(status) {
+  if (!status) return ''
+  if (status in RUN_STATUS_TITLE) return RUN_STATUS_TITLE[status]
+  const words = String(status).replace(/_/g, ' ')
+  return words.charAt(0).toUpperCase() + words.slice(1)
+}
+const RUN_STATUS_TONE = { ok: 'ok', failed: 'danger', aborted_unhealthy: 'warn', dry_run: 'neutral', running: 'info' }
+export const runStatusTone = status => RUN_STATUS_TONE[status] ?? 'neutral'
+const RUN_STATUS_ICON = { ok: 'check', failed: 'x', aborted_unhealthy: 'alert', dry_run: 'info', running: 'clock' }
+export const runStatusIcon = status => RUN_STATUS_ICON[status] ?? null
+
 // Why a run ended as it did, where the status alone does not say (Q-75 G27).
 // `aborted_unhealthy` is the pipeline's network-fault guard: most due companies
 // failed together, so nothing was counted against any of them.
