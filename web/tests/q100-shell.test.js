@@ -75,12 +75,21 @@ describe('the hash keeps its view and item', () => {
 
   it.each([
     ['#/settings/search', 'settings-panel-search'],
-    ['#/settings/appearance', 'settings-panel-appearance'],
+    ['#/settings/preferences', 'settings-panel-preferences'],
     ['#/settings/apply', 'settings-panel-apply'],
   ])('%s stays as written and opens that view', async (hash, panel) => {
     const { w } = await boot(hash)
     expect(window.location.hash).toBe(hash)
     expect(w.find(`#${panel}`).exists()).toBe(true)
+  })
+
+  // Q-116 (design section 4): "Appearance" is now "Preferences"; the old hash is an alias,
+  // rewritten before the view is read (so the old "stays as written" no longer holds for it).
+  it('#/settings/appearance is rewritten to #/settings/preferences and opens Preferences', async () => {
+    const { w } = await boot('#/settings/appearance')
+    expect(window.location.hash).toBe('#/settings/preferences')
+    expect(w.find('#settings-panel-preferences').exists()).toBe(true)
+    expect(w.find('#settings-panel-appearance').exists()).toBe(false)
   })
 
   it('an unknown tab or an empty hash lands on Overview and the URL says so', async () => {
