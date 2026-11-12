@@ -279,9 +279,11 @@ def create_app(cfg: Optional[Config] = None,
     if apply_queue_worker:
         # M2: the restart pause first; the tick only after it (Starlette runs
         # startup handlers in registration order). Disabled: neither runs.
-        app.router.add_event_handler("startup", app.state.apply_queue.startup)
-        app.router.add_event_handler("startup", app.state.apply_queue.start_timer)
-        app.router.add_event_handler("shutdown", app.state.apply_queue.stop)
+        # Names differ from the mail runner's (`start_timer`, `stop`): pins tell
+        # the two apart by handler `__name__`.
+        app.router.add_event_handler("startup", app.state.apply_queue.pause_apply_queue_on_startup)
+        app.router.add_event_handler("startup", app.state.apply_queue.start_apply_queue)
+        app.router.add_event_handler("shutdown", app.state.apply_queue.stop_apply_queue)
     if mail_timer:
         app.router.add_event_handler("startup", app.state.mail.start_timer)
     app.router.add_event_handler("shutdown", app.state.mail.stop)
