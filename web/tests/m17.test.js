@@ -9,7 +9,7 @@ import TitleEditor from '../src/components/TitleEditor.vue'
 import { newRoleCount } from '../src/badges.js'
 import { resetDismissed } from '../src/dismissed.js'
 import { resetSeenJobs } from '../src/composables/useJob.js'
-import { defaultTitles, fakeApi } from './helpers.js'
+import { chooseMore, defaultTitles, fakeApi, legendOf } from './helpers.js'
 
 let api
 
@@ -60,11 +60,21 @@ describe('Companies: every watched company as a CSV', () => {
   it('shows how many can be scanned and links the download', async () => {
     const wrapper = mount(Companies, { props: { run: 'all', jobs: [] } })
     await flushPromises()
-    const tiles = wrapper.findAll('.tile').map(t => t.findAll('span').map(s => s.text()).join(' '))
-    expect(tiles).toEqual(['3 Watched', '2 Can be scanned', '1 Failed'])
-    const link = wrapper.find('a.health-csv')
-    expect(link.attributes('href')).toBe('api/companies/export.csv')
-    expect(link.attributes('download')).toBeDefined()
+    // Q-118 LD: the three tiles became the funnel and the legend; the CSV link is a More menu item.
+    expect(wrapper.findAll('.funnel-n').map(n => n.text())).toEqual(['3', '2', '0'])   // watched, readable, checked this cycle
+    expect(legendOf(wrapper)).toEqual([
+      ['All', 3], ['Checked this cycle', 0], ['Due for a check', 2], ['Failed', 1], ['No job board found', 0],
+    ])
+    const downloads = []
+    const clicks = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function () {
+      downloads.push({ href: this.getAttribute('href'), download: this.getAttribute('download') })
+    })
+    try {
+      await chooseMore(wrapper, 'All watched companies (.csv)')
+    } finally {
+      clicks.mockRestore()
+    }
+    expect(downloads).toEqual([{ href: 'api/companies/export.csv', download: '' }])
   })
 })
 

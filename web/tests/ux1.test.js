@@ -16,7 +16,7 @@ import { parseDescription, previewBlocks } from '../src/jd.js'
 import { resetDismissed } from '../src/dismissed.js'
 import { resetSeenJobs } from '../src/composables/useJob.js'
 import { dismissToast } from '../src/toast.js'
-import { FIXTURE, defaultTitles, fakeApi, runsFrom, setHash } from './helpers.js'
+import { FIXTURE, companyRows, defaultTitles, fakeApi, runsFrom, setHash } from './helpers.js'
 
 let api
 
@@ -121,9 +121,7 @@ describe('Companies: type or paste names', () => {
     // Attached, so a submit button's click submits its form as in a browser.
     const wrapper = mount(Companies, { props: { run: 'all', jobs: [] }, attachTo: document.body })
     await flushPromises()
-    // Personal keeps the Watched / Your list switch; the editor lives under "Your list".
-    await wrapper.find('button.view-list').trigger('click')
-    await flushPromises()
+    // Q-118 LD: no view switch any more; the editor opens from the page head.
     return wrapper
   }
 
@@ -137,14 +135,16 @@ describe('Companies: type or paste names', () => {
   })
 
   it('saves what was typed as the list, and searches the new names', async () => {
-    const wrapper = await mountCompanies(['Grab'])
+    const wrapper = await mountCompanies([{ name: 'Grab', status: 'found' }])
     await wrapper.find('button.edit-list').trigger('click')
     await wrapper.find('textarea.list-text').setValue('Stripe\nGrab')
     await wrapper.find('button.save-list').trigger('click')
     // The fake reads the file with a FileReader, which ends on a later task.
     await vi.waitFor(async () => {
       await flushPromises()
-      expect(wrapper.findAll('.list .row .name').map(n => n.text())).toEqual(['Stripe', 'Grab'])
+      // Grab is already a watched (health) row; Stripe is new, so it waits for the search.
+      expect(companyRows(wrapper)).toContainEqual(['Stripe', 'Waiting'])
+      expect(companyRows(wrapper).filter(r => r[0] === 'Grab')).toHaveLength(1)
     })
     const put = api.calls.find(c => c.url === 'api/companies/list' && c.method === 'PUT')
     expect(put.headers['Content-Type']).toBe('text/plain')
