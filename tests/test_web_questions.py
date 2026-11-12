@@ -97,8 +97,10 @@ def _seed(st) -> dict:
 
 
 @contextmanager
-def _world(*, seed: bool = True):
-    """(client, path, ids, fake_jobs, cfg). The applicant.yaml holds the synthetic sample profile."""
+def _world(*, seed: bool = True, resume: bool = False):
+    """(client, path, ids, fake_jobs, cfg). The applicant.yaml holds the synthetic sample profile.
+    `resume=True` adds a dummy resume.pdf: retry goes through the enqueue helper (Q-120), which
+    checks the profile is complete first (422 `profile_incomplete` otherwise)."""
     from fastapi.testclient import TestClient
     from jobscraper.config import Config
     from jobscraper.store import Store
@@ -108,6 +110,8 @@ def _world(*, seed: bool = True):
         data.mkdir()
         path = data / "applicant.yaml"
         path.write_text(yaml.safe_dump(profile(), sort_keys=False), encoding="utf-8", newline="\n")
+        if resume:
+            (data / "resume.pdf").write_bytes(b"%PDF-1.4 dummy resume for the retry pins")
         cfg = Config({"paths": {"db": str(data / "jobscraper.db"), "applicant": str(path),
                                 "shortlist": str(data / "shortlist.json"),
                                 "profile": str(data / "profile.derived.yaml"), "resume_dir": str(data)},
@@ -340,7 +344,7 @@ def test_dismiss_is_204_marks_the_group_dismissed_and_leaves_the_profile_alone()
 
 @needs(*GATE)
 def test_answering_the_last_open_question_of_a_job_makes_it_ready_and_retry_takes_only_ready_jobs():
-    with _world() as (c, path, ids, fake, _cfg):
+    with _world(resume=True) as (c, path, ids, fake, _cfg):
         r = _answer(c, path, key="solo_question", value="Nothing")
         assert r.status_code == 200, r.text
         ready = r.json()["ready"]
@@ -357,22 +361,28 @@ def test_answering_the_last_open_question_of_a_job_makes_it_ready_and_retry_take
         assert mixed.status_code == 422 and fake.started == [], "nothing starts unless every id is ready"
         assert c.post("/api/questions/retry", json={"job_ids": [f"j{i}" for i in range(21)]}).status_code == 422
 
+        # Q-120 (D-205): retry is a fresh click through the shared enqueue helper. Only the ready
+        # job is queued (source `retry`); the default app starts nothing.
         ok = c.post("/api/questions/retry", json={"job_ids": [ids["j3"]]})
         assert ok.status_code == 202, ok.text
-        assert "job" in ok.json()
-        assert len(fake.started) == 1
-        kind, opts = fake.started[0]
-        assert kind == "apply" and opts["job_ids"] == [ids["j3"]]
-        assert "dry_run" not in opts, "cmd_apply uses the effective mode (AD 14.1): the web never forces dry run"
+        body = ok.json()
+        assert "job" in body and body["queued"] == [{"job_id": ids["j3"], "position": 1}], body
+        assert fake.started == []
+        waiting = c.get("/api/apply/queue").json()["waiting"]
+        assert [(w["job_id"], w["source"]) for w in waiting] == [(ids["j3"], "retry")], waiting
+        # the queue row records the effective mode at the click (AD 14.1: never a forced dry run)
+        assert waiting[0]["mode"] == body["mode"] == c.get("/api/apply/status").json()["mode"]
 
 
 @needs(*GATE)
-def test_retry_while_a_job_runs_is_409_busy():
-    with _world() as (c, path, ids, fake, _cfg):
+def test_retry_while_a_job_runs_is_202_queued_and_starts_nothing():
+    """Q-120 (D-205): a running job no longer refuses retry (was 409 `busy`): the role waits."""
+    with _world(resume=True) as (c, path, ids, fake, _cfg):
         assert _answer(c, path, key="solo_question", value="Nothing").status_code == 200
         fake.busy = True
         r = c.post("/api/questions/retry", json={"job_ids": [ids["j3"]]})
-        assert r.status_code == 409 and r.json()["detail"] == "busy", r.text
+        assert r.status_code == 202, r.text
+        assert r.json()["queued"] == [{"job_id": ids["j3"], "position": 1}] and r.json()["started"] is False
         assert fake.started == []
 
 
