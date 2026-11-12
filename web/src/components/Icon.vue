@@ -2,6 +2,9 @@
 // A small line-icon set (M13-T4), drawn here so the app needs no icon package.
 // Shapes are data, rendered element by element - never v-html - so nothing in
 // the page is ever parsed from a string. 24-unit grid, 1.8 stroke, round caps.
+// The Q-118 shapes (grip, more, info, alert) are copied from Lucide (https://lucide.dev,
+// ISC licence, Copyright (c) Lucide Contributors; portions Copyright (c) Cole Bemis 2013-2022,
+// MIT): permission to use, copy, modify and distribute is granted provided this notice stays.
 import { computed } from 'vue'
 
 const ICONS = {
@@ -25,6 +28,12 @@ const ICONS = {
   send: [['path', { d: 'M4 12 20 4l-4 16-4-7z' }], ['path', { d: 'M12 13 20 4' }]],
   sliders: [['path', { d: 'M4 7h9M17 7h3M4 17h3M11 17h9' }], ['circle', { cx: 15, cy: 7, r: 2 }], ['circle', { cx: 9, cy: 17, r: 2 }]],
   layers: [['path', { d: 'm12 4 8.5 4.5L12 13 3.5 8.5z' }], ['path', { d: 'm3.5 12.5 8.5 4.5 8.5-4.5' }], ['path', { d: 'm3.5 16.5 8.5 4.5 8.5-4.5' }]],
+  // Q-118: grip (drag handle), more (row menu), info, alert. Lucide shapes (ISC licence, see above).
+  grip: [['circle', { cx: 9, cy: 5, r: 1 }], ['circle', { cx: 9, cy: 12, r: 1 }], ['circle', { cx: 9, cy: 19, r: 1 }],
+    ['circle', { cx: 15, cy: 5, r: 1 }], ['circle', { cx: 15, cy: 12, r: 1 }], ['circle', { cx: 15, cy: 19, r: 1 }]],
+  more: [['circle', { cx: 5, cy: 12, r: 1 }], ['circle', { cx: 12, cy: 12, r: 1 }], ['circle', { cx: 19, cy: 12, r: 1 }]],
+  info: [['circle', { cx: 12, cy: 12, r: 10 }], ['path', { d: 'M12 16v-4' }], ['path', { d: 'M12 8h.01' }]],
+  alert: [['path', { d: 'm21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3' }], ['path', { d: 'M12 9v4' }], ['path', { d: 'M12 17h.01' }]],
 }
 
 const props = defineProps({
