@@ -62,14 +62,19 @@ FACT_SOURCES = frozenset({FillSource.PROFILE, FillSource.EXTRA, FillSource.STAND
 def quote_checked(a: Answer) -> bool:
     """D-202 (Q-113, storage only; no guard calls it): did the guards check this Answer's
     quote and did the field take a value? True only for the resume/job route after G3 and
-    the grounded keep: the Answer carries its own non-empty `evidence`, a value status and
-    not the trusted-keep confidence (G8 keeps the site's value without reading the quote).
-    Such a quote is resume, posting or non-private-fact text, so the audit row and the
-    decision cache store it verbatim (a replay re-reads it in G3); every other quote is
-    stored redacted (`pagefill.stored_quote`)."""
+    the grounded keep: the Answer carries its own non-empty `evidence`, a value status, a
+    non-empty value and one of the confidences only those two routes give. The confidence
+    test is a whitelist, not "not the trusted keep" (G8 keeps the site's value without
+    reading the quote), because pagefill rewrites rows and keeps their evidence: a rejected
+    quote (value None, confidence 0) made FILL_FAILED by the required scan, and a rejected
+    or trusted-keep row made PREFILLED at `CONF_UNVERIFIED` with the shown value (G9 reset
+    or entry delete not confirmed; Q-113 review F1). A checked quote is resume, posting or
+    non-private-fact text, so the audit row and the decision cache store it verbatim (a
+    replay re-reads it in G3); every other quote is stored redacted (`pagefill.stored_quote`)."""
     return (bool(a.evidence)
             and a.status in (AnswerStatus.FILLED, AnswerStatus.PREFILLED, AnswerStatus.FILL_FAILED)
-            and a.confidence != CONF_KEEP_TRUSTED)
+            and a.confidence in (CONF_MODEL, CONF_MODEL_CHECKED, CONF_KEEP_GROUNDED)
+            and a.value not in (None, "", [], ()))
 
 
 # Module constants (TR-10), all matched on whole words / token runs.

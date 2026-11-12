@@ -725,6 +725,22 @@ def stored_quote(evidence: str, a: Optional[Answer], values: Sequence[str]) -> s
     return L.redact(evidence or "", values)
 
 
+def _stored_value(value: Any, a: Optional[Answer], values: Sequence[str]) -> Any:
+    """D-202 (Q-113 tester O1): a cached resume/job/keep decision's model value, by the same
+    rule as its quote: verbatim when the guards checked the quote and the field took it,
+    else each string (a list: each string item) redacted; None, bools and numbers as they
+    are. Replay never fills from a redacted value: the resume/job route takes a model value
+    only through a checked quote (and "[private]" fails G3 there), a keep fills the shown
+    value, and a fact decision is cached with no value."""
+    if a is not None and G.quote_checked(a):
+        return value
+    if isinstance(value, str):
+        return L.redact(value, values)
+    if isinstance(value, (list, tuple)):
+        return [L.redact(x, values) if isinstance(x, str) else x for x in value]
+    return value
+
+
 def _cache_put(run: _Run, unknown: Sequence[str] = ()) -> None:
     """The latest fresh decision per field (no G5 or corrective replies, no required `unknown` (F13);
     no value for a fact decision: the program recomputes it, §13.3). `unknown`: the fields the
@@ -758,7 +774,8 @@ def _cache_put(run: _Run, unknown: Sequence[str] = ()) -> None:
                      "facts_used_hash": F.facts_used_hash([d.ref] if d.ref else [], run.rctx, today=run.today),
                      "decision": {"source": d.source.value, "ref": d.ref,
                                   "evidence": stored_quote(d.evidence, run.answers.get(key), run.qv),
-                                  "value": d.value if keep_value else None, "via": d.via}})
+                                  "value": (_stored_value(d.value, run.answers.get(key), run.qv)
+                                            if keep_value else None), "via": d.via}})
     if rows:
         run.services.cache_put(_job_id(run), rows)
 
