@@ -12,7 +12,7 @@ One user, the owner: a new-grad computer engineer (NTU) in Singapore, comfortabl
 
 ## 3. Primary deliverable and success criteria
 
-The deliverable: from the Inbox, "Auto-apply" submits a truthful, tailored application on Greenhouse, Lever, Ashby and Workday sites and records exactly what was sent. Success (PRD §3): ≥ 70% of attempts on the single-page ATSs (≥ 50% on Workday) end submitted with a confirmation; 100% of failures carry a reason and a screenshot; 0 duplicate submissions; 0 fabricated claims; nothing personal in git.
+The deliverable: from the Inbox, "Auto-apply" submits a truthful, tailored application on Greenhouse, Lever, Ashby and Workday sites and records exactly what was sent. Success (PRD §3): ≥ 70% of attempts on the single-page ATSs (≥ 50% on Workday) end submitted with a confirmation; 100% of failures carry a reason and a screenshot; 0 duplicate submissions; every answer sent is recorded with its basis (profile, resume, a standing default, or marked as an assumption, D-208); nothing personal in git.
 
 ## 4. Constraints
 
@@ -23,9 +23,9 @@ The deliverable: from the Inbox, "Auto-apply" submits a truthful, tailored appli
 
 ## 5. Principles (non-negotiable design rules)
 
-1. **Truthful by construction.** Code decides facts; the LLM only rewords and chooses among offered options, and every generated fact must trace back to the owner's resume, profile or the JD (grounding check). When unsure, fail closed.
+1. **The model fills the form from the owner's own facts (owner, 2026-11-12, D-208; replaces "truthful by construction, fail closed").** The local model reads the whole applicant profile and the resume, nothing in them is treated as private, and it answers every field of an application by deriving sensibly from them; a required field is never left unanswered. Declaration-type questions (politically exposed person, relationships, conflicts, criminal record and the like) default to No. An answer the profile and resume do not cover is the model's best sensible answer and is recorded as an assumption for the owner to review. Code still decides what only code knows: which file is uploaded, the account identity and passwords (never shown to the model), never applying twice, and stopping at bot checks.
 2. **Fail properly.** An attempt that can't finish stops input, records a reason code, the step and a screenshot, and never submits half an application or submits twice.
-3. **Deterministic first, LLM last** in answer resolution (field map → profile rule → memory → declarations → LLM).
+3. **The model answers; code handles the mechanics (D-208; replaces "deterministic first, LLM last").** Wording matches and rules are hints to the model, never a reason to leave a field empty.
 4. **Keep the layering:** stages don't import each other; orchestrators wire them; only `store.py` has SQL; only `backends.py` talks to the model.
 5. **Everything auditable:** every answer sent is stored with its source and shown in "What I told this employer".
 6. **Personal data never leaves the machine** and never enters git.
