@@ -45,6 +45,12 @@ export function chipText(item) {
   }
 }
 
+// The label of a card's fix disclosure (Q-104 c): an optional item nobody has set
+// up is an invitation ("Set it up"); only a broken one is a repair ("See how to fix").
+export function fixLabel(item) {
+  return item?.optional && item.state === 'not_set_up' ? 'Set it up' : 'See how to fix'
+}
+
 // ---- copy (§4.4) ----
 
 // Fixed lines the screens share (§4.4). Sentence case, what happened and how to fix.
@@ -52,7 +58,7 @@ export const COPY = Object.freeze({
   checkFailed: "Couldn't check this just now. Try again in a moment.",
   hubError: "Couldn't load your connections.",
   employerEmpty: 'No employer accounts yet. JobScraper creates one only when an application on a Workday site needs it, and lists it here.',
-  readPassword: 'To see a password, open Windows Credential Manager (Windows asks for your password first), or run `accounts export-edge` to import them into Edge.',
+  readPassword: 'To see a password, open Windows Credential Manager (Windows asks for your password first), or, in PowerShell, in the JobScraper folder, run `.\\run.ps1 accounts export-edge` to import them into Edge.',
   setupAllFailed: "Couldn't check your setup just now.",
   browserNote: 'Created the first time an application runs. Sign-ins you make there are kept between restarts.',
   modeChip: 'Auto-apply on',

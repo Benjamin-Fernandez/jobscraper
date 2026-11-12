@@ -142,11 +142,27 @@ const usable = c => (c && Array.isArray(c.items) ? c : null)
 async function loadSignals() {
   const seq = ++signalsSeq
   signalsAt = Date.now()
+  const statusSeqAtStart = statusSeq
   const [c, s] = await Promise.allSettled([getConnections(), getApplyStatus()])
   if (seq !== signalsSeq) return
   connectionsBefore.value = connections.value
   connections.value = c.status === 'fulfilled' ? usable(c.value) : null
-  applyStatus.value = s.status === 'fulfilled' ? s.value : null
+  // A mode change saved while this load was in flight is newer than this answer.
+  if (statusSeqAtStart === statusSeq) applyStatus.value = s.status === 'fulfilled' ? s.value : null
+}
+
+// The mode chip follows a mode change at once (Q-104 f): Settings announces every
+// saved apply-settings change on window; re-read only the status, nothing else.
+let statusSeq = 0
+async function refreshApplyStatus() {
+  const seq = ++statusSeq
+  let s = null
+  try {
+    s = await getApplyStatus()
+  } catch {
+    s = null
+  }
+  if (seq === statusSeq) applyStatus.value = s
 }
 
 const attention = computed(() => (connections.value ? attentionItems(connections.value, connectionsBefore.value) : []))
@@ -383,6 +399,7 @@ onMounted(() => {
   window.addEventListener('hashchange', onHashChange)
   window.addEventListener('keydown', onShellKey, true)
   window.addEventListener('resize', measureTabs)
+  window.addEventListener('jobscraper:apply-settings', refreshApplyStatus)
   measureTabs()
   document.addEventListener('visibilitychange', onVisible)
   stopStarters = onJobStarted(j => shell.track(j, { started: true, announce: false }))
@@ -393,6 +410,7 @@ onBeforeUnmount(() => {
   window.removeEventListener('hashchange', onHashChange)
   window.removeEventListener('keydown', onShellKey, true)
   window.removeEventListener('resize', measureTabs)
+  window.removeEventListener('jobscraper:apply-settings', refreshApplyStatus)
   document.removeEventListener('visibilitychange', onVisible)
   stopStarters()
 })
