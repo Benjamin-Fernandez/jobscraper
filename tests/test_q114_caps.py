@@ -107,9 +107,14 @@ class _FakeJobs:
         return {"id": "fake-1", "kind": kind, "state": "running", "log": []}
 
 
-def _preflight(mode: str, daily_cap: int, per_employer: int, clicks: int):
+def _preflight(mode: str, daily_cap: int, per_employer: int, clicks: int, worker: bool = False):
     """Seed `clicks` Submit clicks today at one employer (distinct jobs), then POST /api/apply
-    for one more job of that employer. Returns (status_code, json body, fake jobs)."""
+    for one more job of that employer. Returns (status_code, json body, fake jobs).
+
+    Q-120 (D-205): POST /api/apply only queues the role. The default app (`worker=False`)
+    never starts a job; with `worker=True` the app is built with `apply_queue_worker=True`
+    (start-up hook run by the TestClient) and the queue runner starts the worker on the
+    fake swapped in after `create_app`."""
     import yaml
     from fastapi.testclient import TestClient
     from jobscraper.config import Config
@@ -141,7 +146,8 @@ def _preflight(mode: str, daily_cap: int, per_employer: int, clicks: int):
         target = make_job(st, cid, 1000)
         st.commit()
         st.close()
-        app = create_app(cfg)
+        app = create_app(cfg, apply_queue_worker=worker)
+        app.state.apply_queue.tick_s = 3600          # no background tick inside the test
         fake = _FakeJobs()
         app.state.jobs = fake
         with TestClient(app, base_url="http://localhost") as client:
@@ -150,10 +156,16 @@ def _preflight(mode: str, daily_cap: int, per_employer: int, clicks: int):
 
 
 def test_q114_b_preflight_zero_means_no_limit_ten_per_employer_and_dry_run_skips_caps():
-    # daily_cap 0, 25 clicks today, employer uncapped (0): accepted, one apply job started
+    # daily_cap 0, 25 clicks today, employer uncapped (0): accepted and queued; the default
+    # app (no worker, Q-120 H1) starts nothing
     code, body, fake = _preflight("auto", daily_cap=0, per_employer=0, clicks=25)
     assert code == 202 and len(body["accepted"]) == 1 and body["refused"] == [], (code, body)
-    assert len(fake.started) == 1 and fake.started[0][0] == "apply"
+    assert len(body["queued"]) == 1 and body["queued"][0]["position"] == 1, body
+    assert fake.started == [] and body["started"] is False
+    # the same click on an app with the worker switched on: the queue worker starts
+    code, body, fake = _preflight("auto", daily_cap=0, per_employer=0, clicks=25, worker=True)
+    assert code == 202 and len(body["queued"]) == 1, (code, body)
+    assert fake.started == [("apply", {"queue": True})] and body["started"] is True, body
 
     # employer at 10 of 10: refused cap_reached, nothing started
     code, body, fake = _preflight("auto", daily_cap=0, per_employer=10, clicks=10)
@@ -168,7 +180,7 @@ def test_q114_b_preflight_zero_means_no_limit_ten_per_employer_and_dry_run_skips
     # a dry run never counts clicks: both caps "reached" yet accepted
     code, body, fake = _preflight("dry_run", daily_cap=1, per_employer=1, clicks=3)
     assert code == 202 and body["mode"] == "dry_run" and body["refused"] == [], (code, body)
-    assert len(fake.started) == 1
+    assert len(body["queued"]) == 1 and fake.started == []
 
 
 # ------------------------------------------------------------------ C. the shipped values

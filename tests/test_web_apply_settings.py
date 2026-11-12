@@ -155,7 +155,13 @@ def test_apply_settings_mode_switch_is_seen_by_status_effective_config_and_prefl
         code, body = _post(client, target)
         assert code == 202 and body["mode"] == "dry_run" and body["refused"] == [], (code, body)
         assert body["accepted"] == [target]
-        assert fake.started == [("apply", {"job_ids": [target]})]
+        # Q-120 (D-205): the click queues the role with the effective mode; the default app
+        # (no worker, H1) starts nothing
+        assert body["queued"] == [{"job_id": target, "position": 1}], body
+        assert [w["mode"] for w in client.get("/api/apply/queue").json()["waiting"]] == ["dry_run"]
+        assert fake.started == []
+        # take it out again so the next click meets the caps, not `already_queued`
+        assert client.delete(f"/api/apply/queue/{target}").status_code == 204
 
         # and back to auto: all three views flip back, the caps bite again
         resp = client.put("/api/apply/settings", json={"mode": "auto"})
@@ -164,7 +170,8 @@ def test_apply_settings_mode_switch_is_seen_by_status_effective_config_and_prefl
         assert _effective(cfg).mode == "auto"
         code, body = _post(client, target)
         assert code == 422 and [x["reason_code"] for x in body["refused"]] == ["cap_reached"], (code, body)
-        assert len(fake.started) == 1                           # still only the dry run
+        assert fake.started == []                               # nothing ever started
+        assert client.get("/api/apply/queue").json()["waiting"] == []   # and nothing queued
 
 
 # ------------------------------------------------------------------ 3. validation
@@ -247,9 +254,12 @@ def test_apply_settings_booleans_round_trip_and_compose_reaches_the_effective_co
 def test_apply_settings_stored_caps_are_the_caps_the_preflight_enforces():
     # config would allow it (10 per employer, no daily limit); one click today at the employer
     with _world(mode="auto", daily_cap=0, per_employer=10, clicks=1) as (client, cfg, target, fake):
+        # Q-120 (D-205): an accepted click queues the role (no start on the default app); each
+        # accepted click is taken out again so the next one meets the caps, not `already_queued`
         code, body = _post(client, target)
         assert code == 202 and body["accepted"] == [target], (code, body)
-        assert len(fake.started) == 1
+        assert body["queued"] == [{"job_id": target, "position": 1}] and fake.started == [], body
+        assert client.delete(f"/api/apply/queue/{target}").status_code == 204
 
         resp = client.put("/api/apply/settings", json={"per_employer_daily_cap": 1})
         assert resp.status_code == 200
@@ -257,14 +267,15 @@ def test_apply_settings_stored_caps_are_the_caps_the_preflight_enforces():
         assert code == 422 and body["detail"] == "refused", (code, body)
         assert [x["reason_code"] for x in body["refused"]] == ["cap_reached"], body
         assert "1 of 1 today at Fake Co" in body["refused"][0]["text"], body
-        assert len(fake.started) == 1                           # nothing new started
+        assert client.get("/api/apply/queue").json()["waiting"] == []     # nothing queued
 
         # 0 = no limit
         resp = client.put("/api/apply/settings", json={"per_employer_daily_cap": 0})
         assert resp.status_code == 200 and resp.json()["per_employer_daily_cap"] == 0
         code, body = _post(client, target)
         assert code == 202 and body["accepted"] == [target], (code, body)
-        assert len(fake.started) == 2
+        assert body["queued"] == [{"job_id": target, "position": 1}] and fake.started == [], body
+        assert client.delete(f"/api/apply/queue/{target}").status_code == 204
 
         # the daily cap is read the same way
         resp = client.put("/api/apply/settings", json={"daily_cap": 1})
