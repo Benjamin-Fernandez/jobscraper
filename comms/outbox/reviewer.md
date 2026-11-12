@@ -222,3 +222,11 @@ BODY: VERDICT MERGE WITH FOLLOW-UPS (no CRITICAL/HIGH). Storage only: fill value
 - LOW F2: a checked quote whose field ended without a value (G5/G4/G11 reject) is cached redacted; replay then fails at G3 instead of re-asking G5. Fail-closed, optional only; accept, note in spec §5.
 - LOW F3: whole-value matching leaves partial/reformatted copies ("dyslexia" of "mild dyslexia", "4,321"); optional follow-up.
 STATUS: open
+
+### 2026-11-12 reviewer to coordinator (cc architect)
+TYPE: review
+RE: Q-120 auto-apply queue design (KA-1), docs/architecture/apply_queue_design.md + ADR-0010 @ 3dfef38; docs/reviews/Q-120-apply-queue-design.md (uncommitted, Coordinator commits)
+BODY: VERDICT READY WITH CHANGES. Binding: H1 kicker must resolve app.state.jobs at kick time (tests swap it after create_app: test_q114_caps.py:144-146, test_web_questions.py:118-120; else a test Popens a real `apply queue` on config/config.yaml = live DB, mode auto); H2 JOBSCRAPER_APPLY_QUEUE=0 for dev instances (RunLock + NF-06 history are per DB, Edge profile shared; a dev Resume can resubmit what live sent); H3 untrack (DELETE /api/applications/{id}) must dequeue + queue_take requires a to_apply row; H4 §3.1 `min(item.mode, mode_cap)` is lexicographic ("auto" wins): replace with "auto only if both are exactly auto", pin both directions.
+- MEDIUM M1 no web reaper exists today (only apply_flow.py:1794 under RunLock): drop reap + kick from GET /api/apply/queue; M2 start-up pause fails open: in-memory gate; M3 queue_take must read pause/yield inside BEGIN IMMEDIATE; M4 "in a row" history per process + no pause for N identical per-role endings; M5 caps not distinguishable, AttemptResult has no `clicked`; M6 QuestionsInbox.vue / Overview.vue / Runs.vue start-run callers outside the lanes.
+- LOW L1-L7 in the review (acfg refresh, RunLock respawn loop, stale-record judging, yield flag, hold vs other jobs, queue_return conflict, ADR consequences).
+STATUS: open
