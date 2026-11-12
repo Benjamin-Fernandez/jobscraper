@@ -1,11 +1,13 @@
-// Pure helpers behind the Overview tab (Q-70 wave 2, D-102/D-103): the pipeline
-// counts, the response rate, the past seven days, who to follow up with, how
-// the last run went, and what to put under "Next up". No Vue and no clock of
-// their own (`now` is passed in), so every rule is testable on its own and the
-// tab stays markup. Design: docs/architecture/ux/overview_design.md §3.
-import { daysSince, lastAt, needsFollowUp } from './applications.js'
+// Pure helpers behind the Overview tab (Q-70 wave 2, D-102/D-103; reshaped by Q-118 LA):
+// the headline numbers, the pipeline counts, the response rate, the past seven days,
+// who to follow up with, how the last run went, and what to put under "To do". No Vue
+// and no clock of their own (`now` is passed in), so every rule is testable on its own
+// and the tab stays markup. Design: docs/architecture/ux/overview_design.md §3 and
+// docs/architecture/q118_ui_polish_design.md §2.
+import { daysSince, isActive, lastAt, needsFollowUp } from './applications.js'
+import { newRoleCount } from './badges.js'
 import { utcMs } from './format.js'
-import { CLOSED_STATUSES, statusLabel } from './stages.js'
+import { CLOSED_STATUSES, stageOf, statusLabel } from './stages.js'
 
 export const DAY_MS = 86400000
 // "This week" is the rolling past 7 days, not a calendar week (O4).
@@ -19,7 +21,13 @@ export const HARD_RUN_FAILURES = ['failed', 'aborted_unhealthy']
 // The key Profile.vue reads on mount to pick its view (O6).
 export const PROFILE_VIEW_KEY = 'profile.view'
 
-const DEFAULT_STAGES = ['to_apply', 'applied', 'interviewing', 'offer']
+// Only for a stats call that failed. `to_apply` is no pipeline stage any more (D-207):
+// a saved or queued role counts as "To apply" under Active, not in the bar.
+const DEFAULT_STAGES = ['applied', 'interviewing', 'offer']
+
+// The pipeline bar's stages, in order: the four stage tabs of the Applications tab
+// (STAGE_TABS without All and Active). Each one links to `#/applications/<stage>`.
+export const PIPELINE_STAGES = ['applied', 'interviewing', 'offer', 'rejected']
 
 const list = v => (Array.isArray(v) ? v : [])
 const eventsOf = row => list(row?.events)
@@ -37,17 +45,39 @@ export function openStages(statuses = [], rows = []) {
   return out
 }
 
-// Current count per open stage, and the closed ones apart.
-export function pipeline(rows, statuses) {
+// The pipeline as the Applications tabs count it (D-207): `stageOf` folds `assessment` into
+// Interviewing and `withdrawn` into Rejected; a `to_apply` row (or a status config adds
+// later) is in no stage, so it is counted apart in `toApply` and still in `total`.
+// The same parts are also returned alone, for the legend notes.
+export function pipeline(rows) {
   const all = list(rows)
-  const stages = openStages(statuses, all).map(status => ({
-    status,
-    label: statusLabel(status),
-    n: all.filter(r => r?.status === status).length,
-  }))
-  const rejected = all.filter(r => r?.status === 'rejected').length
-  const withdrawn = all.filter(r => r?.status === 'withdrawn').length
-  return { stages, closed: { n: rejected + withdrawn, rejected, withdrawn }, total: all.length }
+  const count = test => all.filter(test).length
+  return {
+    segments: PIPELINE_STAGES.map(id => ({
+      id, label: statusLabel(id), n: count(r => stageOf(r?.status) === id),
+    })),
+    toApply: count(r => r?.status === 'to_apply'),
+    assessment: count(r => r?.status === 'assessment'),
+    rejected: count(r => r?.status === 'rejected'),
+    withdrawn: count(r => r?.status === 'withdrawn'),
+    total: all.length,
+  }
+}
+
+// The four headline numbers (KPI row): New roles in the Inbox, Active applications
+// (everything not rejected or withdrawn, "To apply" included), Interviews (interviewing and
+// assessment) with the offers beside them, and the response rate (`responseRate`).
+export function kpis(rows, jobs, statuses) {
+  const all = list(rows)
+  const { segments } = pipeline(all)
+  const n = id => segments.find(s => s.id === id)?.n ?? 0
+  return {
+    newRoles: newRoleCount(list(jobs)),
+    active: all.filter(r => r && isActive(r)).length,
+    interviews: n('interviewing'),
+    offers: n('offer'),
+    reply: responseRate(all, statuses),
+  }
 }
 
 // Of the applications you sent, how many got any reply. A reply is an
@@ -75,8 +105,8 @@ export function responseRate(rows, statuses) {
   return { applied, heard, rate: applied === 0 ? null : Math.round((heard / applied) * 100) }
 }
 
-// What happened in the rolling past 7 days. `saved` / `applied` count status
-// changes to those stages, `moved` every other change (an undo is a change
+// What happened in the rolling past 7 days. `saved` (shown as "To apply") and `applied`
+// count status changes to those stages, `moved` every other change (an undo is a change
 // too, D-101). `found` is what finished runs accepted, dry runs excluded.
 export function pastWeek(rows, runs, now = Date.now()) {
   const since = now - WINDOW_DAYS * DAY_MS
@@ -117,7 +147,7 @@ export function lastRunState(runs, now = Date.now()) {
   return { state: 'fresh', run, days }
 }
 
-// The "Next up" cards in the order the owner should do them, only those with
+// The "To do" rows in the order the owner should do them, only those with
 // work. [] means caught up. A run that never happened is the setup checklist's
 // business, not a card.
 export function nextUp({ newRoles = 0, questions = 0, followUps: due = [], run = null, jobRunning = false } = {}) {

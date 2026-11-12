@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { flushPromises, mount } from '@vue/test-utils'
+import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils'
 import Applications from '../src/tabs/Applications.vue'
 import App from '../src/App.vue'
 import { statusLabel } from '../src/stages.js'
@@ -24,17 +24,22 @@ const stageButton = (w, id) => w.find(`.stage[data-status="${id}"]`)
 
 beforeEach(() => { window.localStorage.clear() })
 afterEach(() => vi.unstubAllGlobals())
+// Q-118 LB: a mounted tab listens to hashchange (a bare #/applications goes to its last
+// tab), so a tab left mounted by an earlier test would steer a later one's hash.
+enableAutoUnmount(afterEach)
 
 describe('Applications tab', () => {
   it('groups applications by company, A to Z', async () => {
     const wrapper = await mountTab({ m4n5o6: 'rejected', a1b2c3: 'applied', j1k2l3: 'interviewing', g7h8i9: 'to_apply' })
-    await stageButton(wrapper, 'all').trigger('click')   // the default chip is Active, which hides rejected
+    // Q-118 LB (D-207): All is the first-visit tab, so the rejected role shows too.
+    expect(stageButton(wrapper, 'all').attributes('aria-pressed')).toBe('true')
     expect(groupNames(wrapper)).toEqual(['Grab', 'OKX', 'Shopee', 'Stripe'])
     const okx = wrapper.find('.company-group[data-company="OKX"]')
     expect(okx.find('.group-n').text()).toBe('1 role')
     expect(okx.find('.mark').text()).toBe('OK')
     expect(okx.find('.role-title').text()).toBe('DevOps / Site Reliability Engineer')
-    expect(wrapper.find('.count').text()).toBe('4 applications at 4 companies')
+    // The page sub counts the whole data set: active (not rejected/withdrawn) of tracked.
+    expect(wrapper.find('.count').text()).toBe('3 active · 4 tracked at 4 companies')
   })
 
   it('two roles at one company sit in one group, ordered by stage', async () => {
@@ -58,11 +63,12 @@ describe('Applications tab', () => {
   it('the stage strip counts each stage and filters to it', async () => {
     const wrapper = await mountTab({ m4n5o6: 'rejected', a1b2c3: 'applied', j1k2l3: 'applied', g7h8i9: 'to_apply' })
     const strip = wrapper.findAll('.stage').map(s => [s.find('.stage-label').text(), s.find('.stage-n').text()])
+    // Q-118 LB (D-207): All, Active, then the four stages; no Saved/Withdrawn tab.
     expect(strip).toEqual([
-      ['Active', '3'], ['All', '4'], ['Saved', '1'], ['Applied', '2'], ['Interviewing', '0'],
-      ['Offer', '0'], ['Rejected', '1'], ['Withdrawn', '0'],
+      ['All', '4'], ['Active', '3'], ['Applied', '2'], ['Interviewing', '0'],
+      ['Offer', '0'], ['Rejected', '1'],
     ])
-    expect(stageButton(wrapper, 'active').attributes('aria-pressed')).toBe('true')
+    expect(stageButton(wrapper, 'all').attributes('aria-pressed')).toBe('true')
 
     await stageButton(wrapper, 'applied').trigger('click')
     expect(stageButton(wrapper, 'applied').attributes('aria-pressed')).toBe('true')
@@ -81,37 +87,41 @@ describe('Applications tab', () => {
     expect(stageButton(wrapper, 'all').find('.stage-n').text()).toBe('1')
   })
 
-  it('offers exactly the statuses config serves, written for people', async () => {
+  // Q-118 LB (D-207): the move targets are the four stages, not every config status;
+  // the menu is named for its row and the current stage is checked (and not offered).
+  it('the Move menu offers the four stages, written for people, the current one checked', async () => {
     const wrapper = await mountTab({ a1b2c3: 'applied' })
-    const select = row(wrapper, 'a1b2c3').find('select')
-    expect(select.findAll('option').map(o => o.attributes('value')))
-      .toEqual(['to_apply', 'applied', 'interviewing', 'offer', 'rejected', 'withdrawn'])
-    expect(select.findAll('option').map(o => o.text()))
-      .toEqual(['Saved', 'Applied', 'Interviewing', 'Offer', 'Rejected', 'Withdrawn'])
-    expect(select.element.value).toBe('applied')
+    const trigger = row(wrapper, 'a1b2c3').find('.ui-move-trigger')
+    expect(trigger.find('.pill').text()).toBe('Applied')
+    expect(trigger.attributes('aria-label')).toBe('Move DevOps / Site Reliability Engineer at OKX, now Applied')
+    await trigger.trigger('click')
+    const items = row(wrapper, 'a1b2c3').findAll('[role="menuitemradio"]')
+    expect(items.map(o => o.text().trim())).toEqual(['Applied', 'Interviewing', 'Offer', 'Rejected'])
+    expect(items.map(o => o.attributes('aria-checked'))).toEqual(['true', 'false', 'false', 'false'])
+    expect(items[0].attributes('disabled')).toBeDefined()
   })
 
-  it('a status added to config (on_hold) is offered, labelled and counted with no code change', async () => {
+  // D-207 dropped the config-driven strip and select: a status config adds later is not a
+  // tab or a move target any more. What stays (no code change needed): the row still
+  // shows, wears its own word, and counts under All and Active.
+  it('a status added to config (on_hold) still shows, labelled, under All and Active', async () => {
     const vocabulary = ['to_apply', 'applied', 'interviewing', 'on_hold', 'offer', 'rejected', 'withdrawn']
-    const wrapper = await mountTab({ a1b2c3: 'applied' }, vocabulary)
-    expect(row(wrapper, 'a1b2c3').findAll('option').map(o => o.attributes('value'))).toEqual(vocabulary)
-
-    const select = row(wrapper, 'a1b2c3').find('select')
-    await select.trigger('pointerdown')
-    await select.setValue('on_hold')
-    await flushPromises()
-    const post = api.calls.find(c => c.method === 'POST')
-    expect(JSON.parse(post.body).status).toBe('on_hold')
+    const wrapper = await mountTab({ a1b2c3: 'on_hold', j1k2l3: 'applied' }, vocabulary)
     expect(row(wrapper, 'a1b2c3').attributes('data-status')).toBe('on_hold')
-    expect(stageButton(wrapper, 'on_hold').text()).toContain('On hold')
-    expect(stageButton(wrapper, 'on_hold').find('.stage-n').text()).toBe('1')
+    expect(row(wrapper, 'a1b2c3').find('.ui-move-trigger .pill').text()).toBe('On hold')
+    expect(stageButton(wrapper, 'on_hold').exists()).toBe(false)
+    expect(stageButton(wrapper, 'all').find('.stage-n').text()).toBe('2')
+    expect(stageButton(wrapper, 'active').find('.stage-n').text()).toBe('2')
+    await stageButton(wrapper, 'active').trigger('click')
+    expect(row(wrapper, 'a1b2c3').exists()).toBe(true)
+    await stageButton(wrapper, 'applied').trigger('click')
+    expect(row(wrapper, 'a1b2c3').exists()).toBe(false)
   })
 
   it('advancing applied -> interviewing keeps both events, in order', async () => {
     const wrapper = await mountTab({ a1b2c3: 'applied' })
-    const select = row(wrapper, 'a1b2c3').find('select')
-    await select.trigger('pointerdown')
-    await select.setValue('interviewing')
+    await row(wrapper, 'a1b2c3').find('.ui-move-trigger').trigger('click')
+    await row(wrapper, 'a1b2c3').findAll('[role="menuitemradio"]').find(b => b.text().trim() === 'Interviewing').trigger('click')
     await flushPromises()
 
     const post = api.calls.find(c => c.method === 'POST')
@@ -204,14 +214,15 @@ describe('Applications tab', () => {
       await flushPromises()
       expect(wrapper.find('.app-row[data-job="a1b2c3"]').exists()).toBe(true)
     })
-    expect(wrapper.find('.app-row[data-job="a1b2c3"] select').element.value).toBe('applied')
+    expect(wrapper.find('.app-row[data-job="a1b2c3"]').attributes('data-status')).toBe('applied')
+    expect(wrapper.find('.app-row[data-job="a1b2c3"] .ui-move-trigger .pill').text()).toBe('Applied')
     expect(wrapper.find('.company-group[data-company="OKX"]').exists()).toBe(true)
   })
 })
 
 describe('stage labels', () => {
   it('writes known statuses for people and derives the rest', () => {
-    expect(statusLabel('to_apply')).toBe('Saved')
+    expect(statusLabel('to_apply')).toBe('To apply')   // Q-118 D-207: was "Saved"
     expect(statusLabel('interviewing')).toBe('Interviewing')
     expect(statusLabel('on_hold')).toBe('On hold')
     expect(statusLabel('')).toBe('')

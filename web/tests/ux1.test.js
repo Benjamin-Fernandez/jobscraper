@@ -182,11 +182,25 @@ describe('Applications: notes', () => {
     return wrapper
   }
   const row = (w, id) => w.find(`.app-row[data-job="${id}"]`)
+  // Q-118 LB: "Add note" / "Edit note" is an item of the row's "⋯" menu.
+  async function noteItem(w, id) {
+    const more = row(w, id).find('.app-more-trigger')
+    if (more.attributes('aria-expanded') !== 'true') await more.trigger('click')
+    await flushPromises()
+    return row(w, id).findAll('[role="menuitem"]').find(b => /^(Add|Edit) note$/.test(b.text().trim()))
+  }
+  async function openNote(w, id) {
+    await (await noteItem(w, id)).trigger('click')
+    await flushPromises()
+  }
 
   it('adds a note without adding to the history', async () => {
     const wrapper = await mountTab({ a1b2c3: 'applied' })
-    expect(row(wrapper, 'a1b2c3').find('button.note-edit').text()).toBe('Add note')
-    await row(wrapper, 'a1b2c3').find('button.note-edit').trigger('click')
+    expect((await noteItem(wrapper, 'a1b2c3')).text()).toBe('Add note')
+    await (await noteItem(wrapper, 'a1b2c3')).trigger('click')
+    await flushPromises()
+    // The note field takes the focus when it opens.
+    expect(document.activeElement).toBe(row(wrapper, 'a1b2c3').find('textarea.note-input').element)
     await row(wrapper, 'a1b2c3').find('textarea.note-input').setValue('Recruiter call Friday')
     await row(wrapper, 'a1b2c3').find('button.note-save').trigger('click')
     await flushPromises()
@@ -194,23 +208,35 @@ describe('Applications: notes', () => {
     expect(JSON.parse(post.body)).toMatchObject({ status: 'applied', notes: 'Recruiter call Friday' })
     expect(api.apps.a1b2c3.events).toHaveLength(1)
     expect(row(wrapper, 'a1b2c3').find('.notes').text()).toBe('Recruiter call Friday')
-    expect(row(wrapper, 'a1b2c3').find('button.note-edit').text()).toBe('Edit note')
+    expect((await noteItem(wrapper, 'a1b2c3')).text()).toBe('Edit note')
   })
 
+  // Q-118 LB: the old pin disabled every other row's note button during a save; the menu
+  // item is not disabled, so this pins the review's intent directly: a note opened on
+  // another row while a slow save is in flight stays open when that save lands.
   it('a slow save never closes another row\'s open note (review)', async () => {
     const wrapper = await mountTab({ a1b2c3: 'applied', j1k2l3: 'applied' })
-    await row(wrapper, 'a1b2c3').find('button.note-edit').trigger('click')
+    const real = api.fetch
+    let release
+    vi.stubGlobal('fetch', vi.fn((url, init = {}) => (init.method === 'POST'
+      ? new Promise(resolve => { release = () => resolve(real(url, init)) })
+      : real(url, init))))
+    await openNote(wrapper, 'a1b2c3')
     await row(wrapper, 'a1b2c3').find('textarea.note-input').setValue('first')
     await row(wrapper, 'a1b2c3').find('button.note-save').trigger('click')
-    // While that save is in flight, no other note can be opened.
-    expect(row(wrapper, 'j1k2l3').find('button.note-edit').attributes('disabled')).toBeDefined()
     await flushPromises()
-    expect(row(wrapper, 'j1k2l3').find('button.note-edit').attributes('disabled')).toBeUndefined()
+    expect(release).toBeTypeOf('function')              // the save is in flight
+    await openNote(wrapper, 'j1k2l3')
+    expect(row(wrapper, 'j1k2l3').find('textarea.note-input').exists()).toBe(true)
+    release()
+    await flushPromises()
+    expect(row(wrapper, 'j1k2l3').find('textarea.note-input').exists()).toBe(true)
+    expect(row(wrapper, 'a1b2c3').find('.notes').text()).toBe('first')
   })
 
   it('Cancel sends nothing', async () => {
     const wrapper = await mountTab({ a1b2c3: 'applied' })
-    await row(wrapper, 'a1b2c3').find('button.note-edit').trigger('click')
+    await openNote(wrapper, 'a1b2c3')
     await row(wrapper, 'a1b2c3').find('textarea.note-input').setValue('draft')
     await row(wrapper, 'a1b2c3').find('button.note-cancel').trigger('click')
     expect(api.calls.some(c => c.method === 'POST')).toBe(false)
@@ -226,8 +252,12 @@ describe('Applications: sort', () => {
     await flushPromises()
     const names = () => wrapper.findAll('.company-group .group-name').map(g => g.text())
     expect(names()).toEqual(['Grab', 'OKX'])
-    await wrapper.find('select.app-sort').setValue('recent')
-    expect(names()).toEqual(['OKX', 'Grab'])
+    // Q-118 LB: the sort is a Segmented radiogroup; Recent is one list with no company
+    // headers, the company leading each row's second line.
+    const sort = wrapper.find('.app-sort[role="radiogroup"]')
+    await sort.findAll('button[role="radio"]').find(b => b.text().trim() === 'Recent').trigger('click')
+    expect(names()).toEqual([])
+    expect(wrapper.findAll('.app-row').map(r => r.find('.row-meta').text().split(' · ')[0])).toEqual(['OKX', 'Grab'])
   })
 })
 

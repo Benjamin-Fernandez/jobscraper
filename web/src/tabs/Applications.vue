@@ -214,6 +214,15 @@ async function revealHashItem() {
 }
 watch([hashItem, loading], revealHashItem)
 
+// On a phone the strip scrolls sideways: keep the open tab in view (a remembered
+// "Rejected" would otherwise sit past the right edge). `nearest` leaves the page's
+// vertical scroll alone and does nothing when the tab is already visible.
+watch([stage, loading], async () => {
+  if (loading.value) return
+  await nextTick()
+  stageBtns[stage.value]?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' })
+})
+
 // ---- the live region: one polite sentence at a time ----
 
 const announcement = ref('')

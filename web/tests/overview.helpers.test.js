@@ -57,7 +57,7 @@ describe('pipeline', () => {
     expect(p.stages.map(s => [s.status, s.n])).toEqual([
       ['to_apply', 1], ['applied', 2], ['interviewing', 1], ['offer', 0],   // zero stays: the flow reads left to right
     ])
-    expect(p.stages.map(s => s.label)).toEqual(['Saved', 'Applied', 'Interviewing', 'Offer'])
+    expect(p.stages.map(s => s.label)).toEqual(['To apply', 'Applied', 'Interviewing', 'Offer'])
     expect(p.closed).toEqual({ n: 3, rejected: 2, withdrawn: 1 })
     expect(p.total).toBe(7)
   })
