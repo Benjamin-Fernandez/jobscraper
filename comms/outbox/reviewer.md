@@ -213,3 +213,12 @@ BODY: VERDICT FIX FIRST (1 HIGH, one-line fix). Tests: layering 13/13, connectio
 - MEDIUM M1: hub CLI lines need cwd + PYTHONPATH=src (jobscraper not installed); use `.\run.ps1 …` "in the JobScraper folder". M2: connections.py:215-220 backup mailbox with the same username double-counts attention. M3: need_now rule (b) never expires for a stuck in-flight attempt (spec gap; bound by recency).
 - Audit: A1 partial (H1), A2/A5 partial by design (W2/Q-111), A3/A4/A6/A7/A13 fixed.
 STATUS: open
+
+### 2026-11-12 reviewer to coordinator (cc software-engineer, tester)
+TYPE: review
+RE: Q-113 D-202 evidence redaction (KA-2), branch eng/Q-113-evidence-redaction @ 90b3281 (code ae474d0); docs/reviews/Q-113-evidence-redaction.md (uncommitted, Coordinator commits)
+BODY: VERDICT MERGE WITH FOLLOW-UPS (no CRITICAL/HIGH). Storage only: fill values, guard decisions and replay of accepted/fact/unknown/trusted-keep rows unchanged; "[private]" cannot newly pass G3 (cnorm keeps brackets). Tests on branch export: -k guards 5/5, -k test_layering 13/13, -k q74 79/80 (the 1 fail is the expected known-gap pin that spec §8 pin 1 flips).
+- MEDIUM F1: pagefill.py:630+816: a rejected optional (BLANK_OPTIONAL, value None, conf 0.0, evidence=quote) that the step-12 required scan marks "required_scan" is rewritten to FILL_FAILED; quote_checked (guards.py:70-72) then returns True and audit_row stores the rejected quote verbatim (repro with dummy salary line). Fix: add `a.confidence > 0 and a.value not in (None, "", [], ())` to quote_checked + a pin; fix its docstring and spec §2.
+- LOW F2: a checked quote whose field ended without a value (G5/G4/G11 reject) is cached redacted; replay then fails at G3 instead of re-asking G5. Fail-closed, optional only; accept, note in spec §5.
+- LOW F3: whole-value matching leaves partial/reformatted copies ("dyslexia" of "mild dyslexia", "4,321"); optional follow-up.
+STATUS: open
