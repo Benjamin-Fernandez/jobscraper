@@ -1,7 +1,7 @@
 // Q-104 follow-ups to Q-100, pinned test-first (the (f) ModeChip refresh pin lives in
 // q100-shell.test.js beside the other chip pins, and (d) in tests/test_connections.py):
 //   (b) the employer accounts hint shows the export command the way the owner types it,
-//       `.\run.ps1 accounts export-edge`, after "In PowerShell, in the JobScraper folder"
+//       `.\run.ps1 accounts export-edge`, after "in PowerShell, in the JobScraper folder"
 //       (D-198 M1 fixed the other commands and missed this one);
 //   (c) a card that is optional and not set up invites ("Set it up"); only a card that
 //       needs the owner says "See how to fix".
@@ -25,7 +25,7 @@ afterEach(() => {
 })
 
 const COMMAND = '.\\run.ps1 accounts export-edge'      // one backslash in the string, and in the DOM text
-const INTRO = 'In PowerShell, in the JobScraper folder'
+const INTRO = /in powershell, in the jobscraper folder/i   // mid-sentence or sentence-start
 
 describe('Q-104 b: the employer accounts export line', () => {
   const lineOf = w => w.findAll('.employer-note').find(p => p.text().includes('export-edge'))
@@ -35,7 +35,7 @@ describe('Q-104 b: the employer accounts export line', () => {
     const line = lineOf(w)
     expect(line, 'a line mentioning export-edge').toBeTruthy()
     const text = line.text()
-    const intro = text.indexOf(INTRO)
+    const intro = text.search(INTRO)
     const cmd = text.indexOf(COMMAND)
     expect(intro).toBeGreaterThanOrEqual(0)
     expect(cmd).toBeGreaterThan(intro)                         // where to run it comes first
@@ -57,8 +57,9 @@ describe('Q-104 b: the employer accounts export line', () => {
     const w = mount(ConnectionsHub, { props: { connections: cloneSample(sample) }, attachTo: document.body })
     await flushPromises()
     const card = w.find('[data-card="employer-accounts"]')
-    expect(card.text()).toContain(INTRO)
-    expect(card.text()).toContain(COMMAND)
+    const line = card.findAll('.employer-note').find(p => p.text().includes('export-edge'))
+    expect(line.text()).toMatch(INTRO)
+    expect(line.text()).toContain(COMMAND)
     expect(card.find('input').exists()).toBe(false)             // D-191
   })
 })
