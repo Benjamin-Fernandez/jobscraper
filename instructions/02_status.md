@@ -6,8 +6,8 @@
 
 ## Now / Next (≤ 10 lines; history goes to `docs/planning/session_log.md`)
 
-- **Now (2026-11-12):** search → shortlist and auto-apply are separate and both work on `personal`. Auto-apply starts only from the owner's click (Inbox button, D-200) and that click now **submits** (D-203, `apply.mode: auto`, no confirm); caps: no daily limit, 10 per employer per day (D-204). The local model reads the whole profile (D-201); unchecked model quotes are stored redacted (D-202). Q-100 Wave 1 (Settings hub, shell) is merged by its session.
-- **Next:** owner restarts the live app; the first Auto-apply clicks are real submissions and the filler's first live runs: read each attempt's audit in Applications afterwards (Q-92 F4, Q-93 M1, Q-95 a). Q-111 apply settings endpoints (`GET/PUT /api/apply/settings`, `writable`, `compose_enabled`) for Q-100's Settings → Apply (Q-104); Q-115 docs. See handover.
+- **Now (2026-11-12):** search → shortlist and auto-apply are separate and both work on `personal`. An Inbox Auto-apply click submits (D-203, `apply.mode: auto`); caps: no daily limit, 10 per employer (D-204). **Settings is one page** (Q-116): a category rail (Accounts / Apply / Search / Preferences), rows that show the value, open in place and save on change; apply mode, limits, browser window, human-check wait and cover letters are editable there (Q-111, stored in the settings table over config.yaml).
+- **Next:** owner restarts the live app; the first Auto-apply clicks are real submissions and the filler's first live runs: read each attempt's audit afterwards (Q-92 F4, Q-93 M1, Q-95 a). Q-104 (Q-100 session: shell chip listens to `jobscraper:apply-settings`, account copy); Q-117 Settings "Later" options; Q-115 docs. See handover.
 - **Blocked on the owner:** nothing. Real submissions happen only on the owner's click.
 
 ## 1. Milestones
@@ -185,3 +185,4 @@ Decided items aren't reopened. If facts change, raise a new decision that refere
 | K-1 | Research briefs: claims marked K or "unverified" in each brief's last section | assumption | open; spikes S-1 to S-4 settle the design-critical ones |
 | K-2 | 62 of 257 Inbox roles had no stored JD on 2026-10-23 (45 Greenhouse); tailoring needs the JD | verified then, not re-checked | open; the apply flow fetches the JD when missing (design) |
 | K-3 | `test_filter::test_filter_cli_test_runs_against_a_draft_rules_file` failed once ("REJECT by location_explicit") while several agents ran full suites at once; 22/22 twice in isolation on the same branch (2026-11-02) | observed once | open: likely a shared temp/resource between concurrent runs; re-check if it recurs |
+| K-4 | One web test failed once in six consecutive full `npx vitest run` runs on the Q-116 integration tree (986 tests; the failing test was not captured; the other five runs and the run on `personal` were green). Likely a timer-based test under load (hub 30 s / 3 s polling, shell attention polling, the 3 s "Saved" flash) | observed once, 2026-11-12 | open: if it recurs, `npx vitest run --reporter=verbose` names it; route to the tester |
