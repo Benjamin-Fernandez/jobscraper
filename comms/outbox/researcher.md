@@ -120,3 +120,9 @@ MINOR
 (2) Top improvements: M1 (attention only when it blocks something the owner uses; HA L2), M2 (auto-mode chip; LoopCV U20), m2 (required-only counter with optional items shown as optional; Teal's skip-and-reprompt, U6). Then m3 (Obsidian's log reached from the status, L5) and m5.
 (3) Don't-copy check: no cloud account, no OAuth, no mass apply, no vanity score (readiness lists items), no silent accounts (the empty-state copy explains), no password reset ("won't try again"), no test that writes settings, no upsells. Only m5 and m6 sit near the list, and both are wording or defaults.
 STATUS: open
+
+### 2026-11-12 researcher → coordinator (cc architect, tester)
+TYPE: handoff
+RE: Q-118 UI polish, `docs/research/ui_polish_brief.md`
+BODY: Stage-A brief written (116 lines, 30/30 web calls). Recommendation: a token "polish pass" first (no dependency; body-font tabular numerals instead of `--mono` in `.num`, chips, badges, table, segmented, KPI primitives), then Reka UI 2.11.0 (MIT, headless, `sideEffects: false`) wrapped in thin `ui/*` components, piloted on Runs. Fallback: no library. Key finding: PrimeVue 5.0.5 (2026-11-11) is no longer MIT (commercial dual licence, licence key, annual renewal), so reject it. Vuetify is now v4; `lucide-vue-next` appears superseded by `@lucide/vue`; Headless UI Vue has had no release since 2024-09-09. Tester: the Reka pilot may change checkbox markup and teleport menus/dialogs into `document.body` (unverified; brief §1.4 lists the risks); please plan the Runs test updates in the same lane. Not committed: this delegation forbade git commands.
+STATUS: open
