@@ -530,3 +530,8 @@ STATUS: open
 - (f) 4 pins in `web/tests/q100-shell.test.js` (auto->dry_run, dry_run->auto, failed re-read, listener removed on unmount); mutation-checked both listener lines.
 - (b) `web/tests/q104-followups.test.js` (3), (c) same file (4) plus the old optional-card loop in `q100-hub.test.js` retargeted (summary "Set it up" for optional not_set_up, "See how to fix" for attention).
 - Known flake seen once: `q75-shell.test.js` "g then a letter" (K-4), green on rerun.
+
+## handoff Q-121 contract v7 pins, branch tst/Q-121-contract-v7-pins (from arch/Q-121-contract-v7 c45c756)
+TYPE: handoff
+BODY: Retargeted the three stale exact-list pins to list the v7 members explicitly (no subset checks): test_apply_contracts_v5 `test_fill_sources_match_the_model_output_schema_enum` (+default, assumption, none, in order), test_apply_questions `test_question_contract_types_are_the_ones_the_design_names` (QuestionReason +assumed, QuestionStatus +assumed). New tests/test_apply_contracts_v7.py, 6 tests: version >= 7; FillPolicy exactly strict/always and a default ResolveContext is STRICT; Answer/ModelDecision/PageOutcome built the old way, new fields False/empty; DOCUMENT_MISSING and OWNER_FACT_MISSING copy has {detail}, formats, says nothing was sent; DEFAULT_RULES/FALLBACK_RULES unique non-empty strings and disjoint; v6 names (QueuePause, QUEUE_PAUSE_TEXTS, RETURNS_ITEM) survive. No src edits. No defect found in the contract change.
+STATUS: open
