@@ -449,6 +449,11 @@ READER_JS = "(arg) => {" + HELPERS_JS + r"""
       continue;
     }
     // inputs and textareas
+    // Q-119: an input hidden from assistive tech and out of the tab order is a widget's
+    // helper, not a field a person fills. react-select renders one (`requiredInput`, a
+    // `required` twin with no label) beside its combobox while the select is empty; read
+    // as a field it became a second, label-less required question for every select.
+    if (el.getAttribute('aria-hidden') === 'true' && el.tabIndex < 0) { done.add(el); continue; }
     const ctl = reactCtl(el);
     const visible = vis(el) || (ctl && vis(ctl));
     if (!visible || off) continue;
@@ -462,7 +467,10 @@ READER_JS = "(arg) => {" + HELPERS_JS + r"""
     }
     if (ctl || /\bselect__input\b/.test(el.className || '')) {
       const multi = !!(ctl && ctl.querySelector('.select__value-container--is-multi'));
-      push(el, 'react_select', multi ? 'multi_choice' : 'typeahead');
+      // Q-119: the skipped `requiredInput` twin still says the select is required.
+      const shell = el.closest('.select__container, [class*="select__container"]');
+      const twin = !!(shell && shell.querySelector('input[required][aria-hidden="true"]'));
+      push(el, 'react_select', multi ? 'multi_choice' : 'typeahead', twin ? { required: true } : undefined);
       continue;
     }
     if (el.readOnly || el.getAttribute('aria-readonly') === 'true') continue;
