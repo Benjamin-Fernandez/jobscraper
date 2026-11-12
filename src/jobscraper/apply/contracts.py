@@ -20,7 +20,7 @@ from dataclasses import dataclass, field
 from enum import Enum, IntEnum
 from typing import Any, Callable, Optional, Protocol, Sequence, Union, runtime_checkable
 
-CONTRACT_VERSION = 5   # 2: D-69 (no FAILED after the Submit click, ADR-0004), D-68 context fields
+CONTRACT_VERSION = 6   # 2: D-69 (no FAILED after the Submit click, ADR-0004), D-68 context fields
                        # 3: D-70 (additive): prefill sources/policy, PREFILLED status, account
                        #    statuses, sign-up outcomes, Workday entry, identity email, adapter
                        #    `prefill`/`read_values`, SIGNING_UP -> SIGNING_UP (backup email)
@@ -47,6 +47,8 @@ CONTRACT_VERSION = 5   # 2: D-69 (no FAILED after the Submit click, ADR-0004), D
                        #    and .DISABILITY (neither employer-specific; apply_design §7.5).
                        #    N6a D1 / D-167 (still v5, additive): FormField.fit_type (derived
                        #    property, not a field; CHOICE_TYPES unchanged; llm_fill_design §3.1).
+                       # 6: D-205 (additive; apply_queue_design.md §3.6, ADR-0010): QueuePause,
+                       #    QUEUE_PAUSE_TEXTS, RETURNS_ITEM, QUEUE_REFUSAL_TEXTS.
 
 
 # --------------------------------------------------------------------------
@@ -217,6 +219,110 @@ STATE_TEXTS: dict[AttemptState, ReasonText] = {
     AttemptState.READY_TO_SUBMIT: ReasonText(
         "Dry run: everything is filled in and nothing was sent.",
         "Check the answers below. The form stays open for 10 minutes."),
+}
+
+
+# --------------------------------------------------------------------------
+# Auto-apply queue (D-205; apply_queue_design.md §3.6, §4.1, §7.2; ADR-0010)
+# --------------------------------------------------------------------------
+
+class QueuePause(str, Enum):
+    """Why the auto-apply queue is paused (stored in the settings table under
+    `apply_queue.paused`; `DISABLED` is shown by the web view only, never stored)."""
+    OWNER = "owner"
+    RESTARTED = "restarted"
+    APP_CLOSED = "app_closed"
+    CANCELLED = "cancelled"
+    PROFILE_INCOMPLETE = "profile_incomplete"
+    MODEL_UNAVAILABLE = "model_unavailable"
+    BROWSER_UNAVAILABLE = "browser_unavailable"
+    FILL_FAILED = "fill_failed"
+    BOT_CHECKS = "bot_checks"
+    REPEATED_ERRORS = "repeated_errors"
+    REPEATED_FAILURES = "repeated_failures"
+    DAILY_LIMIT = "daily_limit"
+    WORKER_FAILED = "worker_failed"
+    BUSY_ELSEWHERE = "busy_elsewhere"
+    DISABLED = "disabled"
+
+
+# Pauses after which the worker puts the role back at the front of the queue,
+# only when its attempt ended `failed` with no Submit click (§4.1, NF-06).
+RETURNS_ITEM = frozenset({
+    QueuePause.PROFILE_INCOMPLETE, QueuePause.MODEL_UNAVAILABLE,
+    QueuePause.BROWSER_UNAVAILABLE, QueuePause.DAILY_LIMIT,
+})
+
+# Owner-facing copy for the paused banner (§7.2). `{detail}` never holds a personal value.
+QUEUE_PAUSE_TEXTS: dict[QueuePause, ReasonText] = {
+    QueuePause.OWNER: ReasonText(
+        "The queue is paused.",
+        "Resume when you're ready."),
+    QueuePause.RESTARTED: ReasonText(
+        "Roles are waiting from your last session. Auto-apply doesn't start by itself "
+        "after JobScraper restarts.",
+        "Resume to continue, or clear the queue."),
+    QueuePause.APP_CLOSED: ReasonText(
+        "JobScraper was closed, so the queue stopped after the application in progress.",
+        "Resume to continue."),
+    QueuePause.CANCELLED: ReasonText(
+        "You stopped an application, so the queue is paused.",
+        "Resume to go on with the next role."),
+    QueuePause.PROFILE_INCOMPLETE: ReasonText(
+        "Your application details are missing: {detail}.",
+        "Fill them in under Profile → Application details, then resume."),
+    QueuePause.MODEL_UNAVAILABLE: ReasonText(
+        "The local AI model isn't answering, so the queue is paused. Nothing was sent.",
+        "Start Ollama, then resume. The role it was on is back at the front."),
+    QueuePause.BROWSER_UNAVAILABLE: ReasonText(
+        "Edge couldn't open for auto-apply: {detail}.",
+        "Close any JobScraper Edge window (a sign-in window, for example), then resume. "
+        "The role is back at the front."),
+    QueuePause.FILL_FAILED: ReasonText(
+        "The form filler couldn't answer a required question, so the queue is paused. "
+        "Nothing was sent.",
+        "See the role in Applications. Resume to go on with the next one."),
+    QueuePause.BOT_CHECKS: ReasonText(
+        "Two sites in a row showed a CAPTCHA or bot check, so the queue is paused.",
+        "Apply to those two by hand. Resume to go on with the rest."),
+    QueuePause.REPEATED_ERRORS: ReasonText(
+        "The last 3 applications stopped with an unexpected error, so the queue is paused.",
+        "Check the Developer tab log, then resume."),
+    QueuePause.REPEATED_FAILURES: ReasonText(
+        "The last 3 applications stopped the same way ({detail}), so the queue is paused.",
+        "Fix the cause shown in Applications, then resume."),
+    QueuePause.DAILY_LIMIT: ReasonText(
+        "Today's limit is reached ({detail}).",
+        "Resume tomorrow, or raise the limit in Settings → Apply."),
+    QueuePause.WORKER_FAILED: ReasonText(
+        "Auto-apply stopped unexpectedly, so the queue is paused.",
+        "Check the Developer tab log, then resume."),
+    QueuePause.BUSY_ELSEWHERE: ReasonText(
+        "Another auto-apply run (started from the command line) is using the browser.",
+        "Resume when it has finished."),
+    QueuePause.DISABLED: ReasonText(
+        "Auto-apply is switched off in this copy of JobScraper.",
+        "Roles can be queued here, but nothing is applied."),
+}
+
+# Refusals at enqueue (and the untrack 409 `in_progress`), API-only codes beside
+# ReasonCode's: `{job_id, reason_code, text, hint}` in POST /api/apply (§3.5, §7.2).
+QUEUE_REFUSAL_TEXTS: dict[str, ReasonText] = {
+    "not_found": ReasonText(
+        "This role is no longer in the database.",
+        ""),
+    "already_queued": ReasonText(
+        "This role is already in the auto-apply queue.",
+        "See it in Runs."),
+    "in_progress": ReasonText(
+        "JobScraper is applying to this role right now.",
+        "Stop it in Runs first if you want to remove it."),
+    "queue_full": ReasonText(
+        "The queue is full (100 roles).",
+        "Add more once some have finished."),
+    "disabled": ReasonText(
+        "Auto-apply is switched off in this copy of JobScraper.",
+        "Roles can be queued here, but nothing is applied."),
 }
 
 
