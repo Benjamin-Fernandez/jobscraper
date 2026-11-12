@@ -60,8 +60,13 @@ describe('Runs tab: starting a run', () => {
   it('sends the dry-run toggle and a changed company count', async () => {
     const wrapper = await mountRuns()
     await wrapper.find('#run-batch').setValue('25')
-    await wrapper.find('input[type="checkbox"]').setValue(true)
-    expect(wrapper.find('button.start-run').text()).toBe('Start dry run')
+    expect(wrapper.find('button.start-run').text()).toBe('Check 25 companies')
+    // Q-118 LC: Dry run is a switch, named by its label, not a raw checkbox.
+    const dry = wrapper.find('button[role="switch"]')
+    expect(dry.text()).toContain('Dry run')
+    await dry.trigger('click')
+    expect(dry.attributes('aria-checked')).toBe('true')
+    expect(wrapper.find('button.start-run').text()).toBe('Start dry run (25 companies)')
     await start(wrapper)
     expect(JSON.parse(posts('api/jobs/run')[0].body)).toEqual({ batch_size: 25, dry_run: true })
   })
@@ -199,8 +204,10 @@ describe('Runs tab: history', () => {
     ]
     const wrapper = await mountRuns({ runs })
     const cells = r => wrapper.findAll(`tr[data-run="${r}"] td`).map(td => td.text())
-    expect(cells(12)).toEqual(['', '12', '23 Sep', '10', '412', '3 matches', '16 min', '2', 'success'])
-    expect(cells(11)).toEqual(['', '11', '21 Sep', '—', '—', '0 matches', '—', '—', 'failed'])
+    // Q-118 LC: the select cell names its run, Matches is the bare number, an
+    // unknown figure is an empty cell (not a dash), and the status is a badge word.
+    expect(cells(12)).toEqual(['Select run 12', '12', '23 Sep', '10', '412', '3', '16 min', '2', 'Success'])
+    expect(cells(11)).toEqual(['Select run 11', '11', '21 Sep', '', '', '0', '', '', 'Failed'])
     // The failed count opens the Companies tab on its Failed list.
     await wrapper.find('tr[data-run="12"] .failed-link').trigger('click')
     expect(window.location.hash).toBe('#/companies')
@@ -215,11 +222,16 @@ describe('Runs tab: history', () => {
 
   it('the picker: tick runs, see the matches, show them in the Inbox', async () => {
     const wrapper = await mountRuns()
-    expect(wrapper.find('.picker-count').text()).toBe('Nothing ticked.')
-    expect(wrapper.find('button.show-picked').attributes('disabled')).toBeDefined()
+    // Q-118 LC: nothing selected, no bulk bar (and so no Show button to press).
+    expect(wrapper.find('.ui-bulkbar').exists()).toBe(false)
+    expect(wrapper.find('button.show-picked').exists()).toBe(false)
     await wrapper.find('tr[data-run="11"] input').setValue(true)
+    expect(wrapper.find('.ui-bulkbar').text()).toContain('1 run selected')
     await wrapper.find('tr[data-run="12"] input').setValue(true)
-    expect(wrapper.find('.picker-count').text()).toBe('2 runs ticked · 5 matches')
+    const bar = wrapper.find('.ui-bulkbar')
+    expect(bar.attributes('role')).toBe('region')
+    expect(bar.attributes('aria-label')).toBe('Selected runs')
+    expect(bar.text()).toContain('2 runs selected · 5 matches')
     await wrapper.find('button.show-picked').trigger('click')
     expect(wrapper.emitted('select-run')).toEqual([[[12, 11]]])   // newest first
     expect(window.location.hash).toBe('#/inbox')

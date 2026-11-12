@@ -244,8 +244,11 @@ suite('ready applications and the retry confirm', () => {
   const READY = [{ job_id: 'j1', attempt_id: 5, company: 'Shopee', title: 'Software Engineer' },
     { job_id: 'j2', attempt_id: 6, company: 'Grab', title: 'Data Engineer' }]
 
+  // Q-120 U1: a retry adds the roles to the auto-apply queue; the 202 body says what happened.
+  const QUEUED = () => [{ queued: [{ job_id: 'j1', position: 1 }, { job_id: 'j2', position: 2 }], started: false, mode: 'dry_run', refused: [] }, 202]
+
   it('shows the ready banner with a Retry button that posts the ready job ids, no confirm in dry run', async () => {
-    const w = await mountInbox(questions([], { ready: READY, mode: 'dry_run' }))
+    const w = await mountInbox(questions([], { ready: READY, mode: 'dry_run' }), { retry: QUEUED })
     expect(w.text()).toContain('2 applications can go again now.')
     const retry = startsWith(w, 'Retry 2 applications')
     expect(retry, 'a Retry 2 applications button').toBeTruthy()
@@ -254,15 +257,23 @@ suite('ready applications and the retry confirm', () => {
     const post = server.calls.find(c => c.method === 'POST' && c.url === 'api/questions/retry')
     expect(post.body).toEqual({ job_ids: ['j1', 'j2'] })
     expect(w.text()).not.toContain('Send 2 applications now?')
-    // QD 10.2 "Retry started (dry run)" is a toast (header: toasts go through toast.js), not inline text
-    expect(toast.current?.message).toBe('Started. Dry run: everything is filled in and nothing is sent.')
+    // QD 10.2: the outcome is a toast (toast.js), not inline text. Q-120: it says what the
+    // queue did with them, never that the work has started when it has not.
+    expect(toast.current?.message).toBe('Added 2 to the auto-apply queue.')
   })
 
-  it('Q-70 D6: the retry toast links to the Developer tab to follow the run', async () => {
-    const w = await mountInbox(questions([], { ready: READY, mode: 'dry_run' }))
-    await startsWith(w, 'Retry 2 applications').trigger('click')
-    await flushPromises()
-    expect(toast.current?.link).toEqual({ label: 'Follow it on the Developer tab', href: '#/developer' })
+  it('Q-70 D6 / Q-120: the retry toast links to the queue in Runs, and tells the queue to re-read', async () => {
+    const heard = vi.fn()
+    window.addEventListener('jobscraper:apply-queue', heard)
+    try {
+      const w = await mountInbox(questions([], { ready: READY, mode: 'dry_run' }), { retry: QUEUED })
+      await startsWith(w, 'Retry 2 applications').trigger('click')
+      await flushPromises()
+      expect(toast.current?.link).toEqual({ label: 'See the queue', href: '#/runs' })
+      expect(heard).toHaveBeenCalledTimes(1)
+    } finally {
+      window.removeEventListener('jobscraper:apply-queue', heard)
+    }
   })
 
   it('in auto mode Retry asks first: "Send <n> applications now?", and Not now sends nothing', async () => {
@@ -288,15 +299,27 @@ suite('ready applications and the retry confirm', () => {
     expect(startsWith(w, 'Retry 1 application')).toBeTruthy()
   })
 
-  it('a busy server disables Retry and says why; a 409 busy answer says the same', async () => {
-    const busy = await mountInbox(questions([], { ready: READY, busy: true }))
-    expect(busy.text()).toContain('Another job is running. Retry when it finishes.')
+  // Q-120 U1 (D-205): the queue never blocks, so a busy server no longer disables Retry.
+  // Any failure still says so; a 422 profile_incomplete points at the application details.
+  it('a busy server leaves Retry enabled; a failure says the queue did not take them', async () => {
+    const busy = await mountInbox(questions([], { ready: READY, busy: true }), { retry: QUEUED })
+    expect(busy.text()).not.toContain('Another job is running')
     const retry = startsWith(busy, 'Retry 2 applications')
-    expect(!retry || retry.attributes('disabled') !== undefined).toBe(true)
+    expect(retry.attributes('disabled')).toBeUndefined()
+    await retry.trigger('click')
+    await flushPromises()
+    expect(server.calls.filter(c => c.url === 'api/questions/retry')).toHaveLength(1)
+
     const w = await mountInbox(questions([], { ready: READY }), { retry: () => [{ detail: 'busy' }, 409] })
     await startsWith(w, 'Retry 2 applications').trigger('click')
     await flushPromises()
-    expect(w.text()).toContain('Another job is running. Retry when it finishes.')
+    expect(w.text()).toContain('Could not add them to the auto-apply queue:')
+    expect(w.text()).not.toContain('Another job is running')
+
+    const incomplete = await mountInbox(questions([], { ready: READY }), { retry: () => [{ detail: 'profile_incomplete', missing: ['personal.phone'] }, 422] })
+    await startsWith(incomplete, 'Retry 2 applications').trigger('click')
+    await flushPromises()
+    expect(incomplete.text()).toContain('Finish your application details first.')
   })
 })
 

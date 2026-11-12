@@ -93,7 +93,12 @@ describe('Runs: choosing how many companies', () => {
   it('All sends every enabled company', async () => {
     const w = await mountRuns()
     await w.find('[data-preset="all"]').trigger('click')
-    expect(w.find('#run-batch').element.value).toBe('224')
+    // Q-118 LC: All lights its segment, the field (Custom only) goes away, and
+    // the button carries the count.
+    expect(w.find('[data-preset="all"]').attributes('aria-pressed')).toBe('true')
+    expect(w.find('[data-preset="all"]').attributes('aria-label')).toBe('All 224 companies')
+    expect(w.find('#run-batch').exists()).toBe(false)
+    expect(w.find('button.start-run').text()).toBe('Check all 224 companies')
     await w.find('form.start').trigger('submit')
     await flushPromises()
     expect(JSON.parse(posts('api/jobs/run')[0].body)).toEqual({ batch_size: 224 })
@@ -106,9 +111,10 @@ describe('Runs: choosing how many companies', () => {
     ]
     const w = await mountRuns({ runs })
     // 600 s for 100 companies = 6 s each; 10 companies -> 1 min.
-    expect(w.find('.estimate').text()).toBe('About 1 min at the pace of your recent runs.')
+    // Q-118 LC: the estimate sits in the count's hint.
+    expect(w.find('#run-batch-hint').text()).toContain('10 of 224 companies · about 1 min.')
     await w.find('[data-preset="200"]').trigger('click')
-    expect(w.find('.estimate').text()).toBe('About 20 min at the pace of your recent runs.')
+    expect(w.find('#run-batch-hint').text()).toContain('200 of 224 companies · about 20 min.')
   })
 
   it('says when the last run finished and what it found', async () => {
