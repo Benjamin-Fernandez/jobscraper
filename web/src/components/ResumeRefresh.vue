@@ -154,10 +154,10 @@ async function save() {
     <h3 id="resume-refresh-title" class="rr-title">Update your application details</h3>
 
     <p v-if="mode === 'unavailable'" class="notice warn rr-unavailable">
-      Couldn't compare with your application details: the AI model isn't running. Start Ollama, then choose "Re-derive profile from the stored resume".
+      Couldn't compare with your application details: the AI model isn't running. Start Ollama, then choose "Re-read resume".
     </p>
     <p v-else-if="mode === 'stale'" class="notice warn rr-stale">
-      This was checked against an older resume. Choose "Re-derive profile from the stored resume" to check again.
+      This was checked against an older resume. Choose "Re-read resume" to check again.
     </p>
     <p v-else-if="mode === 'empty'" class="muted rr-empty">Your application details match your resume.</p>
     <p v-else-if="mode === 'saved'" class="notice ok rr-saved" role="status">
@@ -190,7 +190,7 @@ async function save() {
             <span class="rr-text"><span class="rr-entry">{{ skillsText }}</span></span>
           </label>
           <ul v-if="addSkills.length" class="rr-chips" aria-label="Skills from your resume">
-            <li v-for="sk in shownSkills" :key="sk">{{ sk }}</li>
+            <li v-for="sk in shownSkills" :key="sk" class="chip">{{ sk }}</li>
           </ul>
           <button v-if="moreSkills" type="button" class="link rr-more-skills" :aria-expanded="allSkills" @click="allSkills = !allSkills">
             {{ allSkills ? 'Show fewer' : `and ${moreSkills} more` }}
@@ -246,10 +246,6 @@ async function save() {
 .rr-note { font-size: var(--text-xs); }
 .rr-chips, .rr-more-skills { margin-left: calc(1rem + var(--space-2)); }
 .rr-chips { list-style: none; padding: 0; margin-top: var(--space-1); margin-bottom: 0; display: flex; flex-wrap: wrap; gap: var(--space-1); }
-.rr-chips li {
-  font-family: var(--mono); font-size: var(--text-xs);
-  background: var(--surface-2); border-radius: var(--radius-sm); padding: 0.15rem var(--space-2);
-}
 .rr-more-skills { margin-top: var(--space-1); padding: 0; font-size: var(--text-sm); }
 .rr-kept .rr-text { padding-left: calc(1rem + var(--space-2)); }
 .rr-details { margin-top: var(--space-3); font-size: var(--text-sm); }

@@ -151,29 +151,31 @@ onMounted(() => {
 </script>
 
 <template>
-  <div class="title-editor surface" :aria-busy="loading ? 'true' : 'false'">
-    <p v-if="loading" class="muted small">Loading titles…</p>
+  <section class="title-editor ui-card" aria-labelledby="te-title" :aria-busy="loading ? 'true' : 'false'">
+    <div v-if="loading" role="status" aria-busy="true">
+      <span class="visually-hidden">Loading titles…</span>
+      <div class="ui-card-head" aria-hidden="true"><span class="ui-skeleton te-sk-title" /></div>
+      <span class="ui-skeleton te-sk-body" aria-hidden="true" />
+    </div>
     <div v-else-if="loadError" class="notice error" role="alert">
       <p>Could not load the job titles: {{ loadError }}</p>
       <button type="button" @click="load">Try again</button>
     </div>
 
     <template v-else-if="data">
-      <header class="te-head">
-        <div>
-          <p class="te-question">Job titles to search for</p>
-          <p class="muted small">
-            A posting is kept when its title contains every word of one of these.
-            {{ data.source === 'custom' ? 'You have edited this list.' : 'These came from your resume.' }}
-          </p>
-        </div>
-        <span class="te-count" :class="{ full }">{{ countLabel }}</span>
+      <header class="ui-card-head te-head">
+        <h3 id="te-title" class="ui-card-title te-question">Job titles to search for</h3>
+        <span class="ui-count num te-count" :class="{ full }">{{ countLabel }}</span>
       </header>
+      <p class="muted small te-desc">
+        A posting is kept when its title contains every word of one of these.
+        {{ data.source === 'custom' ? 'You have edited this list.' : 'These came from your resume.' }}
+      </p>
 
       <ul class="te-chips" aria-label="Job titles searched for">
-        <li v-for="t in titles" :key="t" class="chip te-chip">
+        <li v-for="t in titles" :key="t" class="chip is-removable te-chip">
           <span>{{ t }}</span>
-          <button type="button" class="te-remove" :disabled="saving" :aria-label="`Remove ${t}`" @click="remove(t)">
+          <button type="button" class="chip-remove te-remove" :disabled="saving" :aria-label="`Remove ${t}`" @click="remove(t)">
             <Icon name="x" :size="13" />
           </button>
         </li>
@@ -196,7 +198,7 @@ onMounted(() => {
         {{ limit }} of {{ limit }} - the most your plan ({{ data.plan }}) allows. Remove one to add another.
       </p>
       <p v-if="data.source === 'custom'" class="small">
-        <button type="button" class="link te-reset" :disabled="saving" @click="reset">Reset to the titles from your resume</button>
+        <button type="button" class="ghost te-reset" :disabled="saving" @click="reset">Reset to the titles from your resume</button>
       </p>
 
       <p v-if="error" class="notice error" role="alert">{{ error }}</p>
@@ -205,13 +207,13 @@ onMounted(() => {
       <section class="te-suggest" aria-labelledby="te-suggest-title">
         <div class="te-suggest-head">
           <div>
-            <p id="te-suggest-title" class="te-question">Recommended titles</p>
+            <h4 id="te-suggest-title" class="te-sub">Recommended titles</h4>
             <p class="muted small">
               Qwen reads your resume - field of study, internships, skills - and the titles above,
               and suggests {{ data.max_suggestions }} new ones each time: never a title it suggested before.
             </p>
           </div>
-          <button type="button" class="primary te-suggest-btn" :disabled="running" @click="suggest">
+          <button type="button" class="te-suggest-btn" :disabled="running" @click="suggest">
             <Icon name="target" /> {{ running && job?.kind === 'titles' ? 'Recommending…' : suggestions ? 'Recommend again' : 'Recommend titles' }}
           </button>
         </div>
@@ -225,8 +227,9 @@ onMounted(() => {
           </p>
           <ul v-if="suggestions.items.length" class="te-suggestions" aria-label="Recommended titles">
             <li v-for="s in suggestions.items" :key="s.title">
-              <button type="button" class="te-suggestion" :disabled="full || saving" @click="add(s.title)">
+              <button type="button" class="chip is-suggested te-suggestion" :disabled="full || saving" @click="add(s.title)">
                 <Icon name="plus" :size="14" />
+                <span class="visually-hidden">Add </span>
                 <span class="te-s-title">{{ s.title }}</span>
                 <span v-if="s.why" class="te-s-why">{{ s.why }}</span>
               </button>
@@ -246,38 +249,33 @@ onMounted(() => {
         </template>
       </section>
     </template>
-  </div>
+  </section>
 </template>
 
 <style scoped>
-.title-editor { display: grid; gap: var(--space-3); padding: var(--space-4); max-width: 46rem; }
+/* The card itself is the global .ui-card; the grid only spaces its parts. */
+.title-editor { display: grid; gap: var(--space-3); align-content: start; }
 .small { font-size: var(--text-sm); margin: 0; }
-.te-head { display: flex; justify-content: space-between; align-items: flex-start; gap: var(--space-3); }
-.te-question { margin: 0; font-weight: 650; font-size: var(--text-sm); }
-.te-count { font-family: var(--mono); font-size: var(--text-xs); color: var(--muted); white-space: nowrap; padding-top: 2px; }
-.te-count.full { color: var(--warn); font-weight: 600; }
-.te-chips { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: var(--space-1); }
-.te-chip { gap: 2px; padding-right: 2px; font-size: var(--text-sm); }
-.te-remove {
-  min-height: 0; width: 1.5rem; height: 1.5rem; padding: 0; border: none; box-shadow: none;
-  background: transparent; color: var(--muted); border-radius: 999px;
-}
+.te-head { margin-bottom: 0; }
+.te-desc { margin-top: calc(-1 * var(--space-1)); }
+.te-count.full { color: var(--warn); background: var(--warn-soft); }
+.te-chips { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: var(--space-2); }
 .te-remove:hover:not(:disabled) { background: var(--danger-soft); color: var(--danger); }
 .te-add { display: flex; gap: var(--space-2); }
 .te-add input { flex: 1; min-width: 0; }
 .notice { margin: 0; }
 .te-suggest { display: grid; gap: var(--space-2); padding-top: var(--space-3); border-top: 1px solid var(--border); }
 .te-suggest-head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: flex-start; gap: var(--space-2) var(--space-3); }
+.te-sub { margin: 0; font-size: var(--text-sm); font-weight: var(--weight-semibold); }
 .te-based { color: var(--text-2); }
-.te-suggestions { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--space-1); }
-.te-suggestion {
-  width: 100%; justify-content: flex-start; gap: var(--space-2); white-space: normal; text-align: left;
-  min-height: 2.25rem; padding: var(--space-1) var(--space-3); box-shadow: none;
-  border: 1px dashed var(--border-strong); background: transparent; font-weight: 400;
-}
-.te-suggestion:hover:not(:disabled) { border-style: solid; border-color: var(--accent); background: var(--accent-soft); }
-.te-suggestion .icon { color: var(--accent); }
-.te-s-title { font-weight: 600; }
+.te-suggestions { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: var(--space-2); }
+.te-suggestions li { min-width: 0; max-width: 100%; }
+/* A suggestion with a reason may wrap; the chip keeps its dashed outline. */
+.te-suggestion { max-width: 100%; gap: var(--space-1); white-space: normal; text-align: left; }
+.te-suggestion .icon { flex: none; color: var(--accent); }
+.te-s-title { font-weight: var(--weight-semibold); }
 .te-s-why { color: var(--muted); font-size: var(--text-xs); }
 .te-foot { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: var(--space-2); }
+.te-sk-title { width: 10rem; height: 1.1rem; }
+.te-sk-body { height: 6rem; }
 </style>
