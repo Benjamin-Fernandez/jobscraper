@@ -16,10 +16,11 @@ real CLI past the fake, against the repository config (`apply.mode: auto`).
 
 Why it is off unless `cmd_web` turns it on (H1, H2). `create_app` defaults to
 `enabled=False`: tests and the default never start a worker, and no tick runs.
-`cmd_web` passes `apply_queue_wanted(os.environ)`: a dev instance on a copied
-database (`JOBSCRAPER_DB` set) has its own never-twice history while the Edge
-profile is shared, so it must not apply from that copy. Disabled, clicks still
-record (UI work) and the queue view says `disabled`.
+`cmd_web` passes `apply_queue_wanted(os.environ, ...)`, which is on only for the
+owner's live app (review F4): a dev instance (a copied database, another config,
+another port, or code from a git worktree) has its own never-twice history while
+the Edge profile is shared, so it must not apply from that copy. Disabled, clicks
+still record (UI work) and the queue view says `disabled`.
 
 Why a restart gate (M2, D-200). Roles left waiting from the last session were
 clicked then, not now. The start-up hook pauses the queue (`restarted`) when
@@ -36,7 +37,9 @@ pre-upgrade job is never read as a crash. The first pause wins (the store).
 from __future__ import annotations
 
 import logging
+import os
 import threading
+from pathlib import Path
 from typing import Any, Mapping, Optional
 
 from jobscraper.apply.contracts import QueuePause
@@ -48,18 +51,58 @@ logger = logging.getLogger(__name__)
 TICK_S = 5.0                       # the daemon tick while enabled (§3.4)
 EXIT_LOCK_HELD = 3                 # `apply queue`: RunLock held by another apply run (L2)
 ENV_SWITCH = "JOBSCRAPER_APPLY_QUEUE"
+LIVE_PORT = 8765                   # the owner's live app (config default web.port; CLAUDE.md)
+# src/jobscraper/web/applyqueue.py -> the checkout this code was imported from
+_REPO_ROOT = Path(__file__).resolve().parents[3]
 
 
-def apply_queue_wanted(env: Mapping[str, str]) -> bool:
-    """Does `web` start the auto-apply worker? (§3.4, H2; the `mail_timer_wanted` rule.)
+def running_from_worktree(source_dir: Optional[os.PathLike | str] = None) -> bool:
+    """Whether this code runs from a git worktree, not the owner's main checkout.
 
-    `JOBSCRAPER_APPLY_QUEUE=1` on, `=0` off. Unset: on for the real app, off when
-    `JOBSCRAPER_DB` is set - that marks a dev instance on a copied database, whose
-    never-twice history is stale while the Edge profile is shared."""
+    `source_dir` is the checkout the code was imported from (default: this file's
+    repository root, `src/jobscraper/web/` → three levels up). A linked worktree has
+    a `.git` FILE (a `gitdir:` pointer); the main checkout has a `.git` directory.
+    The path test (`/.claude/worktrees/`) catches the agents' worktrees even when
+    `.git` cannot be read. No `.git` at all (a plain copy) is not a worktree."""
+    root = Path(source_dir) if source_dir is not None else _REPO_ROOT
+    if "/.claude/worktrees/" in root.resolve().as_posix().lower() + "/":
+        return True
+    return (root / ".git").is_file()
+
+
+def apply_queue_wanted(env: Mapping[str, str], *, config_path: Optional[str] = None,
+                       port: Optional[int] = None,
+                       source_dir: Optional[os.PathLike | str] = None) -> bool:
+    """Does `web` start the auto-apply worker? (§3.4, H2; review F4.)
+
+    Only the owner's live app may drain the queue: a development copy never does,
+    because its never-twice history is stale while the Edge profile is shared and
+    the repository config is `apply.mode: auto`.
+    - `JOBSCRAPER_APPLY_QUEUE=1` forces on, `=0` forces off.
+    - Unset: on only when ALL hold: `JOBSCRAPER_DB` unset, `JOBSCRAPER_CONFIG` unset,
+      no `--config` (`config_path` None), the web port is the live one (`port`, the
+      resolved `web.port`, when the caller knows it; else `JOBSCRAPER_PORT` unset or
+      equal to it), and the code is not running from a git worktree
+      (`running_from_worktree(source_dir)`).
+    The live app is `python -m jobscraper web` from the main checkout (run.ps1, the
+    desktop icon), which sets none of these."""
     flag = str(env.get(ENV_SWITCH, "")).strip()
     if flag in ("0", "1"):
         return flag == "1"
-    return not str(env.get("JOBSCRAPER_DB", "")).strip()
+    if str(env.get("JOBSCRAPER_DB", "")).strip() or str(env.get("JOBSCRAPER_CONFIG", "")).strip():
+        return False
+    if config_path:
+        return False
+    if port is None:
+        raw = str(env.get("JOBSCRAPER_PORT", "")).strip()
+        if raw:
+            try:
+                port = int(raw)
+            except ValueError:
+                return False
+    if port is not None and int(port) != LIVE_PORT:
+        return False
+    return not running_from_worktree(source_dir)
 
 
 def slot_of(jobs: Any) -> tuple[str, dict[str, Any]]:
