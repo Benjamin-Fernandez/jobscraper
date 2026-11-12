@@ -1097,4 +1097,13 @@ BODY: branch `eng/Q-116-L1-shell`. Commits c4e73f2 (step 1: SettingRow, Settings
 - Search commit rules as design §3 (radios: click/Space saves, arrow holds, Enter/blur saves, Esc drops+closes; number: Enter/blur/preset saves, invalid never sent). Radios are NOT disabled while busy (keeps focus); the guard is in code. Preferences theme follows the same radio rule (arrow no longer applies instantly).
 - Tester notes: Esc on editors closes the row and focuses `#setting-<id> .setting-main`; editors render only while the row is open; "Saved" status text has a visually hidden suffix; number errors are the `#batch-size-hint` line (not role=alert); load error is `role=alert` "Couldn't load search settings: ...".
 - Verify: vitest 30 failed | 938 passed (all retargets of §8: Settings.test.js, m15, q75-pages, ui, q100-settings x4 [rail label, Preferences name, rows closed], q100-shell `#/settings/appearance stays as written` which the alias deliberately breaks although §8 says q100-shell is unchanged). `import jobscraper.web.api` ok; `npx vite build --outDir %TEMP%/q116-l1-dist` ok. No dev server was started.
+
+### 2026-11-12 software-engineer -> coordinator (Q-116 step 4): Apply as rows
+TYPE: handoff
+BODY: branch `eng/Q-116-L2-apply` (from c4e73f2, eng/Q-116-L1-shell step 1). Only `web/src/components/ApplySettings.vue` rewritten.
+- Props `connections`, `apply` ({status, settings, summary} from loadApplyData), `item` (row id from the hash: opens an edit row when editable, scrolls it into view, focuses its row button; follows later changes). Emits `saved(nextSettings)`. No loading, no Save button, no GET.
+- Rows (SettingRow/SettingsGroup): mode, browser-window, human-check-wait | daily-cap, per-employer-cap | cover-letters | mailbox, details, resume. One `putApplySettings({key: value})` per save; success: `saved(next)` + `rows.flash`; failure: old value kept, `rows.fail(id, saveErrorText(e, key))`; 422 does not lock; null/404/405 on PUT sets read-only for the rest of the page's life ("Couldn't save: this server doesn't accept changes yet."). Editable only when `settings.writable === true`; `apply.settings` null: only Mode (read-only, from `status.mode`), mailbox, resume (+ details if the summary loaded). No probe PUT.
+- Assumption: the design §5 has no exact copy for "A running application keeps the mode it started with."; I show exactly that sentence as a muted line under the intro while `status.busy`.
+- Settings.vue (lane 1) still mounts `<ApplySettings :connections>` without `apply`/`item`/`@saved`; lane 1 step 2 must pass them.
+- Not run, by design: no dev server, no apply job, no POST /api/apply (browser check is the Coordinator's).
 STATUS: open
