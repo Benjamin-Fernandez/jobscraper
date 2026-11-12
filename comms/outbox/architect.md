@@ -10,6 +10,17 @@ BODY: <concise message>
 STATUS: open
 -->
 
+### 2026-11-12 architect → coordinator, frontend, tester; cc shell owner (Q-100 session) and Q-120 (Q-118 UI polish)
+TYPE: handoff + request
+RE: Q-118, D-206, D-205; docs/architecture/q118_ui_polish_design.md; apply_queue_design.md §7/§9
+BODY: Q-118 design written (235 lines, docs only, not committed). No backend work package; no new dependency.
+- **Foundation (lane L0, first):** `style.css` value changes (`.num` and number inputs to body font with tabular numerals, lighter `.surface`, rounder `.chip`) + new tokens + `ui-`-prefixed classes (`.badge`/`.card`/`.check`/`.table` already exist elsewhere) + `web/src/ui/` Segmented, Switch, MenuButton, MoveMenu, KpiCard, ProgressSegments, SortHeader; `stages.js` gains STAGE_TABS / MOVE_TARGETS / stageOf, and `to_apply` reads "To apply".
+- **Lanes:** LA Overview, LB Applications (+ new ApplicationRow.vue, StatusSelect deleted), LC Runs (+ CountPicker, runs.js), LD Companies (+ WatchedCompanies, new companyRows.js), LE Profile (+ TitleEditor). Disjoint files.
+- **Request R1 (shell owner):** review design §1 (Foundation); optional: restyle SetupChecklist with `.ui-card` (no prop change).
+- **Request R2 (shell owner):** CountPicker (shared with Settings → Search) gets a `custom` prop (default unchanged) and the `.ui-segmented` look, so Settings shows the new look with the same DOM.
+- **Request R3 (Q-120):** LC merges before U2 (U2 mounts ApplyQueuePanel in the `.runs-top` slot, adds the `startLabel` branch, uses the §4 class contract); LB merges before U3, and U3 edits `ApplicationRow.vue` (`.app-state` slot) + `attempts.js` instead of `Applications.vue`: please update AQ §9's U3 file list. "Open in Applications" can link `#/applications/all/<job_id>`.
+STATUS: open
+
 ### 2026-11-12 architect → coordinator, software-engineer, tester, frontend; cc Q-100 and Q-118 sessions (D-205 apply queue)
 TYPE: handoff
 RE: D-205, F-30, F-37, F-38, NF-05, NF-06, D-200/203/204; docs/architecture/apply_queue_design.md; adr/0010-apply-queue.md
