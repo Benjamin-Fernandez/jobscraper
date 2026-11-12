@@ -334,7 +334,7 @@ describe('Overview: Pipeline and Past 7 days', () => {
     const wrapper = await mountOverview()
     const tiles = wrapper.findAll('.stage-tile:not(.closed)')
     expect(tiles.map(t => [t.attributes('data-status'), t.find('.tile-label').text(), t.find('.tile-n').text()])).toEqual([
-      ['to_apply', 'Saved', '1'], ['applied', 'Applied', '1'], ['interviewing', 'Interviewing', '1'], ['offer', 'Offer', '0'],
+      ['to_apply', 'To apply', '1'], ['applied', 'Applied', '1'], ['interviewing', 'Interviewing', '1'], ['offer', 'Offer', '0'],
     ])
     const closed = wrapper.find('.stage-tile.closed')
     expect(closed.find('.tile-n').text()).toBe('2')
