@@ -385,12 +385,17 @@ class StopBody(BaseModel):
 def stop_application(body: StopBody, request: Request, jobs: Any = Depends(get_jobs)) -> Any:
     """Stop the application in flight (M3). The `cancelled` pause is committed
     first, so the worker can take nothing more; the worker is cancelled only when
-    `attempt_id` is still the attempt in flight, else 409 `already_finished` (the
-    queue stays paused and nothing else is cancelled)."""
+    `attempt_id` is still the attempt in flight AND the job holding the slot is an
+    `apply` job, else 409 `already_finished` (the queue stays paused and nothing
+    else is cancelled). Review F6: after a restart the live row may be a leftover
+    (`interrupted`), or a hand-run CLI `apply` may own it while a search run holds
+    the slot; cancelling then would kill the search run, not the application."""
     with open_store(request) as store:
         store.queue_pause(QueuePause.CANCELLED, None, utcnow())
         live = store.live_attempt()
     if not live or live.get("id") != body.attempt_id:
+        return JSONResponse({"detail": "already_finished"}, status_code=409)
+    if slot_of(jobs)[0] != "apply":
         return JSONResponse({"detail": "already_finished"}, status_code=409)
     try:
         jobs.cancel()
