@@ -272,3 +272,37 @@ def test_apply_settings_stored_caps_are_the_caps_the_preflight_enforces():
         code, body = _post(client, target)
         assert code == 422 and [x["reason_code"] for x in body["refused"]] == ["cap_reached"], (code, body)
         assert "1 of 1 today" in body["refused"][0]["text"], body
+
+
+# ------------------------------------------------------------------ 6. cross-site writes (Q-116)
+
+
+def test_apply_settings_put_from_another_site_is_refused_and_writes_nothing():
+    """The settings page saves on change, so a PUT is one click away for any page on the web
+    that can make the owner's browser send one: the mode could be flipped to real submission.
+    CrossSiteWriteGuard answers 403 to a foreign Origin (or `Sec-Fetch-Site: cross-site`)
+    before the route runs; the stored settings, the effective config and the job manager
+    are all as they were. Same-origin and header-less requests (curl, tests) still pass, and
+    a GET is a read, so it is not guarded."""
+    with _world(mode="dry_run", daily_cap=7, per_employer=3, headed=False, captcha_wait_s=30,
+                compose=False) as (client, cfg, _t, fake):
+        before = client.get("/api/apply/settings").json()
+        change = {"mode": "auto", "daily_cap": 500, "compose_enabled": True, "headed": True}
+        for headers in ({"Origin": "https://evil.example"}, {"Origin": "null"},
+                        {"Sec-Fetch-Site": "cross-site"},
+                        {"Origin": "https://evil.example", "Content-Type": "text/plain"}):
+            resp = client.put("/api/apply/settings", json=change, headers=headers)
+            assert resp.status_code == 403, (headers, resp.status_code, resp.text)
+        # nothing was written: GET, the effective config and the table all say so
+        after = client.get("/api/apply/settings", headers={"Origin": "https://evil.example"})
+        assert after.status_code == 200                      # reads are not guarded
+        assert after.json() == before
+        eff = _effective(cfg)
+        assert (eff.mode, eff.daily_cap, eff.headed) == ("dry_run", 7, False)
+        assert client.get("/api/apply/status").json()["mode"] == "dry_run"
+        assert fake.started == []
+        # the guard is about the Origin, not the route: the same change from here goes through
+        ok = client.put("/api/apply/settings", json={"daily_cap": 9},
+                        headers={"Origin": "http://localhost:5173"})
+        assert ok.status_code == 200 and ok.json()["daily_cap"] == 9
+        assert _effective(cfg).mode == "dry_run"
