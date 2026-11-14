@@ -157,11 +157,18 @@ role.
 **What the AI may read.** The local model reads your whole applicant profile and
 your resume to fill a form, because it runs on your computer. Passwords and
 other secrets are never put in a prompt. Code still makes the answers that
-matter: for example, "Have you worked here before?" is answered Yes only when
-the company's name really matches a past employer. Extra words count only when
-they are generic, like "Ltd", "Group", "Singapore" or "Bank", so "Example Co
-Logistics" is not "Example Co". A real affiliate counts only when it is listed
-as one of that employer's other names (aliases).
+matter. For example, "Have you worked for us before?" is answered Yes only when
+the company matches one of your past employers, by that employer's name or by
+any of its other names. Two names match when they are the same, or differ only
+by generic words such as legal forms ("Inc", "Pte Ltd"), places ("Singapore"),
+"Group", "Holdings" or "Bank". Any other extra word means a different company.
+You add an employer's other names in Profile → Application details →
+Experience, in the **Also known as** field on each entry: the group or parent
+company, a trading name or an abbreviation. Say you worked at "Northwind
+Platforms Inc" and gave it the other name "Northwind". A posting from
+"Northwind" or "Northwind Pte Ltd" gets Yes. One from "Northwind Logistics" gets
+No. Without that other name, "Northwind" alone would not match either, because
+"Platforms" is not a generic word.
 
 **In progress, off by default.** A new way of filling is being built and
 tested: the AI model fills every field, and any answer it had to assume would
