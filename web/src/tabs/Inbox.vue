@@ -883,9 +883,11 @@ onDeactivated(() => window.removeEventListener('keydown', onShortcut))
 
 .empty .icon { display: block; margin: 0 auto var(--space-2); }
 
-/* The dismiss button keeps a 44px target on a phone (Q-78 G31). */
+/* The dismiss button keeps a 44px target on a phone (Q-78 G31); so does the "N already
+   tracked" link (an inline link has no height of its own, hence inline-flex; Q-123 e). */
 @media (max-width: 640px) {
   .write-error-close { min-height: var(--control-h); }
+  .tracked { display: inline-flex; align-items: center; min-height: var(--touch-min); }
 }
 /* A phone or a narrow window: one column. The list, or the role - not both. */
 @media (max-width: 900px) {

@@ -224,6 +224,7 @@ const lastCheckedTitle = r => (r.lastChecked ? `${String(r.lastChecked).replace(
               <td class="status-cell">
                 <span class="ui-badge" :data-tone="r.tone" :title="r.title || undefined">{{ r.badge }}</span>
                 <span v-if="r.reason" class="status-note">{{ r.reason }}</span>
+                <span v-if="r.listNote" class="status-note">{{ r.listNote }}</span>
               </td>
               <td class="col-action">
                 <a

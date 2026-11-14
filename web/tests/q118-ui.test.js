@@ -156,11 +156,22 @@ describe('KpiCard, ProgressSegments, SortHeader', () => {
       { id: 'offer', label: 'Offer', n: 0, tone: 'offer', href: '#/applications/offer' },
     ]
     const link = mount(ProgressSegments, { props: { segments, label: 'Pipeline' } })
-    expect(link.find('.ui-progress').attributes('aria-hidden')).toBe('true')
+    // Q-123 c: in link mode a slice with an href and n > 0 is a link named "{label}: {n}"; the bar
+    // then holds a focusable child, so it is not aria-hidden. n = 0 is not drawn, so it has no link.
+    expect(link.find('.ui-progress').attributes('aria-hidden')).toBeUndefined()
     expect(link.findAll('.ui-progress-seg')).toHaveLength(1)             // n = 0 is not drawn
+    const slice = link.find('.ui-progress-seg')
+    expect(slice.element.tagName).toBe('A')
+    expect(slice.attributes('href')).toBe('#/applications/applied')
+    expect(slice.attributes('aria-label')).toBe('Applied: 3')
+    expect(link.findAll('.ui-progress a[href]')).toHaveLength(1)         // the zero slice has no link
     expect(link.findAll('a.ui-progress-item').map(a => [a.attributes('href'), a.attributes('aria-label')]))
       .toEqual([['#/applications/applied', 'Applied, 3'], ['#/applications/offer', 'Offer, 0']])
     const filter = withModel(ProgressSegments, { segments, label: 'Pipeline', mode: 'filter', modelValue: '', allLabel: 'All' })
+    // Filter mode: the bar stays decoration, whatever the hrefs say (the legend buttons do the work).
+    expect(filter.find('.ui-progress').attributes('aria-hidden')).toBe('true')
+    expect(filter.findAll('.ui-progress a')).toHaveLength(0)
+    expect(filter.find('.ui-progress-seg').element.tagName).toBe('SPAN')
     const items = () => filter.findAll('button.ui-progress-item')
     expect(items().map(b => b.attributes('aria-pressed'))).toEqual(['true', 'false', 'false'])
     expect(items()[0].text()).toContain('3')                            // All = the sum

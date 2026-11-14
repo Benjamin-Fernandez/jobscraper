@@ -15,8 +15,11 @@
 // mode 'link' (default): legend items are links. mode 'filter': legend items are
 // `button[aria-pressed]` (one pressed at a time; pressing it again, or the optional
 // leading "All" item, emits ''), and the bar dims the segments not chosen.
-// The bar is decoration (`aria-hidden`): the legend says everything. A segment with n = 0
-// has no bar slice (a visible slice is at least 6px wide) but stays in the legend, muted.
+// The bar repeats the legend: in filter mode, and in link mode without any href, it is
+// decoration (`aria-hidden`). In link mode each slice with an href is an `a` to the same
+// place, named "{label}: {n}" (Q-123 c), and the bar is then no longer hidden. A segment
+// with n = 0 has no bar slice (a visible slice is at least 6px wide), so no slice link,
+// but stays in the legend, muted.
 import { computed } from 'vue'
 
 const props = defineProps({
@@ -35,6 +38,11 @@ const total = computed(() => props.segments.reduce((sum, s) => sum + (Number(s.n
 const slices = computed(() => props.segments.filter(s => Number(s.n) > 0))
 const chosen = computed(() => (props.mode === 'filter' ? props.modelValue || '' : ''))
 
+// A slice is a link only in link mode and only with an href; the bar is hidden from
+// assistive tech only when nothing in it can be focused.
+const sliceLinks = computed(() => props.mode === 'link' && slices.value.some(s => s.href))
+const isLink = s => props.mode === 'link' && Boolean(s.href)
+
 function nameOf(s) {
   return `${s.label}, ${s.n}${s.note ? ` ${s.note}` : ''}`
 }
@@ -45,15 +53,25 @@ function pick(s) {
 
 <template>
   <div class="ui-progress-wrap">
-    <div class="ui-progress" :class="{ 'has-choice': Boolean(chosen) }" aria-hidden="true">
-      <span
-        v-for="s in slices"
-        :key="s.id"
-        class="ui-progress-seg"
-        :class="{ 'is-apart': s.apart, 'is-dim': chosen && chosen !== s.id }"
-        :data-tone="s.tone || 'neutral'"
-        :style="{ flexGrow: Number(s.n) }"
-      />
+    <div class="ui-progress" :class="{ 'has-choice': Boolean(chosen) }" :aria-hidden="sliceLinks ? undefined : 'true'">
+      <template v-for="s in slices" :key="s.id">
+        <a
+          v-if="isLink(s)"
+          class="ui-progress-seg is-link"
+          :class="{ 'is-apart': s.apart }"
+          :href="s.href"
+          :aria-label="`${s.label}: ${s.n}`"
+          :data-tone="s.tone || 'neutral'"
+          :style="{ flexGrow: Number(s.n) }"
+        />
+        <span
+          v-else
+          class="ui-progress-seg"
+          :class="{ 'is-apart': s.apart, 'is-dim': chosen && chosen !== s.id }"
+          :data-tone="s.tone || 'neutral'"
+          :style="{ flexGrow: Number(s.n) }"
+        />
+      </template>
     </div>
     <ul class="ui-progress-legend" :aria-label="label">
       <li v-if="mode === 'filter' && allLabel">
@@ -101,6 +119,9 @@ function pick(s) {
 .ui-progress-seg:last-child { border-top-right-radius: var(--radius-pill); border-bottom-right-radius: var(--radius-pill); }
 .ui-progress-seg.is-apart { margin-left: var(--space-2); }
 .ui-progress-seg.is-dim { opacity: 0.3; }
+a.ui-progress-seg { display: block; }
+a.ui-progress-seg:hover { filter: brightness(0.82); }
+a.ui-progress-seg:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 
 /* One colour per tone, from the stage and status tokens (3:1 against --surface in both themes). */
 .ui-progress-seg, .ui-progress-swatch { background: var(--stage-closed); }

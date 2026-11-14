@@ -46,8 +46,11 @@ export function openStages(statuses = [], rows = []) {
 }
 
 // The pipeline as the Applications tabs count it (D-207): `stageOf` folds `assessment` into
-// Interviewing and `withdrawn` into Rejected; a `to_apply` row (or a status config adds
-// later) is in no stage, so it is counted apart in `toApply` and still in `total`.
+// Interviewing and `withdrawn` into Rejected. A `to_apply` row is in no stage: it is counted
+// apart in `toApply` (and in `total`). A status the config adds later (one `stageOf` does
+// not know) is in no stage either and is NOT counted in `toApply`: it is only in `total`,
+// the "tracked" number, and shows under All and Active in the Applications tab (design
+// section 2: the bar is the four stage tabs, nothing else).
 // The same parts are also returned alone, for the legend notes.
 export function pipeline(rows) {
   const all = list(rows)
