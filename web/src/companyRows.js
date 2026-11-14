@@ -7,7 +7,9 @@
 //   GET /api/companies/list    your own list, in your order, with the search result of
 //                              each name. Only the names that are NOT watched yet are
 //                              rows here: "no job board found" and "waiting". A found or
-//                              already watched name is already a health row.
+//                              already watched name is already a health row, and so is a
+//                              waiting name whose company is already watched (it only adds a
+//                              note to that row).
 //
 // A company is in exactly one BUCKET, and the legend of the funnel bar filters by it:
 //
@@ -129,6 +131,7 @@ function fromHealth(item, cycleDays, now) {
     url: item.careers_url || '',
     source: item.source || 'watchlist',
     title: bits.join(' · '),
+    listNote: '',
   }
 }
 
@@ -153,15 +156,36 @@ function fromList(item) {
     url: item.careers_url || '',
     source: 'your list',
     title: '',
+    listNote: '',
   }
 }
 
+// The name comparison of the list search (company_search._match): the same name in lower
+// case, or the same slug ("Example / Co" and "example-co"). A name is searched against
+// the watched companies by exactly this rule, so a waiting name joins the same row.
+const slugOf = s => String(s || '').trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '')
+const lowerOf = s => String(s || '').trim().toLowerCase()
+
+// What a watched row says when your list also names it and that name is not searched yet.
+export const LIST_PENDING_NOTE = 'Your list names it too; the search for that name is still to run.'
+
 // Both shapes as one list of rows (health rows first, then the names still to settle).
 // `health` / `list` may be null (not loaded): that part is simply empty.
+// A name still waiting for its search whose company is ALREADY watched is not a second
+// row: the watched row carries a note instead, so it is one company, counted once.
 export function rows(health, list, cycleDays = null, now = Date.now()) {
   const out = (health?.items ?? []).map(i => fromHealth(i, cycleDays, now))
+  const watched = new Map()
+  for (const r of out) {
+    for (const k of [lowerOf(r.company), slugOf(r.company)]) if (k && !watched.has(k)) watched.set(k, r)
+  }
   for (const i of list?.items ?? []) {
-    if (i.status === 'failed' || WAITING.has(i.status)) out.push(fromList(i))
+    if (i.status === 'failed') out.push(fromList(i))
+    else if (WAITING.has(i.status)) {
+      const hit = watched.get(lowerOf(i.name)) ?? watched.get(slugOf(i.name))
+      if (hit) hit.listNote = LIST_PENDING_NOTE
+      else out.push(fromList(i))
+    }
   }
   return out
 }
