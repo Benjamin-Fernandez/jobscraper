@@ -129,3 +129,8 @@ One entry per session. Older handover notes end up here, so `handover.md` stays 
 - Lesson: the architect role has no shell: create its worktree first and commit its files yourself.
 - Lesson (privacy): the Coordinator's own brief used a real company as the example of "a former employer"; it happened to be on the deny-list, and agents copied it into a code comment and eleven test lines. The pre-push scan caught it; personal was reset to origin and the fix redone with a made-up name. Use only made-up names in briefs ("Example Co", "Northwind"), and scan agent branches before they are merged, not only before the push.
 - Stopped at the owner's request, 2026-11-12 night: amendment A1 built and merged on `int/Q-121` (119 pins, the browser-driven suites green); four closing lanes (stale-pin classification, second code review, cache class, rehearsal runner) asked to commit and halt. Nothing of Q-121 is on personal except D-210.
+
+## 2026-11-14 · session jobscraper-b1 (resumed)
+- Q-123 UI follow-ups merged with one bundle. Q-121: second code review NOT READY (three HIGH, all code readers overruling a right model); rulings D-211; fix round started. Ran the dress rehearsal with the real model as a baseline BEFORE the fixes: 4 minutes for 160 fields, 0 never-violations, and it showed what no fake-model test had: the model almost never labels owner facts, and three ordinary-looking fields ended empty or wrong.
+- Lesson: run the real-model rehearsal as soon as a runner exists, not after the code is thought ready: it costs minutes, risks nothing in dry run on fixture pages, and turns design arguments into measurements.
+- Lesson: the GPU is shared with other sessions on this machine; answer their request and ask before each model run.
