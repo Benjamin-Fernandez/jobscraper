@@ -168,7 +168,12 @@ describe('Q-118 Overview: the pipeline', () => {
     const slices = w.findAll('.ui-progress .ui-progress-seg')
     expect(slices.map(s => s.attributes('data-tone'))).toEqual(['applied', 'interviewing', 'closed'])   // no slice for Offer (0)
     expect(slices.map(s => s.classes().includes('is-apart'))).toEqual([false, false, true])
-    expect(w.find('.ui-progress').attributes('aria-hidden')).toBe('true')   // the legend carries every number
+    // Q-123 c: the slices are links to the same stage as their legend item, named "{label}: {n}",
+    // so the bar is no longer hidden from assistive tech (a focusable child in a hidden region).
+    expect(slices.every(s => s.element.tagName === 'A')).toBe(true)
+    expect(slices.map(s => s.attributes('href'))).toEqual(['#/applications/applied', '#/applications/interviewing', '#/applications/rejected'])
+    expect(slices.map(s => s.attributes('aria-label'))).toEqual(['Applied: 2', 'Interviewing: 2', 'Rejected: 2'])
+    expect(w.find('.ui-progress').attributes('aria-hidden')).toBeUndefined()
   })
 })
 
