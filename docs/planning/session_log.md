@@ -136,3 +136,6 @@ One entry per session. Older handover notes end up here, so `handover.md` stays 
 - Lesson: the GPU is shared with other sessions on this machine; answer their request and ask before each model run.
 - Q-125: the documentation lane could not verify a sentence the Coordinator had told the owner ("add the affiliate as an alias"): there was no such place. Built the field the same day (profile, matching, pins, a form fix), browser-checked, live.
 - Lesson: a docs pass that must VERIFY each sentence against the code is a cheap audit: it found a promise with nothing behind it.
+- Stopped at the owner's request, 2026-11-14: Q-121 fix2 + fix3 (ruling U, D-212) merged on `int/Q-121`; the pin round for U and the small U8 change halted mid-way; nothing of Q-121 on personal beyond D-210 / Q-125.
+- Lesson: three real-model rehearsal runs gave the same failures row for row; stable failures are defects, and they were ones no reviewer's paper probe had predicted (the model itself writing the applicant's phone into an employer block).
+- Lesson: when the same class of finding returns a fourth time (code overruling the model on a question it judged simple), remove the mechanism instead of narrowing it again.
