@@ -183,7 +183,11 @@ function covered(path, form) {
     const rest = m[2]
     if (item.kind === 'entries') {
       // Keys an entry does not list (and is not the resume flag) are the owner's own.
-      return !rest || rest === 'from_resume' || (item.sub || []).some(s => s.path === rest)
+      // A list sub-field (list_text, list_url) reaches the leaves as "also_known_as[0]": compare
+      // its path without the trailing index, whatever the field's name.
+      const bareRest = rest && rest.replace(/(?:\[\d+\])+$/, '')
+      return !rest || rest === 'from_resume' || (item.sub || []).some(s =>
+        s.path === rest || (bareRest !== rest && s.path === bareRest && LIST_KINDS.has(s.kind)))
     }
     if (item.kind === 'salary') return !rest || ['amount', 'currency', 'period', 'negotiable'].includes(rest)
     return true

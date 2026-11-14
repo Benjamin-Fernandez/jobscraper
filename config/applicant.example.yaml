@@ -74,6 +74,11 @@ experience:                          # internships count: prior employment is de
     end: "2024-08"                   # null = present
     location: "Singapore"
     description: "One or two lines, copied from your resume."
+    # Optional: other names of this employer (the group or parent company, a trading name,
+    # a former name, an abbreviation). "Have you worked for us before?" is then answered
+    # Yes when an application goes to a company under one of these names. Up to 10 names,
+    # 80 characters each. Leave it out if the employer has no other name.
+    # also_known_as: ["Example Holdings", "Example Co"]
     from_resume: false
 
 skills: ["Python", "SQL"]

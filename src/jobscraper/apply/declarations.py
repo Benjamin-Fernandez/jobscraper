@@ -128,20 +128,41 @@ def _matches_employer(name: str, employer: str, aliases: Iterable[str]) -> bool:
     return any(company_match(name, e) for e in (employer, *aliases) if e)
 
 
+def entry_employer_names(entry: Any) -> tuple[str, ...]:
+    """Q-125: every name one `experience[]` entry gives its employer: `employer`, then
+    each `also_known_as` name (a group or parent name, a trading name, a former name, an
+    abbreviation). A wrong-typed `also_known_as` (validate reports it) is ignored here, so
+    a hand-edited file never crashes a declaration; a bare string is not read as letters."""
+    if not isinstance(entry, dict):
+        return ()
+    names = [str(entry.get("employer") or "")]
+    aka = entry.get("also_known_as")
+    if isinstance(aka, (list, tuple)):
+        names += [x for x in aka if isinstance(x, str)]
+    return tuple(n for n in (s.strip() for s in names) if n)
+
+
+def _entry_matches(entry: Any, employer: str, aliases: tuple[str, ...]) -> bool:
+    """An entry is that employer when ANY of its names `company_match`es the posting's
+    employer or one of its aliases. D-210 holds for each name on its own: the other
+    names add names, they do not loosen the rule."""
+    return any(_matches_employer(n, employer, aliases) for n in entry_employer_names(entry))
+
+
 def prior_employment(profile: dict, employer: str, aliases: Iterable[str] = ()) -> bool:
-    """True if any `experience[].employer` company-matches the employer or one
-    of its aliases (internships count, D-55)."""
+    """True if any `experience[]` entry's employer, or one of its `also_known_as` names
+    (Q-125), company-matches the employer or one of its aliases (internships count, D-55)."""
     aliases = tuple(aliases)
-    return any(isinstance(e, dict) and _matches_employer(str(e.get("employer") or ""),
-                                                         employer, aliases)
+    return any(_entry_matches(e, employer, aliases)
                for e in (profile or {}).get("experience") or [])
 
 
 def current_employment(profile: dict, employer: str, aliases: Iterable[str] = ()) -> bool:
-    """D-69: true only if a matching `experience[]` entry has no end date."""
+    """D-69: true only if a matching `experience[]` entry (by its employer or an
+    `also_known_as` name, Q-125) has no end date."""
     aliases = tuple(aliases)
     return any(isinstance(e, dict) and e.get("end") in (None, "")
-               and _matches_employer(str(e.get("employer") or ""), employer, aliases)
+               and _entry_matches(e, employer, aliases)
                for e in (profile or {}).get("experience") or [])
 
 
