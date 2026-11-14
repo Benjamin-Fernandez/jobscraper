@@ -605,3 +605,10 @@ BODY: Baseline on int/wave2: exactly the predicted 43 red (Companies 35, Profile
 - Final: `npx vitest run` x3 each "Test Files 51 passed (51) / Tests 1055 passed | 1 skipped (1056)".
 OBSERVATION (low, not pinned): a list name still `pending` whose company is already on the built-in watchlist (e.g. "Grab") is a health row AND a Waiting row until the search turns it into `watched`; the table and the "N in your list/watched" numbers show it twice during that window (reproduced in ux1 with a plain-name fixture, which is why that fixture uses status found). Design says nobody is counted twice; only found/watched are excluded in companyRows.rows(). Fix would join on name for pending rows.
 STATUS: open
+
+## Handoff: Q-123 a, c, d, e pins (tst/Q-123-pins, from eng/Q-123-ui-followups d1504db)
+- Retargeted 2 (a4088bf): q118-overview "the bar has a slice per non-empty stage..." and q118-ui "ProgressSegments: link mode names each link..." now expect link slices (`a[href][aria-label="<label>: <n>"]`), no aria-hidden when the bar holds a link, zero slices drawn nowhere; filter mode keeps aria-hidden true, span slices, no links.
+- New 9 in web/tests/q123-followups.test.js: companyRows one-row join for pending/searching/over_limit (note, Waiting 0, counted once), lower-case and slug match, own row when not watched, found/watched regression, table shows the note once, ProgressSegments no-href stays hidden, Overview slice hrefs = stage hrefs = legend hrefs, unknown status in total only, Inbox `.tracked` markup + 640px rule text (jsdom cannot evaluate the media query; 44px is for the browser check at 390px).
+- Mutations (in memory, nothing committed): remove the join -> 3 red (one-row, slug match, table note: "expected [ 'Example Co', 'Example Co' ] to deeply equal [ 'Example Co' ]"); slices as span -> 4 red (q118-ui "expected 'SPAN' to be 'A'", q118-overview, 2 in q123).
+- Full vitest x3: 52 files passed, 1064 passed | 1 skipped (1065). No defects found.
+STATUS: done
