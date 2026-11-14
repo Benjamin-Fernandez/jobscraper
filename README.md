@@ -115,7 +115,7 @@ watchlist.yaml -> who is due? -> scrape -> free prefilter -> ~800-char extract
 |---|---|
 | `run [--dry-run] [--batch-size N]` | One batch. `--dry-run` fetches and reports but writes nothing and consumes nothing. |
 | `status` | Due now, due this week, never checked, quarantined, run rate vs the rate a sweep needs. |
-| `web` | The web app: **Inbox** (triage new roles; Not interested kept in its own section), **Applications** (by company, by stage), Runs, Companies, Profile, Settings, Developer (the background job's log). |
+| `web` | The web app: **Overview**, **Inbox** (triage new roles; **Auto-apply** adds a role to the auto-apply queue, which fills and submits its application in the background), **Applications** (by stage), **Runs** (search runs and the auto-apply queue), Companies, Profile, Settings, Developer (the background job's log). How applying works: [docs/OVERVIEW.md](docs/OVERVIEW.md#how-applying-works-now). |
 | `doctor` | Checks the whole setup, including whether Qwen (Ollama) is reachable. |
 | `watchlist list` / `add "Name" URL` / `disable KEY` | Manage companies; edits keep your comments. |
 | `profile [--show \| --refresh \| --bump]` | Build or inspect the resume-derived profile. |
