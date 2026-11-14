@@ -101,6 +101,14 @@ RECOMMENDED_PATHS: tuple[str, ...] = (
 
 RESUME_PATH = "documents.resume"     # how a missing resume file is reported
 
+# Q-125: `experience[].also_known_as`, the other names of that employer (a group or
+# parent name, a trading name, a former name, an abbreviation). The declaration "have
+# you worked for us before?" reads them (apply/declarations.py), so a real affiliate
+# under another name is not answered "No". Optional; the limits keep a typo small.
+ALSO_KNOWN_AS = "also_known_as"
+ALSO_KNOWN_AS_MAX_NAMES = 10
+ALSO_KNOWN_AS_MAX_LEN = 80
+
 # §5.3. A path here, or under a prefix ending ".", is sensitive. `contact.*`
 # is sensitive except city and country (handled in `is_sensitive`).
 SENSITIVE_PATHS: frozenset[str] = frozenset({
@@ -1105,6 +1113,20 @@ def validate(profile: dict) -> list[FieldError]:
                 s, e = parsed["start"], parsed["end"]
                 if (s[0], s[1], s[2] or 1) > (e[0], e[1], e[2] or 31):
                     err(f"{base}.end", "must not be before start")
+            if lst == "experience":
+                aka = entry.get(ALSO_KNOWN_AS)
+                if not _empty(aka):
+                    # Q-125: other names of the employer. One path for every problem, so
+                    # the form shows the message under the field; no value is repeated.
+                    where = f"{base}.{ALSO_KNOWN_AS}"
+                    if not isinstance(aka, list):
+                        err(where, "must be a list of company names")
+                    elif not all(isinstance(x, str) and x.strip() for x in aka):
+                        err(where, "must be a list of non-empty company names")
+                    elif len(aka) > ALSO_KNOWN_AS_MAX_NAMES:
+                        err(where, f"at most {ALSO_KNOWN_AS_MAX_NAMES} other names")
+                    elif any(len(x.strip()) > ALSO_KNOWN_AS_MAX_LEN for x in aka):
+                        err(where, f"each name at most {ALSO_KNOWN_AS_MAX_LEN} characters")
 
     for k in ("holdings", "relatives_employers"):
         v = _get(profile, f"declarations.{k}")
@@ -1503,6 +1525,10 @@ FORM: tuple[FormGroup, ...] = (
             _I("end", "End", "month", help="Leave it empty if you still work here."),
             _I("location", "Location", "text"),
             _I("description", "What you did", "text", multiline=True),
+            _I(ALSO_KNOWN_AS, "Also known as", "list_text",
+               help="Other names of this employer, such as the group or parent company, a "
+                    "trading name or an abbreviation. Used to answer 'Have you worked for "
+                    "us before?' truthfully."),
         ), entry_label="Job"),
     )),
     FormGroup("skills_languages", "Skills and languages", (
