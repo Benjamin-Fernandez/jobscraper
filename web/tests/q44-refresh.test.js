@@ -367,9 +367,14 @@ describe('Update your application details (R10)', () => {
     api.log(SKIP_LINE)
     api.finishJob()
     await pollOnce()
-    expect(w.find('.rr-unavailable').text()).toContain("the AI model isn't running")
-    expect(w.find('.rr-unavailable').text()).toContain('Start Ollama')
-    expect(w.find('.rr-unavailable').text()).toContain('choose "Re-read resume"')   // the button's name (Q-118 LE2)
+    // Q-126 (design §4.5, stale by design): JobScraper starts the model itself, so the line
+    // points at Settings, not at "Start Ollama" / "Re-read resume".
+    const text = w.find('.rr-unavailable').text()
+    expect(text).toContain("Couldn't compare with your application details")
+    expect(text).toContain("the local AI model couldn't start")
+    expect(text).toContain('Settings → Accounts → Local AI')
+    expect(text).not.toContain('Start Ollama')
+    expect(text).not.toContain('Re-read resume')
   })
 
   it('does not say that when the check ran', async () => {
