@@ -665,7 +665,11 @@ def _spawn_detached(argv: list[str], env: dict[str, str]) -> None:
     `JOBSCRAPER_OLLAMA_AUTOSTART=1` on one command line is the explicit override.
     No shell, hidden, no console, no admin."""
     flag = str(os.environ.get("JOBSCRAPER_OLLAMA_AUTOSTART", "")).strip()
-    if flag == "0" or "run_tests" in sys.modules or "pytest" in sys.modules:
+    # `tests/run_tests.py` runs as `__main__`, so "run_tests" is never in sys.modules
+    # under our own runner: its script name is checked too (review C4b).
+    runner = Path(sys.argv[0] if sys.argv and sys.argv[0] else "").name.lower()
+    if (flag == "0" or "run_tests" in sys.modules or "pytest" in sys.modules
+            or runner in ("run_tests.py", "pytest", "pytest.exe")):
         raise OSError("autostart is off here")
     if flag != "1":
         db = (str(os.environ.get("JOBSCRAPER_DB", "")).strip()
