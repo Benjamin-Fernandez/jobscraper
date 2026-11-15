@@ -10,6 +10,20 @@ BODY: <concise message>
 STATUS: open
 -->
 
+### 2026-11-15 architect → coordinator, software-engineer, tester, frontend (Q-126 rev 2: READY TO BUILD; supersedes the entry below)
+TYPE: handoff + request
+RE: Q-126, D-214, D-217 (rulings R1-R7), D-200, D-205, NF-04, NF-06; docs/architecture/ollama_autostart_design.md (rev 2); docs/architecture/adr/0013-app-starts-local-model.md (new); src/jobscraper/apply/contracts.py (WP-0 amended)
+BODY: The review (`docs/reviews/Q-126-ollama-autostart-design.md`) is folded, C1-C14 (table in design §12). Nothing is committed: please commit the three files on `arch/Q-126-ollama-autostart`.
+- **Coordinator:** record D-217 = R1-R7. The design does it this way:
+  - **R1, no timed resume.** `MODEL_AUTO_RESUME` is gone. A model pause lifts only on Resume or a new `POST /api/apply` click (`MODEL_CLICK_RESUME` = all seven `MODEL_PAUSES`; never any other pause, never the Questions retry). The route clears the pause and kicks; the worker runs the start-and-wait before its first take and re-stores the precise pause on failure. No route waits (§4.4 says why).
+  - **R1, streak.** One store path: `queue_resume_if(reasons|None, now, *, keep_window=MODEL_PAUSE_VALUES)`. Clearing a model pause never writes `resumed_at`, by either click. Resume on any other pause stamps as today.
+  - **R5.** Ship on `personal` first. §10 is the int/Q-121 merge note (`warm(..., *, timeout=None)` keyword-only).
+  - **File follow-up F1:** the tailor's silent fall-back to the original resume (§11).
+- **Tester (WP-T0, first, before E1 merges):** in `tests/run_tests.py`, ASSIGN `os.environ["JOBSCRAPER_OLLAMA_AUTOSTART"] = "0"`. Retarget `tests/test_apply_contracts_v5.py:40` to `"Runs" in rt.hint and "Try again" in rt.hint`. Verify with `-k apply_contracts` (expect 72/72). Then write pins T1-T21 (§9), new in `tests/test_q126_*.py`. Must-haves: T13 no timer lifts a pause; T13b a click lifts only a model pause; T13c `resumed_at` kept; T11b/c and T12c the stop re-checks; T15c spawn refuses under the guard; T9b a dead-PID lock; T12b the retry cap of 2.
+- **Software-engineer lanes (design §8):** E1 = `backends.py` + `store.py`. Then W1 (`web/applyqueue.py`, `web/routers/apply.py`, `web/connections.py`, `web/routers/connections.py`), E2 (`apply_flow.py`, `cli.py`, `pipeline.py`, `config/config.yaml`) and U1 (the five Vue/JS files) run in parallel. Merge W1 before or with E2, never E2 alone; U1 after W1. Each lane runs `-k apply_contracts` and may not merge on red. Shape every shared edit as §10 says.
+- **Manual check (Coordinator, at the end, §9 steps 0-8):** a dry-run DB copy, `queue_clear()` first, a phantom queue row, `JOBSCRAPER_OLLAMA_AUTOSTART=1` only on the one command line. Ask the other live sessions before quitting the shared Ollama.
+STATUS: open
+
 ### 2026-11-15 architect → coordinator, software-engineer, tester, frontend; cc Q-121 session (Q-126 Ollama autostart, D-214)
 TYPE: handoff + request + question
 RE: Q-126, D-214, D-200, D-205, NF-06; docs/architecture/ollama_autostart_design.md (new); src/jobscraper/apply/contracts.py (WP-0, additive, still v7)
