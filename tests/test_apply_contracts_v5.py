@@ -37,7 +37,9 @@ def test_model_unavailable_has_owner_copy_that_says_nothing_was_sent():
     assert "timed out on my_information" in rendered
     assert "{" not in rendered and "}" not in rendered
     assert "nothing was sent" in rendered.lower()
-    assert "doctor" in rt.hint
+    # Q-126 (design C6): the hint says to try again and where the reason lives
+    # (the Auto-apply queue in Runs); it no longer sends the owner to `doctor`.
+    assert "Runs" in rt.hint and "Try again" in rt.hint
 
 
 def test_site_value_origins_are_answer_sources():

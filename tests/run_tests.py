@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import argparse
 import importlib.util
+import os
 import sys
 import traceback
 from pathlib import Path
@@ -44,6 +45,11 @@ ROOT = TESTS_DIR.parent
 
 # Tests import the package as `jobscraper.*`; make that work without installing.
 sys.path.insert(0, str(ROOT / "src"))
+
+# Q-126 (D-214, review C4): the app starts the local model (Ollama) by itself.
+# No test may ever do that. ASSIGN (never setdefault) so an inherited value of
+# "1" cannot switch it on, and do it before any test module is imported.
+os.environ["JOBSCRAPER_OLLAMA_AUTOSTART"] = "0"
 
 
 def _load(path: Path) -> ModuleType:
