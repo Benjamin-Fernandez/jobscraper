@@ -142,3 +142,7 @@ One entry per session. Older handover notes end up here, so `handover.md` stays 
 - 2026-11-14 afternoon: U8b, the fourth review (the reader still voted), U9 (canonical frames only), the repeat-application fix; real-model runs now cost 228 calls for 361 fields and write nothing contradicting the profile on protected fields; what remains is ordinary answers the model gets wrong, fixed in the briefing.
 - Lesson: a 200-character cut on the re-ask instruction silently removed its key sentence; when a model will not move on a re-ask, read the exact bytes it was sent before concluding it is stubborn.
 - Lesson: once the protected fields hold, the remaining real-model errors are plain judgement on ordinary questions; give the model the computed fact (roles held, service status) instead of adding a rule in code.
+
+## 2026-11-15 · session jobscraper-7d
+- Owner: the queue paused because Ollama was closed ("it should start by itself": D-214) and the Profile page is a never-ending list of one company's questions (D-215: none of them on that page; a field only after more than 15 different applications). Counted the live database read-only: 24 open cards, all from one attempt. Final confirmation rehearsal of the always-answer filler read: clean on protected fields in four passes.
+- Lesson: the owner judged the product by the filler that is LIVE; three days of work on the replacement changed nothing they could see. Ship the visible fix (hide the dead-end, start the model) as soon as it is safe, not after the last review.
