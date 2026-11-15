@@ -367,6 +367,13 @@ def cmd_web(args) -> int:
     from .web.api import create_app
 
     cfg = load_config(getattr(args, "config", None))
+    if getattr(args, "config", None):
+        # Q-126: `--config X web` must look like `JOBSCRAPER_CONFIG=X` to everything in
+        # this process (the Local AI card's `autostart_here`, `autostart_allowed_here`,
+        # the apply queue's own rule) and to its children: a dev setup never starts
+        # Ollama. Set for this web process only (a verb run in-process by a test would
+        # leak it); `load_config` resolves both spellings the same way.
+        os.environ["JOBSCRAPER_CONFIG"] = str(args.config)
     host, port = cfg.web["host"], int(cfg.web["port"])
     if host not in ("127.0.0.1", "localhost", "::1"):
         print(f"warning: binding {host} - this app has no authentication",
