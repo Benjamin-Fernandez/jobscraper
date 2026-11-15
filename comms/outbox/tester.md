@@ -10,6 +10,16 @@ BODY: <concise message>
 STATUS: open
 -->
 
+### 2026-11-15 tester -> coordinator
+TYPE: handoff
+RE: Q-126 lane T0 (D-214, D-217) · branch tst/Q-126 (from int/Q-126) · docs/architecture/ollama_autostart_design.md §2, §9
+BODY: T0-a (`tests/run_tests.py` ASSIGNS `JOBSCRAPER_OLLAMA_AUTOSTART=0` before any test import) and T0-b (v5 pin retargeted to `"Runs" in hint and "Try again" in hint`) are ONE commit, 0d31da4: merge or cherry-pick it before E1 lands. `-k apply_contracts` 72/72.
+Pins written: `tests/test_q126_contracts.py` (12, green now: six pauses + copy, sets, no `MODEL_AUTO_RESUME` in src, runner guard); `tests/test_q126_service.py` (41, RED until eng/Q-126-E1: T1-T10, T15, T15c, C1/C3/C7/C8); `tests/test_q126_store.py` (14; 12 red until E1, 2 are regression guards). Red = per-test AttributeError on a missing name, never an import error. I checked every pin against a throwaway reference implementation of the design (not committed): 67/67 green with it, so the fakes and expectations are coherent and a correct E1 passes.
+ASSUMED seam shapes (the design names seams, not signatures; adapt in `Rig` in test_q126_service.py if E1 differs): `http` is httpx.Client-like (`get(url, **kw)`, `post`, responses with `.status_code/.json()/.raise_for_status()`; refused = httpx.ConnectError, slow = httpx.TimeoutException); `spawn(argv, env)` (positional or keyword, env a dict holding OLLAMA_HOST); `find(budget)` -> path|None; `pid_alive(pid)`; `sleep(s)` advances the fake `clock()`; lock file `<lock_dir>/jobscraper-ollama-<port>.lock` holding the creator PID, its AGE judged from the file mtime against `time.time()` (not the fake clock); `_spawn_detached(argv, env)`; `find_ollama(budget, env, *, cwd, checkout)` reads LOCALAPPDATA/ProgramFiles from the `env` it is given (Windows-only pins; skipped elsewhere); `autostart_switch(budget, get)` calls `get("budget.ollama_autostart")`; the worker-state settings keys are `apply_queue.model` / `apply_queue.model_at` (design §3); `ModelReady(code, started=False, detail="", seconds=0.0)` frozen.
+Design observation (for the engineer, C4b): `_spawn_detached` refuses when `"run_tests" in sys.modules`, but `python tests/run_tests.py` runs as `__main__`, so that second guard does not fire under our runner: only the env var protects the suite. My pin sets `sys.modules["run_tests"]` itself to exercise the branch. Consider `"run_tests" in sys.modules or Path(sys.argv[0]).name == "run_tests.py"`.
+Not pinned (ambiguous or later lanes): a stop already true BEFORE the first ping (the design polls only inside waits); the model-state clearing in the worker. LEFT for later lanes (Coordinator resumes me): W1 pins (T13/T13b-f click and tick, T14 start-up hook, T16, T19, T20), E2 pins (T11, T11b/c, T12-T12c, T18, doctor line, run_queue seams), U1 vitest pins and the two vitest retargets (`web/tests/connections.test.js`, `q44-refresh.test.js`).
+STATUS: open
+
 ### 2026-11-02 tester -> coordinator
 TYPE: handoff
 RE: Q-07 · F-01..F-07 · branch test/Q-07-m19-tests (worktree int-M19)
