@@ -18,12 +18,13 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Body, Request
 from fastapi.responses import JSONResponse
 
-from jobscraper import vault
+from jobscraper import backends, vault
 from jobscraper.store import utcnow
 from jobscraper.web.connections import ModelHealth, compose, lockfile_busy
+from jobscraper.web.deps import open_store
 
 router = APIRouter(tags=["connections"])
 
@@ -106,6 +107,35 @@ def get_connections(request: Request) -> JSONResponse:
         if callable(close):
             close()
     return JSONResponse(body, headers=NO_STORE)
+
+
+AUTOSTART_KEY = "budget.ollama_autostart"      # the settings row over config.yaml (Q-126 §4.5)
+
+
+@router.put("/connections/model/autostart")
+def put_model_autostart(request: Request, body: Any = Body(...)) -> JSONResponse:
+    """The Local AI card's switch "Start the local AI model when it is needed".
+
+    Body `{enabled: bool}` (a real boolean, nothing else). 200 `{enabled, default}`:
+    `enabled` is the value now in force, `default` what config.yaml alone gives.
+    422 `{detail: "invalid", errors: [{field, message}]}` changes nothing.
+
+    This is the ONLY thing the web can change about starting Ollama: a boolean.
+    `budget.ollama_path` is config.yaml only (ADR-0013, design §6 rule 2): no route
+    writes it, and `autostart_switch` never reads a stored row for it. Nothing here
+    starts or stops a process; the worker reads the switch when it needs the model."""
+    if not isinstance(body, dict) or type(body.get("enabled")) is not bool:
+        return JSONResponse(
+            {"detail": "invalid",
+             "errors": [{"field": "enabled",
+                         "message": "Start the local AI model must be true or false"}]},
+            status_code=422, headers=NO_STORE)
+    budget = request.app.state.cfg.budget or {}
+    with open_store(request) as store:
+        store.set_setting(AUTOSTART_KEY, "true" if body["enabled"] else "false")
+        enabled = backends.autostart_switch(budget, store.get_setting)
+    return JSONResponse({"enabled": enabled, "default": backends.autostart_switch(budget, None)},
+                        headers=NO_STORE)
 
 
 @router.post("/connections/model/check", status_code=202)
