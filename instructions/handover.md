@@ -23,4 +23,4 @@
 - The full suite takes ~30 min when agents are testing, skips Edge tests silently (gate apply merges on separate `-k apply_e2e` and `-k apply_flow`), and background runs can die without output: use `python -u … > log`.
 - Agents' worktrees have no `web/node_modules`: a directory junction to the main checkout's, removed with `rmdir` only; the bundle is built only in the main checkout.
 - Before every push: deny-list scan (tip diff and every outgoing commit; list in memory `denylist-location`), no `data/` path. Scope hook: engineers cannot edit `tests/`; architects have no shell.
-- IDs: next **Q-128**, **D-224**. Backlog: Q-124, Q-122, Q-117, Q-123 rest, resolver country table (Spain, cities, all-caps), `not_answered` count on the attempt view, PRD rows for D-214..D-219.
+- IDs: next **Q-128**, **D-225**. Backlog: Q-124, Q-122, Q-117, Q-123 rest, resolver country table (Spain, cities, all-caps), `not_answered` count on the attempt view, PRD rows for D-214..D-219.
