@@ -127,11 +127,9 @@ def apply_status(request: Request, cfg: Any = Depends(get_config),
         mode = _mode(cfg, store)
         paused = _pause_view(store, runner)
         waiting = len(store.queue_positions())
-        model = _model_view(store, slot)
     return {"mode": mode, "missing": _missing(cfg), "busy": slot != "free",
             "queue": {"waiting": waiting, "applying": slot == "apply",
-                      "paused": paused["reason"] if paused else None,
-                      "model": model}}
+                      "paused": paused["reason"] if paused else None}}
 
 
 def _settings_view(cfg: Any, store: Any) -> dict[str, Any]:

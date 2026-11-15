@@ -121,7 +121,7 @@ def put_model_autostart(request: Request, body: Any = Body(...)) -> JSONResponse
     422 `{detail: "invalid", errors: [{field, message}]}` changes nothing.
 
     This is the ONLY thing the web can change about starting Ollama: a boolean.
-    `budget.ollama_path` is config.yaml only (ADR-0013, design §6 rule 2): no route
+    The program's location is config.yaml only (ADR-0013, design §6 rule 2): no route
     writes it, and `autostart_switch` never reads a stored row for it. Nothing here
     starts or stops a process; the worker reads the switch when it needs the model."""
     if not isinstance(body, dict) or type(body.get("enabled")) is not bool:

@@ -415,8 +415,7 @@ def _model_item(cfg: Any, snapshot: Optional[dict[str, Any]], reason: Optional[s
              "local": local, "need_now": reason is not None,
              "need_reason": reason, "pending_mail": n_mail,
              "autostart": bool(autostart), "autostart_here": bool(autostart_here),
-             "installed": installed if isinstance(installed, bool) else None,
-             "model_pause": pause["reason"] if pause else None}
+             "installed": installed if isinstance(installed, bool) else None}
     need = reason is not None
     # Only a remote Ollama (D-107) is not "this PC"; off/misconfigured run nothing elsewhere.
     remote = not configured and not local
