@@ -296,7 +296,9 @@ def test_backends_configured_code_agrees_with_what_build_makes():
 def test_backends_a_probe_has_no_reason_text_and_never_the_url():
     from jobscraper import backends
     names = {f.name for f in dataclasses.fields(backends.Probe)}
-    assert names == {"ok", "code", "backend", "model", "local"}, names
+    # Q-126 (design §4.5): `installed: bool | None = None` is added, a plain flag and never a path.
+    assert names == {"ok", "code", "backend", "model", "local", "installed"}, names
+    assert dataclasses.fields(backends.Probe)[-1].default is None
     assert not any("reason" in n or "url" in n or "message" in n for n in names)
     for fake in (FakeHttp(error=ConnectionError(f"cannot reach {URL}")), FakeHttp(models=["x:1"])):
         p, _ = _probe({**LOCAL, "ollama_url": URL}, fake)
