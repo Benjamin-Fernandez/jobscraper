@@ -53,7 +53,7 @@ from .apply.contracts import (
     AnswerStatus, AnswerTier, ApplyFailure, AttemptContext, AttemptResult, AttemptState, Canonical,
     FieldType, FormField, PageOutcome, PrefillPolicy, ReasonCode, ResolveContext, SignUpOutcome,
 )
-from .apply.contracts import QUEUE_PAUSE_TEXTS, RETURNS_ITEM, QueuePause
+from .apply.contracts import MODEL_PAUSE_BY_CODE, QUEUE_PAUSE_TEXTS, RETURNS_ITEM, QueuePause
 from .apply.detect import detect
 from .apply.pagefill import (ENTRY_NOTE_PREFIX, ENTRY_NOTE_TAIL, TYPED_BEFORE_STOP_NOTE, fill_page,
                              stored_quote)
@@ -762,6 +762,12 @@ class _Run:
         self.apply_cfg_fn: Callable[[], ApplyConfig] = lambda: self.acfg
         self.should_stop: Callable[[], bool] = lambda: False   # the web parent is gone
         self.force_dry_run = False
+        # Q-126 (D-214, ollama_autostart_design §3): the worker brings the local model up.
+        self.model_autostart = False          # library default: never start (cli turns it on)
+        self.model_ensurer: Optional[Callable[..., Any]] = None   # None = backends.ensure_model_running
+        self.model_pid_alive: Optional[Callable[[int], bool]] = None
+        self.model_retried: set[str] = set()  # jobs already sent round once after a model ending
+        self.model_retries = 0                # automatic retries this worker run (cap 2, C5)
 
     # -- browser
 
@@ -1901,7 +1907,12 @@ class _Run:
         detail = redact(detail, self.log.values) if detail else detail
         wrote = self.store.queue_pause(reason.value, detail, utcnow())
         rt = QUEUE_PAUSE_TEXTS.get(reason)
-        text = f" {rt.text.format(detail=detail or '')} {rt.hint}" if rt else ""
+        text = ""
+        if rt:
+            try:                                          # the model hints hold {detail} too (§4.2)
+                text = f" {rt.text.format(detail=detail or '')} {rt.hint.format(detail=detail or '')}"
+            except (KeyError, IndexError, ValueError):    # a stray brace never breaks the pause
+                text = f" {rt.text} {rt.hint}"
         self.log(f"queue: paused reason={reason.value}"
                  + ("" if wrote else " (already paused)") + text)
 
@@ -1913,9 +1924,117 @@ class _Run:
         missing = applicant.missing_for_apply(self.profile, self.cfg.resume_dir)
         if missing:
             return QueuePause.PROFILE_INCOMPLETE, ", ".join(missing)
-        if self.acfg.fill == "llm" and not getattr(self.backend, "available", False):
-            return (QueuePause.MODEL_UNAVAILABLE,
-                    str(getattr(self.backend, "unavailable_code", "") or "not running"))
+        if self.acfg.fill == "llm":
+            if self.real_model():
+                r = self.ensure_model(load=True)              # Q-126: start and wait, then take
+                if r.code == "cancelled":                     # the app is closing: nothing is taken
+                    return QueuePause.APP_CLOSED, None
+                if not r.ok:
+                    return self.model_pause(r)
+            elif not getattr(self.backend, "available", False):
+                return (QueuePause.MODEL_UNAVAILABLE,
+                        str(getattr(self.backend, "unavailable_code", "") or "not running"))
+        return None
+
+    # -- the local model (Q-126, D-214; ollama_autostart_design §3)
+
+    def real_model(self) -> bool:
+        """A real Ollama backend: the only kind the start-and-wait service may drive. A
+        fake backend keeps the old `available` rule (pin P6)."""
+        return isinstance(self.backend, backends.OllamaBackend)
+
+    @staticmethod
+    def model_pause(r: Any) -> tuple[QueuePause, Optional[str]]:
+        """The pause a not-ready `ModelReady` causes, with its detail (a tag, a port or
+        fixed words; never a path). Unknown codes fall back to `model_unavailable`."""
+        why = MODEL_PAUSE_BY_CODE.get(r.code, QueuePause.MODEL_UNAVAILABLE)
+        if why is QueuePause.MODEL_UNAVAILABLE:
+            return why, (r.code or "not running").replace("_", " ")
+        return why, (r.detail or None)
+
+    def ensure_model(self, *, load: bool = True) -> Any:
+        """Start Ollama when nothing listens and wait until the model answers (and, with
+        `load`, is loaded), writing the worker's model state for the Runs panel. Never
+        raises: an unexpected error is a `not_running` result. `should_stop` is polled
+        inside every wait, so closing the app cancels it."""
+        state = {"set": False}
+
+        def on_state(s: str) -> None:
+            state["set"] = True
+            self.store.queue_model_state(s, utcnow())
+            self.log("model: starting Ollama" if s == "starting"
+                     else f"model: loading {getattr(self.backend, 'model_id', '') or 'the model'}")
+        ensurer = self.model_ensurer or backends.ensure_model_running
+        try:
+            r = ensurer(self.cfg.budget, autostart=bool(self.model_autostart),
+                        backend=self.backend, load=load,
+                        keep_alive=(self.acfg.llm_fill.keep_alive or None),
+                        on_state=on_state, should_stop=self.should_stop,
+                        pid_alive=self.model_pid_alive)
+        except Exception as exc:                          # noqa: BLE001 - fail closed, never a crash
+            self.log(f"model: the check failed ({type(exc).__name__})")
+            r = backends.ModelReady("not_running")
+        finally:
+            if state["set"]:
+                try:
+                    self.store.queue_model_state(None, utcnow())
+                except Exception:                         # noqa: BLE001
+                    pass
+        if r.ok:
+            if r.started:
+                self.log(f"model: Ollama answered after {int(r.seconds)} s")
+            self.log(f"model: ready ({int(r.seconds)} s)")
+        elif r.code != "cancelled":
+            self.log(f"model: {r.code}" + (f" {r.detail}" if r.detail else ""))
+        return r
+
+    def model_retry_wanted(self, why: QueuePause, row: dict[str, Any]) -> bool:
+        """Only a `model_unavailable` ending of a real Ollama backend whose row is
+        `failed` with no Submit click (read from the store, NF-06) is retried."""
+        return (why is QueuePause.MODEL_UNAVAILABLE and self.real_model()
+                and row.get("state") == S.FAILED.value
+                and row.get("submit_clicked_at") is None)
+
+    def clear_model_state(self) -> None:
+        """Drop the Runs panel's "starting / loading" state (worker start and end)."""
+        try:
+            self.store.queue_model_state(None, utcnow())
+        except Exception:                                 # noqa: BLE001 - a display state only
+            pass
+
+    def model_retry(self, item: dict[str, Any], row: dict[str, Any]
+                    ) -> Optional[tuple[QueuePause, Optional[str]]]:
+        """A role ended `failed/model_unavailable` with no Submit click (§3 row 3, NF-06):
+        bring the model up again, then send the role round once. Returns None when it
+        goes again (the role is back at the front with the note "the local AI model
+        restarted", no pause), else the pause to store. The role is returned in every
+        case (RETURNS_ITEM). At most one retry per role and 2 per worker run (C5)."""
+        job_id = item["job_id"]
+        mode = item.get("item_mode") or "dry_run"
+        company_id = row.get("company_id")
+
+        def back(note: str) -> None:
+            self.store.queue_return(job_id, company_id, mode, note, utcnow())
+
+        r = self.ensure_model(load=True)
+        if r.code == "cancelled" or self.should_stop():       # R2: never go on after a close
+            back(f"returned: {QueuePause.MODEL_UNAVAILABLE.value}")
+            self.log(f"queue: job={job_id} is back at the front")
+            return QueuePause.APP_CLOSED, None
+        if not r.ok:
+            why, detail = self.model_pause(r)
+            back(f"returned: {why.value}")
+            self.log(f"queue: job={job_id} is back at the front")
+            return why, detail
+        if job_id in self.model_retried or self.model_retries >= 2:
+            back(f"returned: {QueuePause.MODEL_NOT_ANSWERING.value}")
+            self.log(f"queue: job={job_id} is back at the front")
+            return QueuePause.MODEL_NOT_ANSWERING, None
+        self.model_retried.add(job_id)
+        self.model_retries += 1
+        back("the local AI model restarted")                  # C11: exactly these words
+        self.log(f"queue: the local AI model stopped answering; it is ready again, "
+                 f"so job={job_id} goes again (once)")
         return None
 
     def keep_tabs(self) -> None:
@@ -1966,6 +2085,7 @@ class _Run:
             out.lock_refused = True
             return out
         self.queue = True
+        self.clear_model_state()
         try:
             reaped = self.store.reap_attempts(utcnow())           # THE reaper of the web path (M1)
             if reaped:
@@ -1990,6 +2110,9 @@ class _Run:
                     if stop:
                         self.pause(*stop)
                         break
+                if self.should_stop():                             # R2/C1: a model wait can be long
+                    self.pause(QueuePause.APP_CLOSED)
+                    break
                 self.item = None
                 item, dropped = self.store.queue_take(utcnow())
                 for job_id in dropped:
@@ -2022,6 +2145,12 @@ class _Run:
                 if p is None:
                     continue
                 why, detail = p
+                if self.model_retry_wanted(why, row):             # Q-126: one retry (§3 row 3)
+                    p = self.model_retry(item, row)               # returns the role itself
+                    if p is None:
+                        continue
+                    self.pause(*p)
+                    break
                 if (why in RETURNS_ITEM and row.get("state") == S.FAILED.value
                         and row.get("submit_clicked_at") is None):
                     self.store.queue_return(item["job_id"], row.get("company_id"),
@@ -2043,6 +2172,7 @@ class _Run:
                 pass
             raise
         finally:
+            self.clear_model_state()
             try:
                 self.close()
             finally:
@@ -2247,13 +2377,21 @@ def run_queue(cfg: Config, store: Store, *, backend: Any,
               say: Callable[[str], None] = print, evidence_dir: Optional[Path] = None,
               now: Optional[Callable[[], float]] = None,
               should_stop: Optional[Callable[[], bool]] = None,
-              force_dry_run: bool = False) -> QueueOutcome:
+              force_dry_run: bool = False, model_autostart: bool = False,
+              model_ensurer: Optional[Callable[..., Any]] = None,
+              model_pid_alive: Optional[Callable[[int], bool]] = None) -> QueueOutcome:
     """The auto-apply queue worker (apply_queue_design §3.2, D-205): take the head
     role, apply to it, judge the ending (§4.1), repeat until the queue is empty,
     paused or a search run asks to go first. `apply_cfg_fn` gives the effective
     settings and is called again for every role (L1); `should_stop` is True once
     the web process that started the worker is gone (§3.3); `force_dry_run` is
-    `apply queue --dry-run`. The mode of each role is `pick_mode`'s (I5)."""
+    `apply queue --dry-run`. The mode of each role is `pick_mode`'s (I5).
+
+    Q-126 (D-214): with a real Ollama backend the worker brings the model up before
+    every take (`backends.ensure_model_running`; `model_ensurer` is the test seam).
+    `model_autostart` (default off: only the CLI turns it on, after the process rule
+    and the owner's switch) lets it START Ollama; `model_pid_alive` is the lock's
+    liveness check."""
     acfg = apply_cfg_fn()
     r = _Run(cfg, store, dry_run=True, backend=backend,
              http=http if http is not None else make_http(cfg),
@@ -2262,4 +2400,7 @@ def run_queue(cfg: Config, store: Store, *, backend: Any,
     r.apply_cfg_fn = apply_cfg_fn
     r.should_stop = should_stop or (lambda: False)
     r.force_dry_run = bool(force_dry_run)
+    r.model_autostart = bool(model_autostart)
+    r.model_ensurer = model_ensurer
+    r.model_pid_alive = model_pid_alive
     return r.run_queue()

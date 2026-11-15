@@ -120,8 +120,13 @@ def run(cfg: Config, store: Store, *, dry_run: bool = False,
         batch_size: Optional[int] = None, now: Optional[str] = None,
         fetcher: Fetcher = fetch_one, resolver: Optional[Resolver] = None,
         client: Optional[HttpClient] = None, backend: Optional[backends.Backend] = None,
-        profile: Optional[dict[str, Any]] = None, verbose: bool = True) -> RunReport:
+        profile: Optional[dict[str, Any]] = None, verbose: bool = True,
+        model_autostart: bool = False,
+        model_pid_alive: Optional[Callable[[int], bool]] = None) -> RunReport:
     """One run: sync, schedule, scrape, persist, stamp.
+
+    `model_autostart` (Q-126, D-214; default off, only `cmd_run` turns it on) lets the
+    decide step start Ollama, and only when postings are waiting for a judgement.
 
     `--dry-run` fetches and reports but writes nothing that a run produces -
     no run row, no jobs, no coverage, no failure counts, no resolution, and
@@ -170,7 +175,8 @@ def run(cfg: Config, store: Store, *, dry_run: bool = False,
             own = client is None
             c = client or make_client(cfg)
             try:
-                _funnel(cfg, store, rep, c, backend, profile, say)
+                _funnel(cfg, store, rep, c, backend, profile, say,
+                        model_autostart=model_autostart, model_pid_alive=model_pid_alive)
             finally:
                 if own:
                     c.close()
@@ -338,7 +344,8 @@ def run(cfg: Config, store: Store, *, dry_run: bool = False,
             say(f"  linked {rep.relinked} earlier application(s) to their postings")
 
         # ---- [1] profile, [3] prefilter, [4] extract, [5] decide, [6] shortlist ----
-        _funnel(cfg, store, rep, client, backend, profile, say)
+        _funnel(cfg, store, rep, client, backend, profile, say,
+                model_autostart=model_autostart, model_pid_alive=model_pid_alive)
 
         # ---- housekeeping: stored descriptions expire (M17) ----
         days = description_days(cfg)
@@ -430,7 +437,8 @@ def _try_reresolve(client: HttpClient, store: Store, company: WatchedCompany,
 
 def _funnel(cfg: Config, store: Store, rep: RunReport, client: HttpClient,
             backend: Optional[backends.Backend], profile: Optional[dict[str, Any]],
-            say) -> None:
+            say, *, model_autostart: bool = False,
+            model_pid_alive: Optional[Callable[[int], bool]] = None) -> None:
     """Stages [1] and [3]-[6], over everything still pending - not just this run.
 
     Work is selected by what is missing, not by run number: postings with no
@@ -505,9 +513,12 @@ def _funnel(cfg: Config, store: Store, rep: RunReport, client: HttpClient,
     # ---- [5] decide: the only paid step ----
     budget = cfg.budget
     backend = backend or backends.build(budget)
+    started_why = ""
+    if model_autostart:
+        started_why = _bring_model_up(budget, store, backend, postings, pv, say, model_pid_alive)
     if not budget.get("enable_llm", True) or not backend.available:
         why = ("disabled in config" if not budget.get("enable_llm", True)
-               else backend.unavailable_reason or "no model transport")
+               else started_why or backend.unavailable_reason or "no model transport")
         rep.stats["awaiting_model"] = len(postings)
         say(f"  decide: skipped ({why}); {len(postings)} postings wait for a model")
     else:
@@ -569,6 +580,52 @@ def _funnel(cfg: Config, store: Store, rep: RunReport, client: HttpClient,
     doc = shortlist.write(store, cfg.shortlist_path, pv, rules_hash=rules_key)
     rep.stats["shortlisted"] = len(doc["jobs"])
     say(f"  shortlist: {len(doc['jobs'])} roles -> {cfg.shortlist_path}")
+
+
+_MODEL_WORDS = {            # a not-ready `ModelReady.code` -> the decide step's skip words (Q-126)
+    "not_installed": "Ollama isn't installed",
+    "start_failed": "Ollama didn't start",
+    "port_taken": "another program is using Ollama's port",
+    "not_answering": "Ollama isn't answering",
+}
+
+
+def _bring_model_up(budget: dict[str, Any], store: Store, backend: backends.Backend,
+                    postings: list, pv: int, say,
+                    pid_alive: Optional[Callable[[int], bool]]) -> str:
+    """Q-126 (D-214, design §3): start Ollama for the decide step, but only when it is
+    needed - the model is on, nothing answers yet and some posting still waits for a
+    judgement (no cached decision from this model, not parked). Never raises and never
+    stops a run: a failure comes back as the words for the existing skip line (empty
+    when there is nothing to add), so a search run fails exactly when it did before."""
+    try:
+        if not budget.get("enable_llm", True) or not isinstance(backend, backends.OllamaBackend):
+            return ""
+        model = backend.model_id
+        waiting = 0
+        for p in postings:
+            h = decide.vital_hash(p.vital_text)
+            row = store.get_decision(p.job_id, pv, h)
+            if row and row["model"] == model:
+                continue
+            if store.decision_failures(p.job_id, pv, h, model) >= decide.MAX_PARSE_FAILURES:
+                continue
+            waiting += 1
+        if not waiting or backend.available:
+            return ""
+        r = backends.ensure_model_running(
+            budget, autostart=True, backend=backend, pid_alive=pid_alive,
+            on_state=lambda s: say("  model: starting Ollama") if s == "starting" else None)
+        if r.ok:
+            if r.started:
+                say(f"  model: Ollama answered after {int(r.seconds)} s")
+            return ""
+        if r.code == "model_missing":
+            return f"the model {r.detail} isn't downloaded"
+        return _MODEL_WORDS.get(r.code, "")
+    except Exception as exc:                              # noqa: BLE001 - a search never fails here
+        log.warning("model start check failed: %s", type(exc).__name__)
+        return ""
 
 
 def _allowed_locations(ruleset: prefilter.RuleSet) -> list[str]:
