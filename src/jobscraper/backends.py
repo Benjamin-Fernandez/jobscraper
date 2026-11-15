@@ -747,9 +747,13 @@ def _ping(client: Any, url: str, sleep: Callable[[float], Any],
 
 
 def _lock_state(path: Path, *, wall: Callable[[], float],
-                pid_alive: Optional[Callable[[int], bool]], max_age: float) -> str:
+                pid_alive: Optional[Callable[[int], bool]], max_age: float,
+                seen: Optional[dict] = None,
+                clock: Optional[Callable[[], float]] = None) -> str:
     """"missing", "stale" or "live" (C8). Stale at once when the creator is dead, or
-    when the file holds no PID 2 s after it was made; also when older than `max_age`."""
+    when the file holds no PID 2 s after it was made (by the file's age, or, in a
+    caller that keeps `seen`, by how long WE have watched it unreadable); also when
+    older than `max_age`."""
     try:
         age = wall() - path.stat().st_mtime
     except OSError:
@@ -761,7 +765,15 @@ def _lock_state(path: Path, *, wall: Callable[[], float],
     except (OSError, ValueError):
         pid = None
     if pid is None:
-        return "stale" if age > 2.0 else "live"
+        if age > 2.0:
+            return "stale"
+        if seen is not None and clock is not None:
+            first = seen.setdefault("unreadable_since", clock())
+            if clock() - first > 2.0:
+                return "stale"
+        return "live"
+    if seen is not None:
+        seen.pop("unreadable_since", None)
     if pid_alive is not None:
         try:
             if not pid_alive(pid):
@@ -865,11 +877,14 @@ def ensure_model_running(
             / f"jobscraper-ollama-{port}.lock"
         lock_path.append(lp)
 
+        seen: dict = {}
+
         def take() -> str:
             """"ours" / "unavailable" (we may start) or "held" (a live creator)."""
             r = _lock_create(lp)
             if r == "exists" and _lock_state(lp, wall=wall, pid_alive=pid_alive,
-                                             max_age=max_age) in ("stale", "missing"):
+                                             max_age=max_age, seen=seen,
+                                             clock=clock) in ("stale", "missing"):
                 _unlink(lp)
                 r = _lock_create(lp)
             if r == "ours":
@@ -907,7 +922,8 @@ def ensure_model_running(
             if last == "ollama":
                 return None
             if waiter and last == "refused" and _lock_state(
-                    lp, wall=wall, pid_alive=pid_alive, max_age=max_age) in ("missing", "stale"):
+                    lp, wall=wall, pid_alive=pid_alive, max_age=max_age, seen=seen,
+                    clock=clock) in ("missing", "stale"):
                 # the creator vanished: take over, once
                 _unlink(lp)
                 if take() != "held":
@@ -939,7 +955,7 @@ def ensure_model_running(
                 return done(missing, model if missing == "model_missing" else "")
             if load:
                 failed = _load_model(budget, backend, keep_alive, load_wait_s, on_state,
-                                     should_stop, clock)
+                                     should_stop, clock, sleep)
                 if failed:
                     return done(failed, model)
             return done("ready")
@@ -970,7 +986,8 @@ def _model_missing(http: Any, url: str, model: str) -> str:
 
 def _load_model(budget: dict[str, Any], backend: Optional[Backend], keep_alive: Any,
                 load_wait_s: float, on_state: Callable[[str], Any],
-                should_stop: Callable[[], bool], clock: Callable[[], float]) -> str:
+                should_stop: Callable[[], bool], clock: Callable[[], float],
+                sleep: Callable[[float], Any] = time.sleep) -> str:
     """Load the model in a daemon thread so `should_stop` is polled while it loads.
     Returns "" when loaded, "load_failed" when the load failed or ran past
     `load_wait_s` (+5 s); raises `_Stop` when `should_stop` turned true (the request
@@ -997,6 +1014,8 @@ def _load_model(budget: dict[str, Any], backend: Optional[Backend], keep_alive: 
             if clock() >= deadline:
                 return "load_failed"
             th.join(0.05)
+            if th.is_alive():
+                sleep(0.5)          # the seam, so a fake clock moves while it loads
     finally:
         if own is not None and not th.is_alive():
             own.close()
