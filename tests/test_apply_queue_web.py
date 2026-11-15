@@ -246,7 +246,10 @@ def test_p5_remove_waiting_204_started_or_unknown_404_and_the_pause_resume_clear
             assert [a["state"] for a in st.attempts_for_job(j2)] == ["queued"]    # untouched
 
         view = w.c.post("/api/apply/queue/pause").json()
-        assert set(view) == {"paused", "now", "slot", "run_pending", "waiting", "recent"}, view
+        # Q-126 (design §4.1, stale by design): the view gains `model` (null or {state, since})
+        # for the "Starting the local AI model" row. RED UNTIL eng/Q-126-W1 merges.
+        assert set(view) == {"paused", "now", "slot", "run_pending", "waiting", "recent",
+                             "model"}, view
         assert view["paused"]["reason"] == "owner" and view["paused"]["text"], view
         assert view["slot"] == "run" and view["run_pending"] is False
         assert view["now"]["job_id"] == j2 and view["now"]["attempt_id"] == live["attempt_id"]
