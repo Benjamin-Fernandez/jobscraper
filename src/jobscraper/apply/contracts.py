@@ -55,6 +55,12 @@ CONTRACT_VERSION = 7   # 2: D-69 (no FAILED after the Submit click, ADR-0004), D
                        #    DEFAULT_RULES, FALLBACK_RULES, Briefing, ReasonCode DOCUMENT_MISSING/
                        #    OWNER_FACT_MISSING (+ REASON_TEXTS), QuestionReason/QuestionStatus ASSUMED,
                        #    PageOutcome.assumed/.fallback/.standing_kept.
+                       #    Q-126 / D-214 (still v7, additive; ollama_autostart_design.md §5):
+                       #    QueuePause MODEL_NOT_INSTALLED/MODEL_START_FAILED/MODEL_MISSING/
+                       #    MODEL_PORT_TAKEN/MODEL_LOAD_FAILED/MODEL_NOT_ANSWERING (+ texts; their
+                       #    hints may hold {detail}), RETURNS_ITEM gains them, MODEL_PAUSES,
+                       #    MODEL_AUTO_RESUME, MODEL_PAUSE_BY_CODE; the hint copy of
+                       #    QueuePause.MODEL_UNAVAILABLE and ReasonCode.MODEL_UNAVAILABLE reworded.
 
 
 # --------------------------------------------------------------------------
@@ -216,7 +222,8 @@ REASON_TEXTS: dict[ReasonCode, ReasonText] = {
     ReasonCode.MODEL_UNAVAILABLE: ReasonText(
         "The local AI model wasn't available ({detail}), so JobScraper stopped before "
         "finishing the form. Nothing was sent.",
-        "Start Ollama, check it with “python -m jobscraper doctor”, then try again."),
+        "Try again. If the local AI model still can't start, the Auto-apply queue in Runs "
+        "says why."),
     ReasonCode.ERROR: ReasonText(
         "Something unexpected went wrong, so JobScraper stopped before sending.",
         "Try again. If it happens again, the Developer tab log has the details."),
@@ -261,6 +268,15 @@ class QueuePause(str, Enum):
     WORKER_FAILED = "worker_failed"
     BUSY_ELSEWHERE = "busy_elsewhere"
     DISABLED = "disabled"
+    # Q-126 / D-214 (ollama_autostart_design.md §4): the precise model pauses, stored
+    # only after JobScraper tried to bring the model up. MODEL_UNAVAILABLE above now
+    # means "nothing listens and JobScraper did not or may not start it".
+    MODEL_NOT_INSTALLED = "model_not_installed"
+    MODEL_START_FAILED = "model_start_failed"
+    MODEL_MISSING = "model_missing"
+    MODEL_PORT_TAKEN = "model_port_taken"
+    MODEL_LOAD_FAILED = "model_load_failed"
+    MODEL_NOT_ANSWERING = "model_not_answering"
 
 
 # Pauses after which the worker puts the role back at the front of the queue,
@@ -268,7 +284,40 @@ class QueuePause(str, Enum):
 RETURNS_ITEM = frozenset({
     QueuePause.PROFILE_INCOMPLETE, QueuePause.MODEL_UNAVAILABLE,
     QueuePause.BROWSER_UNAVAILABLE, QueuePause.DAILY_LIMIT,
+    QueuePause.MODEL_NOT_INSTALLED, QueuePause.MODEL_START_FAILED,
+    QueuePause.MODEL_MISSING, QueuePause.MODEL_PORT_TAKEN,
+    QueuePause.MODEL_LOAD_FAILED, QueuePause.MODEL_NOT_ANSWERING,
 })
+
+# Every pause caused by the local model (Q-126).
+MODEL_PAUSES = frozenset({
+    QueuePause.MODEL_UNAVAILABLE, QueuePause.MODEL_NOT_INSTALLED,
+    QueuePause.MODEL_START_FAILED, QueuePause.MODEL_MISSING,
+    QueuePause.MODEL_PORT_TAKEN, QueuePause.MODEL_LOAD_FAILED,
+    QueuePause.MODEL_NOT_ANSWERING,
+})
+
+# The model pauses the web tick lifts by itself once the Local AI probe answers
+# ok (Ollama answers AND the model is pulled), within one app session (§4.4).
+# Not LOAD_FAILED / NOT_ANSWERING: the server answering proves nothing there, so
+# a lift would loop; those wait for the owner's Resume.
+MODEL_AUTO_RESUME = frozenset({
+    QueuePause.MODEL_UNAVAILABLE, QueuePause.MODEL_NOT_INSTALLED,
+    QueuePause.MODEL_START_FAILED, QueuePause.MODEL_MISSING,
+    QueuePause.MODEL_PORT_TAKEN,
+})
+
+# `backends.ModelReady.code` (every code but "ready") -> the pause it causes (§2, §4).
+MODEL_PAUSE_BY_CODE: dict[str, QueuePause] = {
+    "off": QueuePause.MODEL_UNAVAILABLE,
+    "not_running": QueuePause.MODEL_UNAVAILABLE,
+    "not_installed": QueuePause.MODEL_NOT_INSTALLED,
+    "start_failed": QueuePause.MODEL_START_FAILED,
+    "model_missing": QueuePause.MODEL_MISSING,
+    "port_taken": QueuePause.MODEL_PORT_TAKEN,
+    "load_failed": QueuePause.MODEL_LOAD_FAILED,
+    "not_answering": QueuePause.MODEL_NOT_ANSWERING,
+}
 
 # Owner-facing copy for the paused banner (§7.2). `{detail}` never holds a personal value.
 QUEUE_PAUSE_TEXTS: dict[QueuePause, ReasonText] = {
@@ -289,8 +338,38 @@ QUEUE_PAUSE_TEXTS: dict[QueuePause, ReasonText] = {
         "Your application details are missing: {detail}.",
         "Fill them in under Profile → Application details, then resume."),
     QueuePause.MODEL_UNAVAILABLE: ReasonText(
-        "The local AI model isn't answering, so the queue is paused. Nothing was sent.",
-        "Start Ollama, then resume. The role it was on is back at the front."),
+        "The local AI model isn't running, so the queue is paused. Nothing was sent.",
+        "Start Ollama and the queue continues by itself. Or turn on “Start the local AI "
+        "model when it is needed” in Settings → Accounts → Local AI."),
+    # Q-126: `{detail}` is a model tag, a port number or fixed words, never a path or URL.
+    QueuePause.MODEL_NOT_INSTALLED: ReasonText(
+        "JobScraper couldn't find Ollama on this computer, so the queue is paused. "
+        "Nothing was sent.",
+        "Install Ollama from ollama.com, then download the model with “ollama pull "
+        "{detail}”. The queue continues by itself once the model answers."),
+    QueuePause.MODEL_START_FAILED: ReasonText(
+        "JobScraper tried to start Ollama, but it didn't start ({detail}). The queue is "
+        "paused. Nothing was sent.",
+        "Open Ollama from the Start menu. The queue continues by itself once it answers."),
+    QueuePause.MODEL_MISSING: ReasonText(
+        "The AI model {detail} isn't downloaded, so the queue is paused. Nothing was sent.",
+        "Download it in a terminal with “ollama pull {detail}” (several GB). The queue "
+        "continues by itself when it's ready."),
+    QueuePause.MODEL_PORT_TAKEN: ReasonText(
+        "Another program is using port {detail}, where Ollama should run, so the queue is "
+        "paused. Nothing was sent.",
+        "Close that program, or set budget.ollama_url in config.yaml to Ollama's address. "
+        "The queue continues by itself once Ollama answers."),
+    QueuePause.MODEL_LOAD_FAILED: ReasonText(
+        "Ollama is running but couldn't load the model {detail}, so the queue is paused. "
+        "Nothing was sent.",
+        "Another program may be using the graphics card. Close it, then resume. Your "
+        "roles keep their place in the queue."),
+    QueuePause.MODEL_NOT_ANSWERING: ReasonText(
+        "The local AI model is running but not answering in time, so the queue is "
+        "paused. Nothing was sent.",
+        "Another program may be using the graphics card. Close it or let it finish, then "
+        "resume. Your roles keep their place in the queue."),
     QueuePause.BROWSER_UNAVAILABLE: ReasonText(
         "Edge couldn't open for auto-apply: {detail}.",
         "Close any JobScraper Edge window (a sign-in window, for example), then resume. "
