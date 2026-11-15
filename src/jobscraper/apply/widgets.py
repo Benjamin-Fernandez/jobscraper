@@ -14,6 +14,8 @@ to this file, not to a site module). Ported from the S-5b prototype
     read(page, pf) -> Value          what the field shows now
     error(page, pf) -> str           the site's error text for the field now
     same(pf, shown, value) -> bool   normalised equality (dates by role, multi as sets)
+    query_ladder / fill_search       fill policy `always` only: a remote typeahead's queries
+                                     (Q-121 §4.4), tried in turn through fill_field
     detect(page, loc) -> str         the family of a control
     click(page, loc) -> str          click with the Workday click_filter fallbacks
                                      (navigators use it too; defined in page.py)
@@ -154,6 +156,41 @@ def fill_field(page: Any, pf: PageField, value: Value, *, pick: Optional[Picker]
     if not same(pf, shown, chosen if picked else value):
         return Filled(False, shown, err, note="readback", picked=picked)
     return Filled(True, shown, picked=picked)
+
+
+QUERY_MAX = 40                 # Q-121 §4.4: a remote typeahead query is at most 40 characters
+SEARCH_MISSES = ("search_miss", "no_option")
+
+
+def query_ladder(words: str, fallbacks: Sequence[str] = ()) -> list[str]:
+    """Q-121 §4.4 (fill policy `always`): the queries for a remote typeahead, in order:
+    the model's words (<= 40 characters), their first word of >= 3 letters, then the
+    caller's family fallbacks (a city, then the country; an institution's name). Blank
+    and repeated queries (normalised) are dropped."""
+    out: list[str] = []
+    seen: set[str] = set()
+    first = next((w for w in re.findall(r"[^\W\d_][\w'.&-]*", words or "")
+                  if len(re.sub(r"[^A-Za-z]", "", w)) >= 3), "")
+    for q in [(words or "")[:QUERY_MAX], first, *[(f or "")[:QUERY_MAX] for f in fallbacks]]:
+        q = re.sub(r"\s+", " ", q).strip()
+        if q and B.norm_text(q) not in seen:
+            seen.add(B.norm_text(q))
+            out.append(q)
+    return out
+
+
+def fill_search(page: Any, pf: PageField, queries: Sequence[str], *, pick: Optional[Picker] = None) -> Filled:
+    """Q-121 §4.4: try each query of `query_ladder` in turn until the list offers an option
+    the caller's `pick` takes (or one equal to the query). A query whose list shows nothing
+    usable moves on to the next (each miss clears its typed text, as every family does); any
+    other failure (read-back, a site error) ends the ladder. The `pick` gets the options of
+    the list shown; the always path hands them to `always.ladder` with the model's words."""
+    last = Filled(False, "", note="search_miss")
+    for q in queries:
+        last = fill_field(page, pf, q, pick=pick)
+        if last.ok or last.note not in SEARCH_MISSES:
+            return last
+    return last
 
 
 def _decided(pf: PageField, chosen: Value, value: Value, picked: Sequence[str]) -> bool:

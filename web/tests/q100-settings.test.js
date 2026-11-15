@@ -239,7 +239,7 @@ describe('Settings -> Apply (ApplySettings)', () => {
   // ApplySettings now takes its data as props (Settings loads it once): `apply` is
   // loadApplyData()'s { status, settings, summary }; `connections` is the hub's answer.
   async function apply({ settings = null, status = null, summary = null, put, connections = cloneSample(sample), item = null } = {}) {
-    const api = routeFetch(put ? { 'PUT apply/settings': put } : {})
+    const api = routeFetch({ 'GET apply/remembered': { items: [], count: 0, etag: 'e1', unreadable: false }, ...(put ? { 'PUT apply/settings': put } : {}) })
     const w = mount(ApplySettings, {
       props: { connections, apply: { status, settings, summary }, item },
       attachTo: document.body,
@@ -247,7 +247,12 @@ describe('Settings -> Apply (ApplySettings)', () => {
     await flushPromises()
     return { api, w }
   }
-  const noCalls = api => api.calls
+  // Q-127 U3: the panel makes ONE read-only GET api/apply/remembered on mount (the saved-answers
+  // count); "sends nothing" now means nothing else, and never a write.
+  const REMEMBERED_GET = c => c.method === 'GET' && c.path === 'apply/remembered'
+  // Every button except the ones inside the saved-answers row, which is never read-only.
+  const settingButtons = w => w.findAll('button').filter(b => !b.element.closest('#setting-answers-corrected'))
+  const noCalls = api => api.calls.filter(c => !REMEMBERED_GET(c))
   const rowBtn = (w, id) => w.find(`#setting-${id} .setting-main`)
   const open = async (w, id) => {
     await rowBtn(w, id).trigger('click')
@@ -268,6 +273,8 @@ describe('Settings -> Apply (ApplySettings)', () => {
       expect(rowIds(w), id).not.toContain(id)
     }
     expect(noCalls(api)).toEqual([])
+    expect(api.calls.filter(REMEMBERED_GET)).toHaveLength(1)           // the one read; nothing is written
+    expect(api.calls.every(c => c.method === 'GET')).toBe(true)
   })
 
   it('auto mode is spelled out', async () => {
@@ -279,7 +286,9 @@ describe('Settings -> Apply (ApplySettings)', () => {
     for (const s of [GOOD, (({ writable, ...rest }) => rest)(GOOD), { ...GOOD, writable: 'yes' }]) {
       const { api, w } = await apply({ settings: s })
       expect(rowIds(w)).toEqual([
-        'mode', 'browser-window', 'human-check-wait', 'daily-cap', 'per-employer-cap', 'cover-letters', 'mailbox', 'resume',
+        'mode', 'browser-window', 'human-check-wait', 'daily-cap', 'per-employer-cap', 'cover-letters',
+        'answers-corrected',                                              // Q-127 U3: the saved answers are the owner's own list
+        'mailbox', 'resume',
       ])
       expect(value(w, 'daily-cap')).toBe('5 a day')
       expect(value(w, 'per-employer-cap')).toBe('2 a day')
@@ -290,7 +299,7 @@ describe('Settings -> Apply (ApplySettings)', () => {
       expect(w.find('#setting-human-check-wait').text()).toContain('It never solves one.')
       expect(w.find('#setting-daily-cap').text()).toContain('Set in config.yaml.')
       expect(w.find('input').exists()).toBe(false)
-      expect(w.find('button').exists()).toBe(false)                     // no edit row, no switch
+      expect(settingButtons(w)).toHaveLength(0)                         // no edit row, no switch (the saved-answers list is the owner's own)
       expect(w.find('[role="switch"]').exists()).toBe(false)
       expect(noCalls(api)).toEqual([])
       w.unmount()
@@ -352,7 +361,7 @@ describe('Settings -> Apply (ApplySettings)', () => {
       await flushPromises()
       expect(w.find('#setting-daily-cap [role="alert"]').text()).toContain("Couldn't save: this server doesn't accept changes yet.")
       expect(w.find('input').exists()).toBe(false)
-      expect(w.find('button').exists()).toBe(false)
+      expect(settingButtons(w)).toHaveLength(0)
       expect(value(w, 'daily-cap')).toBe('5 a day')
       w.unmount()
     }

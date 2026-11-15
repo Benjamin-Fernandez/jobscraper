@@ -155,8 +155,15 @@ def test_q76_d2_leaks_no_path_or_url():
                end_url="https://acme.wd3.example/apply/9", tenant_host="acme.wd3.example",
                resume_sha256="ab" * 32, resume_file="C:/Users/me/resume.pdf", confirmation="CONF-1")
     v = attempt_view(row)
+    # The keys as built (Q-76 D2 + the Q-121 additions: the "assumed" rows, the entries note, the
+    # trial marker and the profile target of an owner-fact stop; Q-127: `ready_to_retry` and
+    # `no_field`, both booleans). Still an exact set, so a new key has to be looked at: none of
+    # them may be a file path, a URL or a tenant host.
     assert set(v) == {"id", "mode", "state", "kind", "reason_code", "text", "hint",
-                      "queued_at", "finished_at", "submit_clicked_at", "resume_source"}
+                      "queued_at", "finished_at", "submit_clicked_at", "resume_source",
+                      "assumed", "assumed_text", "entries_note", "trial", "trial_text",
+                      "owner_fact_path", "ready_to_retry", "no_field"}
+    assert v["ready_to_retry"] is False and v["no_field"] is False       # plain booleans, no text to leak
     blob = repr(v)
     for secret in ("secret", "acme.wd3", "resume.pdf", "CONF-1", "ab" * 8):
         assert secret not in blob, secret

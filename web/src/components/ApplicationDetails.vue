@@ -1,37 +1,51 @@
 <script setup>
-// Profile -> Application details (Q-30, D-74): every key of data/applicant.yaml
-// as a form, with what auto-apply still needs at the top and, above the form,
-// the questions employers asked that JobScraper could not answer
-// (QuestionsInbox). The form is generated from `form`, the schema the server
-// sends (applicant.form_json), so a key added there appears here without a UI
-// change. Layout and copy: docs/architecture/questions_design.md section 10.
+// Profile -> Your details (Q-30, D-74; rebuilt by Q-127 U1, D-215, design B.4): what auto-apply
+// puts on application forms, as one status line and ten collapsed section rows. The sections
+// come from the server (`sections` on GET api/applicant; `detailSections.js` says each one in a
+// line and counts what it still needs). A row opens in place, one at a time, and holds the
+// fields the page has always drawn (`FieldInput`, the `entries` kind with add / remove / "from
+// your resume" included, unchanged).
 //
-// Saving sends the whole profile back with the etag it was loaded with. The
-// server refuses a stale etag (409) and a profile that fails validation (422,
-// with a message per path); both are said in words. Keys the form does not
-// know round-trip untouched and are listed read-only in the last group.
+// There is no list of questions here and no company or question wording anywhere (D-215): a
+// question an employer asked is answered by the model and kept with that application ("What
+// was sent", Applications), never on this page. The page reads the profile, the form schema
+// and the path counts `needed_by`; nothing else reaches it.
 //
-// Q-71 (docs/reviews/Q-71-details-form-audit.md, lane F): a failed save lists
-// every error with a "Go to" link; blank added entries are left out of the PUT;
-// "Needed" clears as the owner types; a section rail and "Next needed" get
-// around the long page; a field is checked when the owner leaves it
-// (POST api/applicant/check, when the server has it). The schema's optional
-// hints (`control`, `show_when`, `autocomplete`, `options` for countries,
-// `documents_status`) are used when present; without them the form behaves as
-// before.
+// Saving one section PUTs the whole profile with the etag it was loaded with, taking only that
+// section's paths from the draft (`takeSection`), so a section's Save never writes another
+// section's unsaved edits. The server refuses a stale etag (409) and a profile that fails
+// validation (422, a message per path); both are said in words. Keys the form does not know
+// round-trip untouched and sit in a muted disclosure at the bottom. An `extra.*` error is never
+// drawn (M4): the status line carries one sentence instead.
+//
+// After a save that makes waiting applications ready the page says so in a persistent notice
+// with "Apply again to n applications" (M6). Saving never starts an application; only that
+// button does, through the same queue call the Applications "Try again" uses.
+//
+// Q-71: a failed save lists every error with a "Go to" link; blank added entries are left out
+// of the PUT; "Needed" clears as the owner types; a field is checked when the owner leaves it
+// (POST api/applicant/check, when the server has it). The schema's optional hints (`control`,
+// `show_when`, `autocomplete`, `options` for countries, `documents_status`) are used when present.
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { checkApplicant, describeError, getApplicant, getProfile, problemOf, saveApplicant } from '../api.js'
+import {
+  ApiError, applyStatus, checkApplicant, describeError, enqueueMessage, getApplicant, getProfile, problemOf,
+  saveApplicant, startAutoApply,
+} from '../api.js'
 import {
   clone, conditionHolds, entryPart, errorMap, fieldId, findItem, getAt, isEmptyValue, isFilled, joinAnd,
-  mergeEdits, newSkills, otherKeys, pruneBlankEntries, remapErrors, sectionStatus, setAt, showValue,
-  todayIso, within,
+  mergeEdits, newSkills, otherKeys, pruneBlankEntries, remapErrors, setAt, showValue, todayIso, within,
 } from '../applicantForm.js'
+import { FIELD_FOCUS_KEY, refusalMessage } from '../attempts.js'
+import {
+  NOTHING_YET, applyAgainText, blocksOfSection, detailsNeeded, neededByFor, neededByText, newlyReady,
+  revertSection, sectionDirty, sectionOfPath, sectionState, sectionSummary, sectionsOf, statusLine,
+  takeSection, waitingNoticeText, withoutExtraErrors,
+} from '../detailSections.js'
 import { privateBadge, privateSentence } from '../privacy.js'
+import { showToast } from '../toast.js'
+import DetailSection from './DetailSection.vue'
 import FieldInput from './FieldInput.vue'
 import Icon from './Icon.vue'
-import QuestionsInbox from './QuestionsInbox.vue'
-import SectionRail from './SectionRail.vue'
-import TabLoading from './TabLoading.vue'
 
 const emit = defineEmits(['counts', 'go-view'])
 
@@ -57,37 +71,31 @@ const draft = ref({})
 const loading = ref(true)
 const loadError = ref('')
 const saving = ref(false)
-const errors = ref([])          // [{path, message}] from the last save or load
+const errors = ref([])          // [{path, message}] from the last save or load (never `extra.*`)
 const conflict = ref('')        // '' | 'changed' | 'unreadable' (a 409 on save)
-const note = ref('')
 const problem = ref('')         // a save that failed for a reason that is not 409 or 422
-const openQuestions = ref(null)
-const removing = ref('')        // the `extra` key whose Remove is being confirmed
 const restored = ref(false)     // the draft came back from sessionStorage
 const banner = ref(null)
-const inbox = ref(null)
-const root = ref(null)
 const derivedSkills = ref([])   // the skills the resume parse found (GET api/profile)
 const touched = ref([])         // item paths the owner changed since the last load or save
 const checked = ref({})         // item path -> [{path, message}] from the last blur check
-const currentSection = ref('')
-const lastField = ref('')       // the item path that last had focus, for "Next needed"
+const openId = ref('')          // the one open section ('' = all collapsed)
+const leaving = ref(null)       // {to, focus}: a dirty section is being left; the in-row confirm is up
+const notice = ref(null)        // M6: {sectionId, jobIds, n, busy, error}, until dismissed
 let checkTimer = null
 let checkOff = false            // the server has no check route: stop asking
-let observer = null
 
 const form = computed(() => data.value?.form ?? [])
-// The schema also lists the two groups rendered from the profile (extra, other),
-// with no items: those are drawn below from the profile, not here.
-const groups = computed(() => form.value.filter(g => (g.items || []).length))
+const sections = computed(() => sectionsOf(data.value))
 const missing = computed(() => data.value?.missing ?? [])
+const neededBy = computed(() => data.value?.needed_by ?? {})
 const fileError = computed(() => data.value?.file?.error || '')
 const sensitive = computed(() => data.value?.sensitive ?? [])
 const fromResumePaths = computed(() => data.value?.from_resume ?? [])
-const extra = computed(() => Object.entries(draft.value?.extra ?? {}))
-const dirty = computed(() => !!data.value && JSON.stringify(draft.value) !== JSON.stringify(data.value.profile ?? {}))
-const meter = computed(() => data.value?.completeness ?? null)
+const saved = computed(() => data.value?.profile ?? {})
+const dirty = computed(() => !!data.value && JSON.stringify(draft.value) !== JSON.stringify(saved.value))
 const others = computed(() => (data.value ? otherKeys(draft.value, form.value) : []))
+const openSection = computed(() => sections.value.find(s => s.id === openId.value) ?? null)
 
 // ---- errors: the last save or load, with the fields re-checked on blur on top ----
 const superseded = path => Object.keys(checked.value).some(p => within(path, p))
@@ -102,14 +110,27 @@ const bannerErrors = computed(() => errors.value.flatMap(e => {
   return live ? [live] : []
 }))
 
-// The Profile tab shows "what needs you" in the view's label. `questions` is
-// null until the inbox has loaded (or never, on a server without the routes).
+// ---- the status line and the section rows ----
+const needed = computed(() => detailsNeeded(missing.value, neededBy.value, form.value))
+const status = computed(() => statusLine({
+  form: form.value, needed: needed.value, waiting: data.value?.waiting ?? [], extraErrors: data.value?.extra_errors ?? 0,
+}))
+const noFile = computed(() => !!data.value && !data.value.file?.exists)
+const rows = computed(() => sections.value.map(section => {
+  const ctx = {
+    form: form.value, profile: saved.value, missing: missing.value, neededBy: neededBy.value, errors: shownErrors.value,
+  }
+  return {
+    section,
+    state: sectionState(section, ctx),
+    summary: noFile.value ? NOTHING_YET : sectionSummary(section, saved.value, form.value, hasDocs.value ? docs.value : null),
+    dirty: sectionDirty(section, saved.value, draft.value),
+  }
+}))
+
+// The Profile tab shows "what needs you" in the view's label.
 function report() {
-  emit('counts', { missing: missing.value.length, questions: openQuestions.value })
-}
-function onInboxLoaded(n) {
-  openQuestions.value = n.open
-  report()
+  emit('counts', { needed: needed.value.length })
 }
 
 // Keep the draft while it differs from the file; drop it as soon as it doesn't.
@@ -140,7 +161,7 @@ function restoreDraft() {
 function adopt(res) {
   data.value = res
   draft.value = clone(res.profile ?? {})
-  errors.value = res.errors ?? []
+  errors.value = withoutExtraErrors(res.errors)
   conflict.value = ''
   touched.value = []
   checked.value = {}
@@ -160,7 +181,6 @@ async function loadDerived() {
 
 async function load() {
   loadError.value = ''
-  note.value = ''
   try {
     adopt(await getApplicant())
     restoreDraft()
@@ -169,15 +189,12 @@ async function load() {
   } finally {
     loading.value = false
   }
+  showWishedField()
 }
 
-// The Questions card rewrote the file: take its new etag and answers, but keep
-// what is typed here and not yet saved. The merge is per leaf (`mergeEdits`):
-// only the leaves the owner changed here come from the draft, everything else
-// from the file. Merging whole sections lost a profile-gap answer (Q-30 F2): the
-// owner edited another field of Contact, answered the card for
-// contact.address_line1, and the draft's old Contact, kept with the new etag,
-// wrote the answer away on the next "Save details".
+// Another write changed the file (a 409): take its new etag and answers, but keep what is
+// typed here and not yet saved. The merge is per leaf (`mergeEdits`): only the leaves the
+// owner changed here come from the draft, everything else from the file.
 async function reloadKeepingEdits() {
   const before = data.value?.profile ?? {}
   let res
@@ -191,16 +208,16 @@ async function reloadKeepingEdits() {
   const next = mergeEdits(before, draft.value, res.profile ?? {})
   data.value = res
   draft.value = next
-  errors.value = res.errors ?? []
+  errors.value = withoutExtraErrors(res.errors)
   conflict.value = ''
   checked.value = {}
   report()
 }
 
-// Throw away what was typed and go back to what the file holds.
-function discard() {
+// Throw away every unsaved edit (the "Your unsaved changes are back" notice).
+function discardAll() {
   draft.value = clone(data.value.profile ?? {})
-  errors.value = data.value.errors ?? []
+  errors.value = withoutExtraErrors(data.value.errors)
   touched.value = []
   checked.value = {}
   restored.value = false
@@ -218,7 +235,6 @@ const guard = e => {
 
 // ---- labels, tags, ids ----
 
-const labelOf = path => findItem(form.value, path)?.label ?? path
 const valueOf = item => getAt(draft.value, item.path)
 // A bool the schema marks as a question (`control: 'yes_no'`) is Yes / No radios (Q71-12).
 const kindOf = item => (item.kind === 'bool' && item.control === 'yes_no' ? 'yes_no' : item.kind)
@@ -227,25 +243,28 @@ const isMissing = item => missing.value.some(m => within(m, item.path))
 // Filled as the server counts it (applicant._filled), so "Needed" goes as soon
 // as the field is filled here, not at the next save (Q71-06).
 const filledHere = item => isFilled(item, valueOf(item))
-// "Needed": the server says it is missing and it has not been filled in here yet.
-const needed = item => isMissing(item) && !filledHere(item)
+// How many waiting applications need this item (0 = none), from the server's `needed_by`.
+const waitingCount = item => neededByFor(item, neededBy.value)
+// "Needed": the server says it is missing (or an application waits on it) and it has not been
+// filled in here yet.
+const needs = item => (isMissing(item) || waitingCount(item) > 0) && !filledHere(item)
 const fromResume = item => fromResumePaths.value.some(p => within(p, item.path))
 const privatePath = path => sensitive.value.some(s => within(path, s))
 const labelTag = item => (grouped(item) ? 'span' : 'label')
-const wide = (g, item) => WIDE_GROUPS.has(g.id) || WIDE_KINDS.has(kindOf(item)) || !!item.multiline
-// The group title already says it ("Education" / "Education"): keep the label for screen readers only.
-const labelHidden = (g, item) => (g.items || []).length === 1 && item.label === g.title
+const wide = (b, item) => WIDE_GROUPS.has(b.group.id) || WIDE_KINDS.has(kindOf(item)) || !!item.multiline
+// The title already says it ("Education" / "Education"): keep the label for screen readers only.
+const labelHidden = (b, item) => b.items.length === 1 && item.label === b.group.title
 const requiredText = item => (item.kind === 'bool' ? 'Must be Yes for auto-apply' : 'Required for auto-apply')
+const blocksOf = section => blocksOfSection(section, form.value)
 
-// "Private" once per section (Q71-20). A group that is all private says so in
-// its header; one that is mostly private names the exceptions; one with a few
-// private fields tags those. Each private field still carries the full words
-// for screen readers (in its description).
-function privacyOf(g) {
-  const items = g.items || []
+// "Private" once per block (Q71-20). A block that is all private says so in its header; one
+// that is mostly private names the exceptions; one with a few private fields tags those. Each
+// private field still carries the full words for screen readers (in its description).
+function privacyOf(b) {
+  const items = b.items || []
   const open = items.filter(i => !i.sensitive)
   if (open.length === items.length) return { header: '', perItem: false }
-  if (g.sensitive || !open.length) return { header: PRIVATE.value, perItem: false }
+  if (b.sensitive || !open.length) return { header: PRIVATE.value, perItem: false }
   if (open.length < items.length - open.length) return { header: `${PRIVATE.value}, except ${joinAnd(open.map(i => i.label))}`, perItem: false }
   return { header: '', perItem: true }
 }
@@ -282,25 +301,21 @@ const warningOf = item => {
   return ''
 }
 
-const describedBy = (g, item) => [
+const describedBy = item => [
   item.help && item.kind !== 'fixed' ? `${fieldId(item.path)}-help` : '',
   warningOf(item) ? `${fieldId(item.path)}-warn` : '',
   item.sensitive ? `${fieldId(item.path)}-private` : '',
   itemErrors(item).length ? `${fieldId(item.path)}-err` : '',
 ].filter(Boolean).join(' ')
 
-const extraErrors = key => shownErrors.value.filter(e => within(e.path, `extra.${key}`))
-
 // ---- the error summary (Q71-03) ----
 
-const extraKey = path => String(path).split('.')[1] ?? ''
 const entryIndex = path => {
   const m = /^[^[]*\[(\d+)\]/.exec(String(path))
   return m ? Number(m[1]) : null
 }
 // "Email for applications", "School 1 · Degree", or the bare path for a key the form doesn't know.
 function errorLabel(path) {
-  if (within(path, 'extra')) return draft.value.extra?.[extraKey(path)]?.title || extraKey(path)
   const hit = findItem(form.value, path)
   if (!hit) return path
   const i = hit.item.kind === 'entries' ? entryIndex(path) : null
@@ -308,18 +323,17 @@ function errorLabel(path) {
   const name = `${hit.item.entry_label || hit.item.label} ${i + 1}`
   return hit.sub ? `${name} · ${hit.sub.label}` : name
 }
-const canGo = path => (within(path, 'extra') ? !!draft.value.extra?.[extraKey(path)] : !!findItem(form.value, path))
+const canGo = path => !!findItem(form.value, path)
 const summaryTitle = computed(() => {
   const n = bannerErrors.value.length
   return n === 1 ? '1 detail needs fixing before you can save' : `${n} details need fixing before you can save`
 })
 
-// ---- going to a field: Fill in, Go to, Next needed ----
+// ---- opening a section, and going to a field: Fill in, Go to ----
 
 // The element for a path: an entry's own sub-field ("education[0].end"), the
-// entry, or the item's block.
+// entry, or the item's block. Only a field of the open section is in the page.
 function targetOf(path) {
-  if (within(path, 'extra')) return document.getElementById(fieldId(`extra.${extraKey(path)}`))
   const hit = findItem(form.value, path)
   if (!hit) return null
   const i = hit.item.kind === 'entries' ? entryIndex(path) : null
@@ -336,7 +350,7 @@ function targetOf(path) {
 }
 function fillIn(path) {
   const el = targetOf(path)
-  if (!el) return
+  if (!el) return false
   const control = el.matches?.('input, select, textarea, button')
     ? el
     : el.querySelector('input:not([type="hidden"]), select, textarea, button')
@@ -344,67 +358,117 @@ function fillIn(path) {
   if (closed && !closed.open) closed.open = true
   el.scrollIntoView?.({ block: 'center' })
   control?.focus?.()
+  return true
 }
 const canFill = path => !!findItem(form.value, path)
 
-// ---- sections: the rail, the group headers, Next needed (Q71-13) ----
-
-const extraToFix = computed(() => extra.value.filter(([key]) => extraErrors(key).length).length)
-const sections = computed(() => {
-  const out = groups.value.map(g => {
-    const items = (g.items || []).filter(visible)
-    return { id: g.id, title: g.title, needed: items.filter(needed).length, toFix: items.filter(invalid).length }
-  })
-  if (extra.value.length) out.push({ id: 'extra', title: 'Answers you gave to application questions', needed: 0, toFix: extraToFix.value })
-  if (others.value.length) out.push({ id: 'other', title: 'Other keys in your file', needed: 0, toFix: 0 })
-  return out
-})
-const sectionOf = id => sections.value.find(s => s.id === id) ?? {}
-const neededItems = computed(() => groups.value.flatMap(g => (g.items || []).filter(i => visible(i) && needed(i))))
-const order = computed(() => groups.value.flatMap(g => (g.items || []).map(i => i.path)))
-
-function goSection(id) {
-  const h = document.getElementById(`g-${id}`)
-  if (!h) return
-  currentSection.value = id
-  h.closest('section')?.scrollIntoView?.({ block: 'start' })
-  h.focus?.({ preventScroll: true })
+// Put the focus on the first control of a section (a wish that names a whole group).
+function focusSection(id) {
+  const panel = document.getElementById(`ds-${id}-panel`)
+  const control = panel?.querySelector('input:not([type="hidden"]), select, textarea, button')
+  control?.focus?.()
 }
 
-// The next needed field after the one last focused (or, if none, after the
-// last one scrolled past), wrapping round to the first.
-function nextNeeded() {
-  const list = neededItems.value
-  if (!list.length) return
-  let from = order.value.indexOf(lastField.value)
-  if (from < 0) {
-    // Fields whose top is above the sticky header have been scrolled past.
-    const limit = 100
-    order.value.forEach((p, i) => {
-      const el = document.getElementById(fieldId(p))
-      if (el && el.getBoundingClientRect().top < limit) from = i
-    })
+async function settle(to, focus = '', wholeSection = false) {
+  leaving.value = null
+  openId.value = to
+  if (!to) return
+  await nextTick()
+  if (focus) fillIn(focus)
+  else if (wholeSection) focusSection(to)
+}
+
+// One section open at a time. Leaving a section with unsaved edits asks first, in its row.
+function requestOpen(to, focus = '', wholeSection = false) {
+  const cur = openSection.value
+  if (cur && cur.id !== to && sectionDirty(cur, saved.value, draft.value)) {
+    leaving.value = { to, focus, wholeSection }
+    return Promise.resolve()
   }
-  const next = list.find(i => order.value.indexOf(i.path) > from) ?? list[0]
-  lastField.value = next.path
-  fillIn(next.path)
+  return settle(to, focus, wholeSection)
 }
-function onFocusIn(e) {
-  const path = e.target?.closest?.('.field')?.dataset?.path
-  if (path && order.value.includes(path)) lastField.value = path
+const toggle = id => requestOpen(openId.value === id ? '' : id)
+
+// "Fill in" and "Go to": open the section that holds the path, then focus the field.
+function go(path) {
+  const s = sectionOfPath(sections.value, path, form.value)
+  if (s) requestOpen(s.id, canFill(path) ? path : '')
 }
 
-// The section on screen, for the rail's aria-current. Not in jsdom.
-function observeSections() {
-  observer?.disconnect()
-  observer = null
-  if (typeof IntersectionObserver === 'undefined' || !root.value) return
-  observer = new IntersectionObserver(entries => {
-    for (const en of entries) if (en.isIntersecting) currentSection.value = en.target.dataset.section
-  }, { rootMargin: '-15% 0px -75% 0px' })
-  root.value.querySelectorAll('section[data-section]').forEach(el => observer.observe(el))
+function revert(section) {
+  draft.value = revertSection(section, saved.value, draft.value)
+  errors.value = withoutExtraErrors(data.value.errors)
+  touched.value = []
+  checked.value = {}
 }
-watch(() => sections.value.map(s => s.id).join(' '), () => nextTick(observeSections))
+function cancel() {
+  if (openSection.value) revert(openSection.value)
+  settle('')
+}
+async function confirmSave() {
+  const l = leaving.value
+  if (!l) return
+  if (await save()) settle(l.to, l.focus, l.wholeSection)
+  else leaving.value = null
+}
+function confirmDiscard() {
+  const l = leaving.value
+  if (!l) return
+  if (openSection.value) revert(openSection.value)
+  settle(l.to, l.focus, l.wholeSection)
+}
+
+// A wish from an application row ("Add it") leaves the profile path it wants in
+// sessionStorage (`openAnswer`, attempts.js), and announces it for a form that is already
+// drawn. A field path opens its section and focuses the field (the same as "Fill in"; no smooth
+// scroll, so reduced motion is respected); a group id opens the section that holds the group.
+// The wish is read and cleared whether or not it can be shown, so a stale one never fires
+// later; an unknown path leaves the page where it is.
+async function showWishedField(path) {
+  let wish = typeof path === 'string' ? path : ''
+  try {
+    wish ||= window.sessionStorage.getItem(FIELD_FOCUS_KEY) || ''
+    window.sessionStorage.removeItem(FIELD_FOCUS_KEY)
+  } catch { /* private window */ }
+  wish = wish.trim()
+  if (!wish || !data.value) return
+  const s = sectionOfPath(sections.value, wish, form.value)
+  if (!s) return
+  await nextTick()
+  requestOpen(s.id, canFill(wish) ? wish : '', !canFill(wish))
+}
+function onShowField(e) {
+  showWishedField(e?.detail?.path)
+}
+
+// ---- work rights under "Always answer" (Q-121 U1, llm_first_fill_design section 3.3) ----
+// When forms are answered automatically, a right-to-work question is answered from these
+// rows alone. Two things make that answer a guess: no rows at all, or "yes" for every other
+// country with a single nationality. The warning needs the server to say that "always" is
+// in force (`GET apply/status` -> fill.fill_policy_effective); an older server, or a
+// profile without the Work status block, shows nothing.
+const WORK_RIGHTS_PATH = 'singapore_status.authorised_to_work'
+const fillEffective = ref(null)
+async function loadFillPolicy() {
+  try {
+    fillEffective.value = (await applyStatus())?.fill?.fill_policy_effective ?? null
+  } catch { fillEffective.value = null }   // a quiet look: no warning if the server won't say
+}
+const isMap = v => !!v && typeof v === 'object' && !Array.isArray(v) && Object.keys(v).length > 0
+const workRightsNote = computed(() => {
+  if (fillEffective.value !== 'always') return ''
+  const st = draft.value?.singapore_status
+  if (!st || typeof st !== 'object' || Array.isArray(st)) return ''
+  if (!isMap(st.authorised_to_work) && !isMap(st.requires_sponsorship)) {
+    return 'Your profile has no work-rights answers, so right-to-work questions will be answered by assumption.'
+  }
+  const nat = st.nationality
+  const nationalities = (Array.isArray(nat) ? nat : [nat]).filter(n => typeof n === 'string' && n.trim())
+  if (st.authorised_to_work?.default === true && nationalities.length <= 1) {
+    return "Your profile says you may work in every country. Check the 'every other country' answer."
+  }
+  return ''
+})
 
 // ---- skills and experience from the resume (Q71-15) ----
 
@@ -475,88 +539,115 @@ async function runCheck() {
     if ([404, 405].includes(problemOf(e).status)) checkOff = true
     return
   }
-  const found = remapErrors(Array.isArray(res?.errors) ? res.errors : [], kept)
+  const found = remapErrors(withoutExtraErrors(Array.isArray(res?.errors) ? res.errors : []), kept)
   const next = {}
   for (const p of paths) next[p] = found.filter(x => within(x.path, p))
   checked.value = next
 }
 
-// ---- saving ----
+// ---- saving one section ----
 
+// True when the section was saved. A failure says why and leaves the section open.
 async function save() {
-  if (saving.value || fileError.value) return
+  const section = openSection.value
+  if (!section || saving.value || fileError.value) return false
   saving.value = true
-  note.value = ''
   problem.value = ''
   conflict.value = ''
   // Entries added and left empty are not sent (Q71-04); the rows stay on screen.
-  const { profile, kept } = pruneBlankEntries(draft.value)
+  const { profile: pruned, kept } = pruneBlankEntries(draft.value)
+  const body = takeSection(section, saved.value, pruned)
+  // Other sections' unsaved edits survive this save: they are put back on the fresh profile.
+  const keep = sections.value.filter(s => s.id !== section.id && sectionDirty(s, saved.value, draft.value))
+  const waitingBefore = data.value.waiting ?? []
   try {
-    adopt(await saveApplicant(profile, data.value.etag))
-    note.value = 'Saved.'
+    const res = await saveApplicant(body, data.value.etag)
+    let next = clone(res.profile ?? {})
+    for (const s of keep) next = takeSection(s, next, draft.value)
+    data.value = res
+    draft.value = next
+    errors.value = withoutExtraErrors(res.errors)
+    touched.value = []
+    checked.value = {}
+    report()
+    const ready = newlyReady(section, waitingBefore, res.waiting)
+    if (ready.length) {
+      notice.value = { sectionId: section.id, jobIds: ready.map(w => String(w.job_id)), n: ready.length, busy: false, error: '' }
+    } else {
+      showToast({ message: 'Saved.' })
+    }
+    return true
   } catch (e) {
     const p = problemOf(e)
     if (p.status === 409) {
       conflict.value = p.code === 'unreadable' ? 'unreadable' : 'changed'
     } else if (p.status === 422 && (p.code === 'invalid' || p.errors.length)) {
-      errors.value = remapErrors(p.errors, kept)
+      errors.value = withoutExtraErrors(remapErrors(p.errors, kept))
       checked.value = {}
     } else {
       problem.value = `Could not save your details: ${p.text}`
     }
+    // The section's controls are disabled while saving: enable them before moving the focus.
+    saving.value = false
     await nextTick()
-    banner.value?.focus?.()
+    // A refused save moves the focus to the first error: its field when it is in the open
+    // section, else the summary above (with a "Go to" for each).
+    const first = errors.value[0]
+    const there = first && sectionOfPath(sections.value, first.path, form.value)?.id === openId.value
+    if (!(there && !conflict.value && !problem.value && fillIn(first.path))) banner.value?.focus?.()
+    return false
   } finally {
     saving.value = false
   }
 }
 
-// ---- answers the owner gave to application questions (group 15) ----
+// ---- the waiting notice (M6) ----
 
-const entryKind = e => e?.kind || 'text'
-const scopeOf = (entry, scope) => (scope ? entry.by_employer?.[scope] ?? {} : entry)
-function extraValue(entry, scope) {
-  const s = scopeOf(entry, scope)
-  if (entry.kind === 'choice') return s.picks?.[0] ?? null
-  if (entry.kind === 'multi') return s.picks ?? []
-  return s.value
-}
-function setExtra(key, scope, v) {
-  const entry = draft.value.extra[key]
-  const base = scope ? `extra.${key}.by_employer.${scope}` : `extra.${key}`
-  if (entry.kind === 'choice') setAt(draft.value, `${base}.picks`, v ? [v] : [])
-  else if (entry.kind === 'multi') setAt(draft.value, `${base}.picks`, v)
-  else setAt(draft.value, `${base}.value`, v)
-}
-// Options are stored normalised (lower case); show them capitalised, keep the stored value.
-const titled = norm => String(norm).replace(/\b\w/g, c => c.toUpperCase())
-const seenOptions = (entry, scope) => (scopeOf(entry, scope).seen ?? entry.seen ?? []).map(n => [n, titled(n)])
-const employerName = titled
-async function removeAnswer(key) {
-  delete draft.value.extra[key]
-  if (!Object.keys(draft.value.extra).length) delete draft.value.extra
-  removing.value = ''
-  await save()
+// The only thing on this page that starts applications, and only when the owner clicks it:
+// the same queue call as "Try again" on an Applications row.
+async function applyAgain() {
+  const n = notice.value
+  if (!n || n.busy) return
+  n.busy = true
+  n.error = ''
+  try {
+    const r = await startAutoApply(n.jobIds)
+    const refused = Array.isArray(r?.refused) ? r.refused.map(x => x.text).filter(Boolean) : []
+    showToast({ message: [enqueueMessage(r), ...refused].join(' '), link: { label: 'See the queue', href: '#/runs' } })
+    window.dispatchEvent(new Event('jobscraper:apply-queue'))
+    notice.value = null
+  } catch (e) {
+    n.busy = false
+    n.error = e instanceof ApiError && e.status === 422
+      ? refusalMessage(e.body)
+      : `Could not add them to the auto-apply queue: ${describeError(e)}`
+  }
 }
 
 onMounted(() => {
   window.addEventListener('beforeunload', guard)
+  window.addEventListener('jobscraper:show-field', onShowField)
   load()
   loadDerived()
+  loadFillPolicy()
 })
 onBeforeUnmount(() => {
   window.removeEventListener('beforeunload', guard)
+  window.removeEventListener('jobscraper:show-field', onShowField)
   clearTimeout(checkTimer)
-  observer?.disconnect()
 })
 defineExpose({ load })
 </script>
 
 <template>
-  <div ref="root" class="app-details" :aria-busy="loading ? 'true' : 'false'">
-    <TabLoading v-if="loading" :rows="3" />
+  <div class="app-details">
+    <!-- Loading: ten rows about the height of the real ones. -->
+    <div v-if="loading" class="ui-card sk-card" role="status" aria-busy="true">
+      <span class="visually-hidden">Loading your details…</span>
+      <span v-for="n in 10" :key="n" class="ui-skeleton sk-row" aria-hidden="true" />
+    </div>
     <div v-else-if="loadError" class="notice error" role="alert">
-      <p>Could not load your application details: {{ loadError }}</p>
+      <p>Couldn't load your details. {{ loadError }}</p>
       <button type="button" @click="load">Try again</button>
     </div>
 
@@ -582,55 +673,29 @@ defineExpose({ load })
         <ul class="summary-list">
           <li v-for="e in bannerErrors" :key="e.path + e.message">
             <span><span :class="{ mono: !canGo(e.path) }">{{ errorLabel(e.path) }}</span>: {{ e.message }}</span>
-            <button v-if="canGo(e.path)" type="button" class="link go" :aria-label="`Go to ${errorLabel(e.path)}`" @click="fillIn(e.path)">Go to</button>
+            <button v-if="canGo(e.path)" type="button" class="link go" :aria-label="`Go to ${errorLabel(e.path)}`" @click="go(e.path)">Go to</button>
           </li>
         </ul>
       </div>
 
       <template v-if="!fileError">
-        <section v-if="missing.length" class="missing surface" aria-labelledby="ad-missing">
-          <h2 id="ad-missing" class="section-title">Needed before auto-apply</h2>
-          <p class="muted lead">Auto-apply won't start until these are filled in.</p>
-          <ul class="missing-list">
-            <li v-for="path in missing" :key="path">
-              <span class="missing-label">{{ labelOf(path) }}</span>
-              <button v-if="path === 'documents.resume'" type="button" class="link upload" @click="goUpload">Upload in Resume and titles</button>
-              <button v-else-if="canFill(path)" type="button" class="link fill" @click="fillIn(path)">Fill in</button>
-              <span v-else class="muted mono path">{{ path }}</span>
-            </li>
-          </ul>
-        </section>
-      </template>
-
-      <QuestionsInbox
-        ref="inbox"
-        :form="form"
-        :etag="data.etag"
-        @saved="reloadKeepingEdits"
-        @reload="load"
-        @loaded="onInboxLoaded"
-      />
-
-      <template v-if="!fileError">
-        <p v-if="restored && dirty" class="notice warn restored" role="status">
-          Your unsaved changes are back. <button type="button" class="link" @click="discard">Discard them</button>
-        </p>
-        <h2 class="section-title">Your details</h2>
-        <p v-if="!data.file?.exists" class="muted lead">Nothing saved yet. Saving keeps your details on this PC.</p>
-        <div v-if="meter" class="meter-row">
-          <div
-            class="meter"
-            role="meter"
-            aria-label="Details filled"
-            :aria-valuenow="meter.filled"
-            aria-valuemin="0"
-            :aria-valuemax="meter.needed"
-            :aria-valuetext="`${meter.filled} of ${meter.needed} details filled`"
-          >
-            <span :style="{ width: meter.needed ? `${Math.min(100, Math.round((meter.filled / meter.needed) * 100))}%` : '0%' }" />
+        <!-- The status line: one card, one row. -->
+        <section class="ui-card status-card" aria-label="Details status">
+          <div class="status-row">
+            <span class="ui-badge status-badge" :data-tone="status.tone">{{ status.badge }}</span>
+            <div class="status-text">
+              <p class="status-main">{{ status.text }}</p>
+              <p v-if="status.waitingText" class="status-waiting muted">{{ status.waitingText }}</p>
+              <p v-if="status.attentionText" class="status-attention" role="status">{{ status.attentionText }}</p>
+            </div>
+            <button v-if="!status.ready && status.firstPath" type="button" class="primary fill-in" @click="go(status.firstPath)">Fill in</button>
           </div>
-          <span class="meter-text">{{ meter.filled }} of {{ meter.needed }} details filled</span>
-        </div>
+        </section>
+
+        <p v-if="noFile" class="muted lead">Nothing saved yet. Your details stay on this computer.</p>
+        <p v-if="restored && dirty" class="notice warn restored" role="status">
+          Your unsaved changes are back. <button type="button" class="link" @click="discardAll">Discard them</button>
+        </p>
         <!-- Only while the file still has hand-written comments (the first save removes them). -->
         <p
           v-if="data.file?.has_comments"
@@ -639,182 +704,159 @@ defineExpose({ load })
         >
           Saving tidies your details file and removes its notes. A copy with your notes is kept.
         </p>
+        <p v-if="workRightsNote" class="notice warn work-rights-note" role="status">
+          {{ workRightsNote }}
+          <button v-if="canFill(WORK_RIGHTS_PATH)" type="button" class="link work-rights-fix" @click="go(WORK_RIGHTS_PATH)">Check work rights</button>
+        </p>
 
-        <div class="details-body" :class="{ 'has-rail': sections.length > 1 }">
-        <SectionRail v-if="sections.length > 1" class="details-rail" :sections="sections" :current="currentSection" @go="goSection" />
-        <form class="the-form" novalidate @submit.prevent="save" @focusin="onFocusIn">
-          <section
-            v-for="g in groups"
-            :key="g.id"
-            class="group surface"
-            :data-section="g.id"
-            :aria-labelledby="`g-${g.id}`"
+        <!-- The section rows: from the server's `sections`, collapsed, one open at a time. -->
+        <div class="ui-card sections-card">
+          <DetailSection
+            v-for="r in rows"
+            :id="r.section.id"
+            :key="r.section.id"
+            :title="r.section.title"
+            :summary="r.summary"
+            :status="{ text: r.state.text, tone: r.state.tone }"
+            :fix-text="r.state.fixText"
+            :dirty="r.dirty"
+            :open="openId === r.section.id"
+            :saving="saving && openId === r.section.id"
+            :can-save="(r.dirty || noFile) && !saving"
+            :confirming="!!leaving && openId === r.section.id"
+            @toggle="toggle(r.section.id)"
+            @save="save"
+            @cancel="cancel"
+            @confirm-save="confirmSave"
+            @confirm-discard="confirmDiscard"
+            @keep-editing="leaving = null"
           >
-            <header class="group-head">
-              <h3 :id="`g-${g.id}`" tabindex="-1">{{ g.title }}</h3>
-              <span v-if="sectionStatus(sectionOf(g.id)).tone !== 'done'" class="tag section-tag" :class="sectionStatus(sectionOf(g.id)).tone">{{ sectionStatus(sectionOf(g.id)).text }}</span>
-              <span v-if="privacyOf(g).header" class="tag private" :title="PRIVATE_SENTENCE">{{ privacyOf(g).header }}</span>
-            </header>
-            <p v-if="g.note" class="muted note">{{ g.note }}</p>
-
-            <template v-for="item in g.items" :key="item.path">
-              <div
-                v-if="visible(item)"
-                :id="fieldId(item.path)"
-                class="field"
-                :class="{ wide: wide(g, item) }"
-                :data-path="item.path"
-                @focusout="onFocusOut(item, $event)"
-              >
-                <div class="field-head">
-                  <component
-                    :is="labelTag(item)"
-                    :id="`${fieldId(item.path)}-label`"
-                    class="field-label"
-                    :class="{ 'visually-hidden': labelHidden(g, item) }"
-                    :for="labelTag(item) === 'label' ? `${fieldId(item.path)}-in` : undefined"
-                  >{{ item.label }}</component>
-                  <span v-if="needed(item)" class="tag needed">Needed</span>
-                  <span v-else-if="item.required" class="tag required">{{ requiredText(item) }}</span>
-                  <span v-if="item.sensitive && privacyOf(g).perItem" class="tag private" :title="PRIVATE_SENTENCE">Private</span>
-                  <span v-if="fromResume(item) && item.kind !== 'entries'" class="tag resume">From your resume, please check</span>
-                  <span v-if="item.sensitive" :id="`${fieldId(item.path)}-private`" class="visually-hidden">{{ PRIVATE_SPOKEN }}</span>
+            <template #notice>
+              <div v-if="notice && notice.sectionId === r.section.id" class="notice ok waiting-notice" role="status">
+                <p class="waiting-text">{{ waitingNoticeText(notice.n) }}</p>
+                <p v-if="notice.error" class="field-error" role="alert">{{ notice.error }}</p>
+                <div class="waiting-buttons">
+                  <button type="button" class="primary apply-again" :disabled="notice.busy" @click="applyAgain">{{ notice.busy ? 'Adding…' : applyAgainText(notice.n) }}</button>
+                  <button type="button" class="ghost dismiss" :disabled="notice.busy" @click="notice = null">Dismiss</button>
                 </div>
-
-                <!-- Files: the resume in use and where to upload one; the path box is the exception -->
-                <div v-if="hasDocs && item.path === 'documents.resume'" class="doc-status">
-                  <p v-if="docs.resume" class="doc-line"><Icon name="check" :size="14" /> Using {{ docs.resume.name }}<template v-if="stamp(docs.resume.modified)">, uploaded {{ stamp(docs.resume.modified) }}</template></p>
-                  <p v-else class="doc-line none">No resume yet.</p>
-                  <button type="button" class="upload" @click="goUpload">Upload in Resume and titles</button>
-                </div>
-                <details v-if="hasDocs && item.path === 'documents.resume'" class="other-file" :open="!!valueOf(item)">
-                  <summary>Use a different file</summary>
-                  <FieldInput
-                    :id="`${fieldId(item.path)}-in`"
-                    kind="text"
-                    :model-value="valueOf(item)"
-                    :describedby="describedBy(g, item)"
-                    :invalid="invalid(item)"
-                    @update:model-value="onEdit(item, $event)"
-                  />
-                  <p v-if="item.help" :id="`${fieldId(item.path)}-help`" class="hint">{{ item.help }}</p>
-                </details>
-                <template v-else>
-                  <div :class="{ 'with-status': hasDocs && item.path === 'documents.transcript' }">
-                    <FieldInput
-                      :id="`${fieldId(item.path)}-in`"
-                      :kind="kindOf(item)"
-                      :model-value="valueOf(item)"
-                      :options="item.options || []"
-                      :country-options="item.country_options || []"
-                      :sub="item.sub || []"
-                      :path="item.path"
-                      :label="item.entry_label || item.label"
-                      :from-resume="fromResumePaths"
-                      :errors="errMap"
-                      :nullable="item.nullable ?? !item.required"
-                      :fixed-text="item.fixed_text || item.help || ''"
-                      :multiline="!!item.multiline"
-                      :autocomplete="item.autocomplete || 'off'"
-                      :show-unset="true"
-                      :clearable="!!item.nullable_bool"
-                      :labelledby="grouped(item) ? `${fieldId(item.path)}-label` : ''"
-                      :describedby="describedBy(g, item)"
-                      :invalid="invalid(item)"
-                      @update:model-value="onEdit(item, $event)"
-                    />
-                    <span v-if="hasDocs && item.path === 'documents.transcript' && transcriptKnown(item)" class="doc-found" :class="{ none: !docs.transcript }">
-                      {{ docs.transcript ? 'Found' : 'Not found' }}
-                    </span>
-                  </div>
-                  <p v-if="item.help && item.kind !== 'fixed'" :id="`${fieldId(item.path)}-help`" class="hint">{{ item.help }}</p>
-                </template>
-
-                <p v-if="warningOf(item)" :id="`${fieldId(item.path)}-warn`" class="field-warn">{{ warningOf(item) }}</p>
-                <div v-if="item.path === 'skills' && resumeSkills.length" class="suggest">
-                  <p class="hint">Your resume lists {{ resumeSkills.length === 1 ? '1 skill that isn\'t' : `${resumeSkills.length} skills that aren't` }} here: {{ skillPreview }}.</p>
-                  <button type="button" class="add-skills" @click="addResumeSkills">
-                    <Icon name="plus" /> Add {{ resumeSkills.length === 1 ? '1 skill' : `${resumeSkills.length} skills` }} from your resume
-                  </button>
-                </div>
-                <p v-if="item.path === 'experience' && !(valueOf(item) || []).length" class="hint">
-                  Experience isn't filled from your resume yet. Add your jobs here.
-                </p>
-                <p v-if="itemErrors(item).length" :id="`${fieldId(item.path)}-err`" class="field-error">
-                  <template v-for="(e, i) in itemErrors(item)" :key="e.path + e.message"><template v-if="i"> </template>{{ e.message }}</template>
-                </p>
               </div>
             </template>
-          </section>
 
-          <!-- 15: answers given to application questions -->
-          <section v-if="extra.length" class="group surface extra" data-section="extra" aria-labelledby="g-extra">
-            <header class="group-head">
-              <h3 id="g-extra" tabindex="-1">Answers you gave to application questions</h3>
-              <span v-if="extraToFix" class="tag section-tag fix">{{ extraToFix }} to fix</span>
-            </header>
-            <div v-for="[key, entry] in extra" :id="fieldId(`extra.${key}`)" :key="key" class="field extra-row" :data-path="`extra.${key}`">
-              <div class="field-head">
-                <span :id="`${fieldId(`extra.${key}`)}-label`" class="field-label">{{ entry.title || key }}</span>
-                <span v-if="entry.sensitive" class="tag private" :title="PRIVATE_SENTENCE">{{ PRIVATE }}</span>
+            <div v-for="b in blocksOf(r.section)" :key="b.group.id" class="block">
+              <header v-if="blocksOf(r.section).length > 1 || privacyOf(b).header" class="block-head">
+                <h4 v-if="blocksOf(r.section).length > 1" class="block-title">{{ b.group.title }}</h4>
+                <span v-if="privacyOf(b).header" class="tag private" :title="PRIVATE_SENTENCE">{{ privacyOf(b).header }}</span>
+              </header>
+              <p v-if="b.group.note" class="muted note">{{ b.group.note }}</p>
+
+              <div class="block-fields">
+                <template v-for="item in b.items" :key="item.path">
+                  <div
+                    v-if="visible(item)"
+                    :id="fieldId(item.path)"
+                    class="field"
+                    :class="{ wide: wide(b, item) }"
+                    :data-path="item.path"
+                    @focusout="onFocusOut(item, $event)"
+                  >
+                    <div class="field-head">
+                      <component
+                        :is="labelTag(item)"
+                        :id="`${fieldId(item.path)}-label`"
+                        class="field-label"
+                        :class="{ 'visually-hidden': labelHidden(b, item) }"
+                        :for="labelTag(item) === 'label' ? `${fieldId(item.path)}-in` : undefined"
+                      >{{ item.label }}</component>
+                      <span v-if="needs(item)" class="tag needed">Needed</span>
+                      <span v-else-if="item.required" class="tag required">{{ requiredText(item) }}</span>
+                      <span v-if="needs(item) && waitingCount(item) > 0" class="tag needed-by">{{ neededByText(waitingCount(item)) }}</span>
+                      <span v-if="item.sensitive && privacyOf(b).perItem" class="tag private" :title="PRIVATE_SENTENCE">Private</span>
+                      <span v-if="fromResume(item) && item.kind !== 'entries'" class="tag resume">From your resume, please check</span>
+                      <span v-if="item.sensitive" :id="`${fieldId(item.path)}-private`" class="visually-hidden">{{ PRIVATE_SPOKEN }}</span>
+                    </div>
+
+                    <!-- Files: the resume in use and where to upload one; the path box is the exception -->
+                    <div v-if="hasDocs && item.path === 'documents.resume'" class="doc-status">
+                      <p v-if="docs.resume" class="doc-line"><Icon name="check" :size="14" /> Using {{ docs.resume.name }}<template v-if="stamp(docs.resume.modified)">, uploaded {{ stamp(docs.resume.modified) }}</template></p>
+                      <p v-else class="doc-line none">No resume yet.</p>
+                      <button type="button" class="upload" @click="goUpload">Upload in Resume and titles</button>
+                    </div>
+                    <details v-if="hasDocs && item.path === 'documents.resume'" class="other-file" :open="!!valueOf(item)">
+                      <summary>Use a different file</summary>
+                      <FieldInput
+                        :id="`${fieldId(item.path)}-in`"
+                        kind="text"
+                        :model-value="valueOf(item)"
+                        :describedby="describedBy(item)"
+                        :invalid="invalid(item)"
+                        @update:model-value="onEdit(item, $event)"
+                      />
+                      <p v-if="item.help" :id="`${fieldId(item.path)}-help`" class="hint">{{ item.help }}</p>
+                    </details>
+                    <template v-else>
+                      <div :class="{ 'with-status': hasDocs && item.path === 'documents.transcript' }">
+                        <FieldInput
+                          :id="`${fieldId(item.path)}-in`"
+                          :kind="kindOf(item)"
+                          :model-value="valueOf(item)"
+                          :options="item.options || []"
+                          :country-options="item.country_options || []"
+                          :sub="item.sub || []"
+                          :path="item.path"
+                          :label="item.entry_label || item.label"
+                          :from-resume="fromResumePaths"
+                          :errors="errMap"
+                          :nullable="item.nullable ?? !item.required"
+                          :fixed-text="item.fixed_text || item.help || ''"
+                          :multiline="!!item.multiline"
+                          :autocomplete="item.autocomplete || 'off'"
+                          :show-unset="true"
+                          :clearable="!!item.nullable_bool"
+                          :labelledby="grouped(item) ? `${fieldId(item.path)}-label` : ''"
+                          :describedby="describedBy(item)"
+                          :invalid="invalid(item)"
+                          @update:model-value="onEdit(item, $event)"
+                        />
+                        <span v-if="hasDocs && item.path === 'documents.transcript' && transcriptKnown(item)" class="doc-found" :class="{ none: !docs.transcript }">
+                          {{ docs.transcript ? 'Found' : 'Not found' }}
+                        </span>
+                      </div>
+                      <p v-if="item.help && item.kind !== 'fixed'" :id="`${fieldId(item.path)}-help`" class="hint">{{ item.help }}</p>
+                    </template>
+
+                    <p v-if="warningOf(item)" :id="`${fieldId(item.path)}-warn`" class="field-warn">{{ warningOf(item) }}</p>
+                    <div v-if="item.path === 'skills' && resumeSkills.length" class="suggest">
+                      <p class="hint">Your resume lists {{ resumeSkills.length === 1 ? '1 skill that isn\'t' : `${resumeSkills.length} skills that aren't` }} here: {{ skillPreview }}.</p>
+                      <button type="button" class="add-skills" @click="addResumeSkills">
+                        <Icon name="plus" /> Add {{ resumeSkills.length === 1 ? '1 skill' : `${resumeSkills.length} skills` }} from your resume
+                      </button>
+                    </div>
+                    <p v-if="item.path === 'experience' && !(valueOf(item) || []).length" class="hint">
+                      Experience isn't filled from your resume yet. Add your jobs here.
+                    </p>
+                    <p v-if="itemErrors(item).length" :id="`${fieldId(item.path)}-err`" class="field-error">
+                      <template v-for="(e, i) in itemErrors(item)" :key="e.path + e.message"><template v-if="i"> </template>{{ e.message }}</template>
+                    </p>
+                  </div>
+                </template>
               </div>
-              <p v-if="entry.description" class="hint">{{ entry.description }}</p>
-              <FieldInput
-                :id="`${fieldId(`extra.${key}`)}-in`"
-                :kind="entryKind(entry)"
-                :model-value="extraValue(entry)"
-                :options="seenOptions(entry)"
-                :multiline="entry.kind === 'text'"
-                :labelledby="`${fieldId(`extra.${key}`)}-label`"
-                :invalid="extraErrors(key).length > 0"
-                @update:model-value="setExtra(key, '', $event)"
-              />
-              <div v-for="(scoped, emp) in entry.by_employer || {}" :key="emp" class="scoped">
-                <span :id="`${fieldId(`extra.${key}.${emp}`)}-label`" class="scoped-label">Only for {{ employerName(emp) }}</span>
-                <FieldInput
-                  :id="`${fieldId(`extra.${key}.${emp}`)}-in`"
-                  :kind="entryKind(entry)"
-                  :model-value="extraValue(entry, emp)"
-                  :options="seenOptions(entry, emp)"
-                  :multiline="entry.kind === 'text'"
-                  :labelledby="`${fieldId(`extra.${key}.${emp}`)}-label`"
-                  @update:model-value="setExtra(key, emp, $event)"
-                />
-              </div>
-              <p v-for="e in extraErrors(key)" :key="e.path + e.message" class="field-error">{{ e.message }}</p>
-              <div v-if="removing === key" class="confirm" role="group" :aria-labelledby="`${fieldId(`extra.${key}`)}-confirm`">
-                <p :id="`${fieldId(`extra.${key}`)}-confirm`">Remove this answer? Applications that ask it will stop and ask you again.</p>
-                <p v-if="dirty" class="muted">Your other unsaved changes will be saved too.</p>
-                <div class="confirm-buttons">
-                  <button type="button" class="danger-btn remove-yes" :disabled="saving" @click="removeAnswer(key)">Remove answer</button>
-                  <button type="button" class="remove-no" @click="removing = ''">Keep it</button>
-                </div>
-              </div>
-              <button v-else type="button" class="ghost remove" :aria-label="`Remove ${entry.title || key}`" @click="removing = key">Remove</button>
             </div>
-          </section>
-
-          <!-- 16: keys the form does not know -->
-          <section v-if="others.length" class="group surface other" data-section="other" aria-labelledby="g-other">
-            <header class="group-head"><h3 id="g-other" tabindex="-1">Other keys in your file</h3></header>
-            <p class="muted note">These keys aren't in the form. They're kept as they are. Edit them in data/applicant.yaml.</p>
-            <dl class="others">
-              <div v-for="o in others" :key="o.path">
-                <dt class="mono">{{ o.path }}</dt>
-                <dd class="mono">{{ privatePath(o.path) ? '•••' : showValue(o.value) }}</dd>
-              </div>
-            </dl>
-          </section>
-
-          <div class="save-bar">
-            <span v-if="dirty" class="muted unsaved">You have unsaved changes.</span>
-            <p v-if="note && !dirty" class="notice ok save-note" role="status">{{ note }}</p>
-            <button v-if="neededItems.length" type="button" class="next-needed" @click="nextNeeded">Next needed ({{ neededItems.length }})</button>
-            <button type="button" class="ghost discard" :disabled="saving || !dirty" @click="discard">Discard changes</button>
-            <button type="submit" class="primary save" :disabled="saving || (!dirty && data.file?.exists)">{{ saving ? 'Saving…' : 'Save details' }}</button>
-          </div>
-        </form>
+          </DetailSection>
         </div>
+
+        <!-- Keys the form does not know: kept as they are, edited by hand. Never an `extra.*` key. -->
+        <details v-if="others.length" class="other-keys muted">
+          <summary>Other keys in your file</summary>
+          <p class="note">These keys aren't in the form. They're kept as they are. Edit them in data/applicant.yaml.</p>
+          <dl class="others">
+            <div v-for="o in others" :key="o.path">
+              <dt class="mono">{{ o.path }}</dt>
+              <dd class="mono">{{ privatePath(o.path) ? '•••' : showValue(o.value) }}</dd>
+            </div>
+          </dl>
+        </details>
+
+        <p class="muted pointer">Answers you corrected for next time are in <a class="text-link" href="#/settings/apply/answers-corrected">Settings → Apply</a>.</p>
       </template>
     </template>
   </div>
@@ -825,44 +867,54 @@ defineExpose({ load })
    child's min-content (the rail's chip row was 1587px at 390px, Q-71 D1). */
 .app-details { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--space-4); }
 .lead { margin: 0; font-size: var(--text-sm); }
-.missing { padding: var(--space-4); display: grid; gap: var(--space-2); }
-.missing .section-title { margin: 0; }
-.missing-list { list-style: none; margin: var(--space-2) 0 0; padding: 0; display: grid; gap: var(--space-1); }
-.missing-list li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 var(--space-3); font-size: var(--text-sm); }
-.missing-label { font-weight: 600; }
-.path { font-size: var(--text-xs); }
 .summary-title { font-weight: 650; }
 .summary-list { margin: var(--space-2) 0 0; padding-left: var(--space-5); display: grid; gap: var(--space-1); }
 .summary-list li { overflow-wrap: anywhere; }
 .summary-list .go { margin-left: var(--space-2); min-height: 1.5rem; color: inherit; font-weight: 600; }
 .banner:focus-visible { outline-offset: 2px; }
-.app-details .section-title { margin: var(--space-2) 0 0; }
-.meter-row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-3); }
-.meter { flex: 0 1 16rem; height: 0.5rem; border-radius: 999px; background: var(--surface-3); overflow: hidden; }
-.meter span { display: block; height: 100%; background: var(--accent); border-radius: 999px; }
-.meter-text { font-size: var(--text-sm); color: var(--text-2); }
-.comments-note { margin: 0; }
-.details-body { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--space-4); align-items: start; }
-.details-rail { min-width: 0; }
-.the-form { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--space-4); min-width: 0; }
-.group { padding: var(--space-4) var(--space-5); display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--space-4); align-items: start; min-width: 0; scroll-margin-top: calc(var(--header-h) + var(--space-4)); }
-.group-head { display: flex; align-items: center; gap: var(--space-2) var(--space-3); flex-wrap: wrap; }
-.group-head h3 { margin: 0; font-size: var(--text-md); font-weight: 650; }
-.group-head h3:focus { outline: none; }
-.group-head h3:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
-.section-tag.needed { color: var(--warn); background: var(--warn-soft); border-color: color-mix(in srgb, var(--warn) 35%, transparent); }
-.section-tag.fix { color: var(--danger); background: var(--danger-soft); border-color: color-mix(in srgb, var(--danger) 35%, transparent); }
-.group-head .tag.private { white-space: normal; }
-.note { margin: calc(-1 * var(--space-2)) 0 0; font-size: var(--text-sm); }
+.comments-note, .work-rights-note, .restored { margin: 0; }
+
+/* Loading. */
+.sk-card { display: grid; gap: var(--space-3); }
+.sk-row { height: 3rem; }
+
+/* The status line. */
+.status-row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-4); }
+.status-text { flex: 1 1 16rem; min-width: 0; display: grid; gap: var(--space-1); }
+.status-text p { margin: 0; overflow-wrap: anywhere; }
+.status-attention { color: var(--warn); font-size: var(--text-sm); }
+.status-waiting { font-size: var(--text-sm); }
+.fill-in { min-height: var(--touch-min); }
+@media (max-width: 639px) {
+  .status-row { display: grid; justify-items: start; }
+  .fill-in { width: 100%; }
+}
+
+/* The card of section rows: the Settings row look (Q116 §3), no padding of its own. */
+.sections-card { padding: 0; overflow: clip; }
+.waiting-notice { margin: 0 var(--space-4) var(--space-3); display: grid; gap: var(--space-2); }
+.waiting-notice p { margin: 0; }
+.waiting-buttons { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+@media (max-width: 639px) {
+  .waiting-notice { margin: 0 var(--space-3) var(--space-3); }
+  .waiting-buttons button { min-height: var(--touch-min); }
+}
+
+/* Inside an open section. */
+.block { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--space-3); min-width: 0; }
+.block + .block { padding-top: var(--space-4); border-top: 1px solid var(--border); }
+.block-head { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-2) var(--space-3); }
+.block-title { margin: 0; font-size: var(--text-sm); font-weight: 650; }
+.block-head .tag.private { white-space: normal; }
+.note { margin: 0; font-size: var(--text-sm); color: var(--muted); }
+.block-fields { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--space-4); min-width: 0; }
 /* Two columns from 900px (Q71-19): short related fields pair up, the rest take the row. */
 @media (min-width: 900px) {
-  .details-body.has-rail { grid-template-columns: 13rem minmax(0, 1fr); }
-  .group { grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: var(--space-5); }
-  .group > .group-head, .group > .note, .field.wide, .extra-row, .others { grid-column: 1 / -1; }
+  .block-fields { grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: var(--space-5); }
+  .field.wide { grid-column: 1 / -1; }
 }
-/* The sticky save bar must not cover the field that has focus (WCAG 2.4.11). */
-.field { display: grid; grid-template-columns: minmax(0, 1fr); min-width: 0; gap: var(--space-1); align-content: start; scroll-margin-top: calc(var(--header-h) + var(--space-4)); scroll-margin-bottom: 6rem; }
-.missing-list .upload { min-height: 1.5rem; }
+/* The sticky Save bar must not cover the field that has focus (WCAG 2.4.11). */
+.field { display: grid; grid-template-columns: minmax(0, 1fr); min-width: 0; gap: var(--space-1); align-content: start; scroll-margin-top: calc(var(--header-h) + var(--space-4)); scroll-margin-bottom: 8rem; }
 .field-head { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-2); }
 .field-label { font-size: var(--text-sm); font-weight: 600; }
 .hint { margin: 0; font-size: var(--text-xs); color: var(--muted); max-width: 60ch; }
@@ -877,32 +929,16 @@ defineExpose({ load })
 .with-status { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-2); }
 .doc-found { font-size: var(--text-sm); color: var(--ok); }
 .doc-found.none { color: var(--warn); }
-.scoped { display: grid; gap: var(--space-1); padding-left: var(--space-4); border-left: 2px solid var(--border); }
-.scoped-label { font-size: var(--text-sm); color: var(--text-2); }
-.extra-row + .extra-row { padding-top: var(--space-4); border-top: 1px solid var(--border); }
-.confirm { display: grid; gap: var(--space-2); padding: var(--space-3); background: var(--warn-soft); border-radius: var(--radius); }
-.confirm p { margin: 0; font-size: var(--text-sm); }
-.confirm-buttons { display: flex; gap: var(--space-2); }
-.danger-btn { background: var(--danger); border-color: var(--danger); color: var(--surface); font-weight: 600; }
-.danger-btn:hover:not(:disabled) { background: var(--danger); filter: brightness(0.92); color: var(--surface); }
-.remove { justify-self: start; }
+
+/* The foot: unknown keys and the pointer to Settings. */
+.other-keys summary { cursor: pointer; font-size: var(--text-sm); min-height: 1.5rem; }
+.other-keys .note { margin: var(--space-2) 0; }
 .others { margin: 0; display: grid; gap: var(--space-2); }
 .others > div { display: flex; flex-wrap: wrap; gap: var(--space-1) var(--space-3); }
 .others dt { color: var(--muted); font-size: var(--text-xs); }
 .others dd { margin: 0; font-size: var(--text-xs); overflow-wrap: anywhere; }
-/* Under 640px it rides above the bottom bar (Q-100 A14; --bottom-nav-h is 0 wider). */
-.save-bar {
-  position: sticky; bottom: calc(var(--bottom-nav-h) + env(safe-area-inset-bottom, 0px)); z-index: 5;
-  display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: var(--space-2) var(--space-3);
-  padding: var(--space-3) var(--space-4);
-  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg);
-  box-shadow: var(--shadow);
-}
-.unsaved { font-size: var(--text-sm); margin-right: auto; }
-.save-note { margin: 0 auto 0 0; padding: var(--space-1) var(--space-3); }
-/* A phone (Q71-24): the sentence on its own row, the buttons below it. */
+.pointer { margin: 0; font-size: var(--text-sm); }
 @media (max-width: 639px) {
-  .save-bar { padding: var(--space-2) var(--space-3); }
-  .unsaved, .save-note { flex: 1 1 100%; }
+  .other-keys summary { display: flex; align-items: center; min-height: var(--touch-min); }
 }
 </style>

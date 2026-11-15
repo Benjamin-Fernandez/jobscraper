@@ -31,11 +31,19 @@
 // The Application mailbox row makes the hint "Set up the mailbox in Settings -> Apply"
 // (apply/contracts.py:175) true. JobScraper waits for the owner at a human check; it
 // never solves one.
+//
+// Q-127 U3 (D-215): "Answers you corrected" (id `answers-corrected`, hash
+// `#/settings/apply/answers-corrected`, DOM `#setting-answers-corrected`) lists the answers the
+// owner saved from an application, with Forget (RememberedAnswers.vue). It is a view of the
+// owner's own saved answers, not an apply setting: it opens even when the apply settings are
+// read-only, and it loads its own count (GET /api/apply/remembered), hidden on a server
+// that has no such route. The fill-policy options read "Always answer" / "Stop when unsure".
 import { computed, nextTick, reactive, ref, watch, onMounted } from 'vue'
-import { ApiError } from '../api.js'
+import { ApiError, getRemembered } from '../api.js'
 import { missingLabels } from '../applyData.js'
 import { putApplySettings } from '../connections_api.js'
 import { COPY, LINK_TEXT, capLabel, saveErrorText, useRows, waitLabel, wholeNumber } from '../settingsRows.js'
+import RememberedAnswers from './RememberedAnswers.vue'
 import SettingRow from './SettingRow.vue'
 import SettingsGroup from './SettingsGroup.vue'
 import StateChip from './StateChip.vue'
@@ -69,7 +77,7 @@ const settingsReadOnly = computed(() => !editable.value)
 const mode = computed(() => current.value?.mode ?? props.apply?.status?.mode ?? null)
 const modeText = computed(() => (mode.value === 'auto' ? 'Automatic submit' : 'Dry run'))
 const busy = computed(() => props.apply?.status?.busy === true)
-const has = key => typeof current.value?.[key] === (key === 'headed' || key === 'compose_enabled' ? 'boolean' : 'number')
+const has = key => typeof current.value?.[key] === (key === 'headed' || key === 'compose_enabled' ? 'boolean' : key === 'fill_policy' ? 'string' : 'number')
 
 const mailbox = computed(() => (props.connections?.items ?? []).find(i => i.id === 'apply-mailbox') ?? null)
 const summary = computed(() => props.apply?.summary ?? null)
@@ -190,9 +198,127 @@ function onModeEsc() {
   focusRow('mode')
 }
 
+// ---- How forms are answered (Q-121 U1, llm_first_fill_design section 7.2; Q-127 D2) ----
+// Two radios like Mode. Switching to "Always answer" asks first in the row, because the
+// AI's answers (including the ones it had to assume) are then submitted in the owner's
+// name; going back to "Stop when unsure" never asks. The stored values stay `always` /
+// `strict` (the server's key set is pinned and sends no labels), so the two words live here.
+// The server may say "always" is not in force (`fill_policy_inactive`, plain words): that
+// text replaces the value and the radios still show what is configured. A server without
+// these fields shows no row.
+const FILL_POLICY_LABELS = { always: 'Always answer', strict: 'Stop when unsure' }
+const FILL_OPTIONS = [
+  { value: 'always', name: FILL_POLICY_LABELS.always, sub: 'The local AI fills every field from your profile and resume and marks anything it had to assume.' },
+  { value: 'strict', name: FILL_POLICY_LABELS.strict, sub: "It stops when your details don't cover a question. You answer them in that application's What was filled, then try again." },
+]
+const FILL_DESCRIPTION = `${FILL_POLICY_LABELS.always}: the local AI fills every field from your profile and resume and marks anything it had to assume. `
+  + `${FILL_POLICY_LABELS.strict}: it stops when your details don't cover a question.`
+// Release lock (D-223): while the install has not released "Always answer"
+// (`always_available` from the server, read-only, config file only) the row shows
+// "Stop when unsure", the "Always answer" option is visible but disabled, and nothing
+// is ever sent for it. A server that does not say is treated as locked.
+const FILL_LOCKED_TEXT = "Always answer isn't available yet: it is still being checked."
+const fillLocked = computed(() => current.value?.always_available !== true)
+const fillStored = computed(() => (current.value?.fill_policy === 'always' ? 'always' : 'strict'))
+const fillPolicy = computed(() => (fillLocked.value ? 'strict' : fillStored.value))
+const fillInactive = computed(() => (fillLocked.value ? '' : String(current.value?.fill_policy_inactive || '')))
+const fillText = computed(() => fillInactive.value || FILL_POLICY_LABELS[fillPolicy.value])
+const pendingFill = ref(null)
+const confirmAlways = ref(false)
+let arrowedFill = false
+const fillShown = computed(() => (confirmAlways.value ? 'always' : pendingFill.value ?? fillPolicy.value))
+
+function onFillKey(e) {
+  if (e.key === 'Enter') {
+    e.preventDefault()
+    commitFill()
+  } else if (e.key !== 'Escape') {
+    arrowedFill = e.key.startsWith('Arrow')
+  }
+}
+function onFillChange(value) {
+  if (arrowedFill) {
+    arrowedFill = false
+    pendingFill.value = value === fillPolicy.value ? null : value
+  } else {
+    pendingFill.value = null
+    chooseFill(value)
+  }
+}
+function commitFill() {
+  const value = pendingFill.value
+  pendingFill.value = null
+  if (value !== null) chooseFill(value)
+}
+function onFillFocusout(e) {
+  if (!e.currentTarget.contains(e.relatedTarget)) commitFill()
+}
+async function chooseFill(value) {
+  if (fillLocked.value && value === 'always') return       // locked: never sent, never asked
+  // Locked with an old stored "always": picking "Stop when unsure" rewrites it, so a later
+  // release does not switch it on by itself.
+  if (value === fillPolicy.value && !(fillLocked.value && fillStored.value === 'always')) {
+    confirmAlways.value = false         // picking the saved choice again cancels the question
+    return
+  }
+  if (value === 'always') {
+    confirmAlways.value = true          // nothing is sent until the owner confirms
+    await nextTick()
+    root.value?.querySelector('.fill-confirm-no')?.focus()
+    return
+  }
+  await saveFill(value)
+}
+async function saveFill(value) {
+  pendingFill.value = value
+  await save('fill-policy', 'fill_policy', value)
+  pendingFill.value = null
+}
+async function confirmFillSwitch() {
+  confirmAlways.value = false
+  await saveFill('always')
+  await nextTick()
+  focusEditor('fill-policy')
+}
+function keepAsking() {
+  confirmAlways.value = false
+  pendingFill.value = null
+  nextTick(() => root.value?.querySelector('.fill-options input:checked')?.focus())
+}
+function onFillEsc() {
+  if (confirmAlways.value) {
+    keepAsking()
+    return
+  }
+  pendingFill.value = null
+  rows.close()
+  focusRow('fill-policy')
+}
+// What the confirm says depends on what happens to the answers next.
+const confirmBody = computed(() => (mode.value === 'auto'
+  ? "From now on JobScraper fills every field itself, including ones your profile and resume don't cover, and submits the form with those answers. Each application lists them under What was sent, with the assumed ones marked."
+  : "From now on JobScraper fills every field itself, including ones your profile and resume don't cover. Dry run is on, so the form is left open for you. Each application lists the assumed answers under What was filled."))
+
 // ---- the number rows: presets + a whole-number field ----
 const preset = (text, v) => ({ text, v })
 const NUMBER_ROWS = [
+  {
+    // Trial applications (§7.2, §12): the first N applications under "Always answer" are
+    // filled and not sent. The row reads the server's own words ("Next 3 not sent (2 left)").
+    id: 'always-trial', key: 'always_trial_runs', group: 'how', lo: 0, hi: 20,
+    label: 'Trial applications',
+    description: 'Fill the next few applications without sending them, so you can check the answers first.',
+    field: 'Applications to leave unsent',
+    presets: [preset('Off', 0), preset('3', 3), preset('5', 5)],
+    show: (n, cur) => String(cur?.always_trial_text || '') || (n > 0 ? `Next ${n} not sent` : 'Off'),
+    help: (n, cur) => {
+      const left = Number(cur?.always_trial_left)
+      const tail = cur?.fill_policy_effective === 'strict' ? ' It only applies when forms are answered automatically.' : ''
+      if (!(n > 0)) return `Off: applications are submitted as usual. 0 to 20.${tail}`
+      return `The next ${n} application${n === 1 ? ' is' : 's are'} filled and left unsent`
+        + `${n === Number(cur?.always_trial_runs) && Number.isFinite(left) ? ` (${left} left)` : ''}. After that they are submitted as usual. 0 to 20.${tail}`
+    },
+  },
   {
     id: 'human-check-wait', key: 'captcha_wait_s', group: 'how', lo: 0, hi: 600,
     label: 'Human-check wait',
@@ -242,7 +368,7 @@ watch(current, () => {
 const parsed = n => wholeNumber(drafts[n.id], n.lo, n.hi)
 const fieldError = n => (attempted[n.id] ? parsed(n).error ?? '' : '')
 // The wait helper follows a valid draft, else the saved value.
-const helpFor = n => n.help(parsed(n).value ?? valueFor(n))
+const helpFor = n => n.help(parsed(n).value ?? valueFor(n), current.value)
 
 async function commitNumber(n) {
   if (rows.open !== n.id) return
@@ -276,6 +402,38 @@ function setSwitch(id, key, value) {
   save(id, key, value, { refocus: true })
 }
 
+// ---- Answers you corrected (Q-127 U3) ----
+// The row's value needs the count before the row is opened, so the page asks once on mount
+// (a failed or absent answer never blocks the page). Opening the row loads the list again
+// (RememberedAnswers) and reports the count it finds, so a Forget updates the value at once.
+const REMEMBERED_ID = 'answers-corrected'
+const SAVED_GROUP = 'Saved answers'
+const remembered = reactive({ gone: false, count: undefined })     // undefined: not known yet
+const rememberedValue = computed(() => {
+  if (remembered.count === undefined) return ''
+  if (remembered.count === null) return 'Unavailable'
+  return remembered.count > 0 ? `${remembered.count} saved` : 'None yet'
+})
+function onRememberedCount(n) {
+  remembered.count = Number.isFinite(n) ? n : null
+}
+async function loadRemembered() {
+  try {
+    const r = await getRemembered()
+    if (r?.unreadable === true) onRememberedCount(null)
+    else if (Array.isArray(r?.items)) onRememberedCount(Number(r.count ?? r.items.length))
+    else onRememberedCount(null)
+  } catch (e) {
+    if (e instanceof ApiError && e.status === 404) remembered.gone = true
+    else onRememberedCount(null)
+  }
+}
+function onRememberedEsc() {
+  rows.close()
+  focusRow(REMEMBERED_ID)
+}
+onMounted(loadRemembered)
+
 // ---- opening and focus ----
 function focusEditor(id) {
   root.value
@@ -292,6 +450,10 @@ watch(() => rows.open, async (id, was) => {
       pendingMode.value = null
       confirmAuto.value = false
     }
+    if (was === 'fill-policy') {
+      pendingFill.value = null
+      confirmAlways.value = false
+    }
   }
   if (!id) return
   await nextTick()
@@ -306,8 +468,10 @@ const visible = computed(() => {
   const ids = []
   if (mode.value) ids.push('mode')
   if (has('headed')) ids.push('browser-window')
+  if (has('fill_policy')) ids.push('fill-policy')
   for (const n of NUMBER_ROWS) if (has(n.key)) ids.push(n.id)
   if (has('compose_enabled')) ids.push('cover-letters')
+  if (!remembered.gone) ids.push(REMEMBERED_ID)
   ids.push('mailbox')
   if (summary.value) ids.push('details')
   ids.push('resume')
@@ -323,7 +487,7 @@ async function followItem() {
   }
   if (id === handled || !visible.value.includes(id)) return
   handled = id
-  const opens = editable.value && (id === 'mode' || numberRow(id))
+  const opens = id === REMEMBERED_ID || (editable.value && (id === 'mode' || id === 'fill-policy' || numberRow(id)))
   if (opens && rows.open !== id) {
     rowFocusOnly = true
     rows.open = id
@@ -412,13 +576,73 @@ watch([() => props.item, visible], followItem)
         @change="v => setSwitch('browser-window', 'headed', v)"
       />
 
+      <SettingRow
+        v-if="has('fill_policy')"
+        :ref="el => setRef('fill-policy', el)"
+        id="fill-policy"
+        label="How forms are answered"
+        :description="FILL_DESCRIPTION"
+        kind="edit"
+        :open="rows.open === 'fill-policy'"
+        :busy="rows.busy['fill-policy']"
+        :saved="rows.saved['fill-policy']"
+        :error="rows.error['fill-policy']"
+        :read-only="settingsReadOnly"
+        @toggle="rows.toggle('fill-policy')"
+      >
+        <template #value>
+          <span class="fill-value" :data-inactive="fillInactive ? 'true' : null">{{ fillText }}</span>
+        </template>
+        <div class="editor" @keydown.esc.stop.prevent="onFillEsc">
+          <p v-if="fillLocked" id="apply-fill-locked" class="fill-inactive fill-locked" role="status">{{ FILL_LOCKED_TEXT }} Forms are answered with {{ FILL_POLICY_LABELS.strict }}.</p>
+          <p v-else-if="fillInactive" class="fill-inactive" role="status">{{ fillInactive }} Forms are answered with {{ FILL_POLICY_LABELS.strict }} until then.</p>
+          <div
+            class="mode-options fill-options"
+            role="radiogroup"
+            aria-label="How forms are answered"
+            @keydown="onFillKey"
+            @pointerdown="arrowedFill = false"
+            @focusout="onFillFocusout"
+          >
+            <label
+              v-for="o in FILL_OPTIONS"
+              :key="o.value"
+              class="mode-option"
+              :class="{ active: fillShown === o.value, 'fill-option-locked': fillLocked && o.value === 'always' }"
+            >
+              <input
+                type="radio"
+                name="apply-fill-policy"
+                class="visually-hidden"
+                :value="o.value"
+                :checked="fillShown === o.value"
+                :disabled="fillLocked && o.value === 'always'"
+                :aria-disabled="fillLocked && o.value === 'always' ? 'true' : null"
+                :aria-describedby="fillLocked && o.value === 'always' ? 'apply-fill-locked' : null"
+                @change="onFillChange(o.value)"
+              >
+              <span class="mode-name">{{ o.name }}</span>
+              <span class="mode-sub">{{ fillLocked && o.value === 'always' ? FILL_LOCKED_TEXT : o.sub }}</span>
+            </label>
+          </div>
+          <div v-if="confirmAlways" class="confirm-auto fill-confirm" role="group" aria-labelledby="apply-fill-confirm-title">
+            <p id="apply-fill-confirm-title" class="confirm-title">Answer every field automatically?</p>
+            <p class="confirm-body">{{ confirmBody }}</p>
+            <div class="confirm-buttons">
+              <button type="button" class="primary fill-confirm-yes" :disabled="rows.busy['fill-policy']" @click="confirmFillSwitch">Switch to always answer</button>
+              <button type="button" class="fill-confirm-no" @click="keepAsking">Keep stopping when unsure</button>
+            </div>
+          </div>
+        </div>
+      </SettingRow>
+
       <template v-for="n in numbersIn('how')" :key="n.id">
         <SettingRow
           :ref="el => setRef(n.id, el)"
           :id="n.id"
           :label="n.label"
           :description="n.description"
-          :value="n.show(valueFor(n))"
+          :value="n.show(valueFor(n), current)"
           kind="edit"
           :open="rows.open === n.id"
           :busy="rows.busy[n.id]"
@@ -514,7 +738,7 @@ watch([() => props.item, visible], followItem)
         :ref="el => setRef('cover-letters', el)"
         id="cover-letters"
         label="Write cover letters"
-        description="Writes one from your resume when a form requires it. Off: you're asked instead."
+        description="Writes one from your resume when a form requires it. Off: with Stop when unsure, an application whose form requires a cover letter stops and its row says why. With Always answer, a required one is still written."
         kind="switch"
         :checked="current.compose_enabled"
         :busy="rows.busy['cover-letters']"
@@ -523,6 +747,25 @@ watch([() => props.item, visible], followItem)
         :read-only="settingsReadOnly"
         @change="v => setSwitch('cover-letters', 'compose_enabled', v)"
       />
+    </SettingsGroup>
+
+    <!-- Q-127 U3: the answers the owner saved from an application. Not an apply setting, so
+         it is never read-only: the list is the owner's own, and Forget is a delete. -->
+    <SettingsGroup v-if="!remembered.gone" :title="SAVED_GROUP">
+      <SettingRow
+        :ref="el => setRef(REMEMBERED_ID, el)"
+        :id="REMEMBERED_ID"
+        label="Answers you corrected"
+        description="Answers you saved from an application. JobScraper uses them on every form with the same question."
+        :value="rememberedValue"
+        kind="edit"
+        :open="rows.open === REMEMBERED_ID"
+        @toggle="rows.toggle(REMEMBERED_ID)"
+      >
+        <div class="editor" @keydown.esc.stop.prevent="onRememberedEsc">
+          <RememberedAnswers @count="onRememberedCount" @missing="remembered.gone = true" />
+        </div>
+      </SettingRow>
     </SettingsGroup>
 
     <SettingsGroup :title="COPY.groups.beforeYouApply">
@@ -592,6 +835,10 @@ watch([() => props.item, visible], followItem)
 .confirm-title { font-weight: 650; }
 .confirm-buttons { display: flex; flex-wrap: wrap; gap: var(--space-2); }
 
+.fill-value { display: inline-block; max-width: 18rem; text-align: right; overflow-wrap: anywhere; }
+.fill-value[data-inactive='true'] { color: var(--warn); }
+.fill-option-locked { opacity: 0.6; cursor: not-allowed; }
+.fill-inactive { margin: 0; padding: var(--space-2) var(--space-3); font-size: var(--text-sm); background: var(--warn-soft); border-radius: var(--radius); }
 .presets { display: flex; flex-wrap: wrap; gap: var(--space-2); }
 .preset { min-height: 2.25rem; }
 .preset.active { border-color: var(--accent); background: var(--surface); box-shadow: var(--shadow-sm); font-weight: 650; }
@@ -605,5 +852,6 @@ watch([() => props.item, visible], followItem)
 @media (max-width: 640px) {
   .apply-cta, .preset, .number-field input, .confirm-buttons button { min-height: var(--touch-min); }
   .mode-option { min-height: var(--touch-min); }
+  .fill-value { max-width: none; text-align: left; }
 }
 </style>

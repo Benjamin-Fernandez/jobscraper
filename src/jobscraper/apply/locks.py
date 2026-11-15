@@ -179,7 +179,7 @@ def _email_lock(pf: PageField, rctx: ResolveContext) -> Optional[Answer]:
     toks = tokens(f.label)
     asks = f.type is FieldType.EMAIL or any(
         len(toks) <= 4 and contains_run(toks, list(p.split())) for p in EMAIL_PHRASE)
-    if not asks or facts.about_other_person(pf):
+    if not asks or facts.about_other_person(pf, rctx=rctx):
         return None
     email = rctx.account_email or resolve.profile_value(rctx.profile or {}, "contact.email")
     fit = resolve.fit_text(f, email)

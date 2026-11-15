@@ -5,6 +5,7 @@
 // and the tab stays markup. Design: docs/architecture/ux/overview_design.md §3 and
 // docs/architecture/q118_ui_polish_design.md §2.
 import { daysSince, isActive, lastAt, needsFollowUp } from './applications.js'
+import { contentFailure, rowState } from './attempts.js'
 import { newRoleCount } from './badges.js'
 import { utcMs } from './format.js'
 import { CLOSED_STATUSES, stageOf, statusLabel } from './stages.js'
@@ -150,12 +151,60 @@ export function lastRunState(runs, now = Date.now()) {
   return { state: 'fresh', run, days }
 }
 
+// The facts a form can ask for that "Your details" has no place for (Q-127 B.2d, review Q5):
+// a mirror of the contract's NO_FIELD_FACTS titles (apply/contracts.py). The Overview names a
+// fact only when the server's words for the stop contain one of these four, never free text,
+// so a form's own wording can't reach this page.
+export const NO_FIELD_FACT_TITLES = [
+  'passport number',
+  'bank account details',
+  'full NRIC or national ID number',
+  'driving licence or other ID number',
+]
+
+// What the stopped applications are waiting for, counted from the rows `GET /api/applications`
+// already sends (Q-127 U3, D-215; no question rows are read):
+//   waiting  roles stopped for a detail or file the owner can add (`rowState().add`), not yet
+//            ready to try again
+//   noField  [{fact, n}] roles stopped on a fact Your details can't hold (`last_attempt.no_field`),
+//            one entry per fixed title, in the title order above
+//   stuck    roles stopped on a question JobScraper can't answer: a strict stop with questions
+//            left, or a content failure (the local AI would have had to guess)
+// Only roles still To apply, not queued and not in flight (`rowState` decides, as the row's
+// own chip does). The server sends the fact only inside `last_attempt.text`, so it is found
+// there by the fixed titles; a no_field stop whose text names none of them counts as `stuck`.
+export function stoppedCounts(rows) {
+  let waiting = 0
+  let stuck = 0
+  const byFact = new Map()
+  for (const row of list(rows)) {
+    const s = rowState(row)
+    if (!s || s.ready) continue
+    if (s.noField) {
+      const text = String(row?.last_attempt?.text ?? '').toLowerCase()
+      const fact = NO_FIELD_FACT_TITLES.find(t => text.includes(t.toLowerCase()))
+      if (fact) byFact.set(fact, (byFact.get(fact) ?? 0) + 1)
+      else stuck += 1
+    } else if (s.add) {
+      waiting += 1
+    } else if (s.filled || (s.noRetry && contentFailure(row?.last_attempt))) {
+      stuck += 1
+    }
+  }
+  const noField = NO_FIELD_FACT_TITLES.filter(t => byFact.has(t)).map(t => ({ fact: t, n: byFact.get(t) }))
+  return { waiting, noField, stuck }
+}
+
 // The "To do" rows in the order the owner should do them, only those with
 // work. [] means caught up. A run that never happened is the setup checklist's
-// business, not a card.
-export function nextUp({ newRoles = 0, questions = 0, followUps: due = [], run = null, jobRunning = false } = {}) {
+// business, not a card. The first three come from `stoppedCounts` (Q-127 U3).
+export function nextUp({
+  newRoles = 0, waiting = 0, noField = [], stuck = 0, followUps: due = [], run = null, jobRunning = false,
+} = {}) {
   const out = []
-  if (questions > 0) out.push({ id: 'questions', n: questions })
+  if (waiting > 0) out.push({ id: 'details', n: waiting })
+  for (const f of list(noField)) if (f?.n > 0) out.push({ id: 'no-field', n: f.n, fact: f.fact })
+  if (stuck > 0) out.push({ id: 'stuck', n: stuck })
   if (newRoles > 0) out.push({ id: 'inbox', n: newRoles })
   const quiet = Array.isArray(due) ? due.length : Number(due) || 0
   if (quiet > 0) out.push({ id: 'follow-up', n: quiet })

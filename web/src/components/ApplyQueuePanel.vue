@@ -23,7 +23,7 @@ import {
   ApiError, applyQueue, clearApplyQueue, describeError, pauseApplyQueue, removeFromApplyQueue,
   resumeApplyQueue, stopApplyAttempt,
 } from '../api.js'
-import { attemptLabel } from '../attempts.js'
+import { attemptLabel, withAssumed } from '../attempts.js'
 import { ago, duration, plural, utcMs } from '../format.js'
 import StateChip from './StateChip.vue'
 
@@ -233,7 +233,9 @@ const clearQuestion = computed(() => (waiting.value.length === 1
 watch(() => waiting.value.length, n => { if (!n) confirmingClear.value = false })
 
 const outcomeTone = kind => OUTCOME_TONE[kind] ?? 'neutral'
-const outcomeText = item => attemptLabel(item.kind, item.mode)
+// Q-121: a finished role that carried assumed answers says so ("Sent by auto-apply · 3
+// answers assumed"); an older server sends none and the chip reads as before.
+const outcomeText = item => withAssumed(attemptLabel(item.kind, item.mode), item)
 const applicationHref = item => `#/applications/all/${encodeURIComponent(item.job_id)}`
 
 // ---- the controls ----

@@ -9,7 +9,9 @@ decides everything else: the prompt is built here in a fixed order, the whole us
 goes through the injected `redact` (the apply stage's S-value scrubber; stages don't import
 each other), and the reply is accepted only if all seven deterministic checks pass. A
 failure gets exactly one retry with a `FIX:` line; the second failure is the end
-(`ok=False`, the caller turns the field into a question).
+(`ok=False`, the caller turns the field into a question). Under the always policy
+(Q-121 WP-K1, llm_first_fill_design 4.8) it is not: the text is pruned or replaced by a
+neutral one and marked assumed.
 
 Privacy: no text (prompt, resume, reply) is ever logged or put into an issue detail or an
 error. `PRIVATE_VALUE` details are a category, never the value, and the FIX line never
@@ -25,6 +27,7 @@ import inspect
 import json
 import logging
 import re
+from dataclasses import dataclass, replace
 from typing import Any, Callable, Iterable, Optional, Sequence
 
 from .contracts import (COMPOSE_VERSION, ComposeRequest, ComposeResult, IssueCode,
@@ -181,14 +184,17 @@ def allowed_facts(req: ComposeRequest, master_text: str, dictionary: Dictionary,
 
 
 def check(text: str, req: ComposeRequest, master_text: str, dictionary: Dictionary,
-          attested: Iterable[str] = ()) -> list[ValidationIssue]:
+          attested: Iterable[str] = (), *, min_words: Optional[int] = None) -> list[ValidationIssue]:
     """C1-C7 on `text`; `[]` = clean. C1 failing returns at once (nothing else is
     worth judging in an empty or mis-sized text). Details are counts, offending tokens
-    from the text, or a category; never an S value."""
+    from the text, or a category; never an S value. `min_words` replaces C1's lower bound
+    (Q-121 WP-K1: the always policy judges a pruned text, which may be short, on C2-C7
+    alone); None = the bound of the design."""
     words = len(text.split())
     if not text.strip():
         return [_issue(IssueCode.EMPTY)]
-    lo = min(MIN_WORDS.get(req.kind, MIN_WORDS["answer"]), req.max_words)        # C1
+    lo = (min(MIN_WORDS.get(req.kind, MIN_WORDS["answer"]), req.max_words)        # C1
+          if min_words is None else int(min_words))
     if not lo <= words <= req.max_words:
         return [_issue(IssueCode.LENGTH, f"{words} words, allowed {lo}-{req.max_words}")]
     if len(text) > req.max_chars:
@@ -300,18 +306,143 @@ def _call(backend: Any, system: str, user: str, req: ComposeRequest,
     return text.strip() if isinstance(text, str) else ""
 
 
+# --------------------------------------------------------------------------
+# The always policy (Q-121 WP-K1; llm_first_fill_design 4.8)
+# --------------------------------------------------------------------------
+#
+# Under `strict` (the default) a text that fails C1-C7 twice is a refusal. Under `always`
+# a required field must still get a text, so after the same two attempts the failed text is
+# PRUNED and what is left is used, marked `assumed`; when too little is left, or a hard check
+# still fails, a neutral text built by code is used instead.
+#   Hard (the text is never used with these; prune, else neutral): C5 private values, C7
+#     placeholders, C6 other employers, an empty text, a text over `max_words`/`max_chars`
+#     (sentences are cut from the end).
+#   Audit flags (returned in `ComposeOutcome.flags`, the text is used pruned): C2 added
+#     numbers, C3 added facts, C4 stronger verbs, and C1's minimum length.
+# C3 stays strict inside the text: an unsupported fact is cut, never kept with a flag.
+
+ALWAYS = "always"
+NEUTRAL_MIN_SENTENCES = 2       # design 4.8: the pruned rest is used when it keeps this many
+_BIG = 10 ** 9
+
+
+@dataclass(frozen=True)
+class ComposeOutcome(ComposeResult):
+    """A `ComposeResult` plus what the always policy did to the text. Returned by `compose`
+    only when `policy="always"`; every ComposeResult field means what it did.
+    `flags`: the issues of the last attempt that were pruned away (details name tokens,
+    never S values). `assumed`: the text is not the model's clean first or second try
+    (pruned or neutral): the caller records the answer as assumed. `pruned` / `neutral`:
+    which. `reason`: a short fixed word for the note ("checks", "no master", "setup")."""
+    flags: tuple[ValidationIssue, ...] = ()
+    assumed: bool = False
+    pruned: bool = False
+    neutral: bool = False
+    reason: str = ""
+
+
+_SENT_SPLIT = re.compile(r"(?<=[.!?])\s+(?=[A-Z0-9\"'(\[])")
+
+
+def _sentences(text: str) -> list[list[str]]:
+    """`text` as paragraphs of sentences (blank-line blocks, then sentence ends)."""
+    paras = [p for p in re.split(r"\n\s*\n", text.strip()) if p.strip()]
+    return [[s.strip() for s in _SENT_SPLIT.split(" ".join(p.split())) if s.strip()] for p in paras]
+
+
+def _rebuild(paras: Sequence[Sequence[str]]) -> str:
+    return "\n\n".join(" ".join(p) for p in paras if p)
+
+
+def _fits(text: str, req: ComposeRequest) -> bool:
+    return len(text.split()) <= req.max_words and len(text) <= req.max_chars
+
+
+def prune(text: str, issues: Sequence[ValidationIssue], req: ComposeRequest, master_text: str,
+          dictionary: Dictionary, attested: Iterable[str] = ()) -> str:
+    """`text` without the sentences that fail C2-C7 (llm_first_fill_design 4.8): a sentence
+    is dropped when it, read alone with the same checks `check` makes, holds an added number
+    (C2), an added fact (C3), a stronger verb (C4), a private value (C5), another employer
+    (C6) or a placeholder (C7). `issues` (the failed attempt's) says whether to prune at
+    all; a sentence is judged by the checks themselves, not by matching issue details, so a
+    token the details spell differently still goes. Then sentences are cut from the end
+    until the text is within `max_words` and `max_chars`. "" when nothing is left."""
+    if not text.strip():
+        return ""
+    lenient = replace(req, max_words=_BIG, max_chars=_BIG)
+    paras = _sentences(text)
+    if any(i.code not in (IssueCode.LENGTH, IssueCode.EMPTY) for i in issues):
+        paras = [[s for s in p if not check(s, lenient, master_text, dictionary, attested,
+                                            min_words=0)] for p in paras]
+    out = _rebuild(paras)
+    while out and not _fits(out, req):
+        last = next(i for i in range(len(paras) - 1, -1, -1) if paras[i])
+        paras[last].pop()
+        out = _rebuild(paras)
+    return out
+
+
+def neutral_text(req: ComposeRequest) -> str:
+    """The text code writes when the model's cannot be used (design 4.8): it states the
+    role and employer JOB gives, and points at the attached resume; no claim of its own.
+    Cut to the field's limits."""
+    role = f"the {req.job_title.strip()} role at {req.employer.strip()}" if req.job_title.strip() \
+        else f"a role at {req.employer.strip()}"
+    first = f"I am applying for {role}."
+    full = f"{first} My resume, attached, sets out my education and experience."
+    for cand in (full, first):
+        if _fits(cand, req):
+            return cand
+    words = first.split()[:max(1, req.max_words)]
+    out = ""
+    for w in words:
+        if len((out + " " + w).strip()) > req.max_chars:
+            break
+        out = (out + " " + w).strip()
+    return out
+
+
+def _salvage(text: str, issues: Sequence[ValidationIssue], req: ComposeRequest, master_text: str,
+             dictionary: Dictionary, attested: Iterable[str], base: dict) -> ComposeOutcome:
+    """The always policy after two failed attempts: prune, re-check, else neutral. `base`
+    holds the ComposeResult fields (model, prompt_hash, attempts)."""
+    flags = tuple(issues)
+    kept = prune(text, issues, req, master_text, dictionary, attested)
+    n = sum(len(p) for p in _sentences(kept)) if kept else 0
+    dropped_any = bool(text.strip()) and " ".join(kept.split()) != " ".join(text.split())
+    clean = (bool(kept) and (n >= NEUTRAL_MIN_SENTENCES or not dropped_any)
+             and not check(kept, req, master_text, dictionary, attested, min_words=0))
+    if clean:
+        log.info("compose: pruned to %d sentence(s), %d words, %d flag(s)", n, len(kept.split()),
+                 len(flags))
+        return ComposeOutcome(ok=True, text=kept, issues=flags, flags=flags, assumed=True,
+                              pruned=dropped_any, reason="checks", **base)
+    log.info("compose: neutral text after %s", sorted({i.code.value for i in flags}))
+    return ComposeOutcome(ok=True, text=neutral_text(req), issues=flags, flags=flags,
+                          assumed=True, neutral=True, reason="checks", **base)
+
+
 def compose(req: ComposeRequest, master: MasterResume, dictionary: Dictionary, *, backend: Any,
             redact: Callable[[str, Sequence[str]], str],
-            attested: Iterable[str] = (), timeout: Optional[float] = None) -> ComposeResult:
+            attested: Iterable[str] = (), timeout: Optional[float] = None,
+            policy: str = "strict") -> ComposeResult:
     """Write, check, retry once. `redact(text, req.s_values)` is applied to the whole user
     prompt (FIX line included) so no S value reaches the model. `timeout` (seconds, D-184)
-    caps each model call; a timeout is a transport error. Never logs a text."""
+    caps each model call; a timeout is a transport error. Never logs a text.
+
+    `policy` (Q-121 WP-K1): "strict" (the default, and anything but "always") ends a second
+    failure as `ok=False`, exactly as before. "always" turns it into a pruned or neutral
+    text, `ok=True`, returned as a `ComposeOutcome` (see above); a transport failure is still
+    `ok=False`, `error="transport: <ExceptionName>"` (a prompt the backend refused for holding
+    a registered secret reads `transport: PromptRefused`)."""
+    always = str(getattr(policy, "value", policy)).strip().lower() == ALWAYS
     master_text = resume_text(master)
     system = system_prompt(req)
     base = user_prompt(req, master_text)
     model = getattr(backend, "model_id", "") or getattr(backend, "name", "") or ""
     issues: list[ValidationIssue] = []
     h = ""
+    text = ""
     for attempt in (1, 2):
         user = base if attempt == 1 else base + "\n" + fix_line(issues)
         user = redact(user, req.s_values)
@@ -320,11 +451,15 @@ def compose(req: ComposeRequest, master: MasterResume, dictionary: Dictionary, *
             text = _call(backend, system, user, req, timeout)
         except Exception as exc:    # any transport failure; the type name carries no personal text
             log.warning("compose: model call failed (%s)", type(exc).__name__)
-            return ComposeResult(False, "", tuple(issues), model, h, attempt,
-                                 f"transport: {type(exc).__name__}")
+            fields = (False, "", tuple(issues), model, h, attempt, f"transport: {type(exc).__name__}")
+            return ComposeOutcome(*fields) if always else ComposeResult(*fields)
         issues = check(text, req, master_text, dictionary, attested)
         if not issues:
             log.info("compose: ok after %d attempt(s), %d words", attempt, len(text.split()))
-            return ComposeResult(True, text, (), model, h, attempt, "")
+            fields = (True, text, (), model, h, attempt, "")
+            return ComposeOutcome(*fields) if always else ComposeResult(*fields)
         log.info("compose: attempt %d failed %s", attempt, sorted({i.code.value for i in issues}))
+    if always:
+        return _salvage(text, issues, req, master_text, dictionary, attested,
+                        {"model": model, "prompt_hash": h, "attempts": 2})
     return ComposeResult(False, "", tuple(issues), model, h, 2, "")

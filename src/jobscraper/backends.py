@@ -18,13 +18,47 @@ parser on 2026-09-28; the Claude CLI and API transports went with it (M14).
 """
 from __future__ import annotations
 
+import json
+import logging
 import os
+import re
 from dataclasses import dataclass
-from typing import Any, Optional
+from typing import Any, Iterable, Mapping, Optional, Sequence
+from urllib.parse import quote, quote_plus
+
+log = logging.getLogger(__name__)
 
 
 class BackendError(RuntimeError):
     """A transport failed. The caller logs it and moves on to the next batch."""
+
+
+class PromptRefused(BackendError):
+    """A prompt held a value registered with `forbid` (llm_first_fill_design K1), so it was
+    not sent: no request was made. A subclass of BackendError, so a caller that already
+    fails closed on a backend error does so here too. The text never names the value, the
+    form it took, or the message it was in."""
+
+
+# A value this short would match ordinary words and numbers, refusing prompts that hold
+# no secret; real passwords and app passwords are longer. A shorter value is refused at
+# registration (`forbid`), never silently left out. (WP-H1; the design names no minimum.)
+MIN_FORBIDDEN_LEN = 6
+
+_SPACE = re.compile(r"\s+")
+
+
+def _forbidden_forms(value: str) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    """`(exact, loose)` ways `value` can appear in prompt text. `exact` forms are matched as
+    written: the value itself and its JSON-escaped text (the inside of `json.dumps`, as
+    ASCII `\\uXXXX` and as readable characters), which is how it looks inside a "FIELDS (JSON)"
+    block. `loose` forms are matched case-insensitively because the hex digits of a
+    percent-encoding may be either case: URL-encoded with `%20` or with `+` for a space."""
+    exact = {value,
+             json.dumps(value)[1:-1],
+             json.dumps(value, ensure_ascii=False)[1:-1]}
+    loose = {quote(value, safe=""), quote_plus(value, safe="")} - exact
+    return tuple(sorted(exact)), tuple(sorted(f.lower() for f in loose))
 
 
 @dataclass
@@ -73,14 +107,74 @@ class Backend:
         tailor's sampling need these. `keep_alive` (D-78 form filling,
         llm_fill_design §13.2) is how long the model stays loaded after the call
         ("15m"); sent only when given."""
+        self._guard(system, user)
         raise BackendError(self.unavailable_reason or "no model transport configured")
 
-    def warm(self, keep_alive: Any = None, *, timeout: Optional[float] = None) -> None:
+    def warm(self, keep_alive: Any = None,
+             messages: Optional[Sequence[Mapping[str, str]]] = None,
+             *, timeout: Optional[float] = None) -> None:
         """Load the model before it is needed (llm_fill_design §13.1). A transport
-        with nothing to load only checks that it can answer. `timeout` (Q-126, keyword
-        only) caps the load request's seconds below the transport's own."""
+        with nothing to load only checks that it can answer. `messages` (a stable
+        prefix, llm_first_fill_design §3.5) is checked like any prompt. `timeout`
+        (Q-126, keyword only) caps the load request's seconds below the transport's own."""
+        if messages:
+            self._guard(*(str(m.get("content") or "") for m in messages))
         if not self.available:
             raise BackendError(self.unavailable_reason or "no model transport configured")
+
+    # -- forbidden strings (llm_first_fill_design K1, WP-H1) ---------------------------
+    def forbid(self, values: Iterable[str]) -> int:
+        """Register secrets no prompt may carry: a vault password, the mail app password, a
+        password JobScraper generated for an account. From now on every outgoing prompt
+        (`complete`, `warm(messages=)`) is checked before any request is made, and one that
+        holds a value raises `PromptRefused`. The check covers the value as written, JSON-
+        escaped, URL-encoded (`%20` and `+`), and with all whitespace removed from both sides.
+
+        None and "" are skipped (nothing to protect). A value shorter than
+        `MIN_FORBIDDEN_LEN` raises ValueError saying how long it was, never what it was, and
+        nothing from that call is registered. Returns how many values are now registered.
+        The registry lives on this instance until `clear_forbidden`; the caller clears it at
+        the end of each attempt."""
+        wanted = [v for v in values if v is not None and v != ""]
+        for v in wanted:
+            if not isinstance(v, str):
+                raise TypeError("forbid() takes strings")
+            n = len(_SPACE.sub("", v))      # the whitespace-free form is matched too
+            if n < MIN_FORBIDDEN_LEN:
+                raise ValueError(
+                    f"a forbidden value must be at least {MIN_FORBIDDEN_LEN} characters "
+                    f"without spaces (got {n}); a shorter one would refuse ordinary prompts")
+        reg = self._forbidden()
+        for v in wanted:
+            exact, loose = _forbidden_forms(v)
+            reg[v] = (exact, loose, _SPACE.sub("", v))
+        return len(reg)
+
+    def clear_forbidden(self) -> None:
+        """Forget every registered value (the end of an attempt)."""
+        self._forbidden().clear()
+
+    def _forbidden(self) -> dict:
+        reg = self.__dict__.get("_forbid_registry")
+        if reg is None:
+            reg = self.__dict__["_forbid_registry"] = {}
+        return reg
+
+    def _guard(self, *texts: str) -> None:
+        """Raise PromptRefused when any of `texts` holds a registered value. Runs before
+        the availability probe and the request, so a refused prompt costs no network call.
+        Nothing about the value reaches the exception or the log."""
+        reg = self.__dict__.get("_forbid_registry")
+        if not reg:
+            return
+        text = "\n".join(str(t) for t in texts)
+        low, bare = text.lower(), _SPACE.sub("", text)
+        for exact, loose, stripped in reg.values():
+            if (any(f in text for f in exact) or any(f in low for f in loose)
+                    or stripped in bare):
+                log.warning("prompt refused: it holds a registered secret (value not shown)")
+                raise PromptRefused(
+                    "prompt refused: it holds a value registered as secret; nothing was sent")
 
     def close(self) -> None:
         """Release what the transport holds open (an HTTP client). Nothing here."""
@@ -203,6 +297,7 @@ class OllamaBackend(Backend):
                  seed: Optional[int] = None,
                  top_k: Optional[int] = None,
                  keep_alive: Any = None) -> Completion:
+        self._guard(system, user)       # K1: before the probe, so a refusal costs no request
         if not self.available:
             raise BackendError(self.unavailable_reason)
         body = {
@@ -246,39 +341,66 @@ class OllamaBackend(Backend):
                           eval_ns=_i(data.get("eval_duration")),
                           done_reason=str(data.get("done_reason") or ""))
 
-    def warm(self, keep_alive: Any = None, *, timeout: Optional[float] = None) -> None:
+    def warm(self, keep_alive: Any = None,
+             messages: Optional[Sequence[Mapping[str, str]]] = None,
+             *, timeout: Optional[float] = None) -> None:
         """Load the model now (a cold load costs ~33 s, S-5b) so the first form page
         doesn't pay for it. Ollama loads a model on a generate request with no
         prompt; `keep_alive` (sent only when given) holds it loaded. It sends the same
         `num_ctx` as `complete` (apply's cli sets `llm_fill.num_ctx` on this object
         first): Ollama reloads a model whose context size differs, which would put
-        the cold load back on the first form page."""
+        the cold load back on the first form page.
+
+        With `messages` (llm_first_fill_design §3.5) it posts them once to `/api/chat`, the
+        route `complete` uses, with `num_predict: 1`. Ollama keeps the KV cache of the longest
+        token prefix a later request shares with the loaded one, so a briefing sent here as
+        [system, user prefix] is not read again by the calls that start with it. The messages
+        are checked against the forbidden strings first, like any prompt."""
+        clean: list[dict[str, str]] = []
+        if messages:
+            clean = [{"role": str(m.get("role") or "user"), "content": str(m.get("content") or "")}
+                     for m in messages]
+            self._guard(*(m["content"] for m in clean))
         if not self.available:
             raise BackendError(self.unavailable_reason)
-        body: dict[str, Any] = {"model": self.model_id, "options": {"num_ctx": self.num_ctx}}
+        if clean:
+            body: dict[str, Any] = {
+                "model": self.model_id, "messages": clean, "stream": False,
+                "options": {"temperature": 0, "num_ctx": self.num_ctx, "num_predict": 1}}
+            if self._has_thinking():
+                body["think"] = False
+            route, what = "/api/chat", "warm-up prefix"
+        else:
+            body = {"model": self.model_id, "options": {"num_ctx": self.num_ctx}}
+            route, what = "/api/generate", "warm-up"
         if keep_alive is not None:
             body["keep_alive"] = keep_alive
         try:
-            resp = self._http.post(f"{self.url}/api/generate", json=body,
+            resp = self._http.post(f"{self.url}{route}", json=body,
                                    timeout=self.timeout if timeout is None else timeout)
         except Exception as exc:
-            raise BackendError(f"Ollama warm-up failed: {type(exc).__name__}: {exc}")
+            raise BackendError(f"Ollama {what} failed: {type(exc).__name__}: {exc}")
         if resp.status_code != 200:
             raise BackendError(f"Ollama returned HTTP {resp.status_code} on warm-up")
 
 
-def warm(backend: Backend, keep_alive: Any = None, *, timeout: Optional[float] = None) -> None:
+def warm(backend: Backend, keep_alive: Any = None,
+         messages: Optional[Sequence[Mapping[str, str]]] = None,
+         *, timeout: Optional[float] = None) -> None:
     """Load `backend`'s model before an apply attempt opens the browser (D-81): a
     failure here (Ollama not running, model not pulled) raises BackendError, so the
-    attempt ends `model_unavailable` before Edge opens (llm_fill_design §11).
-    `timeout` (Q-126, keyword only) is passed on only when given, so a transport
-    whose `warm` takes no such argument still works."""
+    attempt ends `model_unavailable` before Edge opens (llm_fill_design §11). `messages`
+    (the always policy's [system, user prefix], llm_first_fill_design §3.5) and `timeout`
+    (Q-126, keyword only) are each passed on only when given, so a backend whose `warm`
+    takes just `keep_alive` is called as before."""
     fn = getattr(backend, "warm", None)
     if callable(fn):
-        if timeout is None:
-            fn(keep_alive)
-        else:
-            fn(keep_alive, timeout=timeout)
+        extra: dict[str, Any] = {}
+        if messages:
+            extra["messages"] = messages
+        if timeout is not None:
+            extra["timeout"] = timeout
+        fn(keep_alive, **extra)
     elif not getattr(backend, "available", False):
         raise BackendError(getattr(backend, "unavailable_reason", "") or "no model transport")
 

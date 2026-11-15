@@ -42,7 +42,7 @@ from typing import Any, Iterable, NamedTuple, Optional, Sequence
 
 import yaml
 
-from .apply.contracts import EXTRA_KEY_PATTERN, QuestionKind
+from .apply.contracts import EXTRA_EMPLOYER_FIELD, EXTRA_KEY_PATTERN, QuestionKind
 from .config import ROOT
 
 APPLICANT_PATH_DEFAULT = "data/applicant.yaml"          # config paths.applicant overrides
@@ -886,8 +886,30 @@ def _keep_previous(p: Path, new_bytes: bytes) -> None:
         raise
 
 
+def _unchanged_extra_keys(profile: dict, previous: Optional[dict]) -> set[str]:
+    """The `extra` keys whose entry is exactly what `previous` (the profile on disk) holds."""
+    new = (profile or {}).get("extra")
+    old = (previous or {}).get("extra")
+    if not (isinstance(new, dict) and isinstance(old, dict)):
+        return set()
+    return {k for k, v in new.items() if k in old and json_safe(old[k]) == json_safe(v)}
+
+
+def drop_unchanged_extra_errors(errors: list[FieldError], profile: dict,
+                                previous: Optional[dict]) -> list[FieldError]:
+    """Q-127 M4: `errors` without those about an `extra` entry the request did not change.
+    An unchanged invalid entry was already on disk and tier 3 skips it (questions_design
+    §11), so it must not stop a section save. `extra` itself (not a mapping) and every other
+    path are kept."""
+    keep = _unchanged_extra_keys(profile, previous)
+    if not keep:
+        return list(errors)
+    return [e for e in errors
+            if not (e.path.startswith("extra.") and e.path.split(".", 2)[1] in keep)]
+
+
 def save(path: str | os.PathLike, profile: dict, *, keep_commented_copy: bool = True,
-         keep_previous: bool = True) -> None:
+         keep_previous: bool = True, tolerate_unchanged_extra: Optional[dict] = None) -> None:
     """Normalise (`normalise`, Q-36), validate, then write atomically (tempfile in
     the same folder + os.replace). The file always holds the canonical spellings.
 
@@ -903,6 +925,8 @@ def save(path: str | os.PathLike, profile: dict, *, keep_commented_copy: bool = 
     file; the file is gitignored, so git has no copy either (NF-01)."""
     profile = normalise(profile)
     errors = validate(profile)
+    if tolerate_unchanged_extra is not None:      # Q-127 M4: the profile on disk, read just before
+        errors = drop_unchanged_extra_errors(errors, profile, tolerate_unchanged_extra)
     if errors:
         raise ApplicantError(f"{len(errors)} invalid field(s): "
                              + ", ".join(e.path for e in errors), errors)
@@ -1151,7 +1175,10 @@ EXTRA_TEXT_MAX = 2000
 EXTRA_DATE_FORMATS = ("day", "month")
 # Question metadata (employer text, or the owner's own labels): readable in a
 # log line, unlike the answers themselves (questions_design §11).
-EXTRA_META_FIELDS = frozenset({"labels", "title", "description", "seen", "kind", "sensitive"})
+# Q-127: `employer` (the scope of a remembered answer: the employer's display name, which is
+# not an answer) and `promoted` (a topic the owner added, Release 2) are metadata too.
+EXTRA_META_FIELDS = frozenset({"labels", "title", "description", "seen", "kind", "sensitive",
+                               EXTRA_EMPLOYER_FIELD, "promoted"})
 
 
 def _str_list(v: Any) -> bool:
@@ -1219,8 +1246,18 @@ def extra_entry_errors(key: Any, entry: Any) -> list[FieldError]:
         if v is not None and not isinstance(v, str):
             out.append(FieldError(f"{base}.{name}", "must be text"))
     labels = entry.get("labels")
-    if not (_str_list(labels) and labels and all(x.strip() for x in labels)):
-        out.append(FieldError(f"{base}.labels", "must be a non-empty list of question labels"))
+    promoted = entry.get("promoted")
+    if promoted is not None and not isinstance(promoted, bool):
+        out.append(FieldError(f"{base}.promoted", "must be true or false"))
+    # Q-127 H1: an added topic (promoted) reaches forms through the briefing only, so it carries
+    # no labels; every other entry is an exact-label answer and needs at least one.
+    if not (_str_list(labels) and all(x.strip() for x in labels)
+            and (bool(labels) or promoted is True)):
+        out.append(FieldError(f"{base}.labels", "must be a list of question labels"
+                              if promoted is True else "must be a non-empty list of question labels"))
+    scope = entry.get(EXTRA_EMPLOYER_FIELD)
+    if scope is not None and not isinstance(scope, str):
+        out.append(FieldError(f"{base}.{EXTRA_EMPLOYER_FIELD}", "must be an employer name"))
     sens = entry.get("sensitive")
     if sens is not None and not isinstance(sens, bool):
         out.append(FieldError(f"{base}.sensitive", "must be true or false"))
@@ -1606,6 +1643,68 @@ FORM: tuple[FormGroup, ...] = (
 )
 
 
+# --------------------------------------------------------------------------
+# The Profile page's sections (Q-127, design B.4): the server owns them
+# --------------------------------------------------------------------------
+
+@dataclass(frozen=True)
+class FormSection:
+    """One collapsible row of Profile -> Your details. `paths` are FORM item paths (an
+    `entries` item is its list path, "education"), in display order; every FORM item of the
+    groups above `extra` is in exactly one section (a pin keeps it so). The page renders each
+    item with the markup it has always had; this only groups them."""
+    id: str
+    title: str
+    paths: tuple[str, ...]
+
+
+def _form_paths(*group_ids: str, skip: Iterable[str] = ()) -> tuple[str, ...]:
+    gone = set(skip)
+    return tuple(i.path for g in FORM if g.id in group_ids for i in g.items if i.path not in gone)
+
+
+# The Singapore group is split: work rights and National Service stay with work rights, the
+# equal-opportunity answers (race, religion, marital status) move to section 8.
+_EQUAL_OPPORTUNITY_SG = ("singapore_status.race", "singapore_status.race_other",
+                         "singapore_status.religion", "singapore_status.marital_status")
+
+SECTIONS: tuple[FormSection, ...] = (
+    FormSection("identity", "Identity", _form_paths("identity")),
+    FormSection("contact", "Contact", _form_paths("contact")),
+    FormSection("work_rights", "Work rights",
+                _form_paths("singapore_status", skip=_EQUAL_OPPORTUNITY_SG)),
+    FormSection("availability_pay", "Availability and pay", _form_paths("availability", "pay")),
+    FormSection("education", "Education", _form_paths("education")),
+    FormSection("experience", "Experience", _form_paths("experience")),
+    FormSection("skills_links", "Skills, languages and links",
+                _form_paths("skills_languages", "links", "sourcing")),
+    FormSection("equal_opportunity", "Equal-opportunity questions",
+                _EQUAL_OPPORTUNITY_SG + _form_paths("us_self_id")),
+    FormSection("consents_declarations", "Consents and declarations",
+                _form_paths("consents", "declarations")),
+    FormSection("files", "Files", _form_paths("documents")),
+)
+
+
+def sections_json() -> list[dict]:
+    """SECTIONS as JSON for the Profile page (`GET /api/applicant` -> `sections`)."""
+    return [{"id": s.id, "title": s.title, "paths": list(s.paths)} for s in SECTIONS]
+
+
+def path_filled(profile: dict, path: str) -> bool:
+    """Whether the profile holds a usable value at `path`, the test "Needed" and "ready to
+    try again" use. Like `missing_for_apply` (education, the salary amount, the two required
+    consents) plus every consent: a consent the profile says No to is still not one an
+    application can proceed on. A path with a list index ("education[0].grade") is read
+    with `get_path`."""
+    profile = profile or {}
+    if path.startswith("consents."):
+        return _get(profile, path) is True
+    if "[" in path:
+        return not _empty(get_path(profile, path))
+    return _filled(profile, path)
+
+
 def _under(path: str, paths: Iterable[str]) -> bool:
     """True when one of `paths` is `path` or lies inside it ("pay.expected_salary"
     covers "pay.expected_salary.amount")."""
@@ -1981,6 +2080,28 @@ def form_item(path: str) -> tuple[Optional[FormItem], Optional[FormItem]]:
             elif it.path == b or b.startswith(it.path + "."):
                 return it, None
     return None, None
+
+
+def form_item_key(path: str) -> str:
+    """The form item a profile path belongs to, the unit the Profile page counts "needed"
+    in: "pay.expected_salary" and "pay.expected_salary.amount" are one item. A path inside an
+    entries item ("education[0].grade") keeps its own key, since each entry's field is its
+    own thing to fill; a path the form does not know is its own item."""
+    item, sub = form_item(path)
+    return item.path if item is not None and sub is None else path
+
+
+def dedupe_by_item(paths: Iterable[str]) -> list[str]:
+    """`paths` with each form item once, the first path of an item kept, order unchanged
+    (Q-127 U1/U2: the Profile tab count and the shell badge must agree)."""
+    seen: set[str] = set()
+    out: list[str] = []
+    for p in paths:
+        k = form_item_key(p)
+        if k not in seen:
+            seen.add(k)
+            out.append(p)
+    return out
 
 
 def form_wording(path: str, value: Any) -> tuple[str, ...]:

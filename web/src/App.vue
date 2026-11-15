@@ -16,7 +16,7 @@
 // masthead, and the "Auto-apply on" chip. Under 640px the tab bar becomes a
 // bottom bar of the `bar` tabs plus More (A14).
 import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { ApiError, describeError, failureText, getQuestions, getRuns, getShortlist, getStats } from './api.js'
+import { ApiError, describeError, failureText, getRuns, getShortlist, getStats } from './api.js'
 import { onJobStarted, useJob } from './composables/useJob.js'
 import { showToast } from './toast.js'
 import { TABS } from './tabs.js'
@@ -40,8 +40,6 @@ const runs = ref([])
 const run = ref('all')
 const jobs = ref([])
 const stats = ref(null)
-// Applications waiting on an answer (Q-75 N7); null until the server has said.
-const openQuestions = ref(null)
 const loading = ref(true)
 const error = ref('')
 // Why the run list failed to load (G20): apart from `error`, which every shortlist
@@ -118,7 +116,7 @@ function badgeOf(tab) {
   if (!tab.badge) return null
   const n = tab.badge({
     jobs: jobs.value, stats: stats.value, runs: runs.value, run: run.value,
-    openQuestions: openQuestions.value, attention: attentionCount.value,
+    detailsNeeded: detailsNeeded.value, attention: attentionCount.value,
   })
   return Number.isFinite(n) && n > 0 ? n : null
 }
@@ -165,6 +163,14 @@ async function refreshApplyStatus() {
   if (seq === statusSeq) applyStatus.value = s
 }
 
+// The Profile tab's badge (Q-127 B.4, D-215): how many details auto-apply is waiting for, from
+// GET /api/apply/status `details_needed` (the required details still empty, plus the paths
+// waiting applications stopped on). Never questions, assumed answers, proposals or saved
+// answers. A status that failed to load, or a server without the key, means no badge.
+const detailsNeeded = computed(() => {
+  const list = applyStatus.value?.details_needed
+  return Array.isArray(list) ? list.length : null
+})
 const attention = computed(() => (connections.value ? attentionItems(connections.value, connectionsBefore.value) : []))
 const attentionCount = computed(() => (connections.value ? attention.value.length : null))
 // The hub shows these itself: no banner on Settings → Accounts (its default view).
@@ -245,22 +251,6 @@ async function loadStats() {
   }
 }
 
-// The Profile tab's badge. Open question groups, as the Application details
-// view counts them; a server without the questions routes, or a failed call,
-// means no badge. Only the newest call may write (as loadJobs).
-let questionsSeq = 0
-async function loadQuestions() {
-  const seq = ++questionsSeq
-  let n = null
-  try {
-    const data = await getQuestions('open')
-    n = (data?.groups ?? []).filter(g => !g.status || g.status === 'open').length
-  } catch {
-    n = null
-  }
-  if (seq === questionsSeq) openQuestions.value = n
-}
-
 // A finished run needs no following any more (M15): All runs, Past week and
 // Past month all take it in on the reload that comes with the new run list.
 // Same guard as loadJobs (Vue review, M12): only the newest call may write.
@@ -288,7 +278,7 @@ async function onChanged(options = {}) {
       runsError.value = describeError(e)
     }
   }
-  await Promise.all([loadJobs(), loadStats(), loadQuestions()])
+  await Promise.all([loadJobs(), loadStats(), refreshApplyStatus()])
 }
 
 // The shell watches the background job for every tab (Q-70 C2, G7): a run that
@@ -334,10 +324,10 @@ function measureTabs() {
   if (el) moreRight.value = el.scrollLeft + el.clientWidth < el.scrollWidth - 1
 }
 
-// Leaving Profile, where questions get answered, refreshes its badge; leaving
+// Leaving Profile, where details get filled in, refreshes its badge; leaving
 // Settings, where connections get fixed, refreshes the attention signals.
 watch(activeId, (_, was) => {
-  if (was === 'profile') loadQuestions()
+  if (was === 'profile') refreshApplyStatus()
   if (was === 'settings') loadSignals()
 })
 
@@ -392,7 +382,7 @@ async function boot() {
     runsError.value = describeError(e)
   }
   retrying.value = false
-  await Promise.all([loadJobs(), loadStats(), loadQuestions(), loadSignals()])
+  await Promise.all([loadJobs(), loadStats(), loadSignals()])
 }
 
 onMounted(() => {

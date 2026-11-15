@@ -193,20 +193,9 @@ describe('JobPill and the Questions retry (U1)', () => {
     expect(callsTo('GET', 'api/apply/queue')).toHaveLength(reads)
   })
 
-  it('a Questions retry on 202 says the queue took them (paused variant)', async () => {
-    const READY = [{ job_id: 'j1', attempt_id: 5, company: 'Shopee', title: 'Software Engineer' }, { job_id: 'j2', attempt_id: 6, company: 'Grab', title: 'Data Engineer' }]
-    withRoutes([
-      ['GET', /^api\/questions\?/, () => respond({ mode: 'dry_run', groups: [], ready: READY, waiting: [], busy: true })],
-      ['POST', 'api/questions/retry', () => respond({ queued: [{ job_id: 'j1', position: 1 }, { job_id: 'j2', position: 2 }], paused: true, refused: [] }, 202)],
-    ])
-    const QuestionsInbox = (await import('../src/components/QuestionsInbox.vue')).default
-    const w = mount(QuestionsInbox)
-    await flushPromises()
-    await w.findAll('button').find(b => b.text().trim().startsWith('Retry 2 applications')).trigger('click')
-    await flushPromises()
-    expect(toast.current?.message).toBe('Added 2 to the auto-apply queue. The queue is paused; resume it in Runs.')
-    expect(heard).toBe(1)
-  })
+  // RETIRED by Q-127 (D-215): 'a Questions retry on 202 says the queue took them' drove the Questions
+  // page's Retry button, and POST /api/questions/retry now answers 410. The queued / paused wording of
+  // the enqueue reply is pinned by the Inbox cases above and by q127-profile.test.js (Apply again).
 })
 
 // ---------------------------------------------------------------- U2: the queue panel
@@ -392,13 +381,13 @@ describe('Applications: queue states on rows (U3)', () => {
     const w = await mountApps([
       appRow('q1', { queue: { position: 3 }, last_attempt: tried('queued') }),
       appRow('r1', { last_attempt: tried('running') }),
-      appRow('n1', { last_attempt: tried('needs_input', { text: 'A required question had no answer.' }) }),
+      appRow('n1', { last_attempt: tried('needs_input', { reason_code: 'unanswerable_required', text: 'A required question had no answer.' }) }),
     ])
     expect([chipOf(w, 'q1').text(), chipOf(w, 'q1').attributes('data-tone')]).toEqual(['Queued · 3rd', 'neutral'])
     expect([chipOf(w, 'r1').text(), chipOf(w, 'r1').attributes('data-tone')]).toEqual(['Applying…', 'info'])
     expect(appRowEl(w, 'r1').find('.app-step').text()).toBe('Signing in')
-    expect([chipOf(w, 'n1').text(), chipOf(w, 'n1').attributes('data-tone')]).toEqual(['Needs your answers', 'warn'])
-    expect(appRowEl(w, 'n1').find('.app-answer').text()).toBe('Answer in Profile')
+    expect([chipOf(w, 'n1').text(), chipOf(w, 'n1').attributes('data-tone')]).toEqual(['Stopped: a question had no answer', 'warn'])   // Q-127: a strict stop
+    expect(appRowEl(w, 'n1').find('button.app-sent').text()).toBe('See what was filled')
   })
 
   it('Try again only on a To apply row that stopped, was cancelled or needs answers, and is not in flight', async () => {

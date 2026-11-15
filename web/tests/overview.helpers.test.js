@@ -252,25 +252,33 @@ describe('nextUp', () => {
   const failed = { state: 'failed' }
   const due = [{ job_id: 'a' }, { job_id: 'b' }]
 
-  it('orders questions, inbox, follow-up, run and hides the run card while a job runs', () => {
-    const all = { newRoles: 5, questions: 2, followUps: due, run: stale, jobRunning: false }
+  it('orders details, no-field, stuck, inbox, follow-up, run and hides the run card while a job runs', () => {
+    const all = {
+      newRoles: 5, waiting: 2, noField: [{ fact: 'passport number', n: 1 }, { fact: 'bank account details', n: 3 }],
+      stuck: 4, followUps: due, run: stale, jobRunning: false,
+    }
     expect(nextUp(all)).toEqual([
-      { id: 'questions', n: 2 }, { id: 'inbox', n: 5 }, { id: 'follow-up', n: 2 }, { id: 'run' },
+      { id: 'details', n: 2 }, { id: 'no-field', n: 1, fact: 'passport number' },
+      { id: 'no-field', n: 3, fact: 'bank account details' }, { id: 'stuck', n: 4 },
+      { id: 'inbox', n: 5 }, { id: 'follow-up', n: 2 }, { id: 'run' },
     ])
-    expect(nextUp({ ...all, jobRunning: true }).map(c => c.id)).toEqual(['questions', 'inbox', 'follow-up'])
+    expect(nextUp({ ...all, jobRunning: true }).map(c => c.id)).not.toContain('run')
     expect(nextUp({ ...all, run: failed }).at(-1)).toEqual({ id: 'run' })
     expect(nextUp({ ...all, run: failed, jobRunning: true }).map(c => c.id)).not.toContain('run')
+    expect(nextUp(all).map(c => c.id)).not.toContain('questions')       // Q-127: no questions row any more
   })
 
   it('lists only items with work', () => {
-    expect(nextUp({ newRoles: 3, questions: 0, followUps: [], run: fresh })).toEqual([{ id: 'inbox', n: 3 }])
-    expect(nextUp({ questions: 1 })).toEqual([{ id: 'questions', n: 1 }])
+    expect(nextUp({ newRoles: 3, waiting: 0, noField: [], stuck: 0, followUps: [], run: fresh })).toEqual([{ id: 'inbox', n: 3 }])
+    expect(nextUp({ waiting: 1 })).toEqual([{ id: 'details', n: 1 }])
+    expect(nextUp({ stuck: 1 })).toEqual([{ id: 'stuck', n: 1 }])
+    expect(nextUp({ noField: [{ fact: 'passport number', n: 0 }] })).toEqual([])
     expect(nextUp({ followUps: due }).map(c => c.id)).toEqual(['follow-up'])
     expect(nextUp({ run: stale }).map(c => c.id)).toEqual(['run'])
   })
 
   it('has no card for a run that never happened or a fresh one, and [] means caught up', () => {
-    expect(nextUp({ newRoles: 0, questions: 0, followUps: [], run: { state: 'none' } })).toEqual([])
+    expect(nextUp({ newRoles: 0, waiting: 0, followUps: [], run: { state: 'none' } })).toEqual([])
     expect(nextUp({ run: fresh })).toEqual([])
     expect(nextUp()).toEqual([])
   })

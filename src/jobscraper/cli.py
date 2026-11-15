@@ -220,6 +220,10 @@ def cmd_doctor(args) -> int:
     else:
         private = "Private fields: kept from the AI (model backend is not on this computer)"
     print(f"privacy        {private}")
+    for line in _fill_policy_lines(cfg, store, backend):
+        print(line)
+    for line in _profile_shape_lines(cfg.applicant_path):
+        print(line)
 
     print(f"budget         llm={'on' if cfg.budget.get('enable_llm') else 'off'}, "
           f"{int(cfg.budget.get('decide_batch', 20))} postings per decide call")
@@ -228,6 +232,173 @@ def cmd_doctor(args) -> int:
     print(BAR)
     store.close()
     return 0
+
+
+def _fill_policy_lines(cfg, store, backend) -> list[str]:
+    """`doctor`'s Q-121 lines (llm_first_fill_design §7.2, §3.3): how forms are answered
+    (the effective policy: `always` only with the local model, K2), the trial, and the
+    warnings: `always` but the model is not on this computer or not reachable; no
+    work-rights rows in the profile; "every other country: yes" with one nationality.
+    Counts and switches only, never a profile value."""
+    from . import applicant
+    from .config import fill_policy_value
+
+    try:
+        acfg = cfg.apply.with_settings(store.get_setting)
+    except Exception:                                    # noqa: BLE001 - the file's values then
+        acfg = cfg.apply
+    want = fill_policy_value(acfg.fill_policy)
+    local = backends.is_local(backend)
+    out: list[str] = []
+    if want != "always":
+        out.append("fill policy    Ask me first (strict): stops and asks when the profile "
+                   "doesn't cover a question")
+        return out
+    if getattr(acfg, "always_available", False) is not True:      # D-223 release lock
+        out.append("fill policy    Ask me first (strict) - always answer is not released on "
+                   "this install")
+        return out
+    if not local:
+        out.append("fill policy    Ask me first (strict) - always answer is off for now")
+        out.append("               WARNING: fill_policy always is ignored: the AI model isn't "
+                   "on this computer")
+        return out
+    out.append("fill policy    Always answer: the local AI fills every field and marks what "
+               "it assumed")
+    try:
+        up = bool(backend.available)
+    except Exception:                                    # noqa: BLE001 - a probe that fails is down
+        up = False
+    if not up:
+        out.append("               WARNING: the local model is not reachable; applications "
+                   "will wait (model unavailable) until it runs")
+    if int(acfg.always_trial_runs or 0) > 0:
+        used = store.always_trial_used()
+        left = max(0, int(acfg.always_trial_runs) - used)
+        out.append(f"               trial: the next {left} of {acfg.always_trial_runs} "
+                   "application(s) are filled but not sent")
+    try:
+        profile = applicant.load(cfg.applicant_path)
+    except Exception:                                    # noqa: BLE001 - the profile line says it
+        return out
+    status = profile.get("singapore_status") if isinstance(profile, dict) else None
+    status = status if isinstance(status, dict) else {}
+    auth, spons = status.get("authorised_to_work"), status.get("requires_sponsorship")
+    if not (isinstance(auth, dict) and auth) and not (isinstance(spons, dict) and spons):
+        out.append("               WARNING: no work-rights rows in your profile (Profile -> "
+                   "Work status); right-to-work answers will be assumed")
+    nat = status.get("nationality")
+    nats = [n for n in nat if n] if isinstance(nat, list) else ([nat] if nat else [])
+    if isinstance(auth, dict) and auth.get("default") is True and len(nats) <= 1:
+        out.append("               WARNING: your profile says you may work in every country. "
+                   "Check the 'every other country' answer.")
+    return out
+
+
+_SHAPE_PAD = " " * 15
+_SHAPE_WIDTH = 96
+
+
+def _shape_set(value) -> bool:
+    """A profile value counts as set when it holds something: not None, not blank text,
+    not an empty list or mapping. False and 0 are set (an answer)."""
+    if value is None:
+        return False
+    if isinstance(value, str):
+        return bool(value.strip())
+    if isinstance(value, (list, tuple, dict, set)):
+        return bool(value)
+    return True
+
+
+def _shape_word(value) -> str:
+    """true / false for a boolean, else set / not set. Never the value itself."""
+    if value is True:
+        return "true"
+    if value is False:
+        return "false"
+    return "set" if _shape_set(value) else "not set"
+
+
+def _shape_rows(value) -> str:
+    """A work-rights map (`authorised_to_work` / `requires_sponsorship`): whether its
+    default row is set and how many country rows it has. The countries and the answers
+    are not printed."""
+    if isinstance(value, bool):
+        return "default row set, 0 country rows"
+    if not isinstance(value, dict) or not value:
+        return "not set"
+    default = "set" if _shape_set(value.get("default")) else "not set"
+    n = sum(1 for k, v in value.items() if str(k) != "default" and _shape_set(v))
+    return f"default row {default}, {n} country row{'' if n == 1 else 's'}"
+
+
+def _shape_wrap(title: str, parts: list[str], sep: str = ",") -> list[str]:
+    """`title: a, b, c` wrapped under doctor's value column."""
+    lines, cur = [], f"{title}:"
+    for i, part in enumerate(parts):
+        piece = f" {part}{sep if i < len(parts) - 1 else ''}"
+        if len(cur) + len(piece) > _SHAPE_WIDTH and cur.strip():
+            lines.append(cur)
+            cur = "  " + piece.lstrip()
+        else:
+            cur += piece
+    lines.append(cur)
+    return [_SHAPE_PAD + line for line in lines]
+
+
+def _profile_shape_lines(path) -> list[str]:
+    """`doctor`'s "Profile shape" block (llm_first_fill_design §17.8, Q-121 A1-W): what the
+    always-answer filler will find in the applicant profile, so the owner can paste it to
+    the Coordinator before the first live click and the expected stops (R9: an
+    `owner_fact_missing` per form for a missing address, postal code or date of birth; a
+    `consent_refused` for a refused consent) are known. Booleans and counts only, never a
+    value, not even masked: true / false for the consents and declaration answers, set /
+    not set for the rest, and how many work-rights country rows. A missing or unreadable
+    profile is one line (the exception's class only: its message may quote a value)."""
+    from . import applicant
+
+    head = "profile shape  "
+    p = Path(path)
+    try:
+        exists = p.is_file()
+    except OSError:
+        exists = False
+    if not exists:
+        return [head + "no profile file yet (fill it in under Profile -> Application details)"]
+    try:
+        profile = applicant.load(p)
+    except Exception as exc:                             # noqa: BLE001 - one line, no traceback
+        return [head + f"the profile file could not be read ({type(exc).__name__}); "
+                "open Profile -> Application details to fix it"]
+    if not isinstance(profile, dict):
+        return [head + "the profile file holds no details"]
+    try:
+        groups = {g.id: [it.path for it in g.items] for g in applicant.FORM}
+        get = applicant.get_path
+        out = [head + "no values shown: true / false, set / not set, counts"]
+        out += _shape_wrap("consents", [f"{x.split('.', 1)[1]} {_shape_word(get(profile, x))}"
+                                        for x in groups.get("consents", [])])
+        out += _shape_wrap("declarations", [f"{x.split('.', 1)[1]} {_shape_word(get(profile, x))}"
+                                            for x in groups.get("declarations", [])])
+        out += _shape_wrap("identity", [
+            f"gender {'set' if _shape_set(get(profile, 'identity.gender')) else 'not set'}",
+            f"nationality {'set' if _shape_set(get(profile, 'singapore_status.nationality')) else 'not set'}",
+            f"date of birth {'set' if _shape_set(get(profile, 'identity.date_of_birth')) else 'not set'}"])
+        out += _shape_wrap("work rights", [
+            f"authorised_to_work {_shape_rows(get(profile, 'singapore_status.authorised_to_work'))}",
+            f"requires_sponsorship {_shape_rows(get(profile, 'singapore_status.requires_sponsorship'))}"],
+            sep=";")
+        education = profile.get("education")
+        graded = isinstance(education, list) and any(
+            isinstance(e, dict) and _shape_set(e.get("grade")) for e in education)
+        out += _shape_wrap("address and education", [
+            f"address_line1 {'set' if _shape_set(get(profile, 'contact.address_line1')) else 'not set'}",
+            f"postal_code {'set' if _shape_set(get(profile, 'contact.postal_code')) else 'not set'}",
+            f"education grade {'set' if graded else 'not set'}"])
+        return out
+    except Exception as exc:                             # noqa: BLE001 - doctor never crashes here
+        return [head + f"the profile could not be summarised ({type(exc).__name__})"]
 
 
 def cmd_sync(args) -> int:

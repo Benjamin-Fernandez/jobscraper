@@ -7,8 +7,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils'
 import ApplicationDetails from '../src/components/ApplicationDetails.vue'
-import QuestionCard from '../src/components/QuestionCard.vue'
-import QuestionsInbox from '../src/components/QuestionsInbox.vue'
 import { dismissToast } from '../src/toast.js'
 import { modelSeesPrivate, privateBadge, privateSentence, setModelSeesPrivate } from '../src/privacy.js'
 
@@ -71,11 +69,16 @@ const applicant = over => ({
 async function mountDetails(payload) {
   vi.stubGlobal('fetch', vi.fn(async url => {
     const path = String(url).replace(/^\/?/, '')
-    if (path === 'api/applicant') return reply(payload)
+    // Q-127: one section holding every form item, opened below (the fields sit in collapsed sections).
+    if (path === 'api/applicant') {
+      return reply({ ...payload, sections: [{ id: 'all', title: 'All details', paths: FORM.flatMap(g => g.items.map(i => i.path)) }] })
+    }
     if (path.startsWith('api/questions')) return reply({ mode: 'dry_run', groups: [], ready: [], waiting: [], busy: false })
     return { ...reply({ detail: 'Not Found' }), ok: false, status: 404 }
   }))
   const w = mount(ApplicationDetails, { attachTo: document.body })
+  await flushPromises()
+  await w.find('#ds-all-button').trigger('click')
   await flushPromises()
   return w
 }
@@ -113,74 +116,6 @@ describe('ApplicationDetails: the tag follows model_sees_private', () => {
   })
 })
 
-// ---------------------------------------------------------------- QuestionsInbox + QuestionCard
-
-const group = (over = {}) => ({
-  key: 'visa_status', title: 'Visa status', description: '', kind: 'choice', sensitive: true,
-  target_path: '', status: 'open', named_by: 'rule', reason: 'no_rule', labels: ['What is your visa status?'],
-  employers: ['Shopee'], waiting: 1, first_seen_at: '2026-11-02T10:00:00', last_seen_at: '2026-11-02T10:00:00',
-  variants: [{ question_id: 11, label: 'What is your visa status?',
-    options: [{ label: 'Citizen', norm: 'citizen' }, { label: 'Others', norm: 'others' }] }],
-  ...over,
-})
-const questions = (groups, over = {}) => ({ mode: 'dry_run', groups, ready: [], waiting: [], busy: false, ...over })
-const APPLICANT = { profile: {}, etag: 'aaaaaaaaaaaaaaaa', errors: [], missing: [], completeness: { filled: 1, needed: 2 },
-  from_resume: [], sensitive: [], form: [], file: { exists: true, has_comments: false, error: '' } }
-
-async function mountInbox(payload) {
-  vi.stubGlobal('fetch', vi.fn(async url => {
-    const path = String(url).replace(/^\/?/, '')
-    if (path.startsWith('api/questions?')) return reply(payload)
-    if (path === 'api/applicant') return reply(APPLICANT)
-    return { ...reply({ detail: 'Not Found' }), ok: false, status: 404 }
-  }))
-  const w = mount(QuestionsInbox)
-  await flushPromises()
-  return w
-}
-
-describe('QuestionsInbox and QuestionCard: the badge follows the payload', () => {
-  it('model_sees_private true: the card badge says "Private: local AI only" with the sentence as title', async () => {
-    const w = await mountInbox(questions([group()], { model_sees_private: true }))
-    const tag = w.find('.tag.private')
-    expect(tag.text()).toBe(ON)
-    expect(tag.attributes('title')).toBe(SENTENCE)
-    expect(w.text()).not.toContain(OFF)
-  })
-
-  it('model_sees_private false or absent: the old words', async () => {
-    for (const over of [{ model_sees_private: false }, {}]) {
-      const w = await mountInbox(questions([group()], over))
-      expect(w.find('.tag.private').text()).toBe(OFF)
-      expect(w.text()).not.toContain(ON)
-    }
-  })
-
-  it('an answered private question shows the same state in the "Answered questions" list', async () => {
-    const answered = group({ status: 'answered', current: { value: null, picks: ['citizen'] } })
-    const on = await mountInbox(questions([answered], { model_sees_private: true }))
-    const off = await mountInbox(questions([answered], { model_sees_private: false }))
-    const tagOf = w => w.find('.answered-item .tag.private')
-    expect(tagOf(on).exists()).toBe(true)
-    expect(tagOf(on).text()).toBe(ON)
-    expect(tagOf(on).attributes('title')).toBe(SENTENCE)
-    expect(tagOf(off).text()).toBe(OFF)
-  })
-
-  it('a bare QuestionCard follows the shared ref the inbox set', () => {
-    setModelSeesPrivate(true)
-    const on = mount(QuestionCard, { props: { group: group() } })
-    expect(on.find('.tag.private').text()).toBe(ON)
-    expect(on.find('.tag.private').attributes('title')).toBe(SENTENCE)
-    setModelSeesPrivate(false)
-    const off = mount(QuestionCard, { props: { group: group() } })
-    expect(off.find('.tag.private').text()).toBe(OFF)
-    expect(off.find('.tag.private').attributes('title')).toBe(OFF)
-  })
-
-  it('a non-private card has no tag in either state', () => {
-    setModelSeesPrivate(true)
-    const w = mount(QuestionCard, { props: { group: group({ sensitive: false }) } })
-    expect(w.find('.tag.private').exists()).toBe(false)
-  })
-})
+// The QuestionsInbox / QuestionCard badge pins that lived here are RETIRED by Q-127 (D-215): the
+// cards are gone from the Profile page. The tag words themselves (privacy.js) are pinned above and
+// on the Details form; the saved-answers list shows no Private tag.

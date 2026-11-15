@@ -21,6 +21,15 @@ The order is the point (review M9, TR-7; LF §8, §10 E7):
        round; then unknown -> unknown_required, else fill_failed;
   13   fresh decisions go into the decision cache (§13.3).
 
+Fill policy `always` (D-208, Q-121 WP-C1; llm_first_fill_design §4.1, §4.5, §8): a
+second path, `_fill_page_always`, chosen by `rctx.fill_policy` (the code default is
+`strict`, so the path above stays as built). It reads the page twice around a settle
+wait (A1), binds entry slots to profile entries (`facts.bind_slots`), hands the fields
+to `always.fill_page_always` (A2-A6: every field gets an answer), then applies them
+through the same widgets with read-back (A7: classify first, surplus slots, fills, Adds,
+revealed fields, one verification read) and one corrective round (A8). It never
+returns `unknown_required`; `always.AlwaysStop` propagates to the flow.
+
 A stop after step 9 leaves the page partly changed; nothing is ever submitted here
 (the flow stops the attempt). Transport failures (BackendError, timeouts, a reply
 still cut after its retry) and an exhausted deadline return `transport_failed`
@@ -39,11 +48,15 @@ origins (`known`) are recorded under both keys.
 from __future__ import annotations
 
 import hashlib
+import re
 from dataclasses import dataclass, field as dc_field, replace as _replace
 from pathlib import Path
-from typing import Any, Optional, Sequence
+from typing import Any, Mapping, Optional, Sequence
 
 from ..backends import BackendError
+from .. import applicant
+from . import always as AL
+from . import briefing as BR
 from . import facts as F
 from . import guards as G
 from . import llm_fill as L
@@ -52,8 +65,8 @@ from . import page as P
 from . import questions as Q
 from . import widgets as W
 from .contracts import (
-    Answer, AnswerSource, AnswerStatus, AnswerTier, AttemptContext, EntrySection, FieldType, FillSource,
-    ModelDecision, PageField, PageOutcome, ResolveContext, ValueOrigin,
+    Answer, AnswerSource, AnswerStatus, AnswerTier, AttemptContext, EntrySection, FieldType, FillPolicy,
+    FillSource, ModelDecision, PageField, PageOutcome, ResolveContext, ValueOrigin,
 )
 
 L1_KEPT_NOTE = K.L1_KEPT_NOTE                            # locks: the file on the page is ours
@@ -121,11 +134,16 @@ class _Run:
     corrected: set = dc_field(default_factory=set)          # keys the corrective pass re-asked (F8)
     entry_failed: dict = dc_field(default_factory=dict)     # reader key -> section note: an E5 add that failed
     dead: set = dc_field(default_factory=set)               # keys of entries we confirmed deleted (F2)
+    al: Any = None                                          # fill policy `always` only: `_AlwaysRun`
 
 
 def fill_page(page: Any, nav: Any, ctx: AttemptContext, rctx: ResolveContext, services: Any) -> PageOutcome:
     """Fill one page (LF §8). Raises what `facts.check_entries` (PROFILE_INCOMPLETE) and
-    `services.classify` (CAPTCHA / bot check) raise; everything else is in the outcome."""
+    `services.classify` (CAPTCHA / bot check) raise; everything else is in the outcome.
+    Fill policy `always` (`rctx.fill_policy`, D-208) takes the second path below
+    (`_fill_page_always`); `strict`, the default, is this one, unchanged."""
+    if _policy(rctx) is FillPolicy.ALWAYS:
+        return _fill_page_always(page, nav, ctx, rctx, services)
     run = _Run(page=page, nav=nav, ctx=ctx, rctx=rctx, services=services,
                cfg=dict(getattr(services, "cfg", None) or {}), stats=L.CallLog(model=services.model))
     # 1. step, scope, entry sections, the page's fields (§3; origins §3.3)
@@ -886,3 +904,551 @@ def _index(gid: str) -> int:
 
 def _text(v: Any) -> str:
     return "; ".join(str(x) for x in v) if isinstance(v, list) else str(v or "")
+
+
+# ------------------------------------------------------------------ fill policy `always` (Q-121 WP-C1)
+#
+# llm_first_fill_design §4.1 A1 and A7-A9, §4.4 (query ladder), §4.5 (entries), §8, §9.
+# The answers come from `always.fill_page_always` (A2-A6); this part reads, binds entry
+# slots, and changes the page through the same widgets the strict path uses.
+
+SETTLE_MS = 1500                     # A1: `apply.llm_fill.settle_ms`
+ADD_WAIT_MS = 500
+HIDDEN_NOTE = "not visible: never filled"                      # K10
+PASSWORD_NOTE = "password field: never read into a prompt"     # K1 backstop
+NO_LABEL_NOTE = "no label"                                     # A1
+SURPLUS_NOTE = "surplus entry: no profile entry left for it"   # §4.5
+REVERTED_NOTE = "reverted"                                     # A7 verification read
+SCAN_ERROR = "The site requires an answer here."               # A8 problem for an empty required field
+ALWAYS_VIA = "always"
+_PLACE_WORDS = ("city", "town", "location", "located", "based")
+_SCHOOL_WORDS = ("school", "university", "institution", "college")
+_CHOICE_WIDGET_TYPES = (FieldType.DROPDOWN, FieldType.RADIO, FieldType.TYPEAHEAD, FieldType.MULTI_CHOICE)
+
+
+def _policy(rctx: Any) -> FillPolicy:
+    """`rctx.fill_policy` (contract v7); anything unreadable is the default, strict."""
+    v = getattr(rctx, "fill_policy", FillPolicy.STRICT)
+    try:
+        return FillPolicy(getattr(v, "value", v))
+    except ValueError:
+        return FillPolicy.STRICT
+
+
+@dataclass
+class _AlwaysRun:
+    """What the `always` steps of one page share (beside `_Run`)."""
+    brief: Any                                              # contracts.Briefing
+    ask: Any                                                # always.Ask over services.backend
+    pctx: Any                                               # always.PageCtx for R2 picks at fill time
+    profile: dict
+    order: dict                                             # list -> briefing.entry_order
+    stats: Any                                              # always.CallStats (counts only)
+    before: int = 0                                         # F2-F6 answers on earlier pages
+    guesses: int = 0                                        # F2-F6 answers on this page so far
+    entries: dict = dc_field(default_factory=dict)          # slot group id -> source entry id
+    stand: list = dc_field(default_factory=list)            # stand-in sections from label runs
+    surplus: tuple = ()
+    adds: list = dc_field(default_factory=list)
+    fb: dict = dc_field(default_factory=dict)               # key -> a code fallback wrote it
+    sk: dict = dc_field(default_factory=dict)               # key -> S1 kept the standing answer
+    expected: dict = dc_field(default_factory=dict)         # key -> the read-back after our fill
+    model_keys: set = dc_field(default_factory=set)         # main-pass model answers (cache rows)
+    corrected: set = dc_field(default_factory=set)          # keys of the A8 round (never cached)
+    classes: dict = dc_field(default_factory=dict)          # key -> `class[:which]` of its answer (A1-A, cache rows)
+
+
+def _fill_page_always(page: Any, nav: Any, ctx: AttemptContext, rctx: ResolveContext,
+                      services: Any) -> PageOutcome:
+    """Fill one page under fill policy `always` (D-208). Raises what `facts.check_entries`
+    (PROFILE_INCOMPLETE), `services.classify` (CAPTCHA / bot check) and
+    `always.fill_page_always` (`AlwaysStop`: owner_fact_missing, document_missing, the
+    content failure) raise; transport failures come back `transport_failed`."""
+    run = _Run(page=page, nav=nav, ctx=ctx, rctx=rctx, services=services,
+               cfg=dict(getattr(services, "cfg", None) or {}), stats=L.CallLog(model=services.model))
+    with P.always_reader():
+        try:
+            return _always_steps(run)
+        except _Stop as halt:
+            return _always_transport(run, halt.note)
+        except (BackendError, TimeoutError) as exc:
+            return _always_transport(run, _backend_note(exc))
+
+
+def _always_steps(run: _Run) -> PageOutcome:
+    page, nav, ctx, rctx, services = run.page, run.nav, run.ctx, run.rctx, run.services
+    run.step = nav.step_id(page, ctx)
+    run.scope = nav.scope(page, ctx)
+    run.today = services.today()
+    # A1: read, let the site restore what it restores, read again (rev note: settle re-read).
+    run.sections = list(nav.entry_sections(page, ctx) or [])
+    _read(run, run.sections)
+    page.wait_for_timeout(int(run.cfg.get("settle_ms", SETTLE_MS)))
+    run.sections = list(nav.entry_sections(page, ctx) or [])
+    fields = _read(run, run.sections)
+    F.check_entries(run.sections, rctx)                     # §9: profile_incomplete stays
+    run.qv = F.quote_s_values(rctx, run.today)              # D-202 rule for stored rows
+    profile = applicant.normalise(dict(rctx.profile or {}))
+    # §7.1: the flow builds the briefing once per attempt; read with getattr so fakes work.
+    brief = getattr(services, "briefing", None) or BR.build(rctx.profile, rctx, today=run.today)
+    timeout = run.cfg.get("page_timeout_s")
+    ask = AL.backend_ask(services.backend, timeout=float(timeout) if timeout else None,
+                         keep_alive=run.cfg.get("keep_alive") or None)
+    stats = AL.CallStats()
+    pctx = AL.PageCtx(brief=brief, rctx=rctx, profile=profile, ask=ask, rules=services.rules,
+                      today=run.today, cfg=run.cfg, step_title=run.step or "this page",
+                      job=BR.job_block(rctx, today=run.today), stats=stats)
+    run.al = _AlwaysRun(brief=brief, ask=ask, pctx=pctx, profile=profile,
+                        order={lst: BR.entry_order(profile, lst) for lst in ("education", "experience")},
+                        stats=stats, before=int(getattr(services, "attempt_fallbacks", 0) or 0))
+    fields = _always_view(run, fields)
+    todo = _always_prepare(run, fields, bind=True)
+    # A2-A6: nothing on the page has been changed yet
+    out = _always_round(run, todo)
+    if out.transport_failed:
+        return _always_transport(run, UNAVAILABLE_NOTE)
+    if out.compose_needed:                                  # §4.8: the flow composes, then calls again
+        return _always_outcome(run, compose=out.compose_needed)
+    # A7: classify before the first keystroke, then the deadline
+    services.classify(page)
+    _time_left(run)
+    _always_surplus(run)
+    _always_apply(run, [pf.field.key for pf in todo])
+    _always_adds(run)
+    _always_reveal(run, int(run.cfg.get("max_reveal_rounds", DEFAULT_REVEAL_ROUNDS)))
+    _always_verify(run)
+    # A8: one corrective round, then the required scan
+    _always_corrective(run)
+    _always_scan(run)
+    if run.transport:
+        return _always_transport(run, run.transport)
+    return _always_outcome(run)
+
+
+def _always_read(run: _Run) -> list[PageField]:
+    run.sections = list(run.nav.entry_sections(run.page, run.ctx) or [])
+    return _always_view(run, _read(run, run.sections))
+
+
+def _always_view(run: _Run, fields: Sequence[PageField]) -> list[PageField]:
+    """§4.5 "detection is a hint": ungrouped fields whose label set repeats get stand-in
+    slot groups (`facts.label_runs`); `run.fields` holds the grouped PageField."""
+    groups, stand = F.label_runs(fields, run.sections)
+    if stand:
+        run.al.stand = stand
+    out = []
+    for pf in fields:
+        if pf.field.key in groups:
+            pf = _replace(pf, group=groups[pf.field.key])
+            run.fields[pf.field.key] = pf
+        out.append(pf)
+    return out
+
+
+def _skip_answer(key: str, note: str) -> Answer:
+    return Answer(field_key=key, value=None, tier=AnswerTier.NONE, source="", confidence=0.0,
+                  status=AnswerStatus.SKIPPED, rule_id=AL.PROMPT_VERSION, note=note)
+
+
+def _always_prepare(run: _Run, fields: Sequence[PageField], *, bind: bool) -> list[PageField]:
+    """A1 field rules before the model sees anything: a password input is never read (K1;
+    READER_JS skips them, this re-checks), a field with no label and no options is skipped
+    unless the site marks it invalid, an invisible field is never filled (K10), and surplus
+    entry slots are not asked (§4.5). `bind`: bind entry slots to source entries."""
+    al = run.al
+    if bind:
+        plan = F.bind_slots(list(run.sections) + list(al.stand), fields, run.rctx, al.order,
+                            max_entries=run.cfg.get("max_entries"))
+        al.entries.update(plan.entries)
+        al.surplus, al.adds = plan.surplus, list(plan.adds)
+    types = P.control_types(run.page, [pf.field.key for pf in fields])
+    todo = []
+    for pf in fields:
+        key = pf.field.key
+        if types.get(key) == "password":
+            run.answers[key] = _skip_answer(key, PASSWORD_NOTE)
+        elif not pf.field.label.strip() and not pf.field.options and not pf.error:
+            run.answers[key] = _skip_answer(key, NO_LABEL_NOTE)
+        elif pf.group and pf.group in al.surplus:
+            continue                                        # `_always_surplus`
+        elif not P.shown_visible(run.page, pf):
+            run.answers[key] = _skip_answer(key, HIDDEN_NOTE)
+        else:
+            todo.append(pf)
+    return todo
+
+
+def _always_round(run: _Run, fields: Sequence[PageField], *, corrective: bool = False) -> PageOutcome:
+    """A2-A6 for `fields` (always.fill_page_always) and the bookkeeping: answers, fallback
+    and S1 marks per key, the F2-F6 count for the attempt cap."""
+    al = run.al
+    _time_left(run)
+    out = AL.fill_page_always(
+        list(fields), brief=al.brief, rctx=run.rctx, ask=al.ask, rules=run.services.rules,
+        today=run.today, cfg=run.cfg, step_title=run.step, uploaded=run.ctx.uploaded,
+        page_text=P.page_text(run.page, run.scope), composed=run.ctx.composed,
+        composed_files=run.ctx.composed_files, audit=run.audit,
+        attempt_fallbacks=al.before + al.guesses, entries=al.entries, stats=al.stats,
+        classes=al.classes)
+    if out.transport_failed:
+        return out
+    run.answers.update(out.answers)
+    for k, a in out.answers.items():
+        al.fb[k] = k in out.fallback
+        al.sk[k] = k in out.standing_kept
+        if k in out.fallback and a.assumed:
+            al.guesses += 1                                 # F2-F6 (F0/F1 are not assumed)
+        if corrective:
+            al.corrected.add(k)
+        elif a.tier is AnswerTier.LLM and k not in out.fallback:
+            al.model_keys.add(k)
+    return out
+
+
+def _always_apply(run: _Run, keys: Sequence[str]) -> None:
+    for key in keys:
+        if key in run.answers and key not in run.dead:
+            _always_apply_one(run, key, run.answers[key])
+        if run.transport:
+            raise _Stop(run.transport)
+
+
+def _blank(v: Any) -> bool:
+    return v is None or v == [] or (isinstance(v, str) and not v.strip())
+
+
+def _always_apply_one(run: _Run, key: str, ans: Answer) -> None:
+    """A7 for one field: a FILLED value is put in with the widgets' strict read-back (a
+    remote typeahead through the query ladder); an optional field the model left empty
+    that shows a site value is cleared (G9 mechanics); a kept site value (PREFILLED), an
+    UNKNOWN left empty for the site's validation and a skipped field are left alone."""
+    pf = run.fields[key]
+    if ans.status is AnswerStatus.BLANK_OPTIONAL:
+        if pf.origin in G.SITE_ORIGINS and not _blank(pf.shown) and P.shown_visible(run.page, pf):
+            r = W.reset_field(run.page, pf)
+            if r.ok:
+                _mark(run, key, ValueOrigin.EMPTY)
+            else:
+                run.answers[key] = _replace(ans, value=r.shown, status=AnswerStatus.PREFILLED,
+                                            confidence=G.CONF_UNVERIFIED, note=G.UNVERIFIED_NOTE)
+        return
+    if ans.status is not AnswerStatus.FILLED:
+        return
+    if not P.shown_visible(run.page, pf):                   # K10: re-checked before each fill
+        run.answers[key] = _replace(ans, status=AnswerStatus.SKIPPED, note=HIDDEN_NOTE)
+        return
+    if pf.field.type is FieldType.FILE:
+        _apply_one(run, key, ans, False)                    # the strict upload mechanics (P1)
+        return
+    search = AL.is_search(pf) and not ans.option_labels
+    wanted = ans.option_labels[0] if ans.option_labels else _text(ans.value)
+    pick = _always_picker(run, pf, wanted)
+    if search:
+        r = W.fill_search(run.page, pf, W.query_ladder(wanted, _query_fallbacks(run, pf)), pick=pick)
+    else:
+        r = W.fill_field(run.page, pf, _fill_value(pf, ans), pick=pick)
+    if not r.ok:
+        run.failed[key] = r.note or "readback"
+        return
+    _mark(run, key, ValueOrigin.OURS)
+    run.failed.pop(key, None)
+    run.al.expected[key] = r.shown
+    if pf.field.type is not FieldType.MULTI_CHOICE and (r.picked or search) and isinstance(r.shown, str) \
+            and r.shown and r.shown != ans.value:
+        run.answers[key] = _replace(ans, value=r.shown, option_labels=(r.shown,))
+
+
+def _always_picker(run: _Run, pf: PageField, wanted: str):
+    """§4.4 at fill time (`pick_refused` is strict only): the options the widget lists go to
+    `always.ladder` with the decided words (R0, R1), then one R2 pick call on the shared
+    prefix. Transport failures end the page (`run.transport`)."""
+    if pf.field.type not in _CHOICE_WIDGET_TYPES:
+        return None
+
+    def pick(want: str, options: Sequence[str]) -> str:
+        words = wanted or want
+        hit, _rung = AL.ladder(words, list(options))
+        if hit:
+            return hit
+        if run.services.deadline_left() <= 0:
+            run.transport = run.transport or TIMED_OUT_NOTE
+        if run.transport:
+            return ""
+        try:
+            return AL.pick_call(run.al.pctx, pf, words, list(options)) or ""
+        except (BackendError, TimeoutError) as exc:
+            run.transport = _backend_note(exc)
+            return ""
+    return pick
+
+
+def _query_fallbacks(run: _Run, pf: PageField) -> list[str]:
+    """§4.4 family fallbacks for a remote typeahead: a place -> `contact.city`, then the
+    country; a school -> the bound (else the newest) entry's institution without a leading
+    "The" / "University of"."""
+    prof = run.al.profile
+    toks = set(F.tokens(" ".join((pf.field.label, pf.field.description))))
+    out: list[str] = []
+    if toks & set(_PLACE_WORDS):
+        city = applicant.get_path(prof, "contact.city")
+        country = str(applicant.get_path(prof, "contact.country") or "")
+        out += [str(city or ""), applicant.COUNTRY_NAMES.get(country.upper(), country)]
+    if toks & set(_SCHOOL_WORDS):
+        entry = run.al.entries.get(pf.group, "")
+        if not entry.startswith("education[") and run.al.order.get("education"):
+            entry = f"education[{run.al.order['education'][0]}]"
+        inst = str(applicant.get_path(prof, f"{entry}.institution") or "") if entry else ""
+        inst = re.sub(r"^\s*the\s+", "", inst, flags=re.I)
+        out.append(re.sub(r"^\s*university\s+of\s+", "", inst, flags=re.I))
+    return [x for x in out if x and x.strip()]
+
+
+def _always_surplus(run: _Run) -> None:
+    """§4.5 surplus slots: deleted when they have a delete control (bottom up, confirmed
+    by the slot's controls being gone); otherwise an optional field showing a value is
+    cleared, and a required one is left as shown with an audit note."""
+    al = run.al
+    if not al.surplus:
+        return
+    groups = {f"{s.section}#{g.index}": g for s in run.sections for g in s.entries}
+    clicked = False
+    for gid in sorted(al.surplus, key=lambda g: -_index(g)):
+        members = [k for k in run.order if k in run.fields and run.fields[k].group == gid]
+        g = groups.get(gid)
+        if g is not None and g.delete_locator and P.click(run.page, run.page.locator(g.delete_locator).first):
+            clicked = True
+            run.page.wait_for_timeout(300)
+            if not any(_present(run, run.fields[k]) for k in members):
+                run.dead |= set(members)
+                run.services.log(f"E3: surplus entry deleted ({gid})")
+                continue
+        for k in members:
+            pf = run.fields[k]
+            if not _blank(pf.shown) and not pf.field.required:
+                r = W.reset_field(run.page, pf)
+                if r.ok:
+                    _mark(run, k, ValueOrigin.EMPTY)
+                    run.answers[k] = Answer(field_key=k, value=None, tier=AnswerTier.NONE, source="",
+                                            confidence=0.0, status=AnswerStatus.BLANK_OPTIONAL,
+                                            rule_id=AL.PROMPT_VERSION, note=f"{SURPLUS_NOTE}; cleared")
+                    continue
+            if _blank(pf.shown):
+                run.answers[k] = _skip_answer(k, f"{SURPLUS_NOTE}; left empty")
+            else:
+                run.answers[k] = Answer(field_key=k, value=pf.shown, tier=AnswerTier.NONE,
+                                        source=pf.origin.value, confidence=G.CONF_UNVERIFIED,
+                                        status=AnswerStatus.PREFILLED, rule_id=AL.PROMPT_VERSION,
+                                        note=f"{SURPLUS_NOTE}; left as shown")
+    if clicked:
+        run.sections = list(run.nav.entry_sections(run.page, run.ctx) or [])
+
+
+def _always_adds(run: _Run) -> None:
+    """§4.5 Adding: one "Add another" click per wanted entry; the new slot is bound to its
+    source entry and gets its own round (A2-A7). A failed Add is a note in the job log
+    ("1 of 2 education entries added"), not a stop (rev L7; WP-F1 branches E5 on the policy)."""
+    al = run.al
+    wanted: dict[str, int] = {}
+    added: dict[str, int] = {}
+    why_of: dict[str, str] = {}
+    for section, eid in list(al.adds):
+        wanted[section] = wanted.get(section, 0) + 1
+        why = _always_add_one(run, section, eid)
+        if why:
+            why_of.setdefault(section, why)
+        else:
+            added[section] = added.get(section, 0) + 1
+    for section, n in wanted.items():
+        if added.get(section, 0) < n:
+            run.services.log(f"E5: {added.get(section, 0)} of {n} {section.replace('_', ' ')} entries "
+                             f"added ({why_of.get(section, 'add failed')})")
+
+
+def _always_add_one(run: _Run, section: str, eid: str) -> str:
+    _time_left(run)
+    sec = next((s for s in run.sections if s.section == section), None)
+    if sec is None or not sec.add_locator:
+        return "no add control"
+    count = len(sec.entries)
+    if not P.click(run.page, run.page.locator(sec.add_locator).first):
+        return "add click failed"
+    run.page.wait_for_timeout(ADD_WAIT_MS)
+    fields = _always_read(run)
+    after = next((s for s in run.sections if s.section == section), None)
+    if after is None or len(after.entries) <= count:
+        return "no entry appeared"
+    new = F.group_id(section, sorted(after.entries, key=lambda g: g.index)[count].index)
+    fresh = [pf for pf in fields if pf.group == new and not _seen(run, pf)]
+    if not fresh:
+        return "new entry has no fields"
+    run.al.entries[new] = eid
+    todo = _always_prepare(run, fresh, bind=False)
+    out = _always_round(run, todo)
+    if out.transport_failed:
+        raise _Stop(UNAVAILABLE_NOTE)
+    run.services.classify(run.page)
+    _time_left(run)
+    _always_apply(run, [pf.field.key for pf in todo])
+    return ""
+
+
+def _always_reveal(run: _Run, rounds: int) -> None:
+    """A7 revealed fields: re-read; fields not seen before get A1-A7, at most `rounds`."""
+    for _ in range(max(0, rounds)):
+        new = [pf for pf in _always_read(run) if not _seen(run, pf) and pf.field.key not in run.dead]
+        if not new:
+            return
+        todo = _always_prepare(run, new, bind=False)
+        out = _always_round(run, todo)
+        if out.transport_failed:
+            raise _Stop(UNAVAILABLE_NOTE)
+        run.services.classify(run.page)
+        _time_left(run)
+        _always_apply(run, [pf.field.key for pf in todo])
+
+
+def _always_verify(run: _Run) -> None:
+    """A7 verification read: every value we filled is read again; one the site reverted is
+    filled once more, else the field is `fill_failed` ("reverted")."""
+    for key, want in list(run.al.expected.items()):
+        pf = run.fields.get(key)
+        if pf is None or key in run.dead or key in run.failed or not _present(run, pf):
+            continue
+        if W.same(pf, W.read(run.page, pf), want):
+            continue
+        r = W.fill_field(run.page, pf, want)
+        if not (r.ok and W.same(pf, W.read(run.page, pf), want)):
+            run.failed[key] = REVERTED_NOTE
+
+
+def _always_corrective(run: _Run) -> None:
+    """A8: fields that failed, show a site error, or are required and still empty get one
+    round with their error (always's TASK_CORRECT, then A5/A6) and are filled once. What
+    still fails stays in `failed` (the flow ends `validation_error`)."""
+    errors = {k: e for k, e in P.field_errors(run.page, scope=run.scope).items() if k}
+    hits = set(P.scan_required(run.page, run.scope))
+    skipped = {k for k, a in run.answers.items() if a.status is AnswerStatus.SKIPPED}
+    surplus = {k for k, pf in run.fields.items() if pf.group and pf.group in run.al.surplus}
+    targets = (set(run.failed) | set(errors) | hits) - run.dead - skipped - surplus
+    if not targets:
+        return
+    run.services.classify(run.page)
+    fields = []
+    for pf in _always_read(run):
+        k = pf.field.key
+        if k not in targets:
+            continue
+        if not pf.error:
+            pf = _replace(pf, error=errors.get(k) or (SCAN_ERROR if k in hits and k not in run.failed
+                                                     else "not accepted"))
+        run.fields[k] = pf
+        fields.append(pf)
+    if not fields:
+        return
+    out = _always_round(run, fields, corrective=True)
+    if out.transport_failed:
+        raise _Stop(UNAVAILABLE_NOTE)
+    for pf in fields:
+        run.failed.pop(pf.field.key, None)
+    _always_apply(run, [pf.field.key for pf in fields])
+
+
+def _always_scan(run: _Run) -> None:
+    """The required scan after A8: what is still empty or in error is `fill_failed`."""
+    for key in P.scan_required(run.page, run.scope):
+        if key not in run.dead:
+            run.failed.setdefault(key, "required_scan")
+
+
+def _always_cache_put(run: _Run) -> None:
+    """§8 fill cache under `always`: the same key shape; prompt_version `always:v2`;
+    inputs_hash = sha(briefing.hash + JD + "always"); values stored with the D-202 rule
+    (`stored_quote`, `_stored_value`); no corrective, fallback or pick rows. A1-A (§17.3): each
+    row carries the field's `class[:which]` in its decision (`always.fill_page_always(classes=)`),
+    and a field without one gets no row."""
+    al = run.al
+    if al is None or not run.cfg.get("cache", True):
+        return
+    inputs = hashlib.sha256((str(al.brief.hash) + (run.rctx.jd_text or "") + "always")
+                            .encode("utf-8")).hexdigest()[:16]
+    hkey = F.hash_key(run.rctx)
+    pfs = [run.fields[k] for k in run.order if k in run.fields]
+    quals = K.qualified_labels(pfs)
+    rows = []
+    for pf in pfs:
+        k = pf.field.key
+        a = run.answers.get(k)
+        if (a is None or k not in al.model_keys or k in al.corrected or al.fb.get(k) or k in run.failed
+                or a.status not in (AnswerStatus.FILLED, AnswerStatus.BLANK_OPTIONAL, AnswerStatus.PREFILLED)):
+            continue
+        if not al.classes.get(k):
+            continue                                        # A1-A: no class, no row (never a code-only replay)
+        ref = a.source if a.source.startswith(("profile:", "extra:", "standing:")) else ""
+        rows.append({"field_sig": F.field_sig(pf, quals.get(k, ""), key=hkey),
+                     "prompt_version": AL.PROMPT_VERSION, "model": run.services.model,
+                     "inputs_hash": inputs,
+                     "facts_used_hash": F.facts_used_hash([ref] if ref else [], run.rctx, today=run.today),
+                     "decision": {"source": a.source, "ref": ref,
+                                  "evidence": stored_quote(a.evidence, a, run.qv),
+                                  "value": _stored_value(a.value, a, run.qv), "assumed": bool(a.assumed),
+                                  "via": ALWAYS_VIA, "class": al.classes[k]}})
+    if rows:
+        run.services.cache_put(_job_id(run), rows)
+
+
+def always_row_decision(key: str, row: Mapping[str, Any]) -> Optional[ModelDecision]:
+    """A1-A (§17.3, pin 28): a fill-cache row written under `always` -> the ModelDecision to
+    replay, with `klass` / `which` rebuilt from the stored `class`, or None (a MISS: the field
+    is asked again) when the row has no readable class or another prompt version. Replay
+    under `always` is OFF today (`_always_steps` never reads the cache): a switch-on calls
+    this on each `services.cache_get(..., AL.PROMPT_VERSION, ...)` row, after the same
+    `facts_used_hash` check `_cached` makes. A class-less row must never be replayed as the
+    model's silent key: code could then take it as code-only."""
+    if row.get("prompt_version", AL.PROMPT_VERSION) != AL.PROMPT_VERSION:
+        return None
+    d = row.get("decision") or {}
+    klass, which = AL.parse_class(d.get("class"))
+    if klass is None:
+        return None
+    stored = str(d.get("source") or "")                     # an Answer's source: "default:<rule>", "profile:<path>", "assumption"
+    try:
+        source = FillSource(stored.partition(":")[0])
+    except ValueError:
+        return None
+    ref = d.get("ref") or (stored if source is FillSource.DEFAULT else "")
+    return ModelDecision(key, source, ref, d.get("value"), d.get("evidence", ""),
+                         via=f"cache:{d.get('via', ALWAYS_VIA)}", assumed=bool(d.get("assumed")),
+                         klass=klass, which=which)
+
+
+def _always_outcome(run: _Run, *, compose: Sequence[str] = ()) -> PageOutcome:
+    """A9: answers, fill_failed, the per-page counts; `unknown_required` is always ()."""
+    _always_cache_put(run)
+    al = run.al
+    answers = dict(run.answers)
+    failed = [k for k in run.order if k in run.failed and k not in run.dead]
+    for k in failed:
+        if k in answers:
+            answers[k] = _replace(answers[k], status=AnswerStatus.FILL_FAILED,
+                                  note=answers[k].note or f"fill: {run.failed[k]}")
+    keys = [k for k in run.order if k in answers]
+    assumed = tuple(k for k in keys if answers[k].assumed)
+    fallback = tuple(k for k in keys if al.fb.get(k))
+    standing = tuple(k for k in keys if al.sk.get(k))
+    filled = sum(1 for k in keys if answers[k].status in (AnswerStatus.FILLED, AnswerStatus.PREFILLED))
+    run.services.log(f"page {run.step or 'form'}: {filled} answered, {len(assumed)} assumed, "
+                     f"{len(fallback)} fallback, {len(standing)} standing kept, {al.stats.calls} calls, "
+                     f"{round(al.stats.seconds)} s")
+    fields = [run.fields[k] for k in run.order if k in run.fields]
+    return PageOutcome(step=run.step, fields=fields, answers=answers, unknown_required=(),
+                       fill_failed=tuple(failed), model_calls=al.stats.calls,
+                       model_seconds=round(al.stats.seconds, 3), transport_failed=False,
+                       compose_needed=tuple(compose), assumed=assumed, fallback=fallback,
+                       standing_kept=standing)
+
+
+def _always_transport(run: _Run, note: str) -> PageOutcome:
+    out = _transport(run, note)
+    if run.al is None:
+        return out
+    return _replace(out, model_calls=run.al.stats.calls, model_seconds=round(run.al.stats.seconds, 3))

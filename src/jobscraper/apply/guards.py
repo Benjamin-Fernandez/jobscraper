@@ -658,7 +658,7 @@ def _own_detail_for_other(c: _Ctx, pf: PageField, value: Any) -> bool:
     """D-84 R4 on the resume/job/keep routes (review F2): a field about another person
     (emergency contact, referee, next of kin, ...) never takes the applicant's own name,
     city or contact detail, whatever the source says."""
-    return F.about_other_person(pf) and F.names_own_detail(_text_of(value), c.rctx, c.own)
+    return F.about_other_person(pf, rctx=c.rctx) and F.names_own_detail(_text_of(value), c.rctx, c.own)
 
 
 SKILL_WORDS = ("skill", "skills")

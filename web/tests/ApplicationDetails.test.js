@@ -13,7 +13,6 @@
 //   * Copy is asserted on the component's rendered text (`wrapper.text()`), not on markup.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils'
-import QuestionsInbox from '../src/components/QuestionsInbox.vue'
 
 const loaders = import.meta.glob('../src/components/ApplicationDetails.vue')
 const PRESENT = Object.keys(loaders).length > 0
@@ -73,11 +72,14 @@ function fakeServer({ applicant = payload(), questions = EMPTY_QUESTIONS, put = 
     const path = String(url).replace(/^\/?/, '')
     const body = init.body ? JSON.parse(init.body) : undefined
     calls.push({ method, url: path, body })
-    if (path === 'api/applicant' && method === 'GET') return reply(state.applicant)
+    // Q-127 T0: the page is a list of collapsed sections, one open at a time. The server sends ONE
+    // section holding every form item and mountDetails() opens it; grouping is pinned in q127-profile.test.js.
+    const withSections = a => ({ ...a, sections: [{ id: 'all', title: 'All details', paths: (a.form || []).flatMap(g => g.items.map(i => i.path)) }] })
+    if (path === 'api/applicant' && method === 'GET') return reply(withSections(state.applicant))
     if (path === 'api/applicant' && method === 'PUT') {
       const r = put ? put(body, state) : { status: 200, body: { ...state.applicant, profile: body.profile, etag: 'bbbbbbbbbbbbbbbb' } }
       if (r.status === 200) state.applicant = r.body
-      return reply(r.body, r.status)
+      return reply(r.status === 200 ? withSections(r.body) : r.body, r.status)
     }
     if (path.startsWith('api/questions') && method === 'GET') return reply(questions)
     return reply({ detail: 'Not Found' }, 404)
@@ -94,6 +96,8 @@ async function mountDetails(opts) {
   // form's submit button (a real browser always has it connected)
   const wrapper = mount(Details, { attachTo: document.body })
   await flushPromises()
+  const row = wrapper.find('#ds-all-button')
+  if (row.exists()) { await row.trigger('click'); await flushPromises() }       // open the one section
   return wrapper
 }
 
@@ -111,14 +115,7 @@ if (!PRESENT) {
 }
 
 suite('Needed before auto-apply', () => {
-  it('lists each missing field by its form label, with a Fill in link, under the QD 10.2 heading', async () => {
-    const w = await mountDetails()
-    const text = w.text()
-    expect(text).toContain('Needed before auto-apply')
-    expect(text).toContain("Auto-apply won't start until these are filled in.")
-    for (const label of ['Email for applications', 'City', 'Earliest start date']) expect(text).toContain(label)
-    expect(w.findAll('a, button').filter(e => e.text().trim() === 'Fill in')).toHaveLength(3)
-  })
+  // RETIRED (Q-127 T0): lists each missing field by its form label... : the Needed list is the status card now (q127-profile.test.js: status card, Fill in)
 
   it('is hidden when nothing is missing', async () => {
     const w = await mountDetails({ applicant: payload({ missing: [] }) })
@@ -153,34 +150,19 @@ suite('field tags and the meter', () => {
     expect(w.text()).toContain('From your resume, please check')
   })
 
-  it('shows the meter as "<filled> of <needed> details filled"', async () => {
-    const w = await mountDetails()
-    expect(w.text()).toContain('12 of 26 details filled')
-  })
+  // RETIRED (Q-127 T0): shows the meter as... : there is no meter; the status card says what auto-apply waits for (q127-profile.test.js)
+
 })
 
 suite('saving', () => {
-  it('PUTs {profile, etag} from the Save details bar and says Saved.', async () => {
-    const w = await mountDetails()
-    await w.find('#f-contact-city-in').setValue('Singapore')     // Save is off until something changed (Q-70 D3)
-    const save = button(w, 'Save details')
-    expect(save, 'a "Save details" button').toBeTruthy()
-    await save.trigger('click')
-    await flushPromises()
-    const puts = server.calls.filter(c => c.method === 'PUT' && c.url === 'api/applicant')
-    expect(puts).toHaveLength(1)
-    expect(puts[0].body.etag).toBe('aaaaaaaaaaaaaaaa')
-    expect(puts[0].body.profile.contact.postal_code).toBe('000001')
-    expect(puts[0].body.profile.contact.city).toBe('Singapore')
-    expect(w.text()).toContain('Saved.')
-  })
+  // RETIRED (Q-127 T0): PUTs {profile, etag} from the Save details bar... : the page-wide Save details bar is a per-section Save section (q127-profile.test.js: section save)
 
   it('a 422 shows the QD 10.2 sentence and the message beside the field, and keeps the edits', async () => {
     const w = await mountDetails({
       put: () => ({ status: 422, body: { detail: 'invalid', errors: [{ path: 'contact.postal_code', message: 'must be 6 digits' }] } }),
     })
     await w.find('#f-contact-city-in').setValue('Singapore')
-    await button(w, 'Save details').trigger('click')
+    await w.find('.ds-save').trigger('click')
     await flushPromises()
     const text = w.text()
     expect(text).toContain('1 detail needs fixing before you can save')
@@ -195,7 +177,7 @@ suite('saving', () => {
   it('a 409 "changed" explains why and offers Reload, which fetches the file again', async () => {
     const w = await mountDetails({ put: () => ({ status: 409, body: { detail: 'changed' } }) })
     await w.find('#f-contact-city-in').setValue('Singapore')
-    await button(w, 'Save details').trigger('click')
+    await w.find('.ds-save').trigger('click')
     await flushPromises()
     expect(w.text()).toContain(
       'This file changed since you opened it, in another tab or by hand. Reload to take in the latest. What you typed here is kept.')
@@ -213,8 +195,7 @@ suite('saving', () => {
     })
     expect(w.text()).toContain("JobScraper can't read data/applicant.yaml (cannot read applicant.yaml: ScannerError)")
     expect(w.text()).toContain('Fix the file by hand. Nothing will be saved over it until then.')
-    const save = button(w, 'Save details')
-    expect(!save || save.attributes('disabled') !== undefined).toBe(true)
+    expect(w.find('.ds-save').exists()).toBe(false)             // no section opens, so no save is offered
   })
 
   it('shows the comments note only when the file has comments', async () => {
@@ -227,27 +208,7 @@ suite('saving', () => {
 })
 
 suite('answers the owner gave (group 15) and other keys (group 16)', () => {
-  it('lists each `extra` entry with a Remove button and confirms before removing', async () => {
-    const withExtra = payload({
-      profile: {
-        contact: { email: 'a@example.com', postal_code: '000001', city: 'Singapore' },
-        availability: { earliest_start_date: '2026-02-02' },
-        extra: { visa_status: { title: 'Visa status', description: '', kind: 'choice', sensitive: false,
-          labels: ['what is your visa status'], value: null, picks: ['citizen'], seen: ['citizen', 'pr'] } },
-      },
-      missing: [],
-    })
-    const w = await mountDetails({ applicant: withExtra })
-    expect(w.text()).toContain('Answers you gave to application questions')
-    expect(w.text()).toContain('Visa status')
-    const remove = button(w, 'Remove')
-    expect(remove, 'a Remove button').toBeTruthy()
-    await remove.trigger('click')
-    await flushPromises()
-    expect(w.text()).toContain('Remove this answer? Applications that ask it will stop and ask you again.')
-    expect(button(w, 'Keep it'), 'a Keep it button').toBeTruthy()
-    expect(button(w, 'Remove answer'), 'a Remove answer button').toBeTruthy()
-  })
+  // RETIRED (Q-127 T0): lists each `extra` entry with a Remove button... : the saved answers moved to Settings -> Answers you corrected (q127-saved-answers.test.js: list, Forget)
 
   it('hides group 15 when there are no answers', async () => {
     const w = await mountDetails()
@@ -284,97 +245,9 @@ async function cardSaved(w, profile) {
   await flushPromises()
 }
 
-suite('F2: a Questions-card save keeps the owner\'s unsaved edits, per leaf', () => {
-  it('a profile-gap answer survives a later "Save details" of an edited section', async () => {
-    const w = await mountDetails({ applicant: f2Payload(PROFILE_F2) })
-    await w.find('#f-contact-city-in').setValue('Typed City')                    // unsaved edit in Contact
-    expect(w.text()).toContain('You have unsaved changes.')
-    await cardSaved(w, { contact: { ...PROFILE_F2.contact, address_line1: '1 Road' } })
-    expect(getsOf()).toHaveLength(2)                                              // the form re-read the file
-    expect(w.find('#f-contact-city-in').element.value).toBe('Typed City')         // the typed edit is still there
-    expect(w.find('#f-contact-address-line1-in').element.value).toBe('1 Road')
-    await button(w, 'Save details').trigger('click')
-    await flushPromises()
-    expect(putsOf()).toHaveLength(1)
-    const sent = putsOf()[0].body
-    expect(sent.etag).toBe(ETAG_FILE)                                             // the new etag, so no 409
-    expect(sent.profile.contact.address_line1).toBe('1 Road')                     // the answer is not written away
-    expect(sent.profile.contact.city).toBe('Typed City')
-    expect(sent.profile.contact.email).toBe('a@example.com')
-  })
+// RETIRED (Q-127 T0): the suite 'F2: a Questions-card save keeps the owner...' went with the Questions card and the extra-answer Remove buttons.
 
-  it('without unsaved edits the form simply shows the file the card wrote', async () => {
-    const w = await mountDetails({ applicant: f2Payload(PROFILE_F2) })
-    await cardSaved(w, { contact: { ...PROFILE_F2.contact, address_line1: '1 Road' } })
-    expect(w.text()).not.toContain('You have unsaved changes.')
-    expect(w.find('#f-contact-address-line1-in').element.value).toBe('1 Road')
-    // nothing is unsaved, so Save is off (Q-70 D3) and no PUT can go out
-    expect(button(w, 'Save details').attributes('disabled')).toBeDefined()
-    expect(putsOf()).toHaveLength(0)
-  })
-
-  it('the same leaf typed here and saved by the card: the card\'s value wins and is shown', async () => {
-    const w = await mountDetails({ applicant: f2Payload(PROFILE_F2) })
-    await w.find('#f-contact-address-line1-in').setValue('Typed Street')
-    await cardSaved(w, { contact: { ...PROFILE_F2.contact, address_line1: '1 Road' } })
-    expect(w.find('#f-contact-address-line1-in').element.value).toBe('1 Road')
-    // the draft now equals the file: nothing unsaved, nothing to send (Q-70 D2/D3)
-    expect(w.text()).not.toContain('You have unsaved changes.')
-    expect(putsOf()).toHaveLength(0)
-  })
-
-  it('an `extra` answer edited here and a new `extra` answer from the file are both sent', async () => {
-    const entry = (title, value) => ({ title, description: '', kind: 'text', sensitive: false, labels: [title.toLowerCase()], value })
-    const before = { ...PROFILE_F2, extra: { visa_note: entry('Visa note', 'a') } }
-    const w = await mountDetails({ applicant: f2Payload(before) })
-    await w.find('#f-extra-visa-note-in').setValue('typed note')
-    await cardSaved(w, { ...PROFILE_F2, extra: { visa_note: entry('Visa note', 'a'), fav_language: entry('Favourite language', 'Python') } })
-    await button(w, 'Save details').trigger('click')
-    await flushPromises()
-    const sent = putsOf()[0].body
-    expect(sent.etag).toBe(ETAG_FILE)
-    expect(sent.profile.extra.visa_note.value).toBe('typed note')
-    expect(sent.profile.extra.fav_language.value).toBe('Python')
-  })
-})
-
-suite('F2: removing an answer says what else it saves', () => {
-  const entry = { title: 'Visa note', description: '', kind: 'text', sensitive: false, labels: ['visa note'], value: 'a' }
-  const withExtra = () => f2Payload({ ...PROFILE_F2, extra: { visa_note: entry } })
-  const SAVED_TOO = 'Your other unsaved changes will be saved too.'
-
-  it('says so when the form has other unsaved edits, and sends them with the removal', async () => {
-    const w = await mountDetails({ applicant: withExtra() })
-    await w.find('#f-contact-city-in').setValue('Typed City')
-    await button(w, 'Remove').trigger('click')
-    await flushPromises()
-    expect(w.text()).toContain('Remove this answer? Applications that ask it will stop and ask you again.')
-    expect(w.text()).toContain(SAVED_TOO)
-    await button(w, 'Remove answer').trigger('click')
-    await flushPromises()
-    const sent = putsOf()[0].body
-    expect(sent.profile.contact.city).toBe('Typed City')
-    expect(sent.profile.extra).toBeUndefined()
-  })
-
-  it('does not say it when nothing else is unsaved', async () => {
-    const w = await mountDetails({ applicant: withExtra() })
-    await button(w, 'Remove').trigger('click')
-    await flushPromises()
-    expect(w.text()).toContain('Remove this answer?')
-    expect(w.text()).not.toContain(SAVED_TOO)
-  })
-
-  it('Keep it leaves everything as it was and sends nothing', async () => {
-    const w = await mountDetails({ applicant: withExtra() })
-    await w.find('#f-contact-city-in').setValue('Typed City')
-    await button(w, 'Remove').trigger('click')
-    await button(w, 'Keep it').trigger('click')
-    await flushPromises()
-    expect(putsOf()).toHaveLength(0)
-    expect(w.text()).not.toContain(SAVED_TOO)
-  })
-})
+// RETIRED (Q-127 T0): the suite 'F2: removing an answer says what else it saves...' went with the Questions card and the extra-answer Remove buttons.
 
 // ---- Q-70 lane D (D-100): the unsaved form survives leaving the tab (sessionStorage), Discard, the 409 Reload ----
 // Fake data only. The draft key is `jobscraper.applicant.draft`; the stored shape is {etag, base, draft}.
@@ -398,14 +271,14 @@ suite('Q-70 D1: the draft survives leaving the Profile tab', () => {
     expect(cityIn(again).element.value).toBe('Typed City')
     expect(again.find('.restored').exists()).toBe(true)
     expect(again.text()).toContain('Your unsaved changes are back.')
-    expect(again.text()).toContain('You have unsaved changes.')
+    expect(again.text()).toContain('Unsaved changes')
 
     await button(again, 'Discard them').trigger('click')
     await flushPromises()
     expect(cityIn(again).element.value).toBe('Singapore')
     expect(again.find('.restored').exists()).toBe(false)
     expect(window.sessionStorage.getItem(DRAFT_KEY)).toBeNull()
-    expect(again.text()).not.toContain('You have unsaved changes.')
+    expect(again.text()).not.toContain('Unsaved changes')
   })
 
   it('the draft lives in sessionStorage only, never localStorage (D-100)', async () => {
@@ -435,7 +308,7 @@ suite('Q-70 D1: the draft survives leaving the Profile tab', () => {
     expect(cityIn(w).element.value).toBe('Typed City')                  // the leaf the owner changed
     expect(emailIn(w).element.value).toBe('alex.new@example.com')      // the leaf the file changed
     expect(w.find('.restored').exists()).toBe(true)
-    await button(w, 'Save details').trigger('click')
+    await w.find('.ds-save').trigger('click')
     await flushPromises()
     expect(putsOf()).toHaveLength(1)
     expect(putsOf()[0].body.etag).toBe(ETAG_FILE)
@@ -451,38 +324,39 @@ suite('Q-70 D1: the draft survives leaving the Profile tab', () => {
 })
 
 suite('Q-70 D2/D3: unsaved marker, Saved. note, Discard changes, Save enabled state', () => {
-  it('(c) after a save the next edit shows "You have unsaved changes." and hides "Saved."', async () => {
+  it('(c) after a save the next edit shows "Unsaved changes"', async () => {
     const w = await mountDetails({ applicant: f2Payload(PROFILE_D) })
     await cityIn(w).setValue('Typed City')
-    await button(w, 'Save details').trigger('click')
+    await w.find('.ds-save').trigger('click')
     await flushPromises()
-    expect(w.text()).toContain('Saved.')
-    expect(w.text()).not.toContain('You have unsaved changes.')
+    expect(putsOf()).toHaveLength(1)
+    expect(w.text()).not.toContain('Unsaved changes')
+    const row = w.find('#ds-all-button')
+    if (row.attributes('aria-expanded') !== 'true') { await row.trigger('click'); await flushPromises() }
     await cityIn(w).setValue('Another City')
-    expect(w.text()).toContain('You have unsaved changes.')
-    expect(w.text()).not.toContain('Saved.')
+    expect(w.text()).toContain('Unsaved changes')
   })
 
-  it('(d) Discard changes is disabled until an edit, then restores the file value', async () => {
+  it('(d) Save section is disabled until an edit; Cancel puts the file value back and closes the section', async () => {
     const w = await mountDetails({ applicant: f2Payload(PROFILE_D) })
-    expect(button(w, 'Discard changes').attributes('disabled')).toBeDefined()
-    expect(button(w, 'Save details').attributes('disabled')).toBeDefined()
+    expect(w.find('.ds-save').attributes('disabled')).toBeDefined()
     await cityIn(w).setValue('Typed City')
-    expect(button(w, 'Discard changes').attributes('disabled')).toBeUndefined()
-    expect(button(w, 'Save details').attributes('disabled')).toBeUndefined()
-    await button(w, 'Discard changes').trigger('click')
+    expect(w.find('.ds-save').attributes('disabled')).toBeUndefined()
+    await w.find('.ds-cancel').trigger('click')
+    await flushPromises()
+    expect(w.find('.ds-save').exists()).toBe(false)
+    expect(window.sessionStorage.getItem(DRAFT_KEY)).toBeNull()
+    await w.find('#ds-all-button').trigger('click')
     await flushPromises()
     expect(cityIn(w).element.value).toBe('Singapore')
-    expect(button(w, 'Discard changes').attributes('disabled')).toBeDefined()
-    expect(w.text()).not.toContain('You have unsaved changes.')
-    expect(window.sessionStorage.getItem(DRAFT_KEY)).toBeNull()
+    expect(w.text()).not.toContain('Unsaved changes')
   })
 
   it('(d) Save details stays enabled when applicant.yaml does not exist yet, so it can be created', async () => {
     const w = await mountDetails({ applicant: f2Payload({}, { file: { exists: false, has_comments: false, error: '' } }) })
-    expect(w.text()).toContain('Nothing saved yet. Saving keeps your details on this PC.')
-    expect(button(w, 'Save details').attributes('disabled')).toBeUndefined()
-    await button(w, 'Save details').trigger('click')
+    expect(w.text()).toContain('Nothing saved yet. Your details stay on this computer.')
+    expect(w.find('.ds-save').attributes('disabled')).toBeUndefined()
+    await w.find('.ds-save').trigger('click')
     await flushPromises()
     expect(putsOf()).toHaveLength(1)
   })
@@ -495,7 +369,7 @@ suite('Q-70 D4: a 409 "changed" Reload keeps what was typed', () => {
       put: () => ({ status: 409, body: { detail: 'changed' } }),
     })
     await cityIn(w).setValue('Typed City')
-    await button(w, 'Save details').trigger('click')
+    await w.find('.ds-save').trigger('click')
     await flushPromises()
     expect(w.find('.conflict').exists()).toBe(true)
     expect(w.text()).toContain('What you typed here is kept.')
@@ -507,7 +381,7 @@ suite('Q-70 D4: a 409 "changed" Reload keeps what was typed', () => {
     expect(w.find('.conflict').exists()).toBe(false)
     expect(cityIn(w).element.value).toBe('Typed City')
     expect(emailIn(w).element.value).toBe('alex.new@example.com')
-    expect(w.text()).toContain('You have unsaved changes.')
+    expect(w.text()).toContain('Unsaved changes')
   })
 
   it('an unreadable-file conflict still just reloads the file', async () => {
@@ -516,7 +390,7 @@ suite('Q-70 D4: a 409 "changed" Reload keeps what was typed', () => {
       put: () => ({ status: 409, body: { detail: 'unreadable' } }),
     })
     await cityIn(w).setValue('Typed City')
-    await button(w, 'Save details').trigger('click')
+    await w.find('.ds-save').trigger('click')
     await flushPromises()
     expect(w.text()).toContain("JobScraper can't read data/applicant.yaml")
     const before = getsOf().length
@@ -538,8 +412,11 @@ suite('Q-70 D1: the beforeunload guard', () => {
     expect(fire().defaultPrevented).toBe(false)               // clean form: leave freely
     await cityIn(w).setValue('Typed City')
     expect(fire().defaultPrevented).toBe(true)                // dirty: ask first
-    await button(w, 'Discard changes').trigger('click')
+    await w.find('.ds-cancel').trigger('click')
+    await flushPromises()
     expect(fire().defaultPrevented).toBe(false)               // clean again
+    await w.find('#ds-all-button').trigger('click')
+    await flushPromises()
     await cityIn(w).setValue('Typed City')
     expect(fire().defaultPrevented).toBe(true)
     w.unmount()
@@ -566,13 +443,13 @@ suite('Expected salary (Q-71)', () => {
       expect(w.find('label[for="f-pay-expected-salary-in"]').text()).toBe('Amount')
       expect(w.find('#f-pay-expected-salary-in-currency').element.value).toBe('SGD')
       expect(w.find('#f-pay-expected-salary-in-period').element.value).toBe('monthly')
-      expect(button(w, 'Save details').attributes('disabled')).toBeDefined()    // nothing changed yet
+      expect(w.find('.ds-save').attributes('disabled')).toBeDefined()    // nothing changed yet
       // Untouched: nothing was written for the salary.
       expect(w.text()).toContain('Needed')
 
       await amount.setValue('4200')
-      expect(button(w, 'Save details').attributes('disabled')).toBeUndefined()
-      await button(w, 'Save details').trigger('click')
+      expect(w.find('.ds-save').attributes('disabled')).toBeUndefined()
+      await w.find('.ds-save').trigger('click')
       await flushPromises()
       const puts = server.calls.filter(c => c.method === 'PUT' && c.url === 'api/applicant')
       expect(puts).toHaveLength(1)
@@ -583,7 +460,7 @@ suite('Expected salary (Q-71)', () => {
   it('an untouched missing salary is not written on the way through', async () => {
     const w = await mountDetails({ applicant: salaryPayload({ pay: {} }) })
     expect(w.find('#f-pay-expected-salary-in').element.value).toBe('')
-    expect(button(w, 'Save details').attributes('disabled')).toBeDefined()    // untouched: nothing to save
+    expect(w.find('.ds-save').attributes('disabled')).toBeDefined()    // untouched: nothing to save
     const puts = server.calls.filter(c => c.method === 'PUT' && c.url === 'api/applicant')
     expect(puts.every(p => !p.body.profile.pay?.expected_salary)).toBe(true)
   })

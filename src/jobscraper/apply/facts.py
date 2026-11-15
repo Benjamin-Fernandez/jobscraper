@@ -13,6 +13,8 @@ data. This module is that program side, and it is pure (no browser, no model, no
   relevant        G2(b): may this fact answer this question at all? (§5.3, D-84 R4)
   match_entries   which site entry (a job, a school) is which source entry (§10 E2)
   entry_blocks    the text block each source entry is checked against (§5.2, G3/G6)
+  bind_slots, label_runs  fill policy `always` only: entry slots -> source entries, Adds,
+                  surplus slots; repeated label runs as stand-in slots (Q-121 §4.5)
   s_values        S values that must never be in a prompt (§6.5); `llm_fill.redact`
                   scrubs them
   today_sg, field_sig, inputs_hash, facts_used_hash: the clock and cache keys (§13.3)
@@ -34,8 +36,8 @@ from typing import Any, Iterable, Mapping, Optional, Sequence, Union
 from .. import applicant
 from . import declarations, resolve
 from .contracts import (
-    CHOICE_TYPES, ApplyFailure, Canonical, EntrySection, Fact, FieldType, FormField, Option,
-    PageField, ReasonCode, ResolveContext,
+    CHOICE_TYPES, ApplyFailure, Canonical, EntryGroup, EntrySection, Fact, FieldType, FormField, Option,
+    FillPolicy, PageField, ReasonCode, ResolveContext, extra_entry_applies,
 )
 from .plan import STOP_WORDS, content_tokens, contains_run, is_generic, norm_label, tokens
 
@@ -107,9 +109,43 @@ TITLE_GENERIC = frozenset({"name", "number", "date", "status", "type", "file", "
                            "your", "yes", "no", "if"})
 # D-84 R4: a label about another person is never answered with the applicant's own
 # contact or identity facts.
-OTHER_PERSON = ("emergency", "next of kin", "kin", "referee", "referees", "reference",
-                "references", "spouse", "partner", "guardian", "parent", "parents", "manager",
-                "supervisor")
+OTHER_PERSON_BASE = ("emergency", "next of kin", "kin", "referee", "referees", "reference",
+                     "references", "spouse", "partner", "guardian", "parent", "parents", "manager",
+                     "supervisor")
+# Q-121 A1-P (code review M7, design §17.4): more people whose details a form may ask for.
+# They count only for a field that can hold such details (text, email, phone, ...; a yes/no or
+# a list never receives a name), never for a how-did-you-hear label, and relative / friend /
+# colleague only with a detail word ("Relative's name", "Friend email"), so "Do you have a
+# relative working here?" stays the relatives declaration. See `about_other_person`.
+OTHER_PERSON_ADDED = ("referrer", "referrers", "referral", "referred", "mentor", "mentors",
+                      "recruiter", "recruiters", "colleague", "colleagues", "friend", "friends",
+                      "relative", "relatives", "contact person", "contact persons",
+                      # D-211 item 8 (review M6): more people a detail field may belong to
+                      "guarantor", "guarantors", "hr contact", "hr email", "hr manager",
+                      "hr department", "professor", "professors", "recommender", "recommenders",
+                      "lecturer", "lecturers", "tutor", "tutors",
+                      # D-212 M6 / N8: an employer's contact for verification is not the applicant's
+                      "verification", "verifier", "employer s contact", "previous employer",
+                      "former employer", "contact of previous employer")
+OTHER_PERSON = OTHER_PERSON_BASE + OTHER_PERSON_ADDED
+_RELATION_WORDS = frozenset({"colleague", "colleagues", "friend", "friends", "relative", "relatives"})
+_ENTITY_CONTACT = frozenset({"verification", "verifier", "employer s contact", "previous employer",
+                             "former employer", "contact of previous employer"})
+_CONTACT_DETAIL = frozenset({"email", "mail", "phone", "mobile", "telephone", "tel", "cell"})
+_PERSON_DETAIL_TYPES = frozenset({FieldType.TEXT, FieldType.TEXTAREA, FieldType.EMAIL,
+                                  FieldType.PHONE, FieldType.NUMBER, FieldType.URL,
+                                  FieldType.TYPEAHEAD})
+_DETAIL_WORDS = frozenset({"name", "email", "mail", "phone", "mobile", "telephone", "tel", "cell",
+                           "number", "address", "contact", "details"})
+_HOW_HEARD_WORDS = frozenset({"hear", "heard", "source"})
+# The preceding-field rule (A1-P): which labels are the applicant's own contact or name
+# details, and what a preceding label may not start with to count as a person's details.
+_PHONE_WORDS = frozenset({"email", "mail", "phone", "mobile", "telephone", "tel", "cell", "fax"})
+_NAME_WORDS = frozenset({"name", "surname", "full", "first", "last", "family", "given", "middle",
+                         "legal", "preferred"})
+_QUESTION_LEADS = frozenset({"do", "does", "did", "have", "has", "had", "are", "is", "was", "were",
+                             "can", "could", "would", "will", "should", "how", "what", "which",
+                             "why", "when", "where", "who"})
 CONTACT_IDENTITY_REFS = ("profile:contact.", "profile:identity.", "standing:full_name",
                          "standing:account_email")
 
@@ -285,7 +321,11 @@ def _extra_usable(key: str, entry: Any, rctx: ResolveContext,
                   others: Sequence[Sequence[str]]) -> Optional[tuple[dict, bool]]:
     """(the answer here, employer-scoped?) for a citable `extra` entry, else None.
     §5.1: a generic-label entry only when scoped to this employer (F1, §12.1); never one
-    whose answer names another employer (G12)."""
+    whose answer names another employer (G12). Q-127 F1 follow-up: an entry scoped to another
+    employer is never listed, even on a hand-built context (the flow already drops it in
+    `apply_flow.profile_here`)."""
+    if not extra_entry_applies(entry, rctx.employer_name, rctx.employer_aliases):
+        return None
     if applicant.extra_entry_errors(key, entry):
         return None
     ans, scope = resolve.employer_answer(entry, rctx)
@@ -550,19 +590,124 @@ def _phrases_in(phrases: Iterable[str], toks: Sequence[str]) -> set[str]:
     return {p for p in phrases if contains_run(toks, p.split())}
 
 
-def about_other_person(field: FieldLike) -> bool:
+def _names_other_person(toks: Sequence[str], *, can_hold_details: bool) -> bool:
+    """The OTHER_PERSON words in `toks`. The base words always count. The added M7 words
+    (A1-P) count only when `can_hold_details` (the field takes free text or a number, not a
+    yes/no or a list), never beside a how-did-you-hear word ("Referral source"), and
+    relative / friend / colleague only beside a detail word (name, email, phone, ...)."""
+    if _phrases_in(OTHER_PERSON_BASE, toks):
+        return True
+    if not can_hold_details or _HOW_HEARD_WORDS.intersection(toks):
+        return False
+    added = _phrases_in(OTHER_PERSON_ADDED, toks)
+    if not added:
+        return False
+    if added & _ENTITY_CONTACT and not added - _ENTITY_CONTACT:
+        # D-212 M6 / N8: an employer's contact only beside an email / phone word ("Contact
+        # email of previous employer"); "Previous employer" / "Name of previous employer" ask
+        # for the employer itself
+        return bool(_CONTACT_DETAIL.intersection(toks))
+    if added - _RELATION_WORDS - _ENTITY_CONTACT:
+        return True
+    return bool(_DETAIL_WORDS.intersection(toks))
+
+
+def _own_detail_label(f: FormField) -> bool:
+    """A1-P: the field asks for a person's contact or name (an email, a phone, or a name
+    made only of name words), i.e. what the applicant's own details could be written into.
+    "Company name" and "Job title" are not."""
+    if f.type in (FieldType.EMAIL, FieldType.PHONE):
+        return True
+    toks = set(tokens(f.label))
+    if not toks:
+        return False
+    if toks & _PHONE_WORDS or {"contact", "number"} <= toks:
+        return True
+    return bool(toks & {"name", "surname"}) and set(content_tokens(f.label)) <= _NAME_WORDS
+
+
+_OWN_LABEL_LEADS = ("your", "my", "applicant", "applicants")
+
+
+def _follows_other_person(pf: PageField, after_other_person: bool) -> bool:
+    """A1-P, the preceding-field rule (review M7): a text, email or phone field whose label
+    is a name / email / phone, and whose previous field in the same group or section was
+    about another person, is about that person. "Supervisor name" then "Email address":
+    the email is the supervisor's. The previous field is `pf.context` (its label), or
+    `after_other_person` when the caller knows it from the page (the chain name, email,
+    phone). A previous label that is a question ("Do you have a relative here?") or has
+    nothing about a person does not count, and a field at the top of its section (no
+    previous label) is the applicant's own."""
+    f = pf.field
+    if f.type not in (FieldType.TEXT, FieldType.EMAIL, FieldType.PHONE) or not _own_detail_label(f):
+        return False
+    lead = tokens(f.label)[:1]
+    if lead and lead[0] in ("your", "my"):
+        return False             # D-211 item 8: "Your email address" is the applicant's own
+    if after_other_person:
+        return True
+    ctx = tokens(pf.context or "")
+    if not ctx or ctx[0] in _QUESTION_LEADS or (pf.context or "").rstrip().endswith("?"):
+        return False
+    return _names_other_person(ctx, can_hold_details=True)
+
+
+def about_other_person(field: FieldLike, *, after_other_person: bool = False,
+                       rctx: Optional[ResolveContext] = None) -> bool:
     """D-84 R4: the question is about someone other than the applicant (an emergency
-    contact, a referee, next of kin, ...). Read from the label, the entry heading and
-    the section; help text and context only for a generic label ("Please specify"), so
-    "Email" with help "the hiring manager will contact you here" stays the applicant's
-    own question (review F5)."""
+    contact, a referee, next of kin, a referrer, a mentor, ...). Read from the label, the
+    entry heading and the section; help text and context only for a generic label ("Please
+    specify"), so "Email" with help "the hiring manager will contact you here" stays the
+    applicant's own question (review F5).
+
+    Q-121 A1-P (review M7): the added words (OTHER_PERSON_ADDED) count only for a field that
+    can hold a person's details; and a name / email / phone field right after a field about
+    another person in the same group or section is about that person too
+    (`_follows_other_person`). `after_other_person` (default False: today's behaviour for a
+    caller that passes it nothing) says the previous field on the page was about another
+    person; `other_person_fields` computes it for a whole page.
+
+    D-223 release lock: the "Your / My ..." relaxation below is an always-filler rule. A caller
+    on the strict path passes its `rctx`; when `rctx.fill_policy` is not ALWAYS the relaxation
+    is skipped, so a strict attempt reads the section words exactly as `personal` did ("Your
+    email address" under "Referee details" is another person's). No `rctx` (the always filler's
+    own callers) keeps the relaxation."""
     f = _ff(field)
+    lead = tokens(f.label)[:1]
+    strict = rctx is not None and getattr(rctx, "fill_policy", None) is not FillPolicy.ALWAYS
+    if not strict and lead and lead[0] in _OWN_LABEL_LEADS and not _names_other_person(
+            tokens(f.label), can_hold_details=f.type in _PERSON_DETAIL_TYPES):
+        # fix2 C: "Your email address" / "My phone" / "Applicant's name" under a "Referrers
+        # and contacts" heading or after "Referrer's name" is the applicant's own; a label
+        # that itself names another person ("Your referee's email") still is not
+        return False
     parts = [f.label, f.section]
     if isinstance(field, PageField):
         parts.append(field.group_title)
     if is_generic(norm_label(f.label)):
         parts += [f.description, field.context if isinstance(field, PageField) else ""]
-    return bool(_phrases_in(OTHER_PERSON, tokens(" ".join(p for p in parts if p))))
+    if _names_other_person(tokens(" ".join(p for p in parts if p)),
+                           can_hold_details=f.type in _PERSON_DETAIL_TYPES):
+        return True
+    return isinstance(field, PageField) and _follows_other_person(field, after_other_person)
+
+
+def other_person_fields(fields: Sequence[PageField]) -> set[str]:
+    """A1-P: the keys of the fields of one page (in page order) that are about another
+    person, with the chain carried along: "Supervisor name", "Email address", "Phone number"
+    are all the supervisor's. The previous field is the one before it in the same group
+    (or section), as the reader's `context` defines it; a field with no label does not
+    break the chain."""
+    out: set[str] = set()
+    last: dict[str, bool] = {}
+    for pf in fields:
+        scope = pf.group or pf.field.section or ""
+        about = about_other_person(pf, after_other_person=last.get(scope, False))
+        if about:
+            out.add(pf.field.key)
+        if pf.field.label:
+            last[scope] = about
+    return out
 
 
 # Q-46(a): a field inside a past-entry section (a job, a school) is about that entry, so
@@ -665,7 +810,7 @@ def relevant(ref: str, field: FieldLike, rules: Any, *, facts: Sequence[Fact] = 
     word with the fact's title or a FACT_TITLE_SYNONYMS group. Never for the applicant's
     contact/identity facts on a question about another person (D-84 R4)."""
     f = _ff(field)
-    if ref.startswith(CONTACT_IDENTITY_REFS) and about_other_person(field):
+    if ref.startswith(CONTACT_IDENTITY_REFS) and about_other_person(field, rctx=rctx):
         return False
     if _own_contact_ref(ref) and in_entry_section(field):
         return False                                 # Q-46(a): an entry's Location is not home
@@ -920,6 +1065,121 @@ def check_entries(sections: Sequence[EntrySection], rctx: ResolveContext) -> Non
             continue
         if not source_entries(kind, rctx):
             raise ApplyFailure(ReasonCode.PROFILE_INCOMPLETE, sec.section)
+
+
+# --------------------------------------------------------------------------
+# Entry slots under fill policy `always` (Q-121, llm_first_fill_design §4.5, rev M5)
+# --------------------------------------------------------------------------
+
+# Site section -> the profile list its slots bind to (education, experience only: §4.5).
+SLOT_LISTS = {"education": "education", "work_experience": "experience", "experience": "experience"}
+MAX_ENTRIES = {"education": 2, "experience": 3}            # `apply.llm_fill.max_entries` defaults
+RUN_NAME_WORDS = {"education": ("school", "university", "institution", "college"),
+                  "experience": ("company", "employer", "organisation", "organization")}
+RUN_SECTION = {"education": "education", "experience": "work_experience"}
+
+
+@dataclasses.dataclass(frozen=True)
+class SlotPlan:
+    """How a page's entry slots meet the source entries (§4.5). `entries`: slot group id ->
+    the source entry id it is filled from ("education[0]", or a resume entry id);
+    `surplus`: slot group ids with no source entry left; `adds`: (section, source entry
+    id) per "Add another" click wanted, in order."""
+    entries: dict
+    surplus: tuple = ()
+    adds: tuple = ()
+
+
+def _ordered_sources(lst: str, rctx: ResolveContext, order: Mapping[str, Sequence[int]]) -> list[str]:
+    """The source entry ids of a list, newest first: the profile's (by `order[lst]`, which
+    is `briefing.entry_order`; file order when absent), else the resume's entries."""
+    kind = "experience" if lst == "experience" else "education"
+    ids = [eid for eid, *_ in source_entries(kind, rctx)]
+    rank = {f"{lst}[{i}]": n for n, i in enumerate(order.get(lst) or [])}
+    if any(eid in rank for eid in ids):
+        return sorted(ids, key=lambda e: (e not in rank, rank.get(e, 0), ids.index(e)))
+    return ids
+
+
+def bind_slots(sections: Sequence[EntrySection], fields: Sequence[PageField], rctx: ResolveContext,
+               order: Mapping[str, Sequence[int]], *,
+               max_entries: Optional[Mapping[str, int]] = None) -> SlotPlan:
+    """§4.5 binding, per education / experience section, slots in page order:
+    (1) a slot that E2-matches a source entry (`match_entries`) is bound to it; two slots
+    matching the same entry: the second is unmatched (E2 claims once);
+    (2) every other slot, blank or not (a stale site-restored entry too), is bound to the
+    first unbound source entry in `order` (newest first) and overwritten;
+    (3) slots left over are `surplus`;
+    (4) with an Add control, Adds are wanted until bound slots = min(source entries,
+    `max_entries[list]`). Other sections are not bound (the model reads rule 8)."""
+    caps = {**MAX_ENTRIES, **dict(max_entries or {})}
+    matched = match_entries(list(sections), list(fields), rctx)
+    entries: dict[str, str] = {}
+    surplus: list[str] = []
+    adds: list[tuple[str, str]] = []
+    for sec in sections:
+        lst = SLOT_LISTS.get(sec.section)
+        if not lst:
+            continue
+        sources = _ordered_sources(lst, rctx, order)
+        gids = [group_id(sec.section, g.index) for g in sorted(sec.entries, key=lambda g: g.index)]
+        used: set[str] = set()
+        for gid in gids:
+            eid = matched.get(gid)
+            if eid and eid in sources and eid not in used:
+                entries[gid] = eid
+                used.add(eid)
+        free = [e for e in sources if e not in used]
+        for gid in gids:
+            if gid in entries:
+                continue
+            if free:
+                entries[gid] = free.pop(0)
+            else:
+                surplus.append(gid)
+        bound = sum(1 for g in gids if g in entries)
+        want = min(len(sources), int(caps.get(lst, len(sources))))
+        if sec.add_locator:
+            for eid in free[:max(0, want - bound)]:
+                adds.append((sec.section, eid))
+    return SlotPlan(entries=entries, surplus=tuple(surplus), adds=tuple(adds))
+
+
+def label_runs(fields: Sequence[PageField], sections: Sequence[EntrySection] = ()
+               ) -> tuple[dict[str, str], list[EntrySection]]:
+    """§4.5 "detection is a hint": no group detected but the same label set repeats (School,
+    Degree, ... twice) -> the i-th run in page order is slot i of a stand-in section
+    ("education" / "work_experience", locators empty: nothing to click). Returns (field
+    key -> stand-in group id, the stand-in sections). One run, or a list that already has a
+    detected section with entries, gives nothing (the model's rule 8 takes the newest)."""
+    loose = [pf for pf in fields if not pf.group]
+    have = {s.section for s in sections if s.entries}
+    groups: dict[str, str] = {}
+    out: list[EntrySection] = []
+    for kind, words in RUN_NAME_WORDS.items():
+        section = RUN_SECTION[kind]
+        if section in have:
+            continue
+        heads = [i for i, pf in enumerate(loose)
+                 if any(w in tokens(pf.field.label) for w in words) and not about_other_person(pf)]
+        if len(heads) < 2:
+            continue
+        lab = norm_label(loose[heads[0]].field.label)
+        heads = [i for i in heads if norm_label(loose[i].field.label) == lab]
+        if len(heads) < 2:
+            continue
+        labels = {norm_label(pf.field.label) for pf in loose[heads[0]:heads[1]]}
+        span = heads[1] - heads[0]
+        entries = []
+        for n, h in enumerate(heads, start=1):
+            gid = group_id(section, n)
+            for pf in loose[h:h + span]:
+                if norm_label(pf.field.label) not in labels or pf.field.key in groups:
+                    break
+                groups[pf.field.key] = gid
+            entries.append(EntryGroup(section=section, index=n, title="", locator=""))
+        out.append(EntrySection(section=section, title="", entries=tuple(entries)))
+    return groups, out
 
 
 # --------------------------------------------------------------------------

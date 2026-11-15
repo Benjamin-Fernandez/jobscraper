@@ -3,7 +3,7 @@
 // Settings tab badge is attentionCount (with the two-failures-in-a-row rule over two loads);
 // the attention banner and the "Auto-apply on" chip appear from /api/connections and
 // /api/apply/status and are absent when those routes are; the phone's bottom bar and its
-// More sheet; and the CSS hooks that keep the page, the save bar and the toast above it.
+// More sheet; and the CSS hooks that keep the page, the section save bar (.ds-actions, Q-127) and the toast above it.
 import { readFileSync } from 'node:fs'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils'
@@ -392,9 +392,9 @@ describe('the bottom bar\'s CSS hooks (jsdom cannot measure, so the contract is 
     expect(phone).toMatch(/height:\s*calc\(var\(--bottom-nav-h\)/)
   })
 
-  it('the page, the save bar and the toast all keep clear of it with --bottom-nav-h', () => {
+  it('the page, the section save bar (.ds-actions, Q-127) and the toast all keep clear of it with --bottom-nav-h', () => {
     expect(app).toMatch(/\.panel\s*\{[^}]*var\(--bottom-nav-h\)/)
-    expect(read('../src/components/ApplicationDetails.vue')).toMatch(/\.save-bar\s*\{[^}]*bottom:\s*calc\(var\(--bottom-nav-h\)/)
+    expect(read('../src/components/DetailSection.vue')).toMatch(/\.ds-actions\s*\{[^}]*bottom:\s*calc\(var\(--bottom-nav-h\)/)
     expect(read('../src/components/ToastHost.vue')).toMatch(/bottom:\s*calc\([^;]*var\(--bottom-nav-h\)/)
   })
 })

@@ -85,6 +85,8 @@ function reply(body, status = 200) {
   }
 }
 
+const withSections = a => ({ ...a, sections: [{ id: 'all', title: 'All details', paths: (a.form || []).flatMap(g => g.items.map(i => i.path)) }] })
+
 // check: (body) => {errors} | null (404). derived: GET api/profile body, or null (404).
 function fakeServer({ applicant = payload(), put = null, check = null, derived = null } = {}) {
   const calls = []
@@ -93,10 +95,15 @@ function fakeServer({ applicant = payload(), put = null, check = null, derived =
     const path = String(url).replace(/^\/?/, '')
     const body = init.body ? JSON.parse(init.body) : undefined
     calls.push({ method, url: path, body })
-    if (path === 'api/applicant' && method === 'GET') return reply(applicant)
+    // Q-127 T0: the page is a list of collapsed sections, one open at a time. These field-level
+    // behaviours do not depend on the grouping, so the server sends ONE section that holds every
+    // form item and mountDetails() opens it; the grouping itself is pinned in q127-profile.test.js.
+    if (path === 'api/applicant' && method === 'GET') {
+      return reply(withSections(applicant))
+    }
     if (path === 'api/applicant' && method === 'PUT') {
       const r = put ? put(body) : { status: 200, body: { ...applicant, profile: body.profile, etag: 'bbbbbbbbbbbbbbbb', missing: [] } }
-      return reply(r.body, r.status)
+      return reply(r.status === 200 ? withSections(r.body) : r.body, r.status)
     }
     if (path === 'api/applicant/check' && method === 'POST') {
       const r = check ? check(body) : null
@@ -116,15 +123,18 @@ async function mountDetails(opts = {}) {
   const wrapper = mount(ApplicationDetails, { attachTo: document.body })
   await flushPromises()
   await flushPromises()
+  const row = wrapper.find('#ds-all-button')
+  if (row.exists()) { await row.trigger('click'); await flushPromises() }       // open the one section
   return wrapper
 }
 
+const reopen = async w => { const r = w.find('#ds-all-button'); if (r.attributes('aria-expanded') !== 'true') { await r.trigger('click'); await flushPromises() } }
 const puts = () => server.calls.filter(c => c.method === 'PUT' && c.url === 'api/applicant')
 const checks = () => server.calls.filter(c => c.url === 'api/applicant/check')
 const button = (w, text) => w.findAll('button').find(b => b.text().replace(/\s+/g, ' ').trim() === text)
 const field = (w, path) => w.find(`.field[data-path="${path}"]`)
 const input = (w, path) => w.find(`#f-${path.replace(/[^a-z0-9]+/gi, '-')}-in`)
-const save = async w => { await button(w, 'Save details').trigger('click'); await flushPromises() }
+const save = async w => { await w.find('.ds-save').trigger('click'); await flushPromises() }
 
 beforeEach(() => { window.localStorage.clear(); window.sessionStorage.clear() })
 afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals() })
@@ -197,7 +207,7 @@ describe('Q71-03 error summary with Go to', () => {
     const rows = banner.findAll('.summary-list li').map(li => li.text().replace(/\s+/g, ' '))
     expect(rows[0]).toContain('Email for applications: is not a valid email')
     expect(rows[1]).toContain('School 1 · Degree: is required')
-    expect(document.activeElement).toBe(banner.element)
+    expect(document.activeElement.id).toBe('f-contact-email-in')     // Q-127 U1: a refused save focuses the first error field
 
     const gos = banner.findAll('button.go')
     expect(gos).toHaveLength(2)
@@ -368,45 +378,8 @@ describe('Q71-09 a start date in the past warns', () => {
   })
 })
 
-// ---------------------------------------------------------------- Q71-13 rail, Next needed
-
-describe('Q71-13 section rail and Next needed', () => {
-  it('lists every group with items, says what each needs, and jumps to the section', async () => {
-    const w = await mountDetails()
-    const links = w.findAll('nav[aria-label="Sections"] .rail-link')
-    expect(links.map(l => l.attributes('data-section'))).toEqual(FORM.map(g => g.id))
-    const byId = id => w.find(`nav[aria-label="Sections"] .rail-link[data-section="${id}"]`)
-    expect(byId('contact').text()).toContain('2 needed')
-    expect(byId('pay').text()).toContain('1 needed')
-    expect(byId('education').find('.tag').exists()).toBe(false)
-    expect(byId('education').text()).toContain('Nothing needed')
-    expect(w.find('#g-contact').text()).toBe('Contact')
-    expect(w.find('section[data-section="contact"] .section-tag').text()).toBe('2 needed')
-    await byId('pay').trigger('click')
-    expect(document.activeElement.id).toBe('g-pay')
-  })
-
-  it('a section with an error says "to fix" first', async () => {
-    const w = await mountDetails({ put: () => ({ status: 422, body: { detail: 'invalid', errors: [{ path: 'contact.email', message: 'bad' }] } }) })
-    await input(w, 'contact.city').setValue('Singapore')
-    await save(w)
-    expect(w.find('nav[aria-label="Sections"] .rail-link[data-section="contact"]').text()).toContain('1 to fix')
-  })
-
-  it('Next needed walks email, city, salary, then wraps', async () => {
-    const w = await mountDetails()
-    const next = () => w.find('button.next-needed')
-    expect(next().text()).toBe('Next needed (3)')
-    const order = []
-    for (let i = 0; i < 4; i++) {
-      await next().trigger('click')
-      order.push(document.activeElement.id)
-    }
-    expect(order).toEqual(['f-contact-email-in', 'f-contact-city-in', 'f-pay-expected-salary-in', 'f-contact-email-in'])
-    await input(w, 'contact.email').setValue('a@b.co')
-    expect(next().text()).toBe('Next needed (2)')
-  })
-})
+// Q71-13 (section rail, "Next needed") is RETIRED by Q-127: the page is a list of collapsed sections with
+// a status card; those pins are replaced by web/tests/q127-profile.test.js (sections, "Needed", "Fill in").
 
 // ---------------------------------------------------------------- Q71-12 / 14 yes_no, show_when
 
@@ -463,9 +436,11 @@ describe('D-91 willing_to_sign_nda is unset / Yes / No and an untouched save nev
     await radios(w)[0].setValue(true)
     await save(w)
     expect(puts().at(-1).body.profile.declarations.willing_to_sign_nda).toBe(true)
+    await reopen(w)                                                    // Q-127: a saved section closes
     await radios(w)[1].setValue(true)
     await save(w)
     expect(puts().at(-1).body.profile.declarations.willing_to_sign_nda).toBe(false)
+    await reopen(w)
     await button(input(w, NDA), 'Clear').trigger('click')
     expect(input(w, NDA).text()).toContain('Not set')
     await save(w)
@@ -548,7 +523,7 @@ describe('Q71-16 which resume is in use', () => {
       applicant: payload({ documents_status: docs({ resume: null }), missing: [...MISSING, 'documents.resume'] }),
     })
     expect(field(w, 'documents.resume').text()).toContain('No resume yet.')
-    await w.find('.missing-list button.upload').trigger('click')
+    await field(w, 'documents.resume').find('button.upload').trigger('click')
     expect(w.emitted('go-view')).toEqual([['resume']])
   })
 
@@ -641,10 +616,12 @@ describe('Q71-18 a field is checked when the owner leaves it', () => {
 
 // ---------------------------------------------------------------- Q71-20 Private once
 
+const blockOf = (w, title) => w.findAll('.block').find(b => b.find('h4.block-title').text() === title)
+
 describe('Q71-20 "Private" is said once per section', () => {
   it('a fully private section has exactly one Private tag, and its fields carry the words for screen readers', async () => {
     const w = await mountDetails()
-    const sec = w.find('section[data-section="identity"]')
+    const sec = blockOf(w, 'Identity papers')
     expect(sec.findAll('.tag.private')).toHaveLength(1)
     expect(sec.find('.tag.private').text()).toBe('Private: never sent to the AI')
     expect(sec.find('#f-identity-passport-private').text()).toBe('Private: never sent to the AI.')
@@ -653,7 +630,7 @@ describe('Q71-20 "Private" is said once per section', () => {
 
   it('one private field among four is tagged on the field, not in the header', async () => {
     const w = await mountDetails()
-    const tags = w.find('section[data-section="contact"]').findAll('.tag.private').map(t => t.text())
+    const tags = blockOf(w, 'Contact').findAll('.tag.private').map(t => t.text())
     expect(tags).toEqual(['Private'])
   })
 })
@@ -665,7 +642,7 @@ describe('narrow layout: every grid track is minmax(0, 1fr)', () => {
   const css = src.slice(src.indexOf('<style'))
 
   it('the details body, form and groups are single minmax(0, 1fr) columns below the wide breakpoint', () => {
-    for (const sel of ['.app-details', '.details-body', '.the-form', '.group', '.field']) {
+    for (const sel of ['.app-details', '.block', '.block-fields', '.field']) {
       const rule = new RegExp(`(^|\\n)${sel.replace('.', '\\.')}\\s*\\{[^}]*grid-template-columns:\\s*minmax\\(0,\\s*1fr\\)`)
       expect(css, `${sel} has a minmax(0, 1fr) column`).toMatch(rule)
     }
@@ -679,7 +656,7 @@ describe('narrow layout: every grid track is minmax(0, 1fr)', () => {
 
   it('the rendered layout carries those classes', async () => {
     const w = await mountDetails()
-    expect(w.find('.app-details .details-body.has-rail form.the-form').exists()).toBe(true)
-    expect(w.find('.details-body > nav.details-rail').exists()).toBe(true)
+    expect(w.find('.app-details .sections-card .block .block-fields .field').exists()).toBe(true)
+    expect(w.find('nav.details-rail').exists()).toBe(false)             // Q-127: no section rail
   })
 })

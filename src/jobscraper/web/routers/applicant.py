@@ -40,13 +40,13 @@ from __future__ import annotations
 import threading
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from jobscraper import applicant, backends
 from jobscraper.config import Config
-from jobscraper.web.deps import get_config
+from jobscraper.web.deps import get_config, open_store
 
 router = APIRouter(tags=["applicant"])
 
@@ -117,8 +117,74 @@ def model_sees_private(cfg: Config) -> bool:
     return backends.is_local_config(getattr(cfg, "budget", None) or {})
 
 
-def applicant_view(cfg: Config) -> dict[str, Any]:
-    """The GET payload (questions_design §9.1)."""
+def profile_or_empty(cfg: Any) -> dict:
+    """The profile on disk, `{}` when the file is absent or unreadable (never an error)."""
+    try:
+        return applicant.load(cfg.applicant_path)
+    except applicant.ApplicantError:
+        return {}
+
+
+# ---- what waits on the owner's details (Q-127 B.2c, B.2e, B.4, B.5) ----------------------------
+# Read from the store's `waiting_on_details()` (a role whose newest attempt stopped for a fact
+# only the owner has, with the Profile paths it waited on) and compared with the profile. Only
+# paths, job ids and counts leave here: never an employer's question wording.
+
+def waiting_roles(store: Any, profile: dict) -> list[dict[str, Any]]:
+    """[{job_id, paths, ready}]: `ready` when the profile now holds a value at every path."""
+    method = getattr(store, "waiting_on_details", None)
+    rows = method() if callable(method) else []
+    return [{"job_id": w["job_id"], "paths": list(w["paths"]),
+             "ready": all(applicant.path_filled(profile, p) for p in w["paths"])} for w in rows]
+
+
+def needed_by(profile: dict, waiting: list[dict[str, Any]]) -> dict[str, int]:
+    """{path: applications waiting} for the paths still empty ("Needed by 2 applications")."""
+    out: dict[str, int] = {}
+    for w in waiting:
+        for p in w["paths"]:
+            if not applicant.path_filled(profile, p):
+                out[p] = out.get(p, 0) + 1
+    return out
+
+
+def details_needed(missing: list[str], profile: dict, waiting: list[dict[str, Any]]) -> list[str]:
+    """What the Profile badge counts: what is missing for auto-apply, then the path of every
+    waiting role that is still empty; de-duplicated, in that order."""
+    out = list(dict.fromkeys(missing))
+    for p in needed_by(profile, waiting):
+        if p not in out:
+            out.append(p)
+    return out
+
+
+_SENT_STATES = ("submitted", "submitted_unconfirmed")
+
+
+def ready_to_retry_jobs(store: Any, profile: dict) -> set[str]:
+    """The jobs whose stopped attempt can be tried again now (B.2e), never one that has a
+    submitted attempt. A role waiting on profile paths is ready when each holds a value; any
+    other stop that left questions is ready when none of its questions is still open or
+    put aside (`retry_candidates`)."""
+    ready: set[str] = set()
+    waiting = {w["job_id"]: w for w in waiting_roles(store, profile)}
+    ready.update(j for j, w in waiting.items() if w["ready"])
+    candidates = getattr(store, "retry_candidates", None)
+    for c in (candidates() if callable(candidates) else []):
+        j = c["job_id"]
+        if j in waiting or c["open"] or c["dismissed"]:
+            continue
+        if any(a.get("state") in _SENT_STATES for a in store.attempts_for_job(j)):
+            continue
+        ready.add(j)
+    return ready
+
+
+def applicant_view(cfg: Config, store: Any = None) -> dict[str, Any]:
+    """The GET payload (questions_design §9.1). Q-127 (additive): `sections` (the Profile
+    page's ten sections and their field paths), `needed_by` ({path: applications waiting}),
+    `waiting` ([{job_id, paths, ready}], from the store when one is given), and `extra_errors`
+    (how many saved answers are invalid: the page says so in one line, never which, M4)."""
     path = cfg.applicant_path
     error = None
     try:
@@ -127,10 +193,17 @@ def applicant_view(cfg: Config) -> dict[str, Any]:
     except applicant.ApplicantError as exc:
         profile, etag, error = {}, exc.etag, str(exc)
     filled, needed = applicant.completeness(profile)
+    errors = applicant.validate(profile) if error is None else []
+    extra_bad = {e.path.split(".", 2)[1] for e in errors if e.path.startswith("extra.")}
+    waiting = waiting_roles(store, profile) if store is not None else []
     return {
         "profile": applicant.json_safe(profile),
         "etag": etag,
-        "errors": errors_json(applicant.validate(profile)) if error is None else [],
+        "errors": errors_json([e for e in errors if not e.path.startswith("extra.")]),
+        "extra_errors": len(extra_bad),
+        "sections": applicant.sections_json(),
+        "needed_by": needed_by(profile, waiting),
+        "waiting": waiting,
         "missing": applicant.missing_for_apply(profile, cfg.resume_dir),
         "completeness": {"filled": filled, "needed": needed},
         "documents_status": applicant.documents_status(profile, cfg.resume_dir),
@@ -170,24 +243,36 @@ def with_version(profile: dict) -> dict:
     return {"version": applicant.SCHEMA_VERSION, **profile}
 
 
+def view_with_store(request: Request, cfg: Config) -> dict[str, Any]:
+    """`applicant_view` with the waiting roles read from the store (Q-127)."""
+    with open_store(request) as store:
+        return applicant_view(cfg, store)
+
+
 @router.get("/applicant")
-def get_applicant(cfg: Config = Depends(get_config)) -> dict[str, Any]:
-    """The profile, its etag, what is missing or wrong, and the form schema."""
-    return applicant_view(cfg)
+def get_applicant(request: Request, cfg: Config = Depends(get_config)) -> dict[str, Any]:
+    """The profile, its etag, what is missing or wrong, the form schema and, additive
+    (Q-127), the Profile page's sections and what waiting applications still need."""
+    return view_with_store(request, cfg)
 
 
 @router.put("/applicant")
-def put_applicant(body: ApplicantChange, cfg: Config = Depends(get_config)) -> Any:
+def put_applicant(body: ApplicantChange, request: Request,
+                  cfg: Config = Depends(get_config)) -> Any:
     """Save the whole profile: 409 on a stale etag or an unreadable file,
-    422 naming each invalid path; nothing is written on either."""
+    422 naming each invalid path; nothing is written on either.
+
+    Q-127 M4: an `extra` entry the request did not change is not validated, so one invalid
+    saved answer already on disk (tier 3 skips it) never stops a section save; a changed one
+    is, and its errors come back."""
     with PROFILE_WRITE_LOCK:
-        load_for_write(cfg, body.etag)
+        current = load_for_write(cfg, body.etag)
         profile = with_version(dict(body.profile))
         try:
-            applicant.save(cfg.applicant_path, profile)
+            applicant.save(cfg.applicant_path, profile, tolerate_unchanged_extra=current)
         except applicant.ApplicantError as exc:
             return invalid(exc.errors)
-    return applicant_view(cfg)
+    return view_with_store(request, cfg)
 
 
 @router.post("/applicant/check")
@@ -195,9 +280,12 @@ def check_applicant(body: ApplicantCheck) -> dict[str, Any]:
     """Validate a profile the way PUT would, without writing it (Q-71 G5): the
     form calls this when a field loses focus, so a mistake shows under the field
     and not only after Save. No etag and no write lock, because nothing is read
-    from or written to the file; `{errors: [{path, message}]}`, empty when valid."""
+    from or written to the file; `{errors: [{path, message}]}`, empty when valid. Q-127 M4:
+    errors about saved answers (`extra.*`) are left out: the Profile page does not edit them
+    and never shows one (they are managed at `GET /api/apply/remembered`)."""
     profile = with_version(dict(body.profile))
-    return {"errors": errors_json(applicant.validate(profile))}
+    return {"errors": errors_json([e for e in applicant.validate(profile)
+                                   if not e.path.startswith("extra.")])}
 
 
 def _proposals_state(cfg: Config) -> tuple[str, dict | None]:
@@ -231,7 +319,7 @@ def get_refresh(cfg: Config = Depends(get_config)) -> dict[str, Any]:
 
 
 @router.post("/applicant/refresh")
-def save_refresh(body: RefreshSave, cfg: Config = Depends(get_config)) -> Any:
+def save_refresh(body: RefreshSave, request: Request, cfg: Config = Depends(get_config)) -> Any:
     """Apply the ticked changes: 409 on a stale etag, an unreadable file, or
     proposals that are gone or older than the resume (`detail` says which);
     422 naming each invalid path; nothing is written on any of them. Ids the
@@ -246,7 +334,8 @@ def save_refresh(body: RefreshSave, cfg: Config = Depends(get_config)) -> Any:
         saved = len([a for a in dict.fromkeys(body.accept) if a not in ignored])
         if saved:
             try:
-                applicant.save(cfg.applicant_path, with_version(new))
+                applicant.save(cfg.applicant_path, with_version(new),
+                               tolerate_unchanged_extra=current)
             except applicant.ApplicantError as exc:
                 return invalid(exc.errors)
-    return {**applicant_view(cfg), "saved": saved, "ignored": ignored}
+    return {**view_with_store(request, cfg), "saved": saved, "ignored": ignored}

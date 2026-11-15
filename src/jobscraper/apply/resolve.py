@@ -37,7 +37,7 @@ from .. import applicant
 from ..backends import BackendError
 from .contracts import (
     CHOICE_TYPES, EMPLOYER_SPECIFIC_DECLARATIONS, Answer, AnswerStatus, AnswerTier, Canonical,
-    FieldType, FormField, Option, ResolveContext,
+    FieldType, FormField, Option, ResolveContext, extra_entry_applies,
 )
 from . import declarations
 from .plan import (
@@ -1110,6 +1110,10 @@ def _extra_answer(f: FormField, label_norm: str,
     generic = is_generic(base)
     matches, invalid = [], []
     for key, entry in extra.items():
+        if isinstance(entry, dict) and (
+                entry.get("promoted") is True                 # Q-127 H1: a details field, never wording
+                or not entry_applies_here(entry, ctx)):       # Q-127 F1: "only Example Co" stays there
+            continue
         labels = entry.get("labels") if isinstance(entry, dict) else None
         if not isinstance(labels, list) or not any(
                 isinstance(x, str) and _label_hit(x, label_norm) for x in labels):
@@ -1134,6 +1138,14 @@ def _extra_answer(f: FormField, label_norm: str,
     rule_id = f"extra.{key}" + (f"@{scope}" if scope else "")
     return _answer(f, fit, AnswerTier.MEMORY, f"memory:extra.{key}", CONF_MEMORY,
                    rule_id=rule_id, sensitive=entry.get("sensitive") is True), ""
+
+
+def entry_applies_here(entry: Any, ctx: ResolveContext) -> bool:
+    """Q-127 F1: may this `extra` entry answer a form of this job's employer? An entry the
+    owner saved "only for applications to <employer>" (`extra.<k>.employer`) applies to that
+    employer and its aliases only; an unscoped one applies everywhere. The one rule is
+    `contracts.extra_entry_applies`; tier 3 and the briefing both call it through here."""
+    return extra_entry_applies(entry, ctx.employer_name, ctx.employer_aliases)
 
 
 def extra_answer(f: FormField, label_norm: str,

@@ -7,7 +7,7 @@
 //   defineProps(tabProps); defineEmits(tabEmits)
 //
 // `badge` (optional) turns the shell's data - { jobs, stats, runs, run,
-// openQuestions } - into a count shown on the tab, or null for none. `badgeLabel`
+// detailsNeeded, attention } - into a count shown on the tab, or null for none. `badgeLabel`
 // says what it counts, for screen readers. `goKey` (optional) is the letter of
 // the go-to shortcut "g <letter>" (shortcuts.js). `quiet` draws the tab less
 // prominently and apart from the rest (Q-75 N19).
@@ -33,11 +33,12 @@ export const TABS = [
   },
   { id: 'runs', label: 'Runs', component: () => import('./tabs/Runs.vue'), goKey: 'r' },
   { id: 'companies', label: 'Companies', component: () => import('./tabs/Companies.vue'), goKey: 'c' },
-  // The badge counts applications waiting on an answer (Q-75 N7): the shell asks
-  // the server for the open questions at start and after a job ends.
+  // The badge counts the details auto-apply is waiting for (Q-127 B.4, D-215): the length of
+  // `details_needed` in GET /api/apply/status, which the shell already reads. Never a count of
+  // questions, assumed answers or saved answers: the Profile page shows none of those.
   {
     id: 'profile', label: 'Profile', component: () => import('./tabs/Profile.vue'),
-    badge: ({ openQuestions }) => openQuestions, badgeLabel: 'open questions', goKey: 'p',
+    badge: ({ detailsNeeded }) => detailsNeeded, badgeLabel: 'details needed', goKey: 'p',
   },
   // The badge counts connections that need the owner (Q-100 §1): none when the
   // count is 0 or the connections could not be loaded.

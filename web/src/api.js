@@ -247,9 +247,17 @@ export function getCompanyHealth() {
 // The same list as a CSV file (the browser downloads it).
 export const COMPANY_EXPORT_URL = 'api/companies/export.csv'
 
-// ---- Q-30 (D-74): Application details and Questions from applications ----
-// The shapes are fixed in docs/architecture/questions_design.md section 9.
+// ---- Q-30 (D-74): Application details ----
+// The shapes are fixed in docs/architecture/questions_design.md section 9. The question
+// routes (list, answer, keep, change, dismiss, retry) are retired (Q-127 M5, D-215): the server
+// answers them empty or with 410, and no screen calls them any more.
 
+// Q-127 W1 adds, to this reply and to the PUT's: `sections: [{id, title, paths}]` (the
+// server's ten sections of "Your details"; every form item sits in exactly one),
+// `needed_by: {path: n}` (applications waiting on that path), `waiting: [{job_id, paths,
+// ready}]` (roles that stopped for a detail; `ready` once every path they wait on is filled)
+// and `extra_errors: n` (saved answers that fail validation: a count only, never a path).
+// `errors` no longer lists `extra.*`.
 // {profile, etag, errors:[{path,message}], missing:[path], completeness:{filled,needed},
 //  from_resume:[path], sensitive:[path], form:[group], file:{exists, has_comments, error}}
 export function getApplicant() {
@@ -283,30 +291,6 @@ export function getResumeRefresh() {
 // 409 {detail:'changed'|'unreadable'|'stale'|'none'|'no_profile'}; 422 {errors}.
 export function saveResumeRefresh(etag, accept) {
   return sendJson('applicant/refresh', 'POST', { etag, accept })
-}
-
-// {mode:'auto'|'dry_run', groups:[...], ready:[{job_id,attempt_id,company,title}],
-//  waiting:[...], busy}. `status` is open, answered or all.
-export function getQuestions(status = 'open') {
-  return request(`questions?status=${encodeURIComponent(status)}`)
-}
-
-// body: {key, etag, employer?, value?, picks?}. 200 {answered, ready, etag}; 404 unknown
-// key; 409 changed/unreadable; 422 invalid.
-export function answerQuestion(body) {
-  return sendJson('questions/answer', 'POST', body)
-}
-
-// "I'll answer this one by hand": 204, no body.
-export function dismissQuestion(key) {
-  return request(`questions/${encodeURIComponent(key)}/dismiss`, { method: 'POST' })
-}
-
-// Put the jobs that stopped on a question now answered back in the auto-apply
-// queue (Q-120). 202 {queued:[{job_id, position}], refused, job, started, disabled,
-// paused}, never a 409; 422 {detail:'not_ready', job_ids} (or profile_incomplete).
-export function retryQuestions(jobIds) {
-  return sendJson('questions/retry', 'POST', { job_ids: jobIds })
 }
 
 // ---- Q-60 (F-50): application status from email ----
@@ -410,6 +394,9 @@ export function problemOf(e) {
 // {mode:'auto'|'dry_run', missing:[dotted paths], busy, queue:{waiting, applying, paused}}.
 // `busy` (a job holds the slot) no longer blocks a click (Q-120): the Inbox reads only
 // `mode` and `missing`. Never throws on a missing profile.
+// Q-127 W1 adds `details_needed: [path]` (`missing`, then the paths waiting applications
+// still need, de-duplicated: the Profile badge is its length) and `details_needed_by:
+// {path: n applications}`.
 export function applyStatus() {
   return request('apply/status')
 }
@@ -444,7 +431,7 @@ export function ordinal(n) {
   return `${k}${{ 1: 'st', 2: 'nd', 3: 'rd' }[k % 10] ?? 'th'}`
 }
 
-// What an enqueue really did, as one sentence (Inbox and Questions retry share it).
+// What an enqueue really did, as one sentence (Inbox, Applications and Apply again share it).
 // `r` is the 202 body. Switched off, paused, or started at once beat the plain
 // "added" line, so the owner is never told the work is under way when it is not.
 export function enqueueMessage(r) {
@@ -483,4 +470,48 @@ export function clearApplyQueue() {
 // when `attemptId` is no longer the live attempt (the queue is paused anyway).
 export function stopApplyAttempt(attemptId) {
   return sendJson('apply/queue/stop', 'POST', { attempt_id: attemptId })
+}
+
+// ---- Q-127 (D-215): what was sent, "Save for next time", and the remembered answers ----
+// The shapes are fixed in docs/architecture/q127_profile_questions_design.md B.5 and the
+// W1 handoff in comms/outbox/software-engineer.md. Nothing here starts an application:
+// "Apply again" and "Try again" stay `startAutoApply`.
+
+// What one attempt filled or sent. {attempt: {id, kind, state, finished_at, trial,
+// entries_note}, employer, fields: [{id, step, label, type, required, value_text,
+// basis_text, assumed, reason_text, status: 'sent'|'not_answered'|'not_sent',
+// remembered_text, can_remember, refusal: ''|'follows_your_details'|'shared_answer'|
+// 'too_general', options: [labels]}]}. 404 when the attempt is not that job's.
+export function getAttemptAnswers(jobId, attemptId) {
+  return request(`applications/${encodeURIComponent(jobId)}/attempts/${encodeURIComponent(attemptId)}/answers`)
+}
+
+// Save the owner's answer for next time. body: {value | picks: [option labels as offered],
+// only_employer?: true (default), etag}. 200 {key, remembered_text, ready_to_retry, etag};
+// 404 not_found; 409 shared_answer | changed | unreadable; 422 follows_your_details |
+// too_general (both with `text`) | invalid (with `errors`). Use `problemOf` for the code.
+export function rememberAnswer(jobId, attemptId, answerId, body) {
+  return sendJson(
+    `applications/${encodeURIComponent(jobId)}/attempts/${encodeURIComponent(attemptId)}`
+      + `/answers/${encodeURIComponent(answerId)}/remember`,
+    'POST',
+    body,
+  )
+}
+
+// Answers the owner saved from an application, newest first (Settings -> Apply, "Answers you
+// corrected"). {items: [{key, title, value_text, scope_text, employer, kind, sensitive,
+// needs_attention}], count, etag, unreadable}. The list is an object because Forget needs
+// its `etag`.
+export function getRemembered() {
+  return request('apply/remembered')
+}
+
+// Forget one remembered answer. `etag` is the list's. 200 {key, forgotten: true, etag};
+// 404 not_found; 409 changed | unreadable; 422 invalid.
+export function forgetRemembered(key, etag) {
+  return request(
+    `apply/remembered/${encodeURIComponent(key)}?etag=${encodeURIComponent(etag ?? '')}`,
+    { method: 'DELETE' },
+  )
 }

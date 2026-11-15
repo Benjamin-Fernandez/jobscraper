@@ -12,6 +12,8 @@ retired at M9-T1 (kept at the v1-final tag).
 """
 from __future__ import annotations
 
+import logging
+import math
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -103,6 +105,111 @@ class LlmFillConfig:
     max_followups: int = 25                 # pick / recheck / second-opinion calls per attempt
     max_reveal_rounds: int = 2              # re-reads after an answer revealed new fields (§8)
     debug_dump: bool = False                # true: data/apply/<id>/prompts/NN.json (local, gitignored)
+    # Q-121 (llm_first_fill_design §7.2): read under fill policy `always` only.
+    must_answer_batch: int = 8              # A5: required fields per must-answer call
+    last_resort_max: int = 5                # A6: F2-F6 answers on one page before a content failure
+    last_resort_max_attempt: int = 12       # A6: ... and in one attempt
+    settle_ms: int = 1500                   # A1: wait for the site to restore its own values
+    briefing_max_tokens: int = 18000        # §3.2: past this, earlier answers are ranked per call
+    # §4.5: entries added per section; (list, count) pairs so the frozen config stays hashable
+    # (`dict(max_entries)` is the mapping `facts.bind_slots` takes).
+    max_entries: tuple = (("education", 2), ("experience", 3))
+
+
+# Q-121 (D-208, llm_first_fill_design §7.2): how forms are answered. `always`: the local AI
+# answers every field (effective only with a local model, K2); `strict`: stop and ask
+# (ADR-0003), the code default.
+FILL_POLICIES = ("strict", "always")
+_cfg_log = logging.getLogger("jobscraper.config")
+
+
+def fill_policy_value(v: Any, *, where: str = "apply.fill_policy") -> str:
+    """`strict` or `always`. Anything else (a typo, a wrong type) is `strict` with a
+    warning: the safer policy, never an error at start-up (§7.2)."""
+    if v is None:
+        return "strict"
+    text = str(getattr(v, "value", v)).strip().lower()
+    if text in FILL_POLICIES:
+        return text
+    _cfg_log.warning("%s: %r is not strict or always; using strict", where, str(v)[:40])
+    return "strict"
+
+
+TRIAL_RUNS_MAX = 20                         # the Settings range (design §7.2: 0..20)
+MAX_ENTRIES_MAX = 20
+
+
+def _whole_number(v: Any) -> Optional[int]:
+    """`v` as a whole number, or None when it is not one (review F9): an int, a finite
+    float with no fraction (3.0 -> 3), or text of either ("3", "3.0", " 3 "). A bool, NaN,
+    an infinity (+inf is None here; callers that clamp check it first), 3.5 or any other
+    text is None. Never raises."""
+    if isinstance(v, bool):
+        return None
+    if isinstance(v, int):
+        return v
+    try:
+        f = float(str(v).strip()) if not isinstance(v, float) else v
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(f) or f != int(f):
+        return None
+    return int(f)
+
+
+def _is_plus_inf(v: Any) -> bool:
+    try:
+        return not isinstance(v, bool) and float(str(v).strip()) == math.inf
+    except (TypeError, ValueError):
+        return False
+
+
+def trial_runs_value(v: Any, *, where: str = "apply.always_trial_runs") -> int:
+    """A whole number in 0..20 (§12 rev H3; 3.0 reads as 3). Above 20 (an infinity
+    included) is 20, the reading that sends less; anything else that is not a whole number
+    >= 0 (text, a bool, NaN, 3.5, below 0) is 0, the default (no trial). Each with a
+    warning; never an error at start-up."""
+    if v is None or v == "":
+        return 0
+    if _is_plus_inf(v):
+        _cfg_log.warning("%s: %r is above %d; using %d", where, str(v)[:40],
+                         TRIAL_RUNS_MAX, TRIAL_RUNS_MAX)
+        return TRIAL_RUNS_MAX
+    n = _whole_number(v)
+    if n is None:
+        _cfg_log.warning("%s: %r is not a whole number; using 0", where, str(v)[:40])
+        return 0
+    if n < 0:
+        _cfg_log.warning("%s: %d is below 0; using 0", where, n)
+        return 0
+    if n > TRIAL_RUNS_MAX:
+        _cfg_log.warning("%s: %d is above %d; using %d", where, n, TRIAL_RUNS_MAX, TRIAL_RUNS_MAX)
+        return TRIAL_RUNS_MAX
+    return n
+
+
+def _max_entries(v: Any) -> tuple:
+    """`apply.llm_fill.max_entries` ({education: 2, experience: 3}) as sorted pairs; a
+    malformed block keeps the defaults; a count that is not a whole number >= 0 (text, a
+    bool, NaN, an infinity, 2.5; review F9) keeps that section's default, one above 20 is
+    20, each with a warning; 2.0 reads as 2. Never raises."""
+    base = dict(LlmFillConfig.max_entries)
+    if isinstance(v, dict):
+        for k, n in v.items():
+            name = str(k)[:40]
+            whole = _whole_number(n)
+            if whole is None or whole < 0:
+                _cfg_log.warning("apply.llm_fill.max_entries.%s: %r is not a whole number "
+                                 ">= 0; keeping the default", name, str(n)[:40])
+                continue
+            if whole > MAX_ENTRIES_MAX:
+                _cfg_log.warning("apply.llm_fill.max_entries.%s: %d is above %d; using %d",
+                                 name, whole, MAX_ENTRIES_MAX, MAX_ENTRIES_MAX)
+                whole = MAX_ENTRIES_MAX
+            base[str(k)] = whole
+    elif v is not None:
+        _cfg_log.warning("apply.llm_fill.max_entries is not a mapping; using the defaults")
+    return tuple(sorted(base.items()))
 
 
 @dataclass(frozen=True)
@@ -134,6 +241,15 @@ class ApplyConfig:
     # (S) profile values. Takes effect only with a local backend (backends.is_local);
     # S values are never logged and code-decided answers stay code-decided either way.
     model_sees_sensitive: bool = False
+    # Q-121 (D-208, llm_first_fill_design §7.2, §12): `strict` (default) | `always`, and the
+    # optional first-use trial (the first N attempts under `always` are dry runs; 0 = off).
+    # Normalised in from_raw / with_settings: an invalid value is `strict` / 0, never an error.
+    fill_policy: str = "strict"
+    always_trial_runs: int = 0
+    # Release lock (D-223): `always` takes effect only when this install has released it.
+    # Read from the config FILE only (never in SETTING_KEYS, no route writes it); anything
+    # but a real YAML `true` is False. Tests set it on the ApplyConfig they build.
+    always_available: bool = False
     llm_fill: LlmFillConfig = LlmFillConfig()
     compose: ComposeConfig = ComposeConfig()      # Q-45: composed texts, off by default
     mail: ApplyMailConfig = ApplyMailConfig()
@@ -149,14 +265,24 @@ class ApplyConfig:
         def block(key: str) -> dict[str, Any]:
             return raw.get(key) if isinstance(raw.get(key), dict) else {}
         backup = {"host": "", **block("mail_backup")}
-        return cls(**_coerce(cls, raw, skip={"mail", "mail_backup", "llm_fill", "compose"}),
-                   llm_fill=LlmFillConfig(**_coerce(LlmFillConfig, block("llm_fill"))),
+        fill = block("llm_fill")
+        llm = LlmFillConfig(**_coerce(LlmFillConfig, fill, skip={"max_entries"}))
+        if "max_entries" in fill:
+            from dataclasses import replace
+            llm = replace(llm, max_entries=_max_entries(fill.get("max_entries")))
+        return cls(**_coerce(cls, raw, skip={"mail", "mail_backup", "llm_fill", "compose",
+                                             "always_available", *POLICY_KEYS}),
+                   **_policy_keys(raw),
+                   always_available=raw.get("always_available") is True,
+                   llm_fill=llm,
                    compose=ComposeConfig(**_coerce(ComposeConfig, block("compose"))),
                    mail=ApplyMailConfig(**_coerce(ApplyMailConfig, block("mail"))),
                    mail_backup=ApplyMailConfig(**_coerce(ApplyMailConfig, backup)))
 
-    # Settings → Apply keys that override this block (apply_design §14.3).
-    SETTING_KEYS = ("mode", "daily_cap", "per_employer_daily_cap", "headed", "captcha_wait_s")
+    # Settings → Apply keys that override this block (apply_design §14.3). Q-121: the fill
+    # policy and the trial count too (§7.2), read like mode and caps but never raising.
+    SETTING_KEYS = ("mode", "daily_cap", "per_employer_daily_cap", "headed", "captcha_wait_s",
+                    "fill_policy", "always_trial_runs")
     MAIL_SETTING_KEYS = ("host", "port", "username")
     COMPOSE_SETTING_KEY = "compose.enabled"          # stored as `apply.compose.enabled`
 
@@ -165,17 +291,34 @@ class ApplyConfig:
         table (`get(key) -> str | None`, e.g. `store.get_setting`) replaces the
         config value; absent keys fall back to config (§14.3). The cover-letter
         opt-in (`apply.compose.enabled`, Q-111) is the one nested key honoured:
-        it rebuilds `compose` with only `enabled` changed."""
+        it rebuilds `compose` with only `enabled` changed. A stored `fill_policy` /
+        `always_trial_runs` that is not valid reads as `strict` / 0 (with a warning)."""
         from dataclasses import replace
 
         top = {k: get(f"apply.{k}") for k in self.SETTING_KEYS}
         mail = {k: get(f"apply.mail.{k}") for k in self.MAIL_SETTING_KEYS}
         compose = {"enabled": get(f"apply.{self.COMPOSE_SETTING_KEY}")}
-        top = _coerce(ApplyConfig, {k: v for k, v in top.items() if v is not None})
+        stored = {k: v for k, v in top.items() if v is not None}
+        policy = _policy_keys(stored, where="settings apply.")
+        top = _coerce(ApplyConfig, {k: v for k, v in stored.items() if k not in POLICY_KEYS})
         mail = _coerce(ApplyMailConfig, {k: v for k, v in mail.items() if v is not None})
         compose = _coerce(ComposeConfig, {k: v for k, v in compose.items() if v is not None})
-        return replace(self, **top, mail=replace(self.mail, **mail),
+        return replace(self, **top, **policy, mail=replace(self.mail, **mail),
                        compose=replace(self.compose, **compose))
+
+
+POLICY_KEYS = ("fill_policy", "always_trial_runs")
+
+
+def _policy_keys(raw: dict[str, Any], *, where: str = "apply.") -> dict[str, Any]:
+    """The Q-121 keys present in `raw`, validated (never raising)."""
+    out: dict[str, Any] = {}
+    if raw.get("fill_policy") is not None:
+        out["fill_policy"] = fill_policy_value(raw["fill_policy"], where=f"{where}fill_policy")
+    if raw.get("always_trial_runs") is not None:
+        out["always_trial_runs"] = trial_runs_value(raw["always_trial_runs"],
+                                                    where=f"{where}always_trial_runs")
+    return out
 
 
 def _coerce(klass: type, raw: dict[str, Any], skip: frozenset | set = frozenset()) -> dict[str, Any]:

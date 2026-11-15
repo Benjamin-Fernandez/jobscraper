@@ -395,6 +395,133 @@ def capture_page(fields: Sequence[Any], answers: Mapping[str, Answer], ctx: Reso
 
 
 # --------------------------------------------------------------------------
+# Fill policy `always` (Q-121, D-208; llm_first_fill_design §4.6, §6.3)
+# --------------------------------------------------------------------------
+
+ASSUMED = QuestionReason.ASSUMED
+ASSUMED_NOTE = "assumed"
+OWNER_FACT_NOTE = "owner_fact_missing"
+# Sources whose answer is code mechanics or the owner's own (P1 files, P2 the identity email,
+# P3 the owner's earlier answer) or a per-job composed text: never offered for Keep / Change.
+_NOT_ASSUMABLE_SOURCES = ("field_map:", "memory:", "composed")
+_SENT = frozenset({AnswerStatus.FILLED, AnswerStatus.PREFILLED})
+
+
+def capture_assumptions(fields: Sequence[Any], answers: Mapping[str, Answer],
+                        ctx: ResolveContext, rules: Any = None) -> list[CapturedQuestion]:
+    """"Answered for you" (§6.3): every field of a page under `always` whose answer was put
+    on the page with `Answer.assumed`, as a question with reason `assumed`, keyed like
+    `capture_page` (the qualified label, QD §5), required or optional. Not captured: files
+    and hidden inputs, P-rows (the identity email, the owner's own earlier answer), composed
+    texts (per job, §4.8) and declarations about this employer (an answer saved from here
+    must never stand at another employer). `fields` are PageFields keyed as the audit rows
+    (the card reads the sent value from `apply_answers` by that key). No answer and no
+    profile value goes into a question (QD §7): the note names the basis only."""
+    employer = declarations.employer_norm(ctx.employer_name or "")
+    ords = resolve.generic_ordinals([pf.field for pf in fields])
+    out: list[CapturedQuestion] = []
+    for pf in fields:
+        f = pf.field
+        a = answers.get(f.key)
+        if a is None or not getattr(a, "assumed", False) or a.status not in _SENT \
+                or f.type in NOT_CAPTURED_TYPES \
+                or (a.source or "").startswith(_NOT_ASSUMABLE_SOURCES):
+            continue
+        if declarations.classify_field(f, ctx) in EMPLOYER_SPECIFIC_DECLARATIONS:
+            continue
+        label_norm = qualified_label(f.label, f.description, pf.context, step=f.step,
+                                     ordinal=ords.get(f.key, 0))
+        options = tuple(o.label for o in f.options[:OPTIONS_MAX]) \
+            if f.type is not FieldType.DATE else ()
+        out.append(CapturedQuestion(
+            label=f.label[:LABEL_MAX], label_norm=label_norm, kind=kind_for(f),
+            reason=ASSUMED, field_key=f.key, field_type=f.type, required=bool(f.required),
+            sensitive=bool(a.sensitive or f.canonical in resolve.SENSITIVE_CANONICALS),
+            description=(f.description or "")[:DESCRIPTION_MAX],
+            options=options, option_norms=tuple(norm_label(o) for o in options),
+            target_path="", step=f.step, ats=ctx.ats, employer_norm=employer,
+            note=f"{ASSUMED_NOTE}: {a.source or 'assumption'}"[:NOTE_MAX]))
+    return out
+
+
+def capture_owner_fact(fact: str, ctx: ResolveContext, *, field: Any = None, field_key: str = "",
+                       label: str = "", target_path: str = "", step: str = "") -> CapturedQuestion:
+    """The owner-fact stop (§4.6): a required fact only the owner knows (date of birth, a
+    grade, a salary figure, a passport number) that neither the profile nor the resume
+    holds. Captured sensitive, reason `profile_gap` with `target_path` when the Profile form
+    edits that path (`identity.date_of_birth`, `education[0].grade`), else `no_rule` (saved to
+    `extra`). `field` is the stopped page's PageField when the flow could read it again (its
+    type, help and options), else the stop's own label and key stand (a TEXT question)."""
+    if field is not None:
+        f, context = field.field, field.context
+    else:
+        f = FormField(key=field_key or "owner_fact", label=label or fact or target_path,
+                      type=FieldType.TEXT, required=True, step=step)
+        context = ""
+    target = _gap_target(target_path)
+    options = tuple(o.label for o in f.options[:OPTIONS_MAX]) \
+        if f.type is not FieldType.DATE else ()
+    return CapturedQuestion(
+        label=(f.label or label or fact)[:LABEL_MAX],
+        label_norm=qualified_label(f.label or label or fact, f.description, context,
+                                   step=f.step or step),
+        kind=kind_for(f), reason=QuestionReason.PROFILE_GAP if target else QuestionReason.NO_RULE,
+        field_key=f.key, field_type=f.type, required=True, sensitive=True,
+        description=(f.description or "")[:DESCRIPTION_MAX], options=options,
+        option_norms=tuple(norm_label(o) for o in options), target_path=target,
+        step=f.step or step, ats=ctx.ats,
+        employer_norm=declarations.employer_norm(ctx.employer_name or ""),
+        note=f"{OWNER_FACT_NOTE}: {fact}"[:NOTE_MAX])
+
+
+def _number(sent: Any) -> Any:
+    """A sent value read as a number for a NUMBER question (Keep): an int when it is whole
+    ("3", 3, 3.0), else a float ("2.5"); None for anything else (a bool, a list, a file, text,
+    "1,000", NaN, infinity). `web/routers/questions._number` is the same reading."""
+    if isinstance(sent, bool) or not isinstance(sent, (int, float, str)):
+        return None
+    try:
+        n = float(sent.strip()) if isinstance(sent, str) else float(sent)
+    except (ValueError, OverflowError):
+        return None
+    if n != n or n in (float("inf"), float("-inf")):
+        return None
+    return int(n) if n == int(n) else n
+
+
+def kept_value(kind: Any, sent: Any) -> Any:
+    """Keep (§6.3): the value JobScraper sent (`store.assumed_answer(...)["value"]`) in the
+    shape an owner's answer to a question of `kind` takes, for the existing answer path
+    (the web saves it to `extra` and marks the row answered, so P3 / ANSWERS YOU GAVE BEFORE
+    carry it next time with no assumption mark). yes_no -> True / False (a checkbox's
+    "true"/"false", "Yes"/"No"); multi -> a list of strings; number -> a number (the kind alone
+    decides: a "3.50" answer to a TEXT question stays exactly as sent); anything else -> text. A value
+    that cannot be read as the kind -> None (the owner answers with Change)."""
+    k = _kind_value(kind)
+    if sent is None:
+        return None
+    if k == QuestionKind.YES_NO.value:
+        if isinstance(sent, bool):
+            return sent
+        word = norm_label(" ".join(str(x) for x in sent) if isinstance(sent, list) else str(sent))
+        if word in ("true", "yes", "y", "checked", "on"):
+            return True
+        if word in ("false", "no", "n", "unchecked", "off"):
+            return False
+        return None
+    if k == QuestionKind.MULTI.value:
+        return [str(x) for x in sent] if isinstance(sent, list) else [str(sent)]
+    if k == QuestionKind.NUMBER.value:            # only the kind decides: a number is saved as one
+        return _number(sent)
+    if isinstance(sent, list):
+        return "; ".join(str(x) for x in sent) or None
+    if isinstance(sent, dict):                    # a file (name + SHA-256): never a fact
+        return None
+    text = str(sent).strip()
+    return text or None
+
+
+# --------------------------------------------------------------------------
 # Equivalent questions (§5.1)
 # --------------------------------------------------------------------------
 

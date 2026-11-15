@@ -3,16 +3,17 @@
 // The tag says where a private value goes. With the owner's switch on and the
 // model running on this computer (the server's effective `model_sees_private`,
 // never the config key), the local AI may read it; otherwise it is kept from the
-// AI. Either way it is never written to logs. One module, so the Details form,
-// the question cards and the inbox always say the same thing.
+// AI. Either way it is never written to logs. One module, so every screen that
+// shows a private value says the same thing.
 import { ref } from 'vue'
 
 const OFF_BADGE = 'Private: never sent to the AI'
 const ON_BADGE = 'Private: local AI only'
 const ON_SENTENCE = "Private. Only the AI on this computer reads it, and it's never written to logs."
 
-// The last effective value a Questions payload carried. QuestionsInbox sets it
-// when it loads, so a QuestionCard (which gets no payload of its own) follows it.
+// The last effective value the server sent. The question cards that set it are gone (Q-127,
+// D-215), so nothing in the app calls `setModelSeesPrivate` now and the tag follows the
+// default (off) unless a caller passes `on`.
 export const modelSeesPrivate = ref(false)
 
 export function setModelSeesPrivate(on) {

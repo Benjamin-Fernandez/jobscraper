@@ -427,7 +427,8 @@ def alias_groups(cfg: Config) -> tuple[tuple[tuple[str, ...], ...], tuple[str, .
 # ---------------------------------------------------------------------------
 
 def compose(cfg: Config, req: ComposeRequest, *, backend, redact: Callable[..., str],
-            timeout: Optional[float] = None) -> ComposeResult:
+            timeout: Optional[float] = None, policy: str = "strict", enabled: bool = True,
+            required: bool = True) -> ComposeResult:
     """One composed text for `req` (design 19.3/19.4), from the CACHED master only: no
     resume parse, so a miss is `ComposeResult(ok=False, error="no master")` (run
     `python -m jobscraper tailor` once). `redact(text, s_values)` is the apply stage's S-value
@@ -435,9 +436,26 @@ def compose(cfg: Config, req: ComposeRequest, *, backend, redact: Callable[..., 
     prompt goes through it. The model writes the words, `tailor.compose.check` (C1-C7)
     decides; one retry. Never raises on a model failure (`error="transport: <kind>"`) and
     never logs a text. `timeout` (seconds; apply_flow passes the attempt's time left, D-184)
-    caps each model call."""
+    caps each model call.
+
+    Q-121 WP-K1 (llm_first_fill_design 4.8), all keyword-only and defaulted to today's
+    behaviour. `policy`: "strict" (default) or "always" (a `FillPolicy` works too). `enabled`:
+    the owner's `apply.compose.enabled`; `required`: the field is required. Composing is
+    allowed when `enabled`, or when `policy == "always"` and the target is `required`;
+    otherwise `ComposeResult(False, error="off")` and the model is not called. Under
+    "always" the result is a `compose.ComposeOutcome` (a ComposeResult with `flags`,
+    `assumed`, `pruned`, `neutral`, `reason`) and is `ok=True` whenever the model answered:
+    a text that fails C1-C7 twice is pruned, else replaced by a neutral one; a missing
+    master or a broken aliases file gives the neutral text too (`reason` "no master" /
+    "setup"). A transport failure is still `ok=False` with `error="transport: ..."`."""
+    always = str(getattr(policy, "value", policy)).strip().lower() == compose_mod.ALWAYS
+    if not (enabled or (always and required)):
+        return ComposeResult(False, error="off")
     m = _cached_master(cfg)
     if m is None:
+        if always:
+            return compose_mod.ComposeOutcome(True, compose_mod.neutral_text(req), assumed=True,
+                                              neutral=True, reason="no master")
         return ComposeResult(False, error="no master")
     try:
         applicant = load_applicant(cfg)
@@ -445,9 +463,13 @@ def compose(cfg: Config, req: ComposeRequest, *, backend, redact: Callable[..., 
         dictionary = terms.load_dictionary(
             cfg.aliases_path, [*_strings(applicant.get("skills")), *attested, *m.skills()])
     except Exception as exc:    # a broken aliases file: tailoring fails the same way
+        if always:
+            return compose_mod.ComposeOutcome(True, compose_mod.neutral_text(req), assumed=True,
+                                              neutral=True, reason="setup")
         return ComposeResult(False, error=f"setup: {type(exc).__name__}")
     return compose_mod.compose(req, m, dictionary, backend=backend, redact=redact,
-                               attested=attested, timeout=timeout)
+                               attested=attested, timeout=timeout,
+                               policy=compose_mod.ALWAYS if always else "strict")
 
 
 def write_letter(text: str, path: str | Path, fmt: str) -> str:

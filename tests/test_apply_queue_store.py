@@ -240,7 +240,7 @@ def test_two_connections_racing_queue_take_never_get_the_same_job():
             b.close()
 
 
-def test_a_v5_database_opens_as_v6_with_the_table_and_keeps_its_rows():
+def test_a_v5_database_opens_at_the_current_version_with_the_table_and_keeps_its_rows():
     with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
         path = Path(tmp) / "jobscraper.db"
         st = Store(path)
@@ -257,9 +257,9 @@ def test_a_v5_database_opens_as_v6_with_the_table_and_keeps_its_rows():
 
         st = Store(path)
         try:
-            assert SCHEMA_VERSION == 6
+            assert SCHEMA_VERSION >= 8          # Q-121 (v6 = this queue table; v7 = apply_answers.assumed; v8 = apply_attempts.trial)
             assert st.conn.execute(
-                "SELECT value FROM meta WHERE key = 'schema_version'").fetchone()[0] == "6"
+                "SELECT value FROM meta WHERE key = 'schema_version'").fetchone()[0] == str(SCHEMA_VERSION)
             names = {r[0] for r in st.conn.execute("SELECT name FROM sqlite_master")}
             assert {"apply_queue", "idx_apply_queue_pos"} <= names, names
             assert st.application(j1)["status"] == "to_apply"                   # kept

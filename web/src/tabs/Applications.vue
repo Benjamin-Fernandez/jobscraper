@@ -23,11 +23,10 @@
 // Undo. Either action reloads the rows and the suggestions.
 import { computed, nextTick, onActivated, onBeforeUnmount, onDeactivated, onMounted, ref, watch } from 'vue'
 import { describeError, getApplicationAttempts, getApplications, getStats, setApplicationStatus, untrackApplication } from '../api.js'
-import { IN_PROGRESS_REMOVE, attemptLabel, modeLabel } from '../attempts.js'
+import { IN_PROGRESS_REMOVE, attemptLabel, modeLabel, sentEntry } from '../attempts.js'
 import {
   STAGE_KEY, inFlight, inStage, isActive, lastAt, pinRank, rememberedStage, stageCounts,
 } from '../applications.js'
-import { openProfile } from '../profileView.js'
 import { exactTime, plural, when } from '../format.js'
 import { useHashItem, useView } from '../route.js'
 import { tabEmits, tabProps } from '../shell.js'
@@ -40,6 +39,7 @@ import Icon from '../components/Icon.vue'
 import JobDetail from '../components/JobDetail.vue'
 import MailEvidence from '../components/MailEvidence.vue'
 import MailSuggestions from '../components/MailSuggestions.vue'
+import WhatWasSent from '../components/WhatWasSent.vue'
 import RunSelector from '../components/RunSelector.vue'
 import TabLoading from '../components/TabLoading.vue'
 import Segmented from '../ui/Segmented.vue'
@@ -442,6 +442,17 @@ function detailJob(row) {
   }
 }
 
+// An older attempt's answers (Q-127 polish): the same "What was sent / What was filled" panel
+// the row opens for its last attempt, here for any attempt in the list that recorded some.
+// `sentEntry` decides (no queue place, an attempt kind that has answers).
+const openAttempt = ref('')        // `${job id}:${attempt id}` of the one panel open
+const attemptEntry = a => sentEntry({ last_attempt: a })
+const attemptKey = (row, a) => `${row.job_id}:${a.id}`
+function toggleAttempt(row, a) {
+  const k = attemptKey(row, a)
+  openAttempt.value = openAttempt.value === k ? '' : k
+}
+
 async function loadAttempts(id) {
   attempts.value = { ...attempts.value, [id]: { state: 'loading', items: [] } }
   try {
@@ -682,9 +693,25 @@ onBeforeUnmount(() => {
                           </div>
                           <p v-if="a.text" class="attempt-text">{{ a.text }}</p>
                           <p v-if="a.hint" class="attempt-hint muted">{{ a.hint }}</p>
-                          <button v-if="a.kind === 'needs_input'" type="button" class="link attempt-answer" @click="openProfile('details')">
-                            Answer in Application details
-                          </button>
+                          <template v-if="attemptEntry(a)">
+                            <button
+                              type="button"
+                              class="link attempt-filled"
+                              :aria-expanded="openAttempt === attemptKey(row, a)"
+                              :aria-controls="`app-attempt-${row.job_id}-${a.id}`"
+                              @click="toggleAttempt(row, a)"
+                            >{{ openAttempt === attemptKey(row, a) ? 'Hide' : attemptEntry(a).button }}</button>
+                            <WhatWasSent
+                              v-if="openAttempt === attemptKey(row, a)"
+                              :id="`app-attempt-${row.job_id}-${a.id}`"
+                              :key="attemptKey(row, a)"
+                              :job-id="row.job_id"
+                              :attempt-id="a.id"
+                              :sent="attemptEntry(a).sent"
+                              :employer-name="row.company || ''"
+                              @close="openAttempt = ''"
+                            />
+                          </template>
                         </li>
                       </ul>
                     </section>
@@ -790,7 +817,7 @@ onBeforeUnmount(() => {
 .attempt[data-kind='dry_run'], .attempt[data-kind='unconfirmed'], .attempt[data-kind='needs_input'] { color: var(--warn); background: var(--warn-soft); }
 .attempt[data-kind='stopped'] { color: var(--danger); background: var(--danger-soft); }
 .attempt-text, .attempt-hint { margin: 2px 0 0; overflow-wrap: anywhere; text-wrap: pretty; }
-.attempt-answer { margin-top: 2px; font-size: var(--text-sm); }
+.attempt-filled { margin-top: 2px; font-size: var(--text-sm); }
 
 .history { margin-top: var(--space-2); font-size: var(--text-sm); }
 .history summary { cursor: pointer; color: var(--muted); width: max-content; }

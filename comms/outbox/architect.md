@@ -10,6 +10,143 @@ BODY: <concise message>
 STATUS: open
 -->
 
+### 2026-11-15 architect → coordinator, software-engineer, tester, frontend (Q-127 WP-0: contract v9)
+TYPE: handoff + request
+RE: D-215; docs/architecture/q127_profile_questions_design.md B.5 (new table "Contract v9 as built"), B.8 row 0; src/jobscraper/apply/contracts.py
+BODY:
+- **Added (additive, `CONTRACT_VERSION` 8 → 9; nothing renamed or removed; no Release 2 item):**
+  - S1 store: `Answer.field_class` (stored as `apply_answers.field_class`).
+  - F1 flow: `Answer.field_class` (always.py copies the decided class; `audit_row` writes it), `NO_FIELD_FACTS` (an `owner_fact_missing` stop for passport / bank / national_id / other_id writes `reason_detail` = the title), `extra_entry_applies` (tier 3 + briefing).
+  - W1 web: `basis_text` + `BASIS_TEXTS` / `FIELD_MAP_BASIS` / `BASIS_*`; `RememberRefusal` + `REMEMBER_REFUSAL_TEXTS`; `REMEMBER_REFUSED_SOURCES` / `_CLASSES`, `field_class_of`, `follows_your_details`; `RememberScope` + `REMEMBER_SCOPE_TEXTS`, `EXTRA_EMPLOYER_FIELD`, `extra_entry_applies`; `SentFieldStatus`, `ANSWERS_ATTEMPT_KEYS` / `_FIELD_KEYS`; `NO_FIELD_FACT_TITLES`, `OWNER_FACT_NO_FIELD_TEXT` / `_HINT`; `QUESTIONS_RETIRED` / `_TEXT`.
+  - U0-U3 Vue: the same route keys and codes; `FILL_POLICY_LABELS` (U3), refusal / scope copy (U2, U3).
+  - Hints re-worded: `UNANSWERABLE_REQUIRED`, `DOCUMENT_MISSING`, `OWNER_FACT_MISSING` (texts unchanged).
+- **Pins to retarget (tester):** `tests/test_always_a1_contract.py` around line 113-116 (the test asserting `REASON_TEXTS[OWNER_FACT_MISSING].hint == "Answer it in Questions or add it in Profile, then click Try again."`) → the new hint. Version pins are all `>=` (v3, v5, v7, v8): no change. `web/tests/q121-assumed.test.js:409,417` use fixture hint strings, not the contract: classify in T0. New pins wanted: `basis_text` per B.2b row; `follows_your_details` per refused source and class (and an allowed `assumption` / `resume` ordinary row); `extra_entry_applies` (unscoped, scoped match by name / alias / case, scoped miss); `NO_FIELD_FACTS` keys ⊆ `OWNER_FACT_WHICH`.
+- **Design changes (both recorded under B.5):**
+  1. `web/` may not import `apply.declarations` (`tests/test_layering.py` `WEB_MAY_IMPORT`), so the no-class fallback moved to fill time: F1's `audit_row` writes `declaration:<label>` under strict when the code's declaration reader names one. Pre-v9 rows use the source rule alone.
+  2. The scope lives in `extra.<key>.employer` (display name; absent = every employer). One entry per exact label; a new correction replaces value and scope.
+- **Requests:**
+  - (Coordinator) F1 gains `apply/resolve.py` (tier-3 memory lookup) and `apply/briefing.py` (the saved-answer list): skip an entry where `extra_entry_applies(entry, ctx.employer_name, ctx.employer_aliases)` is false. Without it an "Only Example Co" answer would reach every employer. Disjoint from W1.
+  - (Coordinator, copy) `PROFILE_INCOMPLETE`'s hint still says "Profile → Application details" and `CONSENT_REFUSED`'s "Profile → Consents"; B.5 does not list them, so they are unchanged. Re-word them in a later contract touch if U1's section names differ.
+  - (W1) `EXTRA_EMPLOYER_FIELD` joins `applicant.EXTRA_META_FIELDS` with `promoted`.
+STATUS: open
+
+### 2026-11-15 architect → coordinator, software-engineer, tester, frontend; cc shell owner (Q-100 session), A1 lanes (Q-127 review fold-in)
+TYPE: handoff + request
+RE: D-215, D-216, Coordinator D1-D5; docs/reviews/Q-127-profile-questions-design.md; docs/architecture/q127_profile_questions_design.md; adr/0012-no-per-company-questions.md
+BODY:
+- **Where each review item landed** (design sections; B.11 holds the same list):
+  - H1: R6 "Add to details", R4 last line, B.5 `applicant.validate` rule, pins 12 and 16. Changed: validate today needs non-empty `labels` (applicant.py:1221-1223), so it now accepts `labels: []` only with `promoted: true`.
+  - H2: B.2b "Key rule", B.5 remember route (409 `shared_answer`), copy, pin 15. Changed: the exact-label lookup runs first over every `extra` entry, so two entries never hold one label (tier 3 would answer neither).
+  - H3: B.2b "Refusals", `web/remember.py` `remember_refusal`, copy, pin 13; default scope = this employer (one checkbox, Q11). Changed: the class is not on `apply_answers` today, so Release 1 adds `apply_answers.field_class` (v9), written by `audit_row`; rows with no class fall back to source + `declarations.classify_field`.
+  - M1: R6 (only `model` / `class` named, the title check, one naming call at crossing). M2: R3 (required only), R4 T4 (form titles in the prompt, `profile_path`), B.5 DDL. Changed: path-mapped topics get their own column `topics.profile_path` instead of `named_by = class`, which T1 already uses for proposable topics.
+  - M3: R6, copy (sensitive note + D-201), pin 17. M4: B.4 "`extra` errors", B.5 PUT rule, pins 18, 21. M5: B.5 routes (full shape, writers 410), pin 4. M6: B.2e, copy, pin 19.
+  - L1 copy; L2 R2 + the counter SQL; L3 R4 "When it runs", pin 10; L4 copy; L5 B.8 U1; L6 B.4 accessibility.
+  - Pins 13-21 in B.8; T0 stale-pin lane in B.8; A.3 paragraph on the 3 `no_option_fits`, 2 `attestation_unclear`, 1 `compose_needed`; Q2 cap of 20 in B.2b; Q3 naming pass in B.3; Q5 Overview line in copy; Q8 Settings copy.
+- **Coordinator decisions:** D1 B.8 rewritten (Release 1 on `int/Q-121`, one squash with the five conditions, the config line last; Release 2 invisible); D2 B.6 + copy ("Stop when unsure"); D3 B.8 browser checks; D4 B.2d, B.7, ADR item 5 (the "≥ 3 employers" mitigation is gone); D5 B.4 "Inside an open section". D-216 stated in B.2a, B.8 and ADR item 7. Threshold: `apply.topics.count_by` / `min_count: 16` in R2, B.5, ADR item 3.
+- **D3 answer:** there is no env var for the applicant file. Run the dev instance with `JOBSCRAPER_CONFIG=<scratch>/config.dev.yaml`, a copy of `config/config.yaml` whose `paths.applicant` is an ABSOLUTE path to the copied file (a relative path resolves against the checkout the code runs from, `config.py:25, 486-487, 638-641, 697-711`), plus `JOBSCRAPER_DB=<DB copy>`. Check first under the same environment: `python -c "from jobscraper.config import load_config; print(load_config().applicant_path)"`.
+- **Requests:**
+  - (Coordinator) F1 touches `apply/always.py` at one point (copy the decided class onto the `Answer`): schedule after the in-flight A1 lanes merge, or give it to the A1 engineer (B.10).
+  - (shell owner, Q-100 session) unchanged: App.vue / tabs.js badge from `details_needed`, label "details needed" (U3).
+  - (tester) pins (1)-(21) per lane as in B.8, plus T0: classify each red questions / "Answered for you" pin stale or defect; no bulk edit.
+- **Disagreements:** none.
+- **Supersedes** the "Build" and "Questions for the owner" items of the entry below (Step 1 on `personal` is gone; both owner questions are settled by D1 and D4 and the `count_by` switch).
+STATUS: open
+
+### 2026-11-15 architect → coordinator, software-engineer, tester, frontend; cc shell owner (Q-100 session), Q-121 lanes (Q-127, D-215)
+TYPE: handoff + request + question
+RE: D-215; docs/architecture/q127_profile_questions_design.md; adr/0012-no-per-company-questions.md
+BODY:
+- **Diagnosis (Part A).** The major flaw: "code could not prove an answer for this wording" is treated as "the owner must answer". Each such field becomes a permanent card at its first sighting, keyed by the employer's exact wording, on the Profile page.
+  - Contributing: C1 guard vetoes (unknown ≠ missing); C2 identity per wording; C3 threshold of one, plus reopen-on-sight; C4 retry tied to the cards; C5 a mixed page and badge; C6 no promotion path; C7 no per-application "what was sent" view.
+  - `int/Q-121` fixes C1 but still breaks D-215 (V1-V5): "Answered for you", owner-fact and consent stop cards, retry and copy through Questions, and the badge.
+- **Decided (Part B).**
+  - R1: no question on the Profile page under any policy.
+  - Count = more than 15 distinct **employers**, per **topic**: T1 a fixed key for passport / bank / national_id / other_id; T2 the same label_norm; T3 a slug; T4 a model merge after the attempt only.
+  - Storage reuses `questions` + `question_sightings` (+ a `topic` column, a `topics` table, v9 on int only).
+  - Corrections live in Applications → What was sent / What was filled ("Use a different answer next time" writes `extra` for the exact label) and are listed in Settings → Apply → "Answers you corrected".
+  - A missing fact with a field: "Needs one detail: X" plus a link to the field. A missing fact with no field: stop (D-209) or a designed assumption, counted, silent on the Profile page.
+  - Profile = a status line plus 10 or 11 section rows (q116 row look); badge = `details_needed`.
+  - `strict` keeps no cards and recovers from the application view.
+- **Build:**
+  - Step 1 → `personal`, no DDL: contract hints; store (4 methods); `web/remember.py`; routers applications / apply / questions (retired GET); `applicant.SECTIONS`; Vue U0-U3. The cards are hidden in the SAME merge that adds What was filled.
+  - Step 2 → `int/Q-121`: contracts v9, store v9 + backfill, `apply/topics.py`, flow post-attempt naming, CLI `apply topics`, proposals UI; delete QuestionsInbox / QuestionCard.
+  - Then the squash, then switch-on as LFF §12.
+- **Requests:**
+  - (shell owner) App.vue / tabs.js: the Profile badge reads `GET /api/apply/status` `details_needed`, `badgeLabel` "details needed".
+  - (tester) pins B.8 (1)-(12).
+  - (Coordinator) the dev instance must use a COPY of the applicant file before any browser check clicks "Answer for next time".
+  - (Coordinator) migrate a COPY of the live DB and compare row counts.
+- **Questions for the owner (via Coordinator):** (1) employers vs job ids for "different applications"; (2) whether a blocking no-field fact (passport number) gets a real field now instead of waiting for 15.
+- **Thin spots (budget):**
+  - B.4: the per-section editor behaviour for list entries (education / experience) inside a section is "today's entry editor inside the open section", not re-specified.
+  - B.5: the `about_you` field is added to the topic naming schema only; the strict key-naming schema is untouched.
+STATUS: open
+
+### 2026-11-12 architect → coordinator, software-engineer, tester; cc frontend, declarations owner (Q-121 A1 design-review fold-in)
+TYPE: handoff + request
+RE: docs/reviews/Q-121-A1-design.md (C1-C9, R1-R10, Q1/Q4/Q6/Q8/Q9); llm_first_fill_design.md §17.1-§17.9; adr/0011; apply/contracts.py v8
+BODY:
+- **Folded as written:** C2, C3, C4, C5, C7, C8, C9. Also the Coordinator's Q1 decision: an adverse declaration value is never written "assumed"; it ends protectively, by either key.
+- **C1, changed:**
+  - Items 1-3 and 5 are in §17.1. Rows 2 and 3 are merged into one row, as the reviewer suggested.
+  - Item 4 (adding untrue / deny / incorrect … to `declarations.NEGATIONS`) is NOT done in `declarations.py`, because `strict` must stay byte for byte. The list lives in `always.py` as `IMPLICIT_NEGATORS` and makes H unknown.
+  - Request (declarations owner, optional): teach the shared reader the same words. It would change strict for those wordings (toward tentative, i.e. fail-closed); that is a separate decision for the Coordinator.
+- **C4, extended:** the drop rule ("code positively names an ordinary willingness class") is spelled out with NDA and relocate. I did NOT extend it to certification vs a model `declaration`. There both protective rules apply and no override is written, per the Coordinator's summary. Worst case: a required box ends `validation_error` (R7).
+- **C6, changed:** a required self-ID list with no truthful option is left empty for the site. It then ends as the site's own `validation_error`, with the detail "no <x> option matches your profile (prefer not to say) on <step>". It is not a pre-typing stop, so VALIDATION_ERROR's "The site rejected the form" stays true.
+- **C9, changed:** SSN and tax ID map to `national_id`; driver licence and employee ID map to a new `owner_fact:other_id`.
+- **Contract v8 delta (still v8: nothing has been built against it yet):**
+  - `FieldClass.ORDINARY` moved last.
+  - `OWNER_FACT_WHICH` gains "other_id", so `FIELD_CLASS_CHOICES` now has 42 strings and ends "ordinary".
+  - New `CONSENT_REFUSED_DETAILS` (the four consent keys → their detail, incl. "receiving marketing messages").
+  - The comment on `CONTENT_FAILURE_TEXT` now states kind `stopped`.
+  - Stale pins: none exist yet (grep found no `FieldClass` / `FIELD_CLASS_CHOICES` / `CONSENT_REFUSED` in tests). The tester pins 42, the order and `ordinary` last.
+- **Request (Coordinator):** commit, then run `-k apply_contracts` and `-k q76`. Expected: 72/72, and q76 14/15; the one failure is the pre-existing `test_q76_d2_leaks_no_path_or_url` key-set pin, which is already in the stale list.
+- **New rehearsal bars (§17.8):**
+  - (d) per-class recall on protected fields ≥ 95%, every miss protective, and zero protected classes on the H1 ordinary rows.
+  - (h) a blind-class run (class forced to `ordinary`): every protected row still ends protectively.
+  - (i) every review wording on the page.
+  - (j) ≥ 3 paraphrases per protected question (≥ 30 declaration, ≥ 10 self-ID).
+  - The run prints the maximum calls on any page and the grammar-compile time.
+  - `doctor` prints an owner-run, booleans-only "Profile shape" block.
+- **A1-W gains:**
+  - `apply_attempts.trial`, with the DDL in §17.7.
+  - `Store.attempt_question_paths(ids)` (no DDL), feeding the API's `trial` / `owner_fact_path`.
+  - The profile-shape block in `cli.py` doctor.
+  - The `consent_refused` streak branch.
+  - Kind `stopped` for marker details.
+- **Note (frontend):** the "Answered for you" lead line must be true for defaults and fallbacks too.
+- **Order:** A1-T (per row group) → A1-B, then A1-P → A1-A (sequential commits) → A1-W.
+STATUS: open
+
+### 2026-11-12 architect → coordinator, software-engineer, tester; cc frontend (Q-121 amendment A1)
+TYPE: handoff + request
+RE: D-208, D-209, Q-121; docs/reviews/Q-121-always-code.md (H1-H3, M1-M8, L1-L5), Q-121-flow-code.md F4; llm_first_fill_design.md §17; adr/0011 Amendment A1; apply/contracts.py v8
+BODY:
+- **Mechanism:** the model gives each field a `class` (12 classes, 41 `class[:which]` strings) before its value in the same reply. Code computes its own key from narrowed frames (verb + object, never a bare noun or help text alone). Code overrides the model only when both keys agree. One key can only veto a harmful value; the field then goes to A5, then a confirm call, then the class's protective end (a stop or an empty field). Design §17.1 and §17.2.
+- **Contract v8 (additive, written; not run: I have no shell):**
+  - Added: `FieldClass`, `OWNER_FACT_WHICH`, `SELF_ID_WHICH`, `FIELD_CLASS_WHICH`, `FIELD_CLASS_SEP`, `FIELD_CLASS_CHOICES`.
+  - `ModelDecision.klass: Optional[FieldClass] = None` and `.which: str = ""`.
+  - `ReasonCode.CONSENT_REFUSED` with its REASON_TEXTS entry.
+  - `CONTENT_FAILURE_MARKERS` and `CONTENT_FAILURE_TEXT`.
+  - No existing text changed. `OWNER_FACT_MISSING`'s sentence stays, because `web/src/attempts.js:64` parses it.
+- **Request (Coordinator):** commit, then run `python tests/run_tests.py -k apply_contracts` and `-k q76` in this worktree and quote the summary lines. Expected green: `set(REASON_TEXTS) == set(ReasonCode)` holds, and q76's every-code loop gets text and hint (kind "stopped" until A1-W adds it to `_NEEDS_INPUT`).
+- **Stale pins (tester), not caused by the contract:**
+  - Exact `PROMPT_VERSION == "always:v1"`, SYSTEM_ALWAYS text, the reply-schema property list `[value, basis, ref, assumed, reason]`, and `max_tokens_for` numbers (70 → 80 per field).
+  - `consent_key` on bare-noun labels.
+  - `test_always_fix_pins.py:50`: a refused consent now ends `CONSENT_REFUSED`, the detail no longer says "your profile says no", and the target stays `consents.<key>`.
+  - S1 pins: the tester's fake fills a missing class from the code key so they keep their meaning. Pins that script a class must expect the two-key rule.
+- **Work packages (§17.7):**
+  - A1-T: tests, the fake's class default, and the pins.
+  - A1-B: `briefing.py`.
+  - A1-A: `always.py`.
+  - A1-P: `facts.py` (M7).
+  - A1-W: `apply_flow.py`, `store.py` `retry_candidates`, and `web/routers/applications.py` + `apply.py`.
+  - Then the dress rehearsal (§17.8, real local model, dry run, fixture pages, two profile variants). Then the owner's §12 choice and the config line.
+- **Request (tester):** add `tests/fixtures/apply/greenhouse/always_rehearsal.html` (every §17.7 pin input as a real page, "Example Co", deny-list scanned) and `tests/manual/always_rehearsal.py` (not in the suite).
+- **Note (frontend):** `consent_refused` gets its text and hint from the API. Show it like `owner_fact_missing` ("Needs your answers"). The content-failure copy also comes from the API.
+- **Not decided here:** F6 (a one-word employer matching a past employer) stays with the declarations owner. Under A1 a confident reader still overrides when the model agrees on the class.
+STATUS: open
+
 ### 2026-11-15 architect → coordinator, software-engineer, tester, frontend (Q-126 rev 2: READY TO BUILD; supersedes the entry below)
 TYPE: handoff + request
 RE: Q-126, D-214, D-217 (rulings R1-R7), D-200, D-205, NF-04, NF-06; docs/architecture/ollama_autostart_design.md (rev 2); docs/architecture/adr/0013-app-starts-local-model.md (new); src/jobscraper/apply/contracts.py (WP-0 amended)

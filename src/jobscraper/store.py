@@ -24,9 +24,13 @@ from urllib.parse import urlsplit
 
 from .models import RawJob, WatchedCompany, posting_key
 
-SCHEMA_VERSION = 6   # 4: D-78 fill_cache + apply_answers evidence/shown_json/shown_origin/entry
+SCHEMA_VERSION = 9   # 4: D-78 fill_cache + apply_answers evidence/shown_json/shown_origin/entry
                      # 5: F-50 mail_* tables (mail_status_design §9)
                      # 6: Q-120 apply_queue (apply_queue_design §2, D-205)
+                     # 7: Q-121 apply_answers.assumed; questions.status 'assumed' (TEXT, no
+                     #    DDL); the trial counter in `settings` (llm_first_fill_design §7.3)
+                     # 8: Q-121 A1 apply_attempts.trial (llm_first_fill_design §17.7 A1-W)
+                     # 9: Q-127 apply_answers.field_class (q127_profile_questions_design B.5)
 
 # A posting closes after this many successful fetches in a row leave it out (H1-1).
 CLOSE_AFTER_MISSES = 2
@@ -500,6 +504,26 @@ class Store:
         for col in ("evidence", "shown_json", "shown_origin", "entry"):
             if col not in ans_cols:
                 self.conn.execute(f"ALTER TABLE apply_answers ADD COLUMN {col} TEXT")
+        # Q-121 (llm_first_fill_design §6.1, §7.3): the answer was assumed, not backed by the
+        # profile (fill policy `always`). Additive: every older row reads 0.
+        if "assumed" not in ans_cols:
+            self._add_column("apply_answers", "assumed INTEGER NOT NULL DEFAULT 0")
+        # Q-127 (q127_profile_questions_design B.5, v9): the field class the filler decided
+        # ("declaration:pep", "work_right", ...), so "Answer for next time" can refuse a field
+        # whose answer follows the owner's details. Nullable and additive: every older row stays
+        # NULL and is judged by its source alone (`contracts.follows_your_details`).
+        if "field_class" not in ans_cols:
+            self._add_column("apply_answers", "field_class TEXT")
+        # Q-121 review F5: under `always` a failed "Add another" is a note, not a stop; the
+        # attempt keeps it ("1 of 2 education entries added") for the Applications row.
+        # Additive, NULL for every older attempt (and for every strict one).
+        att_cols = {r["name"] for r in self.conn.execute("PRAGMA table_info(apply_attempts)")}
+        if "entries_note" not in att_cols:
+            self._add_column("apply_attempts", "entries_note TEXT")
+        # Q-121 A1 (§17.7 A1-W, v8): the attempt ran as a first-use trial (filled, not sent,
+        # §12 rev H3), so the Applications row can say so. Additive: every older row reads 0.
+        if "trial" not in att_cols:
+            self._add_column("apply_attempts", "trial INTEGER NOT NULL DEFAULT 0")
         # A pre-amendment fill_cache (keyed on facts_hash, only ever on a dev branch)
         # is rebuilt in the §14 shape: the cache is disposable, a miss only costs a call.
         fc_cols = {r["name"] for r in self.conn.execute("PRAGMA table_info(fill_cache)")}
@@ -516,6 +540,17 @@ class Store:
             "CAST(MAX(CAST(COALESCE(meta.value, '0') AS INTEGER), "
             "CAST(excluded.value AS INTEGER)) AS TEXT)",
             (str(SCHEMA_VERSION),))
+
+    def _add_column(self, table: str, decl: str) -> None:
+        """ALTER TABLE ... ADD COLUMN after the caller's `PRAGMA table_info` check. Another
+        process that opened the same file at the same moment may have added it in between
+        (the live app and a CLI run): its "duplicate column name" error means the column is
+        there, so the second open is a no-op. Any other error is raised."""
+        try:
+            self.conn.execute(f"ALTER TABLE {table} ADD COLUMN {decl}")
+        except sqlite3.OperationalError as exc:
+            if "duplicate column" not in str(exc).lower():
+                raise
 
     def ping(self) -> None:
         """Raise if the database cannot be read (GET /api/healthz, C-6)."""
@@ -1905,14 +1940,17 @@ class Store:
                        "section", "options_json", "value_json", "tier", "source",
                        "confidence", "status", "rule_id", "model", "prompt_hash", "note",
                        "sensitive", "recorded_at",
-                       "evidence", "shown_json", "shown_origin", "entry")   # D-78, §14
+                       "evidence", "shown_json", "shown_origin", "entry",   # D-78, §14
+                       "assumed",                                           # Q-121 §7.3
+                       "field_class")                                       # Q-127 v9
 
     def add_answers(self, attempt_id: int, rows: Iterable[dict[str, Any]]) -> int:
         """Append audit rows (apply_design §7.8). Each row is a dict with the
         `apply_answers` columns; `options_json` / `value_json` / `shown_json` may
         be given as Python values (they are JSON-encoded here); a missing D-78
-        column (`evidence`, `shown_json`, `shown_origin`, `entry`) is NULL.
-        Does not commit."""
+        column (`evidence`, `shown_json`, `shown_origin`, `entry`) is NULL, a
+        missing `assumed` (Q-121) is 0, a missing `field_class` (Q-127) is NULL. Does not
+        commit."""
         n = 0
         cols = ", ".join(("attempt_id",) + self._ANSWER_COLUMNS)
         marks = ",".join("?" * (len(self._ANSWER_COLUMNS) + 1))
@@ -1923,7 +1961,7 @@ class Store:
                 if c in ("options_json", "value_json", "shown_json") and v is not None \
                         and not isinstance(v, str):
                     v = json.dumps(v, ensure_ascii=False)
-                elif c in ("required", "sensitive"):
+                elif c in ("required", "sensitive", "assumed"):
                     v = int(bool(v))
                 elif c == "step":
                     v = v or ""
@@ -1936,8 +1974,189 @@ class Store:
         return n
 
     def answers(self, attempt_id: int) -> list[dict[str, Any]]:
+        """One attempt's audit rows, oldest first, every column (since v9 with
+        `field_class`, NULL for older rows). The "What was sent" route reads this, with
+        `attempt()` for the attempt's own columns."""
         return [dict(r) for r in self.conn.execute(
             "SELECT * FROM apply_answers WHERE attempt_id = ? ORDER BY id", (attempt_id,))]
+
+    # ---- Q-127 (q127_profile_questions_design B.2b, B.5): "Answer for next time" ----
+
+    def answer_row(self, answer_id: int) -> Optional[dict[str, Any]]:
+        """One audit row by id, with its attempt's `job_id`, `company_id`, `attempt_state`
+        and `attempt_mode` beside the `apply_answers` columns (`field_class` NULL for rows
+        written before v9; `corrected_json` / `corrected_at` NULL until `mark_answer_corrected`).
+        None when there is no such row. The remember route reads it for the H2 / H3 checks."""
+        r = self.conn.execute(
+            """SELECT w.*, a.job_id AS job_id, a.company_id AS company_id,
+                      a.state AS attempt_state, a.mode AS attempt_mode
+                 FROM apply_answers w JOIN apply_attempts a ON a.id = w.attempt_id
+                WHERE w.id = ?""", (int(answer_id),)).fetchone()
+        return dict(r) if r else None
+
+    def attempt_field_question(self, attempt_id: int, field_key: str) -> Optional[dict[str, Any]]:
+        """The `questions` row an attempt captured for one of its fields (through
+        `question_sightings` on (attempt_id, field_key)), as `_question_dict` (options parsed)
+        plus `sighting_label` (the label as seen in that attempt) and `sighting_required`; the
+        newest sighting wins. None when the attempt captured nothing for the field (an ordinary
+        filled field, or strict and the field was answerable). Its `target_path` is the profile
+        field "Add it" opens, `key` the old group key (never an `extra` key to write to: H2)."""
+        r = self.conn.execute(
+            """SELECT q.*, s.label AS sighting_label, s.required AS sighting_required
+                 FROM question_sightings s JOIN questions q ON q.id = s.question_id
+                WHERE s.attempt_id = ? AND s.field_key = ?
+                ORDER BY s.id DESC LIMIT 1""", (int(attempt_id), field_key)).fetchone()
+        if r is None:
+            return None
+        d = self._question_dict(r)
+        d["sighting_required"] = bool(d["sighting_required"])
+        return d
+
+    def mark_answer_corrected(self, answer_id: int, value_json: Any, now: str) -> Optional[int]:
+        """The owner remembered an answer for next time: stamp the row's `corrected_json` /
+        `corrected_at` (M22 columns, unused until now) and mark every `questions` row that
+        attempt captured for the field `answered` (any status but answered; `answered_at`
+        stamped), so `strict` readiness (`retry_candidates`) follows. `value_json` is the
+        remembered value as JSON text (a non-text value is JSON-encoded here, as in
+        `add_answers`). Only this attempt's rows for this field are touched, never another
+        entry or another attempt's rows. One commit. Returns the number of question rows
+        marked (0 when the attempt captured none), None when there is no such answer row."""
+        row = self.conn.execute(
+            "SELECT attempt_id, field_key FROM apply_answers WHERE id = ?",
+            (int(answer_id),)).fetchone()
+        if row is None:
+            return None
+        if value_json is not None and not isinstance(value_json, str):
+            value_json = json.dumps(value_json, ensure_ascii=False)
+        self.conn.execute(
+            "UPDATE apply_answers SET corrected_json = ?, corrected_at = ? WHERE id = ?",
+            (value_json, now, int(answer_id)))
+        cur = self.conn.execute(
+            """UPDATE questions SET status = 'answered', answered_at = ?
+                WHERE status != 'answered' AND id IN (
+                      SELECT question_id FROM question_sightings
+                       WHERE attempt_id = ? AND field_key = ?)""",
+            (now, int(row["attempt_id"]), row["field_key"]))
+        self.conn.commit()
+        return cur.rowcount
+
+    # The reasons an attempt can wait on the owner's details (retry_candidates' three).
+    _WAITING_REASONS = ("unanswerable_required", "owner_fact_missing", "consent_refused")
+
+    def waiting_on_details(self) -> list[dict[str, Any]]:
+        """Roles waiting for a Profile field: [{job_id, attempt_id, paths}] for each job whose
+        newest attempt `failed` with `unanswerable_required` / `owner_fact_missing` /
+        `consent_refused` and whose sightings name at least one profile path (the question's
+        `target_path`; "Answered for you" rows, reason `assumed`, are left out), `paths`
+        distinct in first-sighting order. A job with any `submitted` /
+        `submitted_unconfirmed` attempt is never listed (B.2e). Oldest attempt first. The
+        caller checks which paths the profile now holds (`ready_to_retry`, "Needed by n
+        applications"). Read-only, no DDL."""
+        marks = ",".join("?" * len(self._WAITING_REASONS))
+        try:
+            rows = self.conn.execute(
+                f"""SELECT a.job_id, a.id AS attempt_id, q.target_path
+                      FROM apply_attempts a
+                      JOIN question_sightings s ON s.attempt_id = a.id
+                      JOIN questions q ON q.id = s.question_id
+                     WHERE a.state = 'failed' AND a.reason_code IN ({marks})
+                       AND a.id = (SELECT MAX(b.id) FROM apply_attempts b WHERE b.job_id = a.job_id)
+                       AND NOT EXISTS (SELECT 1 FROM apply_attempts d WHERE d.job_id = a.job_id
+                                        AND d.state IN ('submitted', 'submitted_unconfirmed'))
+                       AND COALESCE(q.target_path, '') != ''
+                       AND COALESCE(q.reason, '') != 'assumed'
+                     ORDER BY a.id, s.id""", self._WAITING_REASONS).fetchall()
+        except sqlite3.OperationalError:          # no apply_attempts table yet
+            return []
+        out: dict[int, dict[str, Any]] = {}
+        for r in rows:
+            e = out.setdefault(int(r["attempt_id"]), {"job_id": r["job_id"],
+                                                      "attempt_id": int(r["attempt_id"]),
+                                                      "paths": []})
+            if r["target_path"] not in e["paths"]:
+                e["paths"].append(str(r["target_path"]))
+        return list(out.values())
+
+    # Q-121 (llm_first_fill_design §6.2): an answer counts as assumed in the attempt's summary
+    # ("Submitted · 3 answers assumed") when it was put on the page.
+    _ASSUMED_SENT = ("filled", "prefilled")
+
+    def assumed_counts(self, attempt_ids: Iterable[int]) -> dict[int, int]:
+        """{attempt_id: number of `assumed` audit rows whose value went on the page} for
+        the given attempts (absent = 0). For the Applications pill and the attempt summary."""
+        ids = list(dict.fromkeys(int(i) for i in attempt_ids))
+        out: dict[int, int] = {}
+        for i in range(0, len(ids), 500):
+            chunk = ids[i:i + 500]
+            marks = ",".join("?" * len(chunk))
+            for r in self.conn.execute(
+                    f"""SELECT attempt_id, COUNT(*) AS n FROM apply_answers
+                         WHERE assumed = 1 AND status IN (?, ?) AND attempt_id IN ({marks})
+                         GROUP BY attempt_id""", (*self._ASSUMED_SENT, *chunk)):
+                out[int(r["attempt_id"])] = int(r["n"])
+        return out
+
+    def assumed_count(self, attempt_id: int) -> int:
+        """`assumed_counts` for one attempt."""
+        return self.assumed_counts([attempt_id]).get(int(attempt_id), 0)
+
+    def entries_notes(self, attempt_ids: Iterable[int]) -> dict[int, str]:
+        """{attempt_id: "1 of 2 education entries added"} for the given attempts whose
+        "Add another" fell short under `always` (review F5: a note, not a stop); absent =
+        none. Several sections are joined with "; ". Next to `assumed_counts`, for the
+        Applications row and the attempt summary. Also on `attempt()` rows as `entries_note`."""
+        ids = list(dict.fromkeys(int(i) for i in attempt_ids))
+        out: dict[int, str] = {}
+        for i in range(0, len(ids), 500):
+            chunk = ids[i:i + 500]
+            marks = ",".join("?" * len(chunk))
+            for r in self.conn.execute(
+                    f"""SELECT id, entries_note FROM apply_attempts
+                         WHERE entries_note IS NOT NULL AND entries_note != ''
+                           AND id IN ({marks})""", chunk):
+                out[int(r["id"])] = str(r["entries_note"])
+        return out
+
+    def attempt_question_paths(self, attempt_ids: Iterable[int]) -> dict[int, str]:
+        """{attempt_id: profile path} (Q-121 A1-W, §17.7): the Profile field the owner fills
+        to answer what an attempt stopped on, from its question sightings joined to the
+        question's `target_path` where one is set ("identity.date_of_birth" for an
+        `owner_fact_missing`, "consents.data_retention_consent" for a `consent_refused`).
+        "Answered for you" rows (reason `assumed`) are left out: they name fields the
+        attempt already filled. The newest such sighting wins; absent = none. One query per
+        chunk, like `entries_notes`, for the Applications row and the queue's recent list.
+        No DDL."""
+        ids = list(dict.fromkeys(int(i) for i in attempt_ids))
+        out: dict[int, str] = {}
+        for i in range(0, len(ids), 500):
+            chunk = ids[i:i + 500]
+            marks = ",".join("?" * len(chunk))
+            for r in self.conn.execute(
+                    f"""SELECT s.attempt_id, q.target_path FROM question_sightings s
+                          JOIN questions q ON q.id = s.question_id
+                         WHERE s.attempt_id IN ({marks})
+                           AND COALESCE(q.target_path, '') != ''
+                           AND COALESCE(q.reason, '') != 'assumed'
+                         ORDER BY s.attempt_id, s.id""", chunk):
+                out[int(r["attempt_id"])] = str(r["target_path"])       # the newest wins
+        return out
+
+    # Q-121 §12 (rev H3): the first-use trial's counter, in `settings` (no DDL).
+    ALWAYS_TRIAL_USED = "apply.always_trial_used"
+
+    def always_trial_used(self) -> int:
+        """Trial attempts that reached the review page so far (0 when unset or unreadable)."""
+        raw = self.get_setting(self.ALWAYS_TRIAL_USED)
+        try:
+            return max(0, int(str(raw).strip())) if raw is not None else 0
+        except ValueError:
+            return 0
+
+    def count_always_trial(self) -> int:
+        """One more trial attempt reached the review page; returns the new count. Commits."""
+        n = self.always_trial_used() + 1
+        self.set_setting(self.ALWAYS_TRIAL_USED, n)
+        return n
 
     def answer_memory_get(self, label_norm: str, field_type: str, ats: str) -> Optional[str]:
         """The remembered value (JSON text) for a question, this ATS first,
@@ -2115,7 +2334,7 @@ class Store:
     # stored here (ADR-0005). `apply_attempts` belongs to lane B; until that table
     # exists, retry candidates are simply none.
 
-    _QUESTION_STATUSES = ("open", "answered", "dismissed")
+    _QUESTION_STATUSES = ("open", "answered", "dismissed", "assumed")     # assumed: Q-121 §6.3
 
     @staticmethod
     def _question_dict(r: sqlite3.Row) -> dict[str, Any]:
@@ -2135,10 +2354,22 @@ class Store:
         `q` holds the `questions` columns (sig, key, target_path, title,
         description, kind, label, label_norm, sensitive, reason, named_by) and
         the options as `options` ([{label, norm}]) or as `options_json` text."""
+        assumed = q.get("reason") == "assumed"
         r = self.conn.execute("SELECT id, status FROM questions WHERE sig = ?",
                               (q["sig"],)).fetchone()
         if r is not None:
-            status = "open" if r["status"] == "answered" else r["status"]
+            if assumed:
+                # Q-121 §6.3 + review F3: JobScraper answered it for the owner this time. Only
+                # an `answered` row becomes `assumed` (Keep / Change); open (a stopped role
+                # waits on it), dismissed and assumed rows keep their status. The row's
+                # `reason` is never rewritten by an assumed sighting, so a role stopped on
+                # this question stays in "ready to retry" (`retry_candidates`).
+                status = "assumed" if r["status"] == "answered" else r["status"]
+                self.conn.execute("UPDATE questions SET last_seen_at = ?, status = ? WHERE id = ?",
+                                  (now, status, r["id"]))
+                self.conn.commit()
+                return int(r["id"])
+            status = "open" if r["status"] in ("answered", "assumed") else r["status"]
             self.conn.execute(
                 "UPDATE questions SET last_seen_at = ?, reason = ?, status = ? WHERE id = ?",
                 (now, q.get("reason") or "no_rule", status, r["id"]))
@@ -2151,13 +2382,50 @@ class Store:
             """INSERT INTO questions (sig, key, target_path, title, description, kind, label,
                    label_norm, options_json, sensitive, reason, named_by, status,
                    first_seen_at, last_seen_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'open', ?, ?)""",
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (q["sig"], q["key"], q.get("target_path") or "", q.get("title") or q["label"][:60],
              q.get("description") or "", q["kind"], q["label"], q["label_norm"], options_json,
              int(bool(q.get("sensitive"))), q.get("reason") or "no_rule",
-             q.get("named_by") or "rule", now, now))
+             q.get("named_by") or "rule", "assumed" if assumed else "open", now, now))
         self.conn.commit()
         return int(cur.lastrowid)
+
+    _JSON_FIELD_TYPES = ("multi_choice", "checkbox", "file")   # FieldType values stored as JSON
+
+    def assumed_answer(self, question_id: int) -> Optional[dict[str, Any]]:
+        """What JobScraper sent for an `assumed` question (llm_first_fill_design §6.3): the
+        `apply_answers` row of the question's latest sighting, matched by (attempt_id,
+        field_key). {attempt_id, job_id, field_key, value (decoded), reason (the model's
+        reason or the check note), source, note, assumed}; None when there is no sighting
+        or no matching row. The value lives only in `apply_answers` (QD §7), never in
+        `questions`."""
+        s = self.conn.execute(
+            """SELECT attempt_id, job_id, field_key FROM question_sightings
+                WHERE question_id = ? ORDER BY seen_at DESC, id DESC LIMIT 1""",
+            (int(question_id),)).fetchone()
+        if s is None:
+            return None
+        a = self.conn.execute(
+            """SELECT value_json, field_type, evidence, source, note, assumed FROM apply_answers
+                WHERE attempt_id = ? AND field_key = ? ORDER BY id DESC LIMIT 1""",
+            (s["attempt_id"], s["field_key"])).fetchone()
+        if a is None:
+            return None
+        # Review D1: `add_answers` stores a text value as written and JSON-encodes only
+        # non-text values, so only the field types whose value is a list, a tick or a file
+        # record are decoded; a text, number, date or single choice comes back exactly as
+        # it was sent ("3.50" stays "3.50", "null" stays "null").
+        raw = a["value_json"]
+        value: Any = raw
+        if raw is not None and str(a["field_type"] or "") in self._JSON_FIELD_TYPES:
+            try:
+                value = json.loads(raw)
+            except ValueError:
+                value = raw
+        return {"attempt_id": int(s["attempt_id"]), "job_id": s["job_id"],
+                "field_key": s["field_key"], "value": value, "reason": a["evidence"] or "",
+                "source": a["source"] or "", "note": a["note"] or "",
+                "assumed": bool(a["assumed"])}
 
     def add_sighting(self, question_id: int, attempt_id: int, job_id: str,
                      company_id: Optional[int], employer_norm: str, ats: str, step: str,
@@ -2260,10 +2528,15 @@ class Store:
         return out
 
     def retry_candidates(self) -> list[dict[str, Any]]:
-        """Jobs whose newest attempt failed `unanswerable_required` with at least
-        one question sighting: {job_id, attempt_id, company, title, open,
-        dismissed}, where open/dismissed count that attempt's questions by
-        status. Ready to retry = open == 0 and dismissed == 0."""
+        """Jobs whose newest attempt failed `unanswerable_required`, or (Q-121 §4.6)
+        `owner_fact_missing`, or (A1 §17.6) `consent_refused`, with at least one question
+        sighting: {job_id,
+        attempt_id, company, title, open, dismissed}, where open/dismissed count that
+        attempt's questions by status. Ready to retry = open == 0 and dismissed == 0
+        (an `assumed` row never blocks a retry). An attempt whose sightings are all
+        "Answered for you" questions (reason `assumed`) is not a candidate: nothing was
+        asked of the owner (an `always` content failure is not returned, §9), so it must
+        never show as ready. Under `strict` no question has that reason."""
         try:
             rows = self.conn.execute(
                 """SELECT a.job_id, a.id AS attempt_id, c.name AS company, j.title AS title,
@@ -2275,9 +2548,14 @@ class Store:
                      JOIN questions q ON q.id = s.question_id
                      LEFT JOIN jobs j ON j.job_id = a.job_id
                      LEFT JOIN companies c ON c.id = COALESCE(a.company_id, j.company_id)
-                    WHERE a.state = 'failed' AND a.reason_code = 'unanswerable_required'
+                    WHERE a.state = 'failed'
+                      AND a.reason_code IN ('unanswerable_required', 'owner_fact_missing',
+                                            'consent_refused')
                       AND a.id = (SELECT MAX(b.id) FROM apply_attempts b WHERE b.job_id = a.job_id)
-                    GROUP BY a.id ORDER BY a.id""").fetchall()
+                    GROUP BY a.id
+                   HAVING COUNT(DISTINCT CASE WHEN COALESCE(q.reason, '') != 'assumed'
+                                              THEN q.id END) > 0
+                    ORDER BY a.id""").fetchall()
         except sqlite3.OperationalError:          # no apply_attempts table yet (lane B)
             return []
         return [{"job_id": r["job_id"], "attempt_id": int(r["attempt_id"]),
@@ -2291,9 +2569,10 @@ class Store:
         options, employers}], one per option set), employers (company names,
         by first sighting), waiting (jobs ready-or-not in retry_candidates with
         a sighting here), first_seen_at, last_seen_at. `status` = open |
-        answered | all; a group is open if any of its rows is."""
-        if status not in ("open", "answered", "all"):
-            raise ValueError(f"status must be open, answered or all, not {status!r}")
+        answered | assumed | all; a group is open if any of its rows is, else
+        assumed if any row is (Q-121)."""
+        if status not in ("open", "answered", "all", "assumed"):
+            raise ValueError(f"status must be open, answered, assumed or all, not {status!r}")
         rows = [self._question_dict(r) for r in self.conn.execute(
             "SELECT * FROM questions ORDER BY id")]
         sightings: dict[int, list[dict[str, Any]]] = {}
@@ -2321,7 +2600,10 @@ class Store:
         out = []
         for key, grp in groups.items():
             statuses = {r["status"] for r in grp}
+            # Q-121 §6.3: a group JobScraper answered for the owner ("Answered for you") is
+            # `assumed` unless a row still waits for the owner (open).
             gstatus = ("open" if "open" in statuses else
+                       "assumed" if "assumed" in statuses else
                        "answered" if "answered" in statuses else "dismissed")
             if status != "all" and gstatus != status:
                 continue
@@ -3266,7 +3548,7 @@ _ATTEMPT_COLUMNS = frozenset({
     "job_id", "company_id", "ats", "tenant_host", "mode", "state", "step", "reason_code",
     "reason_detail", "end_url", "plan_source", "resume_file", "resume_sha256",
     "resume_source", "tailored_id", "confirmation", "code_resubmits", "queued_at",
-    "started_at", "submit_clicked_at", "finished_at", "job_log"})
+    "started_at", "submit_clicked_at", "finished_at", "job_log", "entries_note", "trial"})
 
 
 def _state(v: Any) -> str:

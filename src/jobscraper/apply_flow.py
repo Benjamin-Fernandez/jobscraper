@@ -37,6 +37,8 @@ from typing import Any, Callable, Optional, Sequence
 from urllib.parse import urlsplit
 
 from . import applicant, backends, tailor_flow, vault
+from .apply import always as AL
+from .apply import briefing as BR
 from .apply import browser as B
 from .apply import declarations
 from .apply import llm_fill
@@ -51,14 +53,18 @@ from .apply.contracts import (
     ALWAYS_OURS, CHOICE_TYPES, EMPLOYER_SPECIFIC_DECLARATIONS, POST_CLICK_STATES, PREFILL_POLICY,
     REASON_TEXTS, STATE_TEXTS, TERMINAL_STATES, TRANSITIONS, AccountStatus, Answer, AnswerSource,
     AnswerStatus, AnswerTier, ApplyFailure, AttemptContext, AttemptResult, AttemptState, Canonical,
-    FieldType, FormField, PageOutcome, PrefillPolicy, ReasonCode, ResolveContext, SignUpOutcome,
+    FieldType, FillPolicy, FormField, PageOutcome, PrefillPolicy, QuestionReason, ReasonCode,
+    ResolveContext, SignUpOutcome,
 )
-from .apply.contracts import MODEL_PAUSE_BY_CODE, QUEUE_PAUSE_TEXTS, RETURNS_ITEM, QueuePause
+from .apply.contracts import (FIELD_CLASS_CHOICES, FIELD_CLASS_SEP, MODEL_PAUSE_BY_CODE,
+                              QUEUE_PAUSE_TEXTS, RETURNS_ITEM, FieldClass, QueuePause,
+                              extra_entry_applies)
+from .apply.contracts import CONSENT_REFUSED_DETAILS, CONTENT_FAILURE_MARKERS, CONTENT_FAILURE_TEXT
 from .apply.detect import detect
 from .apply.pagefill import (ENTRY_NOTE_PREFIX, ENTRY_NOTE_TAIL, TYPED_BEFORE_STOP_NOTE, fill_page,
                              stored_quote)
 from .apply.plan import norm_label
-from .config import ApplyConfig, Config
+from .config import ApplyConfig, Config, fill_policy_value
 from .scrape.net import HttpClient
 from .tailor.contracts import ComposeRequest
 from .store import (ATTEMPT_TRANSITIONS, POST_CLICK_ATTEMPT_STATES, TERMINAL_ATTEMPT_STATES,
@@ -69,6 +75,9 @@ SG = timezone(timedelta(hours=8))        # Asia/Singapore: no DST since 1982, so
 REDACTED = "[redacted]"
 _BLANK = (None, "", [])
 CODE_REQUIRED = "code_required"          # await_confirmation's note for §4.2's emailed code
+# pagefill's always-path line after a short "Add another" (`_always_adds`, rev L7; review F5)
+_E5_SHORT = re.compile(r"^E5: (?P<added>\d+) of (?P<wanted>\d+) (?P<section>[a-z][a-z ]{0,40}?) "
+                       r"entries added\b")
 
 
 def check_attempt_table() -> None:
@@ -209,6 +218,11 @@ class _Attempt:
         # D-202: the values blanked in a stored unchecked model quote (`facts.quote_s_values`),
         # set from every ResolveContext the attempt fills with, before its first `record`
         self.quote_values: tuple[str, ...] = ()
+        self.always = False           # Q-121: the attempt fills under the effective policy `always`
+        self.trial = False            # Q-121 §12: a first-use trial attempt (a dry run under `always`)
+        # Q-121 review F5: "1 of 2 education entries added" per section whose Add fell short
+        # under `always` (a note, not a stop); stored as `apply_attempts.entries_note`
+        self.entries: dict[str, str] = {}
 
     # -- state
 
@@ -233,6 +247,9 @@ class _Attempt:
             self.log(f"[attempt {self.id}] failed reason={reason.value if reason else ''} "
                      f"step={self.step} detail={detail or ''}")
             rt = REASON_TEXTS.get(reason) if reason else None
+            if reason is ReasonCode.UNANSWERABLE_REQUIRED and is_content_failure(
+                    {"state": S.FAILED.value, "reason_code": reason.value, "reason_detail": detail}):
+                rt = CONTENT_FAILURE_TEXT           # A1 §17.6: not the "answer it in Profile" copy
             if rt:
                 self.log(f"[attempt {self.id}] {rt.text.format(detail=detail or '')} {rt.hint}")
             return
@@ -247,9 +264,37 @@ class _Attempt:
         a = list(self.answers.values())
         n = lambda *st: sum(1 for x in a if x.status in st)        # noqa: E731
         tier5 = sum(1 for x in a if x.tier is AnswerTier.LLM and x.fills)
-        return (f"fields={len(a)} filled={n(AnswerStatus.FILLED, AnswerStatus.PREFILLED)} "
-                f"blank={n(AnswerStatus.BLANK_OPTIONAL)} "
-                f"unknown={n(AnswerStatus.UNKNOWN, AnswerStatus.UNGROUNDED)} tier5={tier5}")
+        out = (f"fields={len(a)} filled={n(AnswerStatus.FILLED, AnswerStatus.PREFILLED)} "
+               f"blank={n(AnswerStatus.BLANK_OPTIONAL)} "
+               f"unknown={n(AnswerStatus.UNKNOWN, AnswerStatus.UNGROUNDED)} tier5={tier5}")
+        if self.always:                   # Q-121 §6.2: the attempt summary counts assumptions
+            out += f" assumed={self.assumed_count()}"
+            if self.entries:              # review F5: and says when an Add fell short
+                out += f" entries=\"{self.entries_note()}\""
+        return out
+
+    def entries_note(self) -> str:
+        """The F5 note: "1 of 2 education entries added" (sections joined with "; ")."""
+        return "; ".join(self.entries.values())
+
+    def entries_short(self, line: str) -> None:
+        """Record pagefill's always-path E5 log line ("E5: 1 of 2 education entries added
+        (<why>)") on the attempt and its row (`entries_note`); the latest count per section
+        wins (a page filled again). The why is not kept (counts only, K10). Never raises."""
+        m = _E5_SHORT.match(str(line or ""))
+        if not m:
+            return
+        self.entries[m["section"]] = f"{m['added']} of {m['wanted']} {m['section']} entries added"
+        try:
+            self.store.update_attempt(self.id, entries_note=self.entries_note()[:200])
+            self.store.commit()
+        except Exception:                                 # noqa: BLE001 - a note never changes an outcome
+            pass
+
+    def assumed_count(self) -> int:
+        """Answers put on the page with an assumption (§6.2; counts only, K10)."""
+        return sum(1 for x in self.answers.values() if getattr(x, "assumed", False)
+                   and x.status in (AnswerStatus.FILLED, AnswerStatus.PREFILLED))
 
     # -- evidence (§8.3)
 
@@ -318,11 +363,34 @@ def _sent_value(f: FormField, a: Answer) -> Any:
     return a.value
 
 
+def stored_class(a: Answer) -> str:
+    """Q-127 B.5 (H3): the field class a row is stored with, a FIELD_CLASS_CHOICES string or "".
+    The class the filler decided (`Answer.field_class`, `always`) wins. Without one (`strict`,
+    or a path that does not stamp it) a tier-4 declaration answer, whose source is
+    `declaration:<label>` and which the code's declaration reader wrote, is `declaration:<label>`:
+    `web/` may not import `apply.declarations`, so the class is written at fill time and
+    "Use a different answer next time" can refuse it by class, not only by source. A class the
+    reader names that has no class of its own is `declaration:other` (an agreed set "a+b" takes
+    its first label with a class), disability is a self-ID. Anything else is "" (NULL-like)."""
+    if a.field_class:
+        return a.field_class
+    if a.source_kind is not AnswerSource.DECLARATION:
+        return ""
+    for name in (a.source.split(":", 1)[1] if ":" in a.source else "").split("+"):
+        if name == "disability":
+            return f"{FieldClass.SELF_ID.value}{FIELD_CLASS_SEP}disability"
+        choice = f"{FieldClass.DECLARATION.value}{FIELD_CLASS_SEP}{name}"
+        if choice in FIELD_CLASS_CHOICES:
+            return choice
+    return f"{FieldClass.DECLARATION.value}{FIELD_CLASS_SEP}other"
+
+
 def audit_row(step: str, f: FormField, a: Answer,
               quote_values: Sequence[str] = ()) -> dict[str, Any]:
     """One `apply_answers` row. `evidence` (D-202): a quote the guards checked on a field
     that took a value is kept verbatim, any other with `quote_values` redacted
-    (`pagefill.stored_quote`); rows with no quote stay None."""
+    (`pagefill.stored_quote`); rows with no quote stay None. `field_class` (Q-127): see
+    `stored_class`; "" when none is known, NULL on rows written before schema v9."""
     return {
         "step": step, "field_key": f.key, "label": f.label, "label_norm": norm_label(f.label),
         "field_type": f.type.value, "required": f.required, "section": f.section,
@@ -335,6 +403,8 @@ def audit_row(step: str, f: FormField, a: Answer,
         "evidence": stored_quote(a.evidence, a, quote_values) or None,
         "shown_json": a.shown if a.shown not in _BLANK else None,
         "shown_origin": a.origin or None, "entry": a.entry or None,
+        "assumed": bool(getattr(a, "assumed", False)),         # Q-121 §6.1 (always 0 under strict)
+        "field_class": stored_class(a),                        # Q-127 v9 (H3)
     }
 
 
@@ -494,16 +564,18 @@ def _entry_problem(a: Any) -> str:
     return note[i + len("E5: "):].split(ENTRY_NOTE_TAIL)[0].strip()
 
 
-def _transport_cause(outcome: PageOutcome) -> str:
+def _transport_cause(outcome: PageOutcome, watch: Any = None) -> str:
     """What the first "transport: ..." row note says (N6a F5): "model unavailable", "timed
-    out", ... so a model that died mid-attempt isn't reported as a timeout. The old wording
-    when no row carries one."""
+    out", ... so a model that died mid-attempt isn't reported as a timeout. When no row
+    carries one (the `always` path writes no such notes), what the backend watch saw
+    (`_RefusalWatch.failure`, review D4); the old wording when neither says."""
     for pf in outcome.fields:
         a = outcome.answers.get(pf.field.key)
         note = (a.note if a is not None else "") or ""
         if note.lower().startswith("transport:"):
             return note.split(":", 1)[1].strip().split(";")[0].strip() or "timed out"
-    return "timed out"
+    seen = getattr(watch, "failure", "") if isinstance(watch, _RefusalWatch) else ""
+    return seen or "timed out"
 
 
 def _flagged(fields: Sequence[FormField], errors: Sequence[str]) -> list[FormField]:
@@ -516,6 +588,68 @@ def _flagged(fields: Sequence[FormField], errors: Sequence[str]) -> list[FormFie
                        for e in errs):
             out.append(f)
     return out
+
+
+# ---------------------------------------------------------------- fill policy (Q-121, D-208)
+#
+# llm_first_fill_design §2 K2, §7.2: `apply.fill_policy: always` takes effect only with the
+# local model (backends.is_local) and the LLM page filler (`apply.fill: llm`); otherwise the
+# attempt runs `strict`, today's path, and the log says why. The code default is `strict`.
+
+POLICY_NOT_LOCAL = "fill_policy always ignored: model not on this computer"
+POLICY_NOT_LLM = "fill_policy always ignored: apply.fill is not llm"
+# D-223 release lock: `always` is also ignored until the config file releases it
+# (`apply.always_available: true`; no settings row, route or flag can set that).
+POLICY_NOT_RELEASED = "fill_policy always ignored: not released on this install"
+PROMPT_CHECK = "prompt check"            # §9 / K1: the `error` detail when a prompt held a secret
+TRIAL_NOTE = "Trial: filled, not sent"   # §12 rev H3
+NEUTRAL_TEXT = ("I am applying for the {title} role at {employer}. My resume, attached, sets "
+                "out my education and experience.")     # §4.8: the last-resort composed text
+
+
+def effective_policy(acfg: ApplyConfig, backend: Any) -> tuple[FillPolicy, str]:
+    """(the effective fill policy, why `always` was not applied or ""). `always` only when
+    configured, released on this install (D-223), the model is on this computer (K2) and
+    forms go through the LLM page filler. Anything unreadable is `strict`. The one place
+    every reader of the policy goes through (`choose_policy`)."""
+    if fill_policy_value(getattr(acfg, "fill_policy", "strict")) != FillPolicy.ALWAYS.value:
+        return FillPolicy.STRICT, ""
+    if getattr(acfg, "always_available", False) is not True:
+        return FillPolicy.STRICT, POLICY_NOT_RELEASED
+    if getattr(acfg, "fill", "llm") != "llm":
+        return FillPolicy.STRICT, POLICY_NOT_LLM
+    if not backends.is_local(backend):
+        return FillPolicy.STRICT, POLICY_NOT_LOCAL
+    return FillPolicy.ALWAYS, ""
+
+
+class _RefusalWatch:
+    """The page filler's backend (both policies since review D2): the same backend, but a
+    `PromptRefused` (K1) is remembered, because pagefill reports every BackendError as a
+    transport failure and the flow must end the attempt `error` "prompt check", not
+    `model_unavailable` (a refusal is never retried as transport)."""
+
+    def __init__(self, backend: Any):
+        self._backend = backend
+        self.refused = False
+        self.failure = ""         # review D4: what the last failed call was ("timed out" | "model unavailable")
+
+    def complete(self, *args: Any, **kw: Any) -> Any:
+        try:
+            return self._backend.complete(*args, **kw)
+        except backends.PromptRefused:
+            self.refused = True
+            raise
+        except TimeoutError:
+            self.failure = "timed out"
+            raise
+        except backends.BackendError as exc:
+            self.failure = "timed out" if "timeout" in str(exc).lower().replace("timed out", "timeout") \
+                else "model unavailable"
+            raise
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._backend, name)
 
 
 # ---------------------------------------------------------------- run lock (review F4)
@@ -600,7 +734,7 @@ class _FillServices:
     def __init__(self, run: "_Run", at: _Attempt, ctx: AttemptContext, rules: Any,
                  now: Optional[Callable[[], float]] = None):
         self.run, self.at, self.ctx = run, at, ctx
-        self.backend = run.backend
+        self.backend = _RefusalWatch(run.backend)       # K1 under both policies (review D2)
         self.model = str(getattr(run.backend, "model_id", "") or getattr(run.backend, "name", ""))
         self.rules = rules
         self.cfg: dict[str, Any] = dataclasses.asdict(run.acfg.llm_fill)
@@ -639,6 +773,8 @@ class _FillServices:
             self.log(f"decision cache not kept ({type(exc).__name__})")
 
     def log(self, line: str) -> None:
+        if self.at.always:                                # review F5: keep the E5 shortfall
+            self.at.entries_short(line)
         self.run.log(f"[attempt {self.at.id}] {line}")
 
 
@@ -659,8 +795,12 @@ def _fill_services(run: "_Run", at: _Attempt, ctx: AttemptContext, *,
 
 def _naming_wanted(q: Any, extra: Any, rows: Sequence[dict[str, Any]]) -> bool:
     """Would `assign_key` reach the model (QD §5.2 rule 4)? Not for a profile gap, a
-    sensitive question, or a label an `extra` entry or a stored row already holds."""
-    if q.sensitive or q.target_path:
+    sensitive question, or a label an `extra` entry or a stored row already holds.
+    Never for an "Answered for you" question (reason `assumed`, Q-121 review F2): the
+    model's `same_as` could give it another question's key, and Keep would then write the
+    AI's guess over the owner's own answer there; it keeps its exact label or a new slug
+    (rules 2, 3, 5), and no naming call is spent inside the fill loop."""
+    if q.sensitive or q.target_path or getattr(q, "reason", None) is QuestionReason.ASSUMED:
         return False
     for e in Q.existing_keys(extra, rows):
         if e.in_extra and q.label_norm in e.labels:
@@ -672,19 +812,23 @@ def _naming_wanted(q: Any, extra: Any, rows: Sequence[dict[str, Any]]) -> bool:
 
 def _capture_questions(store: Store, cfg: Config, backend: Any, at: _Attempt, job: dict[str, Any],
                        fields: Sequence[Any], answers: dict[str, Answer], rctx: ResolveContext,
-                       rules: Any, *, page: bool = False) -> int:
+                       rules: Any, *, page: bool = False,
+                       found: Optional[Sequence[Any]] = None) -> int:
     """Questions from applications (questions_design §4.1, llm_fill_design §11): every
     required field no tier could answer becomes a `questions` row plus a sighting, so
     the owner answers it once in Profile -> Application details. `fields`/`answers` are
     the resolved FormFields (pre-D-78 path) or, with `page=True`, the PageFields of the
     stopped page. The model only names (never answers, never sees a sensitive question
     or a profile value). Capture can never change an outcome: any exception is logged
-    by type only and the attempt ends as it would have. Returns how many were captured."""
+    by type only and the attempt ends as it would have. Returns how many were captured.
+    `found` (Q-121): CapturedQuestions already chosen (an owner-fact stop, the assumed
+    answers of a page under `always`); `fields`/`answers` are then not read."""
     qc = cfg.question_capture
     if not qc.enabled:
         return 0
     try:
-        found = (Q.capture_page if page else Q.capture)(fields, answers, rctx, rules)
+        if found is None:
+            found = (Q.capture_page if page else Q.capture)(fields, answers, rctx, rules)
         extra = rctx.profile.get("extra") if isinstance(rctx.profile, dict) else None
         calls, said = 0, False
         for q in found:
@@ -762,6 +906,10 @@ class _Run:
         self.apply_cfg_fn: Callable[[], ApplyConfig] = lambda: self.acfg
         self.should_stop: Callable[[], bool] = lambda: False   # the web parent is gone
         self.force_dry_run = False
+        # Q-121 (D-208): the effective fill policy of the attempt in flight (K2), set by
+        # `attempt` from the item's settings; `strict` keeps every pre-Q-121 behaviour.
+        self.policy = FillPolicy.STRICT
+        self.compose_assumed: dict[str, str] = {}             # audit key -> why a composed text is assumed
         # Q-126 (D-214, ollama_autostart_design §3): the worker brings the local model up.
         self.model_autostart = False          # library default: never start (cli turns it on)
         self.model_ensurer: Optional[Callable[..., Any]] = None   # None = backends.ensure_model_running
@@ -912,6 +1060,19 @@ class _Run:
             n for n in (str(x).strip() for x in names)
             if n and not any(declarations.company_match(n, m) for m in mine)))
 
+    def profile_here(self, employer: str, aliases: Sequence[str]) -> dict[str, Any]:
+        """Q-127 F1: the profile as this employer's attempt may read it. A remembered answer
+        saved "only for applications to <employer>" (`extra.<k>.employer`) is dropped from
+        `extra` for every other employer, so no reader (tier 3, the briefing, the FACTS list,
+        the guards) can reach it, whatever it looks up by key. The same object when nothing
+        is dropped."""
+        extra = self.profile.get("extra") if isinstance(self.profile, dict) else None
+        if not isinstance(extra, dict) or all(
+                extra_entry_applies(e, employer, aliases) for e in extra.values()):
+            return self.profile
+        return {**self.profile, "extra": {k: e for k, e in extra.items()
+                                          if extra_entry_applies(e, employer, aliases)}}
+
     def resolve_ctx(self, job: dict[str, Any], tenant: Any, adapter: Any,
                     resume_path: str, attempt_id: Any = None) -> ResolveContext:
         aliases = tuple(dict.fromkeys(a for a in (job.get("company_key"), tenant.board)
@@ -928,8 +1089,14 @@ class _Run:
         if self.acfg.model_sees_sensitive and not sees_s:
             prefix = f"[attempt {attempt_id}] " if attempt_id is not None else ""
             self.log(f"{prefix}model_sees_sensitive ignored: model backend is not on this computer")
+        extra: dict[str, Any] = {}
+        if self.policy is FillPolicy.ALWAYS:
+            # Q-121 §7.2: under `always` (local model only, K2) the model reads the whole
+            # profile; strict contexts are built exactly as before (no new argument).
+            extra = {"fill_policy": FillPolicy.ALWAYS, "model_sees_sensitive": True}
         return ResolveContext(
-            profile=self.profile, employer_name=str(job.get("company") or ""),
+            profile=self.profile_here(str(job.get("company") or ""), aliases),
+            employer_name=str(job.get("company") or ""),
             job_title=str(job.get("title") or ""),
             employer_aliases=aliases,
             resume_entries=self._resume_entries,
@@ -939,7 +1106,7 @@ class _Run:
             resume_path=resume_path, ats=adapter.name, alias_groups=groups,
             alias_ambiguous=ambiguous,
             account_email=str(_profile_path(self.profile, "contact.email") or ""),
-            model_sees_sensitive=sees_s)
+            **{"model_sees_sensitive": sees_s, **extra})
 
     def resolve(self, fields: Sequence[FormField], rctx: ResolveContext,
                 at: _Attempt) -> dict[str, Answer]:
@@ -1002,12 +1169,37 @@ class _Run:
         the `queued` row `queue_take` created (its mode already set by `set_mode`)."""
         job = self.store.job_for_apply(job_id)
         taken = attempt_id is not None
+        base_mode = (self.mode, self.dry_run)
+        # review F14 (c): the composed-text bookkeeping is one attempt's (audit keys repeat
+        # across jobs of one ATS), in a batch `apply` run as in the queue (`begin_item`)
+        self.compose_files, self.compose_meta, self.compose_assumed = {}, {}, {}
+        trial = self.choose_policy()
+        if trial:                                      # §12 rev H3: an upper bound, never auto
+            self.mode, self.dry_run = "dry_run", True
+        # A1-W (§17.7): a trial attempt is marked on its row (`trial = 1`) so Applications and
+        # Runs can say "Trial: filled, not sent"; every other attempt keeps the column's 0.
         if attempt_id is None:
             attempt_id = self.store.create_attempt(job_id, job.get("company_id") if job else None,
                                                    self.mode, utcnow())
+            if trial:
+                self.store.update_attempt(attempt_id, trial=1)
+            self.store.commit()
+        elif trial:
+            self.store.update_attempt(attempt_id, mode=self.mode, trial=1)
             self.store.commit()
         at = _Attempt(self.store, self.log, attempt_id, job_id, self.evidence)
+        at.always, at.trial = self.policy is FillPolicy.ALWAYS, trial
         self.log(f"[attempt {attempt_id}] queued job={job_id} mode={self.mode}")
+        if at.always:
+            nth = "?"
+            if trial:
+                try:                                      # review F14 (b): a log line never fails the attempt
+                    nth = str(self.store.always_trial_used() + 1)
+                except Exception:                         # noqa: BLE001 - choose_policy already failed closed
+                    pass
+            self.log(f"[attempt {attempt_id}] fill policy: always (local model)"
+                     + (f"; {TRIAL_NOTE.lower()} (trial {nth} of {self.acfg.always_trial_runs})"
+                        if trial else ""))
         adapter = ctx = None
         try:
             if job is None:
@@ -1039,6 +1231,8 @@ class _Run:
             finally:
                 raise
         finally:
+            self.clear_secrets()                          # K1: the registry lives one attempt
+            self.mode, self.dry_run = base_mode           # a trial lowered this attempt only
             if adapter is not None and ctx is not None and hasattr(adapter, "forget"):
                 adapter.forget(ctx)
             if at.page is not None and at.state is not S.READY_TO_SUBMIT:
@@ -1081,6 +1275,16 @@ class _Run:
 
     def body(self, at: _Attempt, job: dict[str, Any]):
         acfg = self.acfg
+        if at.always:
+            # K1, review F7: the known secrets are registered before ANY prompt of the
+            # attempt, the tailor's included (`resume` below). `detect` is pure; when it
+            # cannot name the site only the mailbox passwords are registered here (planning
+            # then ends the attempt as before).
+            try:
+                nav0, tenant0 = detect(job)
+            except ApplyFailure:
+                nav0 = tenant0 = None
+            self.forbid_known_secrets(at, nav0, tenant0)
         # tailoring -> planning
         resume_path = self.resume(at, job)
         at.to(S.PLANNING, step="planning")
@@ -1194,16 +1398,136 @@ class _Run:
         return self.rules
 
     def capture(self, at: _Attempt, job: dict[str, Any], fields: Sequence[Any],
-                answers: dict[str, Answer], rctx: ResolveContext, *, page: bool = False) -> int:
+                answers: dict[str, Answer], rctx: ResolveContext, *, page: bool = False,
+                akeys: Optional[dict[str, str]] = None) -> int:
+        """`akeys` (page stops; the reader key -> audit key map `stage` returns): the sightings
+        are then stored under the AUDIT key, the one `apply_answers` rows carry, so "Answer for
+        next time" finds the captured question (`store.attempt_field_question`, review M1).
+        Only the stored field key changes; what was filled or submitted does not."""
+        if page and akeys:
+            fields = [dataclasses.replace(pf, field=dataclasses.replace(
+                pf.field, key=akeys.get(pf.field.key) or pf.field.key)) for pf in fields]
+            answers = {akeys.get(k) or k: a for k, a in answers.items()}
         return _capture_questions(self.store, self.cfg, self.backend, at, job, fields, answers,
                                   rctx, self.load_rules(), page=page)
 
-    def warm_up(self, at: _Attempt) -> None:
+    # -- Q-121 (D-208): the fill policy, the briefing, secrets (llm_first_fill_design §2, §3, §12)
+
+    def choose_policy(self) -> bool:
+        """Set `self.policy` for the attempt about to start (K2: `always` only with the local
+        model) and say whether the attempt is a first-use trial (§12 rev H3): the policy is
+        `always`, this attempt would submit (`auto`), `always_trial_runs` > 0 and fewer trial
+        attempts than that reached the review page. A counter that cannot be read counts as
+        a trial (the reading that sends less)."""
+        self.policy, why = effective_policy(self.acfg, self.backend)
+        if why:
+            self.log(f"apply: {why}")
+        if self.policy is not FillPolicy.ALWAYS or self.dry_run:
+            return False
+        n = int(getattr(self.acfg, "always_trial_runs", 0) or 0)
+        if n <= 0:
+            return False
+        try:
+            return self.store.always_trial_used() < n
+        except Exception as exc:                          # noqa: BLE001 - fail towards not sending
+            self.log(f"apply: WARNING the trial counter could not be read ({type(exc).__name__}); "
+                     "this attempt runs as a dry run")
+            return True
+
+    def forbid(self, *secrets: Any) -> None:
+        """K1: register secrets with the backend's prompt check the moment they exist (a
+        generated account password, a vault password read for sign-in, the IMAP app
+        password), so no prompt of this attempt can carry them (`clear_secrets` at its end).
+        A value too short to guard ends the attempt `error` "prompt check" under `always`;
+        under `strict` it is logged and the attempt goes on as before."""
+        fn = getattr(self.backend, "forbid", None)
+        vals = [s.reveal() if hasattr(s, "reveal") else s for s in secrets if s is not None]
+        vals = [v for v in vals if isinstance(v, str) and v]
+        if not callable(fn) or not vals:
+            return
+        try:
+            fn(vals)
+        except (TypeError, ValueError):
+            if self.policy is FillPolicy.ALWAYS:
+                raise ApplyFailure(ReasonCode.ERROR, PROMPT_CHECK) from None
+            self.log("apply: a secret is too short for the prompt check (not registered)")
+
+    def forbid_known_secrets(self, at: _Attempt, nav: Any, tenant: Any) -> None:
+        """K1 under `always`, before the first prompt (the warm-up sends the briefing): the
+        vault passwords of this site's known accounts and the IMAP app passwords of the
+        profile's mailboxes are registered now, not only when sign-in or the mail reads them,
+        so no prompt of the attempt can carry one even if it was pasted into the profile.
+        A vault that cannot be read is skipped (sign-in and the mail read it again later)."""
+        secrets: list[Any] = []
+        try:
+            service = vault.service_for(nav.name, tenant.host)
+            rows = self.store.accounts_for_tenant(nav.name, tenant.host) or {}
+            mine = [str(_profile_path(self.profile, k) or "").strip()
+                    for k in ("contact.email", "contact.backup_email")]
+            for email in dict.fromkeys([*(m for m in mine if m and m.lower() in rows), *rows]):
+                secrets.append(vault.get(service, email))
+        except Exception:                                 # noqa: BLE001 - read again at sign-in
+            pass
+        try:
+            settings = mail.effective_settings(self.cfg, self.store.get_setting)
+            for key in ("contact.email", "contact.backup_email"):
+                address = str(_profile_path(self.profile, key) or "").strip()
+                box = mail.mailbox_for(address, self.profile, settings) if address else None
+                if box is not None:
+                    secrets.append(mail.mailbox_password(box))
+        except Exception:                                 # noqa: BLE001 - read again by the mail step
+            pass
+        self.forbid(*secrets)
+        n = sum(1 for s in secrets if s is not None)
+        if n:
+            self.log(f"[attempt {at.id}] prompt check: {n} secret(s) registered")
+
+    def clear_secrets(self) -> None:
+        """K1: forget the registered secrets (the end of every attempt)."""
+        fn = getattr(self.backend, "clear_forbidden", None)
+        if callable(fn):
+            try:
+                fn()
+            except Exception:                             # noqa: BLE001 - nothing to lose
+                pass
+
+    def always_services(self, at: _Attempt, services: "_FillServices",
+                        rctx: ResolveContext) -> list[dict[str, str]]:
+        """What pagefill's `always` branch reads from FillServices (WP-C1): the briefing,
+        built once per attempt from the profile and this ResolveContext (§3.1, §7.1;
+        deterministic), the attempt's F2-F6 count (§4.6), the backend behind the K1 refusal
+        watch, `max_entries` as a mapping. Returns the warm-up messages (§3.5): the system
+        text and the user prefix (BRIEFING + JOB) every call of the attempt starts with. A
+        profile key named like a secret ends the attempt `error` "prompt check" (K1)."""
+        today = services.today()
+        try:
+            brief = BR.build(rctx.profile, rctx, today=today,
+                             max_tokens=int(self.acfg.llm_fill.briefing_max_tokens))
+        except BR.BriefingRefused:
+            self.log(f"[attempt {at.id}] briefing refused: a profile key looks like a secret")
+            raise ApplyFailure(ReasonCode.ERROR, PROMPT_CHECK, step="planning") from None
+        services.briefing = brief
+        services.attempt_fallbacks = 0
+        services.page_fallbacks, services.last_page_step = {}, ""     # review F13: per page
+        services.cfg["max_entries"] = dict(services.cfg.get("max_entries") or ())
+        self.log(f"[attempt {at.id}] briefing ready ({brief.tokens} tokens)")
+        return [{"role": "system", "content": AL.SYSTEM_ALWAYS},
+                {"role": "user", "content": AL.user_prefix(brief, BR.job_block(rctx, today=today))}]
+
+    def warm_up(self, at: _Attempt, messages: Optional[list[dict[str, str]]] = None) -> None:
         """Load the model before Edge opens (D-81: a cold load costs ~33 s). A model that
-        is not there ends the attempt `model_unavailable` with nothing opened (§11)."""
+        is not there ends the attempt `model_unavailable` with nothing opened (§11). Under
+        `always` the warm-up sends the shared prefix (`messages`, §3.5) so later calls reuse
+        it; a prefix the prompt check refuses ends the attempt `error` "prompt check" (K1)."""
         t0 = time.monotonic()
         try:
-            backends.warm(self.backend, self.acfg.llm_fill.keep_alive or None)
+            if messages:
+                backends.warm(self.backend, self.acfg.llm_fill.keep_alive or None, messages=messages)
+            else:
+                backends.warm(self.backend, self.acfg.llm_fill.keep_alive or None)
+        except backends.PromptRefused:
+            self.log(f"[attempt {at.id}] model warm-up refused by the prompt check")
+            raise ApplyFailure(ReasonCode.ERROR, PROMPT_CHECK, step="planning") from None
         except backends.BackendError as exc:
             self.log(f"[attempt {at.id}] model warm-up failed ({type(exc).__name__})")
             raise ApplyFailure(ReasonCode.MODEL_UNAVAILABLE,
@@ -1238,8 +1562,11 @@ class _Run:
         nav.precheck(ctx)                                 # POSTING_CLOSED before the model or Edge
         self.check_deadline(ctx)
         services = _fill_services(self, at, ctx, now=self.now)
+        warm_msgs = None
+        if at.always:                                     # K1: secrets registered in `body` (F7)
+            warm_msgs = self.always_services(at, services, rctx)
         t_warm = time.monotonic()
-        self.warm_up(at)
+        self.warm_up(at, warm_msgs)
         ctx.deadline += time.monotonic() - t_warm         # the model load is not the attempt's time (N6a F3)
 
         # opening
@@ -1261,51 +1588,143 @@ class _Run:
 
         # filling, one step at a time (loop guard: the same step with the same fields twice)
         seen: set = set()
-        for _ in range(max(1, acfg.max_wizard_steps)):
-            self.check_deadline(ctx, at.step)
-            self.check_page(page, at)
-            outcome = fill_page(page, nav, ctx, rctx, services)
-            if outcome.compose_needed:                    # Q-45: write the texts, then once more (section 19.3)
-                outcome = self.compose_step(at, page, nav, ctx, rctx, services, job, outcome)
-            step = self.page_result(at, page, outcome, rctx, services, job)
-            if not outcome.fields and step != "review":
-                raise ApplyFailure(ReasonCode.PAGE_UNRECOGNISED, f"no fields on {step}", step=step)
-            sig = (step, _signature(outcome))
-            if sig in seen:
-                raise ApplyFailure(ReasonCode.PAGE_UNRECOGNISED, f"{step} shown again", step=step)
-            seen.add(sig)
-            at.shot(page, step)
-            self.check_page(page, at)
-            res = nav.next_step(page, ctx)
-            if res.errors:                                # one corrective pass (llm_fill_design §8)
-                self.log(f"[attempt {at.id}] errors after Next: {', '.join(res.errors[:3])}")
-                again = fill_page(page, nav, ctx, rctx, services)
-                self.page_result(at, page, again, rctx, services, job)
+        try:
+            for _ in range(max(1, acfg.max_wizard_steps)):
+                self.check_deadline(ctx, at.step)
+                self.check_page(page, at)
+                outcome = fill_page(page, nav, ctx, rctx, services)
+                if outcome.compose_needed:                # Q-45: write the texts, then once more (section 19.3)
+                    outcome = self.compose_step(at, page, nav, ctx, rctx, services, job, outcome)
+                step = self.page_result(at, page, outcome, rctx, services, job)
+                if not outcome.fields and step != "review":
+                    raise ApplyFailure(ReasonCode.PAGE_UNRECOGNISED, f"no fields on {step}", step=step)
+                sig = (step, _signature(outcome))
+                if sig in seen:
+                    raise ApplyFailure(ReasonCode.PAGE_UNRECOGNISED, f"{step} shown again", step=step)
+                seen.add(sig)
+                at.shot(page, step)
+                self.check_page(page, at)
                 res = nav.next_step(page, ctx)
-                if res.errors:
-                    raise ApplyFailure(ReasonCode.VALIDATION_ERROR,
-                                       ", ".join(e[:80] for e in res.errors[:3]), step=step)
-            at.record(step, list(at.fields.values()))
-            if res.is_review:
-                break
-            at.to(S.FILLING, step=B.slug(res.step) or step)
-        else:
-            raise ApplyFailure(ReasonCode.PAGE_UNRECOGNISED, f"{nav.name}: too many steps")
+                if res.errors:                            # one corrective pass (llm_fill_design §8)
+                    self.log(f"[attempt {at.id}] errors after Next: {', '.join(res.errors[:3])}")
+                    if at.always:
+                        self.refill_base(services)        # review F13: this page is counted once
+                    again = fill_page(page, nav, ctx, rctx, services)
+                    self.page_result(at, page, again, rctx, services, job)
+                    res = nav.next_step(page, ctx)
+                    if res.errors:
+                        raise ApplyFailure(ReasonCode.VALIDATION_ERROR,
+                                           ", ".join(e[:80] for e in res.errors[:3]), step=step)
+                at.record(step, list(at.fields.values()))
+                if res.is_review:
+                    break
+                at.to(S.FILLING, step=B.slug(res.step) or step)
+            else:
+                raise ApplyFailure(ReasonCode.PAGE_UNRECOGNISED, f"{nav.name}: too many steps")
 
-        # review: the pre-Submit scan and the review text check (llm_fill_design §8, H7), then,
-        # unchanged, a dry run stops here and auto mode submits (NF-06). Auto mode reaches
-        # `submit` only through a passing scan (replaces the N6a review-F1 stop).
-        at.shot(page, "review")
-        at.result.url = (page.url or "").split("?", 1)[0]
-        self.check_page(page, at)                          # a bot check after the last Next ends as one (review F2)
-        self.pre_submit_scan(page, nav, ctx, at)
+            # review: the pre-Submit scan and the review text check (llm_fill_design §8, H7), then,
+            # unchanged, a dry run stops here and auto mode submits (NF-06). Auto mode reaches
+            # `submit` only through a passing scan (replaces the N6a review-F1 stop). Under
+            # `always` a required field the scan finds empty gets one more A8 round first (K8).
+            at.shot(page, "review")
+            at.result.url = (page.url or "").split("?", 1)[0]
+            self.check_page(page, at)                      # a bot check after the last Next ends as one (review F2)
+            refill = None
+            if at.always:
+                def refill() -> None:
+                    self.refill_base(services)            # review F13: this page is counted once
+                    again = fill_page(page, nav, ctx, rctx, services)
+                    self.page_result(at, page, again, rctx, services, job)
+                    at.record(at.step, list(at.fields.values()))
+            self.pre_submit_scan(page, nav, ctx, at, refill=refill)
+        except AL.AlwaysStop as stop:                      # §9: only the `always` path raises it
+            self.always_stop(at, page, nav, ctx, job, rctx, stop)
         if self.dry_run:
             at.to(S.READY_TO_SUBMIT, end_url=at.result.url)
+            if at.trial:
+                self.trial_used(at)
             return nav, ctx
         self.submit(page, ctx, nav, at, job)
         return nav, ctx
 
-    def pre_submit_scan(self, page: Any, nav: Any, ctx: AttemptContext, at: _Attempt) -> None:
+    def trial_used(self, at: _Attempt) -> None:
+        """§12 rev H3: a trial attempt reached the review page: count it, say so."""
+        try:
+            n = self.store.count_always_trial()
+        except Exception as exc:                          # noqa: BLE001 - the attempt is done
+            self.log(f"[attempt {at.id}] trial counter not updated ({type(exc).__name__})")
+            return
+        self.log(f"[attempt {at.id}] {TRIAL_NOTE} (trial {n} of {self.acfg.always_trial_runs}); "
+                 f"{at.assumed_count()} answer(s) assumed")
+
+    def always_stop(self, at: _Attempt, page: Any, nav: Any, ctx: AttemptContext,
+                    job: dict[str, Any], rctx: ResolveContext, stop: Any) -> None:
+        """A per-role or content stop under `always` (llm_first_fill_design §9; raised by
+        `always.fill_page_always` through `fill_page`, before anything on that page is
+        typed, or from a reveal / Add / A8 round after typing). `owner_fact_missing`: the
+        field is captured for the owner (`profile_gap` with its profile path, else
+        `no_rule`; sensitive), the attempt waits ("Needs your answers") and the queue goes on
+        (`pause_for`). `document_missing`: per role, nothing captured. The content failure
+        (`unanswerable_required`, the detail starting with a marker): `fill_failed`, not
+        returned. Never returns.
+
+        Review F4: the stored detail says WHAT stopped it: the step, and for an owner-fact or
+        document stop the form's own label (employer text, never a value): "date of birth
+        (“Date of Birth” on my_information)". `owner_fact_of` reads the fact back for the
+        queue's same-fact rule. The stopped page has no audit rows: `AlwaysStop` carries no
+        decided answers (always.py), so there is nothing to stage with applied=False.
+
+        `consent_refused` (A1 §17.6: a consent the form requires and the profile refuses)
+        ends exactly like `owner_fact_missing`: the field is captured (target
+        `consents.<key>`, the stop's `target_path`), the role waits for the owner and is not
+        returned, the queue goes on. Its detail is the contract's plain words for that key
+        (`consent_refused_detail`), so the same consent reads the same on every role and the
+        same-detail streak rule in `pause_for` can name it."""
+        reason, detail = stop.reason, " ".join(str(stop.detail or "").split())
+        step = B.slug(getattr(stop, "step", "") or "") or at.step
+        label = " ".join(str(getattr(stop, "label", "") or "").split())[:80]
+        if reason is ReasonCode.OWNER_FACT_MISSING:
+            self.capture_owner_fact(at, page, nav, ctx, job, rctx, stop)
+            detail = owner_fact_detail(detail or label or "a fact", label, step)
+        elif reason is ReasonCode.CONSENT_REFUSED:
+            self.capture_owner_fact(at, page, nav, ctx, job, rctx, stop)
+            detail = consent_refused_detail(getattr(stop, "target_path", ""), detail)
+        elif reason is ReasonCode.DOCUMENT_MISSING:
+            detail = f"{detail or label or 'document'} (on {step})"
+        elif reason is ReasonCode.UNANSWERABLE_REQUIRED:
+            if not any(detail.lower().startswith(m) for m in CONTENT_FAILURE_DETAILS):
+                detail = content_failure_detail(FILL_WOULD_BE_GUESSES, detail)  # never a guessed field label
+            title = " ".join(str(getattr(stop, "step", "") or "").split())
+            if step not in detail and (not title or title not in detail):
+                detail = f"{detail} on {step}"
+        self.log(f"[attempt {at.id}] always: {reason.value} on {step}")
+        raise ApplyFailure(reason, detail[:200], step=step)
+
+    def capture_owner_fact(self, at: _Attempt, page: Any, nav: Any, ctx: AttemptContext,
+                           job: dict[str, Any], rctx: ResolveContext, stop: Any) -> None:
+        """§4.6: capture the owner-only fact (date of birth, a grade, ...) as a question;
+        A1 §17.6: also the consent a `consent_refused` stop names (its `target_path` is
+        `consents.<key>`, which the Profile form edits). The PageField is read again by its
+        key (the reader's marks are stable) for its type and options; without it the stop's
+        label stands. Never changes the outcome."""
+        pf = None
+        try:
+            scope = nav.scope(page, ctx)
+            pf = next((p for p in P.read_page(page, scope=scope)
+                       if p.field.key == stop.field_key), None)
+        except Exception:                                 # noqa: BLE001 - the label is enough
+            pf = None
+        try:
+            q = Q.capture_owner_fact(stop.detail, rctx, field=pf, field_key=stop.field_key,
+                                     label=stop.label, target_path=stop.target_path, step=at.step)
+        except Exception as exc:                          # noqa: BLE001 - capture never changes the outcome
+            self.log(f"[attempt {at.id}] question capture failed: {type(exc).__name__}")
+            return
+        _capture_questions(self.store, self.cfg, self.backend, at, job, [], {}, rctx,
+                           self.load_rules(), found=[q])
+
+    def pre_submit_scan(self, page: Any, nav: Any, ctx: AttemptContext, at: _Attempt, *,
+                        refill: Optional[Callable[[], None]] = None) -> None:
         """Before Submit (llm_fill_design §8, review H7). (1) `page.scan_required` over the whole
         form (Greenhouse: the one page; Workday: the review page shows no inputs, so the last
         step's scan before Next stands): a required control empty or in error ->
@@ -1313,7 +1732,11 @@ class _Run:
         the resume, its file name must be on the page ("review: resume not shown"). (3) Required
         text answers the page does not show: a log line only. Fail closed: a scan that cannot
         run stops an auto-mode attempt (a dry run, which sends nothing, says so and goes on).
-        Raises ApplyFailure; never clicks anything; no field value is logged."""
+        Raises ApplyFailure; never clicks anything; no field value is logged.
+
+        Q-121 K8 (`always` only): with `refill`, a scan hit first gets one more A8 round on
+        the page (`refill`: fill_page + page_result), then the scan runs again and stays the
+        final gate: still a hit -> `validation_error`, nothing sent."""
         try:
             scope = nav.scope(page, ctx)
             hits = P.scan_required(page, scope)
@@ -1323,6 +1746,20 @@ class _Run:
                 raise ApplyFailure(ReasonCode.VALIDATION_ERROR, REVIEW_SCAN_FAILED,
                                    step="review") from None
             return
+        if hits and refill is not None:
+            self.log(f"[attempt {at.id}] pre-Submit scan: {len(hits)} required field(s) empty; "
+                     "one more round (A8)")
+            refill()
+            try:
+                scope = nav.scope(page, ctx)
+                hits = P.scan_required(page, scope)
+            except Exception as exc:                      # noqa: BLE001 - fail closed (NF-06)
+                self.log(f"[attempt {at.id}] pre-Submit scan could not run "
+                         f"({type(exc).__name__})")
+                if not self.dry_run:
+                    raise ApplyFailure(ReasonCode.VALIDATION_ERROR, REVIEW_SCAN_FAILED,
+                                       step="review") from None
+                return
         if hits:
             labels = self._labels_of(page, scope, hits)
             raise ApplyFailure(ReasonCode.VALIDATION_ERROR,
@@ -1370,28 +1807,39 @@ class _Run:
         by_key = {pf.field.key: pf for pf in outcome.fields}
         if outcome.transport_failed:
             self.stage(at, page, outcome, step, applied=False)
+            # K1 (Q-121; both policies since review D2): a prompt that held a registered
+            # secret was refused before it was sent; pagefill reports it as transport, the
+            # flow ends `error` "prompt check" (never `model_unavailable`, never retried).
+            if getattr(services.backend, "refused", False) is True:
+                raise ApplyFailure(ReasonCode.ERROR, PROMPT_CHECK, step=step)
             # An expired deadline is reported by pagefill as transport "timed out": it is
             # the attempt's time that ran out, not the model (N1; llm_fill_design §11).
             if services.deadline_left() <= 0:
                 raise ApplyFailure(ReasonCode.ERROR, f"timed out on {step}", step=step)
             raise ApplyFailure(ReasonCode.MODEL_UNAVAILABLE,
-                               f"{_transport_cause(outcome)} on {step}", step=step)
+                               f"{_transport_cause(outcome, services.backend)} on {step}", step=step)
         if outcome.compose_needed:
             # the texts were written and the page still asks for them (section 19.3 step 4): never again
             self.stage(at, page, outcome, step, applied=False)
             raise ApplyFailure(ReasonCode.ERROR, f"compose loop on {step}", step=step)
         if outcome.unknown_required:
-            self.stage(at, page, outcome, step, applied=False)
-            self.capture(at, job, outcome.fields, outcome.answers, rctx, page=True)
+            akeys = self.stage(at, page, outcome, step, applied=False)
+            self.capture(at, job, outcome.fields, outcome.answers, rctx, page=True, akeys=akeys)
             first = by_key.get(outcome.unknown_required[0])
             label = first.field.label if first else outcome.unknown_required[0]
             raise ApplyFailure(ReasonCode.UNANSWERABLE_REQUIRED, label[:120], step=step)
-        self.stage(at, page, outcome, step, applied=True)
+        akeys = self.stage(at, page, outcome, step, applied=True)
+        if at.always:
+            self.always_page_done(at, job, outcome, akeys, rctx, services)
         # R3 F14 (D-173, D-174): a failed E5 Add is the section's problem, not a field's: say so,
         # and stop on it even when every field in the section is optional (fewer entries than
         # the profile has must never be submitted). Any other optional fill_failed row is not a stop.
         failed = [k for k in outcome.fill_failed if k in by_key]
         added = next((s for s in (_entry_problem(outcome.answers.get(k)) for k in failed) if s), "")
+        if added and at.always:
+            # Q-121 §4.5 (rev L7): under `always` a failed Add is an attempt note, not a stop.
+            self.log(f"[attempt {at.id}] E5: {added[:120]} (a note under fill policy always)")
+            added = ""
         req = [k for k in failed if by_key[k].field.required]
         bad = [by_key[k].field.label for k in req if not _entry_problem(outcome.answers.get(k))]
         if added or bad:
@@ -1399,11 +1847,53 @@ class _Run:
             raise ApplyFailure(ReasonCode.VALIDATION_ERROR, detail[:200], step=step)
         return step
 
+    def always_page_done(self, at: _Attempt, job: dict[str, Any], outcome: PageOutcome,
+                         akeys: dict[str, str], rctx: ResolveContext,
+                         services: "_FillServices") -> None:
+        """After a page under `always` was staged: add its F2-F6 answers to the attempt's
+        count (§4.6 `last_resort_max_attempt`; F0/F1 are not assumed) and capture its assumed
+        answers as "Answered for you" questions (§6.3), keyed by the audit key so the card
+        finds the sent value in `apply_answers`. Capture never changes an outcome."""
+        guesses = sum(1 for k in outcome.fallback
+                      if getattr(outcome.answers.get(k), "assumed", False))
+        # review F13: per page, once; the same page filled again (Next errors, the pre-Submit
+        # round) replaces its count instead of adding to it
+        counts = getattr(services, "page_fallbacks", None)
+        if not isinstance(counts, dict):
+            counts = services.page_fallbacks = {}
+        counts[at.step] = guesses
+        services.last_page_step = at.step
+        services.attempt_fallbacks = sum(counts.values())
+        if not outcome.assumed:
+            return
+        pfs, answers = [], {}
+        for pf in outcome.fields:
+            key = akeys.get(pf.field.key) or pf.field.key
+            if key in at.answers:
+                pfs.append(dataclasses.replace(pf, field=dataclasses.replace(pf.field, key=key)))
+                answers[key] = at.answers[key]
+        try:
+            found = Q.capture_assumptions(pfs, answers, rctx, self.load_rules())
+        except Exception as exc:                          # noqa: BLE001 - capture never changes the outcome
+            self.log(f"[attempt {at.id}] assumption capture failed: {type(exc).__name__}")
+            return
+        if found:
+            _capture_questions(self.store, self.cfg, self.backend, at, job, [], {}, rctx,
+                               self.load_rules(), found=found)
+
+    def refill_base(self, services: "_FillServices") -> None:
+        """Before the same page is filled again under `always` (review F13): the attempt's
+        F2-F6 count without that page's own, so `last_resort_max_attempt` sees it once."""
+        counts = getattr(services, "page_fallbacks", None) or {}
+        last = getattr(services, "last_page_step", "")
+        services.attempt_fallbacks = sum(n for s, n in counts.items() if s != last)
+
     def stage(self, at: _Attempt, page: Any, outcome: PageOutcome, step: str, *,
-              applied: bool) -> None:
+              applied: bool) -> dict[str, str]:
         """Put a page's fields and answers into the attempt under their audit keys
         (`apply.page.audit_keys`). `applied=False` (a stop or a transport failure) marks the
-        rows that were only decided: nothing is on the page for them (R3 F10)."""
+        rows that were only decided: nothing is on the page for them (R3 F10). Returns the
+        reader key -> audit key map ({} when the page could not give one)."""
         try:
             akeys = P.audit_keys(page, outcome.fields, step) if outcome.fields else {}
         except Exception:                                 # noqa: BLE001 - the reader keys still work
@@ -1426,8 +1916,13 @@ class _Run:
             path = self.compose_files.get(key)
             if path and f.type is FieldType.FILE and a.source == AnswerSource.COMPOSED.value:
                 a = dataclasses.replace(a, note=_composed_note(path))   # name and SHA-256 of the real file
+            why = self.compose_assumed.get(key)
+            if why is not None and a.source == AnswerSource.COMPOSED.value:
+                # Q-121 §4.8: a pruned or neutral composed text is assumed; the reason is its evidence
+                a = dataclasses.replace(a, assumed=True, evidence=a.evidence or why)
             at.fields[key] = f
             at.answers[key] = a
+        return akeys
 
     # -- Q-45: composed texts (llm_fill_design section 19.3)
 
@@ -1457,26 +1952,57 @@ class _Run:
             f, akey = pf.field, akeys.get(key) or key
             text, meta = Q.owner_compose_text(f, rctx), ("", "")
             if not text:
-                if not self.acfg.compose.enabled:
+                # Q-121 §4.8: under `always` a REQUIRED target is composed even with the
+                # cover-letter toggle off (the tailor gets the policy; strict calls it as before).
+                forced = at.always and f.required
+                if not self.acfg.compose.enabled and not forced:
                     self.compose_stop(at, page, job, rctx, outcome, step, key, Q.COMPOSE_OFF)
+                kw: dict[str, Any] = {}
+                if at.always:
+                    kw = {"policy": FillPolicy.ALWAYS.value,
+                          "enabled": bool(self.acfg.compose.enabled), "required": bool(f.required)}
                 res = tailor_flow.compose(self.cfg, self.compose_request(f, rctx),
                                           backend=self.backend, redact=llm_fill.redact,
-                                          timeout=max(1.0, services.deadline_left()))   # D-184
+                                          timeout=max(1.0, services.deadline_left()),   # D-184
+                                          **kw)
                 if not res.ok:
-                    if (res.error or "").startswith("transport"):
+                    err = res.error or ""
+                    if err.startswith("transport") and "PromptRefused" in err:
+                        self.stage(at, page, outcome, step, applied=False)       # K1, §9
+                        raise ApplyFailure(ReasonCode.ERROR, PROMPT_CHECK, step=step)
+                    if err.startswith("transport"):
                         self.stage(at, page, outcome, step, applied=False)
                         raise ApplyFailure(ReasonCode.MODEL_UNAVAILABLE,
                                            f"{res.error[:60]} on {step}", step=step)
-                    self.compose_stop(at, page, job, rctx, outcome, step, key,
-                                      Q.COMPOSE_NO_MASTER if res.error == "no master"
-                                      else Q.COMPOSE_FAILED)
-                text, meta = res.text, (res.model, res.prompt_hash)
+                    if not at.always:
+                        self.compose_stop(at, page, job, rctx, outcome, step, key,
+                                          Q.COMPOSE_NO_MASTER if res.error == "no master"
+                                          else Q.COMPOSE_FAILED)
+                text, meta = (res.text if res.ok else ""), (res.model, res.prompt_hash)
+                if at.always:
+                    why = "; ".join(x for x in (
+                        "pruned after its checks" if getattr(res, "pruned", False) else "",
+                        "a neutral text" if getattr(res, "neutral", False) else "",
+                        str(getattr(res, "reason", "") or "")) if x)
+                    if not (text or "").strip():          # §4.8: a required text is never left empty
+                        text, why = self.neutral_text(rctx), why or "a neutral text"
+                    if getattr(res, "assumed", False) or why:
+                        self.compose_assumed[akey] = f"composed: {why or 'assumed'}"[:120]
+                    flags = len(getattr(res, "flags", ()) or ())
+                    if flags:
+                        self.log(f"[attempt {at.id}] composed text: {flags} check flag(s)")
             ctx.composed[akey] = text
             if f.type is FieldType.FILE:
                 ctx.composed_files[akey] = self.compose_files[akey] = self.write_letter(at, ctx, text)
             self.compose_meta[akey] = meta
             self.log(f"[attempt {at.id}] composed 1 text ({len(text.split())} words)")
         return fill_page(page, nav, ctx, rctx, services)
+
+    def neutral_text(self, rctx: ResolveContext) -> str:
+        """§4.8's code-built text (the tailor's `neutral_text` wording; apply_flow may not
+        import tailor/compose): used only when a required composed text came back empty."""
+        return NEUTRAL_TEXT.format(title=rctx.job_title or "advertised",
+                                   employer=rctx.employer_name or "your company")
 
     def compose_request(self, f: FormField, rctx: ResolveContext) -> ComposeRequest:
         """The tailor's request (section 19.3 step 1): employer text and limits, and the S
@@ -1512,8 +2038,8 @@ class _Run:
                                            confidence=0.0, status=AnswerStatus.UNKNOWN, note=note)
         stopped = dataclasses.replace(outcome, answers={**outcome.answers, key: ans},
                                       compose_needed=(), unknown_required=(key,))
-        self.stage(at, page, stopped, step, applied=False)
-        self.capture(at, job, stopped.fields, {key: ans}, rctx, page=True)
+        akeys = self.stage(at, page, stopped, step, applied=False)
+        self.capture(at, job, stopped.fields, {key: ans}, rctx, page=True, akeys=akeys)
         self.log(f"[attempt {at.id}] compose_needed: {why} on {step}")
         pf = next((p for p in stopped.fields if p.field.key == key), None)
         raise ApplyFailure(ReasonCode.UNANSWERABLE_REQUIRED,
@@ -1645,6 +2171,7 @@ class _Run:
         if secret is None:
             raise ApplyFailure(ReasonCode.LOGIN_FAILED,
                                "JobScraper has no saved password for this account.")
+        self.forbid(secret)                               # K1: read from the vault -> no prompt holds it
         acc_id = self._account_id(adapter, ctx, service, at, AccountStatus.CREATED.value)
         try:
             adapter.sign_in(page, ctx, secret)
@@ -1674,6 +2201,7 @@ class _Run:
         while True:
             at.to(S.SIGNING_UP, step="signing_up")
             secret = vault.generate(adapter.password_rules)
+            self.forbid(secret)                           # K1: registered the moment it exists
             try:
                 vault.put(service, ctx.email, secret)
             except vault.VaultError:
@@ -1749,6 +2277,7 @@ class _Run:
         not count against the attempt deadline (NF-07, review Q-35 M11).
         Raises ApplyFailure(MAIL_NOT_SET_UP / EMAIL_VERIFICATION_TIMEOUT)."""
         settings = mail.effective_settings(self.cfg, self.store.get_setting)
+        self.forbid_mail_password(ctx.email, settings)
         watcher = mail.watcher_for(ctx.email, self.profile, settings)
         employer = mail.employer_domain(str(job.get("careers_url") or ""))
         extra = (employer,) if employer else ()
@@ -1768,6 +2297,19 @@ class _Run:
             ctx.deadline += time.monotonic() - t0
         self.log(f"[attempt {at.id}] verification mail found ({v.kind}) from {v.sender_domain}")
         return v
+
+    def forbid_mail_password(self, address: str, settings: Any) -> None:
+        """K1: the IMAP app password is registered when the mail loads (before the watcher
+        holds it). A mailbox that is not set up is `watcher_for`'s to report. `always` only:
+        under `strict` the vault is read exactly as before (once, by `watcher_for`)."""
+        if self.policy is not FillPolicy.ALWAYS:
+            return
+        try:
+            box = mail.mailbox_for(address, self.profile, settings)
+            pw = mail.mailbox_password(box) if box else None
+        except Exception:                                 # noqa: BLE001 - watcher_for reports it
+            return
+        self.forbid(pw)
 
     def code_after_submit(self, page: Any, ctx: AttemptContext, adapter: Any, at: _Attempt,
                           job: dict[str, Any]):
@@ -1877,6 +2419,7 @@ class _Run:
         self.reopened = False
         self.compose_files = {}
         self.compose_meta = {}
+        self.compose_assumed = {}
         self.last_cap = ""
         self.browser_failed = ""
         self.seen = set()
@@ -2217,13 +2760,12 @@ def pick_mode(item_mode: Any, effective_mode: Any, force_dry_run: bool) -> str:
 # since it would fail the same page on every Resume (Coordinator, 2026-11-12).
 # Review F3: the signal is data, not prose found anywhere. The filler that stops on such a
 # failure writes one of these constants as the START of the attempt's own `reason_detail`
-# (build it with `content_failure_detail`); `pause_for` matches nothing else. These are the
-# only spellings: the always-answer lane (Q-121) imports them, never retypes them.
-FILL_NO_USABLE_ANSWERS = "no usable answers"
-FILL_WOULD_BE_GUESSES = "would be guesses"
-FILL_LAST_RESORT = "last resort"
-CONTENT_FAILURE_DETAILS = (FILL_NO_USABLE_ANSWERS, FILL_WOULD_BE_GUESSES, FILL_LAST_RESORT)
-CONTENT_FAILURE_MARKERS = CONTENT_FAILURE_DETAILS          # the earlier name, same values
+# (build it with `content_failure_detail`); `pause_for` matches nothing else. A1 (§17.6,
+# F10): the spellings live in the contract (`CONTENT_FAILURE_MARKERS`, v8), which the
+# always-answer stage and the web renderers read too, so there is no copy to drift and no
+# import-time check any more. The names below are the contract's values, in its order.
+FILL_NO_USABLE_ANSWERS, FILL_WOULD_BE_GUESSES, FILL_LAST_RESORT = CONTENT_FAILURE_MARKERS
+CONTENT_FAILURE_DETAILS = tuple(CONTENT_FAILURE_MARKERS)   # the earlier name, same values
 # A `validation_error` detail is the employer's own error text (`res.errors`), so it is
 # never read as a content failure even when that text happens to begin with a marker.
 _PAGE_TEXT_REASONS = frozenset({ReasonCode.VALIDATION_ERROR.value})
@@ -2290,12 +2832,61 @@ def pause_for(row: Optional[dict], last_cap: str, streak: Sequence[dict], *,
     if len(last3) == 3 and all(r.get("state") == S.FAILED.value
                                and r.get("reason_code") == ReasonCode.ERROR.value for r in last3):
         return QueuePause.REPEATED_ERRORS, None
+    # Q-121 §4.6: `owner_fact_missing` is per role (the queue goes on); only the SAME fact
+    # missing on the last 3 roles pauses, naming it. It never joins the generic streak.
+    # A1 §17.6 (review C8): `consent_refused` joins this branch: the same refused consent on
+    # the last 3 roles pauses naming it; different consents, or a mix of the two reasons,
+    # return None and never fall into the generic "consent refused" streak below.
+    if (len(last3) == 3 and all(r.get("state") == S.FAILED.value
+                                and r.get("reason_code") in _PER_ROLE_NAMED for r in last3)):
+        codes = {r.get("reason_code") for r in last3}
+        facts = {owner_fact_of(r.get("reason_detail")).lower() for r in last3}
+        if len(codes) == 1 and len(facts) == 1 and next(iter(facts)):
+            fact = owner_fact_of(last3[0].get("reason_detail"))
+            return QueuePause.REPEATED_FAILURES, f"{fact} {_PER_ROLE_NAMED[next(iter(codes))]}"
+        return None
     if (len(last3) == 3 and all(r.get("state") == S.FAILED.value for r in last3)
             and len({r.get("reason_code") for r in last3}) == 1):
         same = str(last3[0].get("reason_code") or "")
         if same and same not in _NOT_REPEATED and same != ReasonCode.ERROR.value:
             return QueuePause.REPEATED_FAILURES, same.replace("_", " ")
     return None
+
+
+_OWNER_FACT = ReasonCode.OWNER_FACT_MISSING.value
+_CONSENT_REFUSED = ReasonCode.CONSENT_REFUSED.value
+# The per-role reasons that wait for the owner and pause only when the same detail repeats
+# 3 times, with the words after the detail in the pause text (§4.6, A1 §17.6).
+_PER_ROLE_NAMED = {_OWNER_FACT: "is missing from your profile",
+                   _CONSENT_REFUSED: "is refused in your profile"}
+
+
+def consent_refused_detail(target_path: Any, detail: Any = "") -> str:
+    """A `consent_refused` reason_detail (A1 §17.6): the contract's plain words for the
+    refused key (`CONSENT_REFUSED_DETAILS`, keyed by "consents.<key>", e.g. "keeping your
+    details on file for future roles"), else the stop's own detail, else a generic phrase.
+    Read through REASON_TEXTS[CONSENT_REFUSED] ("This form needs you to agree to {detail},
+    and your profile says no."). Never a value: a consent's words, not the owner's answer."""
+    words = CONSENT_REFUSED_DETAILS.get(str(target_path or "").strip())
+    if words:
+        return words
+    return " ".join(str(detail or "").split()) or "a consent this form requires"
+
+
+def owner_fact_detail(fact: str, label: str = "", step: str = "") -> str:
+    """An `owner_fact_missing` reason_detail (review F4): the fact in plain words first (the
+    contract's "This form asks for your {detail}"), then where the form asked it, in the
+    form's own words: "date of birth (“Date of Birth” on my_information)". Never a value."""
+    fact = " ".join(str(fact or "").split())
+    where = " ".join(x for x in (f"“{label}”" if label else "", f"on {step}" if step else "") if x)
+    return f"{fact} ({where})" if where else fact
+
+
+def owner_fact_of(detail: Any) -> str:
+    """The fact of an `owner_fact_missing` detail (`owner_fact_detail`'s first part; a
+    detail written before review F4 is the fact alone)."""
+    text = " ".join(str(detail or "").split())
+    return text.split(" (", 1)[0].strip()
 
 
 def _session_alive(session: Any) -> bool:

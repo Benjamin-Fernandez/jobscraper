@@ -41,6 +41,14 @@ const NEEDS = attempt('needs_input', {
   hint: 'Answer it under Application details.',
 })
 
+// Q-127: a fact the profile lacks (owner_fact_missing) reads "Needs one detail" and "Add it" opens
+// Your details at the field; the strict stop above reads "Stopped: a question had no answer".
+const OWNER_FACT = attempt('needs_input', {
+  reason_code: 'owner_fact_missing', owner_fact_path: 'identity.date_of_birth',
+  text: "This form asks for your date of birth, which isn't in your profile or resume. Nothing was sent.",
+  hint: 'Add it in Profile → Your details, then click Try again.',
+})
+
 beforeEach(() => {
   pinZone()
   clearPostingCache()
@@ -152,33 +160,32 @@ describe('the auto-apply chip on a row (N11, Q-120 U3)', () => {
     expect(chip(w, 'a1b2c3').text()).toBe('Sent by auto-apply')
   })
 
-  it('"Needs your answers" carries the reason in its title, with an "Answer in Profile" link', async () => {
+  it('a strict stop reads "Stopped: a question had no answer", carries the reason in its title and offers What was filled', async () => {
     const w = await mountTab({ statuses: TO_APPLY, attempts: { a1b2c3: [NEEDS] } })
     const c = chip(w, 'a1b2c3')
-    expect(c.text()).toBe('Needs your answers')
+    expect(c.text()).toBe('Stopped: a question had no answer')
     expect(c.attributes('data-tone')).toBe('warn')
     expect(c.attributes('title')).toContain('Why us?')
-    const answer = row(w, 'a1b2c3').find('.app-answer')
-    expect(answer.element.tagName).toBe('A')
-    expect(answer.text()).toBe('Answer in Profile')
-    expect(answer.attributes('href')).toBe('#/profile')
+    expect(row(w, 'a1b2c3').find('.app-answer').exists()).toBe(false)         // the Answer in Profile link is gone
+    expect(row(w, 'a1b2c3').find('button.app-sent').text()).toBe('See what was filled')
   })
 
-  it('"Answer in Profile" remembers Application details and goes to Profile', async () => {
-    const w = await mountTab({ statuses: TO_APPLY, attempts: { a1b2c3: [NEEDS] } })
-    await row(w, 'a1b2c3').find('.app-answer').trigger('click')
+  it('"Add it" on a missing fact remembers Your details and goes to Profile', async () => {
+    const w = await mountTab({ statuses: TO_APPLY, attempts: { a1b2c3: [OWNER_FACT] } })
+    expect(chip(w, 'a1b2c3').text()).toBe('Needs one detail: date of birth')
+    await row(w, 'a1b2c3').find('.app-add').trigger('click')
     expect(window.localStorage.getItem(PROFILE_VIEW_KEY)).toBe('details')
     expect(window.location.hash).toBe('#/profile')
   })
 
-  it('end to end in the app: the click lands on the Application details view', async () => {
-    useApi({ statuses: { a1b2c3: 'to_apply' }, attempts: { a1b2c3: [NEEDS] } })
+  it('end to end in the app: the click lands on the Your details view', async () => {
+    useApi({ statuses: { a1b2c3: 'to_apply' }, attempts: { a1b2c3: [OWNER_FACT] } })
     // The owner last looked at Resume and titles.
     window.localStorage.setItem(PROFILE_VIEW_KEY, 'resume')
     setHash('#/applications')
     const w = mount(App, { attachTo: document.body })
-    await vi.waitFor(async () => { await flushPromises(); expect(w.find('.app-row .app-answer').exists()).toBe(true) })
-    await w.find('.app-row .app-answer').trigger('click')
+    await vi.waitFor(async () => { await flushPromises(); expect(w.find('.app-row .app-add').exists()).toBe(true) })
+    await w.find('.app-row .app-add').trigger('click')
     await vi.waitFor(async () => {
       await flushPromises()
       expect(window.location.hash).toBe('#/profile')
@@ -302,18 +309,34 @@ describe('the attempts list (N11)', () => {
     expect(items[0].find('.at').attributes('title')).toBe('2026-11-03 01:00 UTC')
   })
 
-  it('a needs-input attempt offers the way to answer, which opens Application details', async () => {
+  // Q-127 polish (D-215): the "Answer in Application details" button is retired; every listed attempt
+  // that recorded answers offers "See what was filled" (this attempt's own answers panel) instead.
+  it('a needs-input attempt offers "See what was filled", which opens that attempt\'s answers panel and toggles to Hide', async () => {
     const w = await mountTab({ attempts: { a1b2c3: [NEEDS] } })
+    // The fake server has no answers route: serve one for attempt 1.
+    const real = api.fetch
+    vi.stubGlobal('fetch', vi.fn((url, init) => (/\/attempts\/1\/answers$/.test(url)
+      ? Promise.resolve({
+        ok: true, status: 200, statusText: 'OK',
+        json: async () => ({ attempt: { id: 1, kind: 'needs_input', state: 'failed', finished_at: '2026-11-02T01:05:00', trial: false, entries_note: '' }, employer: 'OKX', fields: [] }),
+      })
+      : real(url, init))))
     await open(w)
-    const answer = w.find('.attempt-answer')
-    expect(answer.text()).toBe('Answer in Application details')
-    await answer.trigger('click')
-    expect(window.localStorage.getItem(PROFILE_VIEW_KEY)).toBe('details')
-    expect(window.location.hash).toBe('#/profile')
-    // Other kinds do not.
-    const w2 = await mountTab({ attempts: { a1b2c3: [attempt('stopped')] } })
-    await open(w2)
-    expect(w2.find('.attempt-answer').exists()).toBe(false)
+    const filled = w.find('.attempt-filled')
+    expect(filled.text()).toBe('See what was filled')
+    expect(w.find('.attempt-answer').exists()).toBe(false)               // the retired button is gone
+    expect(filled.attributes('aria-expanded')).toBe('false')
+    await filled.trigger('click')
+    await flushPromises()
+    expect(w.find('.attempt-item .wws-title').text()).toBe('What was filled')
+    expect(filled.text()).toBe('Hide')
+    expect(filled.attributes('aria-expanded')).toBe('true')
+    await filled.trigger('click')
+    await flushPromises()
+    expect(w.find('.attempt-item .wws-title').exists()).toBe(false)
+    expect(filled.text()).toBe('See what was filled')
+    // No click here ever walks to Profile.
+    expect(window.localStorage.getItem(PROFILE_VIEW_KEY)).toBe(null)
   })
 
   it('a failed load says why, and Try again asks again', async () => {

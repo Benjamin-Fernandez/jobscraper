@@ -56,8 +56,44 @@ def _resumed_at(st):
     return st.get_setting(Store.QUEUE_RESUMED_AT)
 
 
+def _shape(st):
+    """Every table's DDL and columns, the recorded schema version, and the row count of every table
+    but `settings` / `meta`."""
+    conn = st.conn
+    ddl = sorted((r["name"], r["sql"]) for r in conn.execute(
+        "SELECT name, sql FROM sqlite_master WHERE type IN ('table', 'index') AND name NOT LIKE 'sqlite_%'"))
+    tables = [n for n, sql in ddl if sql and sql.lstrip().upper().startswith("CREATE TABLE")]
+    cols = {t: [r["name"] for r in conn.execute(f"PRAGMA table_info({t})")] for t in tables}
+    counts = {t: conn.execute(f"SELECT COUNT(*) AS n FROM {t}").fetchone()["n"]
+              for t in tables if t not in ("settings", "meta")}
+    version = conn.execute("SELECT value FROM meta WHERE key = 'schema_version'").fetchone()["value"]
+    return ddl, cols, counts, version
+
+
 def test_no_schema_change():
-    assert SCHEMA_VERSION == 6
+    """Q-126 adds no migration step of its own: the model pause reasons, `queue_resume_if`,
+    `queue_pause_if_waiting(replace=)`, `queue_model_state` and `queue_model_view` only read and write
+    `settings` rows. This is not a version number (later lanes, v7-v9 for Q-121 / Q-127, raise it on the
+    integration branch): every Q-126 store call leaves the DDL, the columns, the recorded version and
+    every other table's row count exactly as they were, and the two model-state rows are in `settings`."""
+    with _world(roles=1) as (st, _p):
+        before = _shape(st)
+        assert before[3] == str(SCHEMA_VERSION), "the database is at the code's own version"
+        for reason in MODEL:
+            assert st.queue_pause(reason, "qwen3:14b", T0) is True
+            st.queue_model_state("starting", T0)
+            assert st.queue_model_view()["state"] == "starting"
+            keys = {r["key"] for r in st.conn.execute("SELECT key FROM settings")}
+            assert {Store.QUEUE_MODEL, Store.QUEUE_MODEL_AT} <= keys, "the model state lives in `settings`"
+            st.queue_model_state("loading", T0)
+            st.queue_model_state(None, T0)
+            assert st.queue_model_view() is None
+            assert st.queue_resume_if(None, NOW, keep_window=MODEL_PAUSE_VALUES) == reason
+        st.queue_pause("restarted", None, T0)
+        st.queue_pause_if_waiting("app_closed", T0, replace=("restarted",))
+        st.queue_resume_if(None, NOW, keep_window=MODEL_PAUSE_VALUES)
+        st.commit()
+        assert _shape(st) == before
 
 
 def test_lifting_a_model_pause_never_writes_resumed_at_so_the_streak_survives():

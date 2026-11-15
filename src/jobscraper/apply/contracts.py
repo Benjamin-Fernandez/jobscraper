@@ -20,7 +20,7 @@ from dataclasses import dataclass, field
 from enum import Enum, IntEnum
 from typing import Any, Callable, Optional, Protocol, Sequence, Union, runtime_checkable
 
-CONTRACT_VERSION = 7   # 2: D-69 (no FAILED after the Submit click, ADR-0004), D-68 context fields
+CONTRACT_VERSION = 9   # 2: D-69 (no FAILED after the Submit click, ADR-0004), D-68 context fields
                        # 3: D-70 (additive): prefill sources/policy, PREFILLED status, account
                        #    statuses, sign-up outcomes, Workday entry, identity email, adapter
                        #    `prefill`/`read_values`, SIGNING_UP -> SIGNING_UP (backup email)
@@ -55,6 +55,25 @@ CONTRACT_VERSION = 7   # 2: D-69 (no FAILED after the Submit click, ADR-0004), D
                        #    DEFAULT_RULES, FALLBACK_RULES, Briefing, ReasonCode DOCUMENT_MISSING/
                        #    OWNER_FACT_MISSING (+ REASON_TEXTS), QuestionReason/QuestionStatus ASSUMED,
                        #    PageOutcome.assumed/.fallback/.standing_kept.
+                       # 8: Q-121 amendment A1 (additive; llm_first_fill_design.md §17, ADR-0011
+                       #    Amendment A1): FieldClass, FIELD_CLASS_WHICH, FIELD_CLASS_CHOICES,
+                       #    ModelDecision.klass/.which, ReasonCode.CONSENT_REFUSED (+ REASON_TEXTS),
+                       #    CONSENT_REFUSED_DETAILS, CONTENT_FAILURE_MARKERS, CONTENT_FAILURE_TEXT.
+                       #    No existing text changed. Design review C5/C6/C9 (still v8, before any
+                       #    build): ORDINARY last, owner_fact "other_id" (42 class strings),
+                       #    CONSENT_REFUSED_DETAILS.
+                       # 9: Q-127 Release 1, D-215 (additive; q127_profile_questions_design.md B.2,
+                       #    B.4, B.5, ADR-0012): Answer.field_class, FILL_POLICY_LABELS,
+                       #    NO_FIELD_FACTS, NO_FIELD_FACT_TITLES, OWNER_FACT_NO_FIELD_HINT/_TEXT,
+                       #    BASIS_* texts + basis_text(), RememberRefusal (+ REMEMBER_REFUSAL_TEXTS),
+                       #    REMEMBER_REFUSED_SOURCES/_CLASSES, field_class_of(),
+                       #    follows_your_details(), RememberScope (+ REMEMBER_SCOPE_TEXTS),
+                       #    EXTRA_EMPLOYER_FIELD, extra_entry_applies(), SentFieldStatus,
+                       #    ANSWERS_ATTEMPT_KEYS/_FIELD_KEYS, QUESTIONS_RETIRED(_TEXT). Three hints
+                       #    re-worded (no Questions page any more): UNANSWERABLE_REQUIRED,
+                       #    DOCUMENT_MISSING, OWNER_FACT_MISSING (its `text` unchanged: attempts.js
+                       #    parses it). Nothing renamed or removed. The v9 helpers are small pure
+                       #    functions (no I/O), so web/ can share them through this module.
                        #    Q-126 / D-214 / D-217 (additive, no version bump; v8 after the
                        #    later merge into int/Q-121; ollama_autostart_design.md §5):
                        #    QueuePause MODEL_NOT_INSTALLED/MODEL_START_FAILED/MODEL_MISSING/
@@ -163,6 +182,10 @@ class ReasonCode(str, Enum):
     OWNER_FACT_MISSING = "owner_fact_missing"   # a required fact only the owner knows (date of birth, national ID,
                                                 # a numeric grade, a salary), in neither the profile nor the resume;
                                                 # detail = the fact in plain words; the queue continues
+    # v8 (Q-121 A1, §17.6): a consent the form requires and the profile refuses (consents.* false).
+    # Per role like owner_fact_missing (captured, target consents.<key>, the queue continues);
+    # detail = what the form asks the owner to agree to, in plain words.
+    CONSENT_REFUSED = "consent_refused"
 
 
 @dataclass(frozen=True)
@@ -196,7 +219,8 @@ REASON_TEXTS: dict[ReasonCode, ReasonText] = {
         "Set up the mailbox in Settings → Apply, then try again."),
     ReasonCode.UNANSWERABLE_REQUIRED: ReasonText(
         "A required question had no answer JobScraper could back up: “{detail}”.",
-        "Answer it under Profile → Application details, then retry."),
+        "Open What was filled for this application to answer it for next time, "
+        "then click Try again."),
     ReasonCode.VALIDATION_ERROR: ReasonText(
         "The site rejected the form: {detail}.",
         "Open the posting to see the error. If it's about your details, fix them in your profile."),
@@ -231,11 +255,38 @@ REASON_TEXTS: dict[ReasonCode, ReasonText] = {
         "Try again. If it happens again, the Developer tab log has the details."),
     ReasonCode.DOCUMENT_MISSING: ReasonText(
         "This form needs a {detail}, and your profile has none. Nothing was sent.",
-        "Add it in Profile, then try again."),
+        "Add it in Profile → Your details → Files, then try again."),
     ReasonCode.OWNER_FACT_MISSING: ReasonText(
         "This form asks for your {detail}, which isn't in your profile or resume. Nothing was sent.",
-        "Answer it in Questions or add it in Profile, then click Try again."),
+        "Add it in Profile → Your details, then click Try again."),
+    ReasonCode.CONSENT_REFUSED: ReasonText(
+        "This form needs you to agree to {detail}, and your profile says no. Nothing was sent.",
+        "To agree, change it in Profile → Consents, then click Try again. "
+        "Otherwise apply by hand or skip this role."),
 }
+
+# v8 (Q-121 A1, §17.2, review C5): the `reason_detail` of a CONSENT_REFUSED stop, by the
+# refused consent key (the strictest part of a combined box names the detail). The
+# questions capture targets the same key. Read through REASON_TEXTS[CONSENT_REFUSED].
+CONSENT_REFUSED_DETAILS: dict[str, str] = {
+    "consents.privacy_consent": "the processing of your personal data",
+    "consents.data_retention_consent": "keeping your details on file for future roles",
+    "consents.certify_true": "a statement that your answers are true and complete",
+    "consents.talent_pool_opt_in": "receiving marketing messages",
+}
+
+# v8 (Q-121 A1, §17.6; flow review F4, review C8): a content failure under fill_policy
+# `always` ends `unanswerable_required` with a `reason_detail` that STARTS with one of these
+# markers (`always.content_failure_detail`). Renderers (web routers, the job log) show
+# CONTENT_FAILURE_TEXT instead of REASON_TEXTS[UNANSWERABLE_REQUIRED] for such a detail, and
+# the Applications view gives it kind `stopped`, not `needs_input`: nothing was captured, so
+# "answer it under Profile" would mislead. The text has no {detail}.
+CONTENT_FAILURE_MARKERS: tuple[str, ...] = ("no usable answers", "would be guesses", "last resort")
+CONTENT_FAILURE_TEXT = ReasonText(
+    "The local AI couldn't answer this form without guessing, so JobScraper stopped. "
+    "Nothing was sent.",
+    "Apply by hand, or skip this role. If this happens on most forms, check the AI with "
+    "“python -m jobscraper doctor”.")
 
 # Copy for the two terminal states that are not failures but need the owner.
 STATE_TEXTS: dict[AttemptState, ReasonText] = {
@@ -662,6 +713,12 @@ class Answer:
     # resume, the job or a standing rule; offered to the owner as "Answered for you". Under
     # `always`, `evidence` holds the model's one-line reason instead of a quote.
     assumed: bool = False
+    # v9 (Q-127 B.5, H3): the field's class as a FIELD_CLASS_CHOICES string ("declaration:pep",
+    # "consent_privacy", "ordinary") or "" when none is known. `always`: the decided class, else
+    # the code key's (always.py copies it onto the Answer). `strict`: "declaration:<label>"
+    # when the code's declaration reader names one, else "" (apply_flow). Stored as
+    # apply_answers.field_class (schema v9); read by follows_your_details().
+    field_class: str = ""
 
     @property
     def fills(self) -> bool:
@@ -1142,6 +1199,236 @@ class Fact:
     entry: str = ""         # "experience[1]" etc. for facts that belong to one entry
 
 
+class FieldClass(str, Enum):
+    """v8 (Q-121 A1, llm_first_fill_design §17): what a form question asks, as the model labels
+    it in the same reply as its answer, before the value: the model's key of the two-key rule.
+    Code computes its own key with narrowed detectors; code writes its own value over the
+    model's only when both keys name the class (§17.1). ORDINARY is LAST (review C6): the
+    schema enum and rule 12 list the protected classes first."""
+    CONSENT_PRIVACY = "consent_privacy"        # agree to processing / storing data for this application
+    CONSENT_RETENTION = "consent_retention"    # keep the applicant's details on file for other roles
+    MARKETING = "marketing"                    # newsletters, job alerts, talent community (D6)
+    CERTIFICATION = "certification"            # the information given is true and complete
+    ACKNOWLEDGEMENT = "acknowledgement"        # has read / accepts a policy, terms, a code
+    DECLARATION = "declaration"                # a personal status or history (which: a DeclarationLabel)
+    WORK_RIGHT = "work_right"                  # right to work, visa, citizenship, residence
+    SPONSORSHIP = "sponsorship"                # needs visa sponsorship
+    OWNER_FACT = "owner_fact"                  # a fact only the owner holds (which: OWNER_FACT_WHICH)
+    SELF_ID = "self_id"                        # gender, race, religion, ... (which: SELF_ID_WHICH)
+    OTHER_PERSON = "other_person"              # a referee's / manager's / referrer's / emergency contact
+    ORDINARY = "ordinary"                      # everything else (skills, experience, willingness, ...)
+
+
+# The `which` each class takes ("" for the others). Declarations: the reader's labels, without
+# disability (self_id) and NDA willingness (ordinary, D9), plus "other" (an unclassed adverse
+# history: dismissal, litigation, investigation, visa refusal). Owner facts: "other_id" is any
+# other identity number (driver licence, employee ID; review C9; SSN / tax ID are national_id).
+OWNER_FACT_WHICH: tuple[str, ...] = (
+    "date_of_birth", "age", "national_id", "passport", "bank", "grade", "salary_current",
+    "salary_expected", "address", "postal_code", "phone", "other_id")
+SELF_ID_WHICH: tuple[str, ...] = (
+    "gender", "race", "religion", "marital", "disability", "veteran", "other")
+FIELD_CLASS_WHICH: dict[FieldClass, tuple[str, ...]] = {
+    FieldClass.DECLARATION: tuple(d.value for d in DeclarationLabel
+                                  if d not in (DeclarationLabel.DISABILITY,
+                                               DeclarationLabel.NDA_WILLINGNESS)) + ("other",),
+    FieldClass.OWNER_FACT: OWNER_FACT_WHICH,
+    FieldClass.SELF_ID: SELF_ID_WHICH,
+}
+# The reply schema's `class` enum: "<class>" or "<class>:<which>" (e.g. "declaration:pep",
+# "owner_fact:date_of_birth"); parsed into ModelDecision.klass / .which.
+FIELD_CLASS_SEP = ":"
+FIELD_CLASS_CHOICES: tuple[str, ...] = tuple(
+    s for c in FieldClass
+    for s in ([f"{c.value}{FIELD_CLASS_SEP}{w}" for w in FIELD_CLASS_WHICH[c]]
+              if c in FIELD_CLASS_WHICH else [c.value]))
+
+
+# --------------------------------------------------------------------------
+# v9: Q-127 Release 1 (D-215; q127_profile_questions_design.md B.2, B.4, B.5; ADR-0012).
+# No question on the Profile page: each application shows "What was sent", the owner may
+# "Use a different answer next time", and saved answers are listed in Settings. web/ may
+# import only this module from apply/, so every name the web lane needs is here.
+# --------------------------------------------------------------------------
+
+# Settings → Apply, the fill policy (D2). ApplySettings.vue shows the same two names.
+FILL_POLICY_LABELS: dict[FillPolicy, str] = {
+    FillPolicy.ALWAYS: "Always answer",
+    FillPolicy.STRICT: "Stop when unsure",
+}
+
+# B.2d: the owner facts the profile has no field for (OWNER_FACT_WHICH ids -> the words used in
+# "your {fact}"). An owner_fact_missing stop for one of these writes reason_detail = the title
+# (apply_flow); a renderer then shows OWNER_FACT_NO_FIELD_TEXT instead of REASON_TEXTS, and
+# `GET /api/applications` sets last_attempt.no_field. The Overview "To do" line names a fact
+# from these titles only (review Q5). national_id is never proposed (M3, Release 2).
+NO_FIELD_FACTS: dict[str, str] = {
+    "passport": "passport number",
+    "bank": "bank account details",
+    "national_id": "full NRIC or national ID number",
+    "other_id": "driving licence or other ID number",
+}
+NO_FIELD_FACT_TITLES = frozenset(NO_FIELD_FACTS.values())
+OWNER_FACT_NO_FIELD_HINT = "Your details have no place for it yet. Apply by hand, or skip this role."
+OWNER_FACT_NO_FIELD_TEXT = ReasonText(
+    "This form asks for your {detail}, which your details can't hold. Nothing was sent.",
+    OWNER_FACT_NO_FIELD_HINT)
+
+# B.2b: the basis of one "What was sent" row in plain words, keyed by the part of
+# Answer.source before ":". profile / field_map, assumed rows and unanswered rows go through
+# basis_text(), which also fills the {label} / {reason} slots.
+BASIS_TEXTS: dict[str, str] = {
+    AnswerSource.MEMORY.value: "Your saved answer",
+    AnswerSource.STANDING.value: "Worked out from your details",
+    AnswerSource.DEFAULT.value: "Your standing answer",
+    AnswerSource.DECLARATION.value: "Your standing answer",     # strict tier 4
+    AnswerSource.RESUME.value: "From your resume",
+    AnswerSource.JOB.value: "From the job posting",
+    AnswerSource.COMPOSED.value: "Written for this application",
+    AnswerSource.LLM.value: "Written by the local AI from your details",
+    AnswerSource.MYGREENHOUSE.value: "Kept from the site",
+    AnswerSource.WORKDAY_LAST_APPLICATION.value: "Kept from the site",
+    AnswerSource.SITE_DEFAULT.value: "Kept from the site",
+    AnswerSource.RESUME_IMPORT.value: "Kept from the site",
+    "keep": "Kept from the site",
+}
+FIELD_MAP_BASIS: dict[str, str] = {           # "field_map:<canonical>" that is not a details row
+    "resume": "Your resume file",
+    "email": "Your application email",
+}
+BASIS_FROM_DETAILS = "From your details: {label}"   # {label} = the applicant.FORM title of the path
+BASIS_FROM_DETAILS_BARE = "From your details"       # strict "profile" with no path
+BASIS_ASSUMED = "Assumed: {reason}"                 # {reason} = the stored one-line reason
+BASIS_ASSUMED_NO_REASON = "Assumed: nothing in your details or resume covered it"
+BASIS_NOT_ANSWERED = "Not answered"
+
+
+def basis_text(source: str, *, status: str = "filled", assumed: bool = False,
+               reason: str = "", form_label: str = "") -> str:
+    """The "Basis shown" of B.2b for one audit row. `status` is the AnswerStatus value;
+    "" for a source the table does not name (the row then shows no basis line)."""
+    if status in (AnswerStatus.UNKNOWN.value, AnswerStatus.UNGROUNDED.value):
+        return BASIS_NOT_ANSWERED
+    head, _, detail = (source or "").partition(":")
+    if assumed or head in (AnswerSource.ASSUMPTION.value, AnswerSource.FALLBACK.value):
+        why = (reason or "").strip()
+        return BASIS_ASSUMED.format(reason=why) if why else BASIS_ASSUMED_NO_REASON
+    if head == AnswerSource.FIELD_MAP.value and detail in FIELD_MAP_BASIS:
+        return FIELD_MAP_BASIS[detail]
+    if head in (AnswerSource.PROFILE.value, AnswerSource.FIELD_MAP.value):
+        return BASIS_FROM_DETAILS.format(label=form_label) if form_label else BASIS_FROM_DETAILS_BARE
+    return BASIS_TEXTS.get(head, "")
+
+
+class RememberRefusal(str, Enum):
+    """Why "Use a different answer next time" is refused (B.2b H2/H3). The route's error code;
+    the GET's `refusal` per row ("" when allowed)."""
+    FOLLOWS_YOUR_DETAILS = "follows_your_details"   # 422: the answer follows the details (H3)
+    SHARED_ANSWER = "shared_answer"                 # 409: another saved answer holds the label (H2)
+    TOO_GENERAL = "too_general"                     # 422: a generic label with no captured row
+
+
+REMEMBER_REFUSAL_TEXTS: dict[RememberRefusal, str] = {
+    RememberRefusal.FOLLOWS_YOUR_DETAILS:
+        "This answer follows your details. Change it in Your details.",
+    RememberRefusal.SHARED_ANSWER:
+        "This question shares a saved answer with other questions. "
+        "Change it in Settings → Apply → Answers you corrected.",
+    RememberRefusal.TOO_GENERAL:
+        "This question is too general to save on its own (“{label}”). "
+        "Change it in your details instead.",
+}
+
+# H3: a row whose source kind is one of these, or whose class is one of these, can never be
+# replaced by a remembered answer. `declaration` is the strict tier-4 source.
+REMEMBER_REFUSED_SOURCES = frozenset({
+    AnswerSource.PROFILE, AnswerSource.FIELD_MAP, AnswerSource.STANDING,
+    AnswerSource.DEFAULT, AnswerSource.DECLARATION,
+})
+REMEMBER_REFUSED_CLASSES = frozenset({
+    FieldClass.DECLARATION, FieldClass.CONSENT_PRIVACY, FieldClass.CONSENT_RETENTION,
+    FieldClass.MARKETING, FieldClass.WORK_RIGHT, FieldClass.SPONSORSHIP,
+    FieldClass.SELF_ID, FieldClass.OWNER_FACT,
+})
+
+
+def field_class_of(field_class: str) -> Optional[FieldClass]:
+    """The FieldClass of a stored class string ("declaration:pep" -> DECLARATION); None for ""
+    or an unknown string."""
+    head = (field_class or "").split(FIELD_CLASS_SEP, 1)[0]
+    try:
+        return FieldClass(head) if head else None
+    except ValueError:
+        return None
+
+
+def follows_your_details(source: str, field_class: str = "") -> bool:
+    """H3: True when the row's answer follows the details, so remembering is refused with
+    RememberRefusal.FOLLOWS_YOUR_DETAILS. Rows written before v9 have no class; there the
+    source rule alone decides (strict writes declarations, work rights and consents with a
+    declaration / standing / profile source)."""
+    try:
+        kind: Optional[AnswerSource] = AnswerSource((source or "").split(":", 1)[0])
+    except ValueError:
+        kind = None
+    return kind in REMEMBER_REFUSED_SOURCES or field_class_of(field_class) in REMEMBER_REFUSED_CLASSES
+
+
+class RememberScope(str, Enum):
+    """Who a remembered answer is for. The POST's `only_employer` (default true, H3 / Q11)."""
+    EMPLOYER = "employer"   # only applications to the attempt's employer
+    EVERY = "every"         # every application
+
+
+REMEMBER_SCOPE_TEXTS: dict[RememberScope, str] = {   # Settings → Answers you corrected
+    RememberScope.EVERY: "Every application",
+    RememberScope.EMPLOYER: "Only {employer}",
+}
+# The `extra.<key>` field that holds the employer's display name for an EMPLOYER-scoped entry;
+# absent or "" = every employer. It joins applicant.EXTRA_META_FIELDS (W1). One entry per
+# exact label (H2): a new correction replaces the entry's value and scope.
+EXTRA_EMPLOYER_FIELD = "employer"
+
+
+def _name_key(s: str) -> str:
+    return " ".join(str(s).casefold().split())
+
+
+def extra_entry_applies(entry: Any, employer_name: str,
+                        employer_aliases: Sequence[str] = ()) -> bool:
+    """Whether an `extra` entry may answer a form for this employer (tier 3 memory, the
+    briefing, the strict readiness check). An unscoped entry applies everywhere; a scoped one
+    only when its employer equals the attempt's name or one of its aliases (case and spacing
+    ignored)."""
+    scoped = entry.get(EXTRA_EMPLOYER_FIELD) if isinstance(entry, dict) else None
+    if not scoped:
+        return True
+    want = _name_key(scoped)
+    return any(want == _name_key(n) for n in (employer_name, *employer_aliases) if n)
+
+
+class SentFieldStatus(str, Enum):
+    """`fields[].status` of the What was sent route (B.5)."""
+    SENT = "sent"                   # the form was submitted with this value
+    NOT_ANSWERED = "not_answered"   # a required field left empty (status unknown / ungrounded)
+    NOT_SENT = "not_sent"           # filled, but the attempt stopped or was a dry run
+
+
+# The JSON keys of `GET /api/applications/{job_id}/attempts/{attempt_id}/answers` (B.5); the
+# body is {attempt: {ANSWERS_ATTEMPT_KEYS}, employer, fields: [{ANSWERS_FIELD_KEYS}]}.
+# No path, URL, log line or password is ever one of them.
+ANSWERS_ATTEMPT_KEYS: tuple[str, ...] = ("id", "kind", "state", "finished_at", "trial", "entries_note")
+ANSWERS_FIELD_KEYS: tuple[str, ...] = (
+    "id", "step", "label", "type", "required", "value_text", "basis_text", "assumed",
+    "reason_text", "status", "remembered_text", "can_remember", "refusal", "options")
+
+# M5: `GET /api/questions` answers its old shape, empty, with `retired: true`; the old writers
+# (answer, dismiss, retry, keep, change) answer 410 with this code and text.
+QUESTIONS_RETIRED = "retired"
+QUESTIONS_RETIRED_TEXT = ("This page is out of date. Reload it, then answer from the "
+                          "application's What was filled.")
+
+
 @dataclass(frozen=True)
 class ModelDecision:
     """The model's reply for one field, before the guards (llm_fill_design §6.3)."""
@@ -1155,6 +1442,11 @@ class ModelDecision:
     # D-208 (`always`): the model marked the answer as an assumption. There `evidence` holds
     # the model's one-line reason (llm_first_fill_design §5.2).
     assumed: bool = False
+    # v8 (Q-121 A1, §17): the class the model gave the field and, for declaration / owner_fact /
+    # self_id, which one (FIELD_CLASS_WHICH). None / "" when the reply had none (a fake, a cut
+    # reply, a v1 cache row): the model's key is then silent.
+    klass: Optional[FieldClass] = None
+    which: str = ""
 
 
 @dataclass(frozen=True)

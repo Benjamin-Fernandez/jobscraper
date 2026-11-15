@@ -1,0 +1,77 @@
+<!doctype html>
+<!--
+  Local fixture for the Q-121 dress rehearsal (llm_first_fill_design section 17.8).
+  Used only by tests/manual/always_rehearsal.py; not part of the test suite. No network: the
+  rehearsal serves it from 127.0.0.1. Made-up employer ("Example Co"), made-up wording, no personal data.
+
+  One file, %%NPARTS%% "parts". The rehearsal server serves part N at /exampleco/jobs/N by writing N into
+  <body data-active-part>; the script below then removes the other parts, so each part is a
+  page of at most ~20 fields (what one real employer page holds, and what one model call set
+  should handle in under a minute). Opened straight from disk (no number) it shows every part.
+  Parts 11-15 are the "stop" pages: one required field the profile cannot or must not answer.
+
+  The JSON block with id "expected" (at the end of the page, not rendered) holds, per field name, what the
+  rehearsal scores against: the class the model should name (`cls`, `alt`), and the outcomes
+  that are acceptable (`ok`) or never acceptable (`never`) for the sample profile, with `rok` /
+  `rnever` replacing them for the refusing variant. "empty", "ticked" and "unticked" are the
+  outcomes of a field with no value, a checked box and an unchecked box; "re:<regex>" and
+  "~<text>" (contains) match a value; "*" matches anything. `fake` / `rfake` are what the
+  rehearsal's scripted model (--fake only) answers when it is told to get a row wrong.
+  Parts 25-30 (the fourth code review): `wok` / `wnever` replace ok / never when the run has
+  --past-employer; `pre` is the option the site pre-selects when the page loads (part 29; "ticked"
+  for a box); `unmarked` means the profile is silent, so an answer not marked assumed is a NEVER.
+  Part 27 is a repeat application: the runner records an earlier application to Example Co for
+  that part only (a separate company row, same name).
+
+  The Submit button counts clicks in document.body.dataset.submitCount and never navigates.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Job Application for Software Engineer (New Graduate) at Example Co</title>
+<style>
+  body { font-family: sans-serif; max-width: 780px; margin: 24px auto; line-height: 1.4; }
+  h1 { font-size: 1.4em; }
+  h2 { font-size: 1.15em; margin-top: 18px; }
+  .intro, .help { color: #555; font-size: 0.9em; margin: 2px 0 0; }
+  .field { margin: 14px 0; }
+  label, legend { font-weight: 600; }
+  label.opt, label.inline { font-weight: 400; margin-right: 14px; }
+  fieldset { border: 0; padding: 0; margin: 0; }
+  input[type=text], input[type=email], input[type=tel], input[type=url], input[type=number],
+  input[type=date], select, textarea { display: block; width: 100%; box-sizing: border-box; padding: 5px; margin-top: 3px; }
+  button { padding: 8px 18px; margin-top: 16px; }
+</style>
+</head>
+<body data-active-part="">
+<h1>Software Engineer (New Graduate)</h1>
+<p>Example Co &middot; Singapore</p>
+
+<form id="application-form" novalidate>
+%%BODY%%
+  <button type="submit" id="submit-app">Submit application</button>
+</form>
+
+<script type="application/json" id="expected">
+%%EXPECTED%%
+</script>
+
+<script>
+(function () {
+  var active = document.body.getAttribute('data-active-part');
+  if (active) {
+    document.querySelectorAll('section.part').forEach(function (s) {
+      if (s.getAttribute('data-part') !== active) { s.parentNode.removeChild(s); }
+    });
+    document.title = document.title + ' (part ' + active + ')';
+  }
+  document.body.dataset.submitCount = '0';
+  document.getElementById('application-form').addEventListener('submit', function (e) {
+    e.preventDefault();       // nothing is ever sent: the count is the oracle
+    document.body.dataset.submitCount = String(Number(document.body.dataset.submitCount) + 1);
+    window.__submitted = true;
+  });
+})();
+</script>
+</body>
+</html>

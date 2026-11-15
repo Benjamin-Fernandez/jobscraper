@@ -297,43 +297,72 @@ describe('Z undoes the last Save, Applied or Not interested (G3r)', () => {
   })
 })
 
-describe('the Profile badge counts open question groups (N7)', () => {
+// Q-127 (D-215): the Profile badge counts the details auto-apply is waiting for
+// (GET /api/apply/status `details_needed`), never questions. Replaces the N7 pins that counted
+// open question groups from GET /api/questions.
+describe('the Profile badge counts the details that are needed (Q-127, was N7)', () => {
   const badge = w => w.find('[data-tab=profile] .badge')
+  const status = needed => ({ mode: 'dry_run', missing: [], busy: false, ...(needed === undefined ? {} : { details_needed: needed }) })
 
-  it('shows the open groups only, and says what it counts', async () => {
+  // Serve GET api/apply/status from `box.body` (null = 404); everything else is the fake API.
+  function serveStatus(box) {
+    const inner = api.fetch
+    vi.stubGlobal('fetch', vi.fn(async (url, init = {}) => {
+      if (url === 'api/apply/status') {
+        return box.body
+          ? { ok: true, status: 200, statusText: 'OK', json: async () => JSON.parse(JSON.stringify(box.body)) }
+          : { ok: false, status: 404, statusText: 'Not Found', json: async () => ({ detail: 'Not Found' }) }
+      }
+      return inner(url, init)
+    }))
+  }
+
+  it('shows the number of details needed, and says what it counts', async () => {
+    serveStatus({ body: status(['contact.city', 'pay.expected_salary.amount', 'documents.resume']) })
     const w = await mountApp()
-    await vi.waitFor(() => expect(badge(w).text()).toContain('2'))
-    expect(w.find('[data-tab=profile]').text()).toContain('open questions')
+    await vi.waitFor(() => expect(badge(w).text()).toContain('3'))
+    expect(w.find('[data-tab=profile]').text()).toContain('details needed')
+    expect(w.find('[data-tab=profile]').text()).not.toContain('questions')
   })
 
-  it('shows none when the server has no questions route (404)', async () => {
-    useApi()                                           // questions: null -> 404
+  it('never asks for questions any more', async () => {
+    serveStatus({ body: status(['contact.city']) })
     const w = await mountApp()
     await flushPromises()
-    expect(api.calls.some(c => c.url.startsWith('api/questions'))).toBe(true)
+    expect(badge(w).exists()).toBe(true)
+    expect(api.calls.some(c => c.url.startsWith('api/questions'))).toBe(false)
+  })
+
+  it('shows none when the status fails or the server does not send the key', async () => {
+    serveStatus({ body: null })                                    // 404
+    let w = await mountApp()
+    await flushPromises()
+    expect(badge(w).exists()).toBe(false)
+    w.unmount()
+    serveStatus({ body: status(undefined) })                       // an older server: no details_needed
+    w = await mountApp()
+    await flushPromises()
     expect(badge(w).exists()).toBe(false)
   })
 
-  it('shows none when there are no open groups', async () => {
-    useApi({ questions: { groups: [{ key: 'c', status: 'answered' }] } })
+  it('shows none when nothing is needed', async () => {
+    serveStatus({ body: status([]) })
     const w = await mountApp()
     await flushPromises()
     expect(badge(w).exists() ? badge(w).text() : '').not.toMatch(/[1-9]/)
   })
 
   it('refreshes when the owner leaves the Profile tab', async () => {
-    const questions = QUESTIONS()
-    useApi({ questions })
+    const box = { body: status(['contact.city', 'contact.email']) }
+    serveStatus(box)
     setHash('#/profile')
     const w = mount(App, { attachTo: document.body })
     await vi.waitFor(async () => { await flushPromises(); expect(badge(w).text()).toContain('2') })
-    // The owner answers one on the Profile tab, then goes elsewhere.
-    questions.groups.splice(0, 1)
-    const before = api.count(/^api\/questions/)
+    // The owner fills one detail on the Profile tab, then goes elsewhere.
+    box.body = status(['contact.email'])
     await press('g')
     await press('i')
     await vi.waitFor(async () => { await flushPromises(); expect(badge(w).exists() ? badge(w).text() : '').toContain('1') })
-    expect(api.count(/^api\/questions/)).toBeGreaterThan(before)
   })
 })
 

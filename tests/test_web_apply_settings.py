@@ -29,6 +29,11 @@ from questions_support import make_job  # noqa: E402
 from jobscraper import store as store_mod  # noqa: E402
 
 SIX = {"mode", "daily_cap", "per_employer_daily_cap", "headed", "captcha_wait_s", "compose_enabled"}
+# Q-121 W1 (llm_first_fill_design 7.2): two more writable keys, and the read-only view of what is in
+# force. The exact key set is pinned on purpose: a renamed or dropped field must fail here.
+POLICY = {"fill_policy", "always_trial_runs"}
+READ_ONLY = {"fill_policy_effective", "fill_policy_inactive", "always_trial_used", "always_trial_left",
+             "always_trial_text", "always_available"}      # D-223: the release lock, read from config.yaml only
 
 
 class _FakeJobs:
@@ -115,10 +120,13 @@ def test_apply_settings_get_returns_six_keys_and_a_put_moves_values_not_defaults
         resp = client.get("/api/apply/settings")
         assert resp.status_code == 200
         body = resp.json()
-        assert set(body) == SIX | {"writable", "defaults"}, sorted(body)
+        assert set(body) == SIX | POLICY | READ_ONLY | {"writable", "defaults"}, sorted(body)
         assert body["writable"] is True
         assert {k: body[k] for k in SIX} == cfg_values
-        assert body["defaults"] == cfg_values
+        # the new keys, with nothing set in config.yaml: the safe values
+        assert (body["fill_policy"], body["always_trial_runs"]) == ("strict", 0)
+        assert (body["fill_policy_effective"], body["fill_policy_inactive"]) == ("strict", None)
+        assert body["defaults"] == {**cfg_values, "fill_policy": "strict", "always_trial_runs": 0}
 
         resp = client.put("/api/apply/settings", json={
             "mode": "auto", "daily_cap": 12, "per_employer_daily_cap": 4, "headed": True,
@@ -129,7 +137,7 @@ def test_apply_settings_get_returns_six_keys_and_a_put_moves_values_not_defaults
         assert {k: resp.json()[k] for k in SIX} == moved       # the PUT answers with the new view
         again = client.get("/api/apply/settings").json()
         assert {k: again[k] for k in SIX} == moved
-        assert again["defaults"] == cfg_values                  # config.yaml alone, untouched
+        assert again["defaults"] == {**cfg_values, "fill_policy": "strict", "always_trial_runs": 0}  # config.yaml alone, untouched
         assert again["writable"] is True
         assert fake.started == []                               # saving a setting starts nothing
 

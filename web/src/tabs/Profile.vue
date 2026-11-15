@@ -9,9 +9,9 @@
 // answer is shown in words, not as a status code alone.
 //
 // Two views (Q-30, D-74): "Resume and titles" (all of the above) and
-// "Application details" (the applicant form and the questions employers asked).
-// The view last chosen is remembered; a first visit opens Application details
-// when something there needs the owner, and its label carries that count.
+// "Your details" (the applicant form as ten collapsed sections; Q-127 D-215: it never lists
+// a question an employer asked). The view last chosen is remembered; a first visit opens
+// Your details when something there needs the owner, and its label carries that count.
 // Q-100 A6: the hash can name the view (`#/profile/resume`, `#/profile/details`,
 // route.js `useView`) and then wins; the remembered view is the fallback when
 // the hash names none.
@@ -28,10 +28,11 @@
 // first resume. Skills are read-only: no endpoint edits them.
 import { computed, nextTick, onActivated, onMounted, ref } from 'vue'
 import {
-  ApiError, RESUME_TYPES, describeError, failureText, getApplicant, getProfile, getQuestions,
+  ApiError, RESUME_TYPES, describeError, failureText, getApplicant, getProfile,
   startProfileRefresh, uploadResume,
 } from '../api.js'
 import { useJob } from '../composables/useJob.js'
+import { detailsNeeded } from '../detailSections.js'
 import { exactTime, when } from '../format.js'
 import { PROFILE_VIEW_KEY } from '../profileView.js'
 import { parseHash, useView } from '../route.js'
@@ -98,11 +99,11 @@ function readNote() {
 const modelDown = computed(() => (job.value?.log ?? []).some(l => String(l).includes("application details check skipped: the AI model isn't running")))
 const jobFailed = computed(() => !!job.value && job.value.state === 'failed')
 
-// ---- which view: Resume and titles, or Application details ----
+// ---- which view: Resume and titles, or Your details ----
 const VIEW_KEY = PROFILE_VIEW_KEY
 const VIEWS = [
   { id: 'resume', label: 'Resume and titles' },
-  { id: 'details', label: 'Application details' },
+  { id: 'details', label: 'Your details' },
 ]
 function rememberedView() {
   try {
@@ -117,9 +118,9 @@ const stored = rememberedView()
 const linked = VIEWS.some(v => v.id === parseHash(window.location.hash, ['profile']).view)
 const view = useView('profile', VIEWS, stored ?? 'resume')
 let chosen = stored !== null || linked  // the owner picked a view, now or before
-const counts = ref({ missing: 0, questions: 0 })
-const todo = computed(() => counts.value.missing + counts.value.questions)
-const labelOf = v => (v.id === 'details' && todo.value > 0 ? `${v.label} (${todo.value})` : v.label)
+const counts = ref({ needed: 0 })
+const todo = computed(() => counts.value.needed)
+const labelOf = v => (v.id === 'details' && todo.value > 0 ? `${v.label} ${todo.value}` : v.label)
 
 function pickView(id) {
   view.value = id
@@ -127,7 +128,7 @@ function pickView(id) {
   try { window.localStorage.setItem(VIEW_KEY, id) } catch { /* private window */ }
 }
 
-// Application details asks for another view ("Upload in Resume and titles",
+// Your details asks for another view ("Upload in Resume and titles",
 // Q71-16): switch, and put the focus on that view's tab so the move is heard.
 async function goView(id) {
   if (!VIEWS.some(v => v.id === id)) return
@@ -145,20 +146,17 @@ function onViewKey(e, i) {
   document.getElementById(`profile-tab-${v.id}`)?.focus()
 }
 
-// The Application details view reports its own counts once it is open. Before
-// that, a quiet look at the server tells the label (and a first visit) what is
-// waiting: a server without these routes simply shows no count.
+// The Your details view reports its own count once it is open. Before that, a quiet look
+// at the server tells the label (and a first visit) what is waiting: the details auto-apply
+// needs (what the profile lacks, then what waiting applications need). A server without
+// these routes simply shows no count.
 async function probeCounts() {
-  const [form, asked] = await Promise.allSettled([getApplicant(), getQuestions('open')])
-  const missing = form.status === 'fulfilled' ? (form.value?.missing?.length ?? 0) : 0
-  const questions = asked.status === 'fulfilled'
-    ? (asked.value?.groups ?? []).filter(g => !g.status || g.status === 'open').length
-    : 0
-  setCounts({ missing, questions })
+  const [form] = await Promise.allSettled([getApplicant()])
+  const needed = form.status === 'fulfilled' ? detailsNeeded(form.value?.missing, form.value?.needed_by, form.value?.form).length : 0
+  setCounts({ needed })
 }
 function setCounts(c) {
-  // `questions: null` = the questions list has not reported; keep what was known.
-  counts.value = { missing: c.missing, questions: c.questions ?? counts.value.questions }
+  counts.value = { needed: Number(c?.needed) || 0 }
   if (!chosen && view.value === 'resume' && todo.value > 0) view.value = 'details'
 }
 
@@ -277,7 +275,7 @@ onMounted(() => Promise.all([loadProfile(), refresh(), ...(view.value === 'resum
       <div>
         <h2 class="page-title">Profile</h2>
         <p v-if="view === 'resume'" class="page-sub">Your resume, and the job titles each run searches for.</p>
-        <p v-else class="page-sub">What auto-apply fills into application forms, and the questions it still needs you to answer.</p>
+        <p v-else class="page-sub">What auto-apply puts on application forms. Change anything that stops being true.</p>
       </div>
       <div class="views ui-segmented" role="tablist" aria-label="Profile sections">
         <button

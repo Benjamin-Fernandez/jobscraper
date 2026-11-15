@@ -44,9 +44,16 @@ Field encoding notes for the model side (lane M) and `pagefill`:
     ("3/2026"); `date_iso(pf)` turns it into "2026-03".
   - `context` is set on every field (the previous field's label in the same
     entry group, else the same section); LF §12.1 uses it for generic labels.
+
+Fill policy `always` (Q-121, llm_first_fill_design §4.1 A1, §4.5, rev M3): inside
+`with always_reader():` (pagefill's always path) help text comes from visible nodes
+only (it goes into prompts) and a generic entry section is titled only from a heading
+inside the section. Outside it (policy `strict`) the reader is unchanged.
 """
 from __future__ import annotations
 
+import contextlib
+import contextvars
 import logging
 import random
 import re
@@ -59,6 +66,9 @@ from .contracts import (
 )
 
 _LOG = logging.getLogger(__name__)
+# Q-121: set by pagefill's `always` path only; the navigators' entry_sections reach the
+# generic one through their own signature, so the switch rides on a context variable.
+_ALWAYS_READER: contextvars.ContextVar[bool] = contextvars.ContextVar("always_reader", default=False)
 MAX_OPTIONS = 400             # LF §3.1: lists are read up to this many options
 DESCRIPTION_MAX = 300          # LF §3.1: help text cut
 OPEN_WAIT_MS = 1500            # how long a just-opened list may take to show its options
@@ -171,7 +181,10 @@ HELPERS_JS = r"""
     unit = unit || [el];
     const out = [];
     const add = e => { if (!e || isErr(e) || labelEls.includes(e) || e.querySelector(CTRL)) return; const t = txt(e); if (t && !out.includes(t)) out.push(t); };
-    unit.concat([el]).forEach(u => idText(u.getAttribute('aria-describedby')).forEach(add));
+    // Q-121 rev M3: under fill policy `always` (arg.visibleHelp) a describedby node counts only
+    // when it is visible: its text goes into a prompt, so hidden text must not.
+    const onlyVis = typeof arg !== 'undefined' && arg && arg.visibleHelp;
+    unit.concat([el]).forEach(u => idText(u.getAttribute('aria-describedby')).forEach(e => { if (!onlyVis || vis(e)) add(e); }));
     if (!out.length && cont) cont.querySelectorAll(HELP_SEL).forEach(e => { if (vis(e)) add(e); });
     return out.join(' ').slice(0, %DESC%);
   };
@@ -582,11 +595,22 @@ ENTRIES_JS = "(arg) => {" + HELPERS_JS + r"""
       a = a.parentElement;
     }
     const before = plain.filter(x => (x.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING) && !x.contains(b));
-    const nearest = before.length ? before[before.length - 1] : null;
+    let nearest = before.length ? before[before.length - 1] : null;
+    let own = null;
+    if (arg.inside) {
+      // Q-121 (fill policy `always`): the section is the button's nearest ancestor that holds a
+      // form control, and its title comes only from a heading INSIDE it; a heading or legend
+      // elsewhere on the page ("Phone") never names it.
+      own = b.parentElement;
+      while (own && own !== best && !own.querySelector(CTRL)) own = own.parentElement;
+      own = own || best;
+      const inner = plain.filter(x => own.contains(x) && !x.contains(b));
+      nearest = inner.length ? inner[0] : null;
+    }
     const fromAria = (b.getAttribute('aria-label') || '').replace(/^add( another)?\s*/i, '').trim();
     const title = fromAria || (nearest ? txt(nearest) : '');
-    let el = best;
-    if (nearest && best.contains(nearest)) { let c = b.parentElement; while (c && c !== best && !c.contains(nearest)) c = c.parentElement; el = c || best; }
+    let el = own || best;
+    if (!own && nearest && best.contains(nearest)) { let c = b.parentElement; while (c && c !== best && !c.contains(nearest)) c = c.parentElement; el = c || best; }
     const sid = 's' + (i + 1);
     b.setAttribute('data-llmfill-add', sid);
     sections.push({ id: sid, el, title: title.replace(/\s*\*\s*$/, ''), required: /\*\s*$/.test(title), add: `[data-llmfill-add="${sid}"]`, entries: [] });
@@ -708,7 +732,10 @@ def read_page(page: Any, *, scope: str = "", sections: Sequence[EntrySection] = 
     token = "".join((rng or random).choice("abcdefghijklmnopqrstuvwxyz0123456789") for _ in range(4))
     groups = [{"id": f"{s.section}#{g.index}", "title": g.title, "locator": g.locator}
               for s in sections for g in s.entries if g.locator]
-    raw = page.evaluate(READER_JS, {"scope": scope, "token": token, "groups": groups}) or []
+    arg = {"scope": scope, "token": token, "groups": groups}
+    if _ALWAYS_READER.get():
+        arg["visibleHelp"] = True                         # Q-121 rev M3: prompts see visible help only
+    raw = page.evaluate(READER_JS, arg) or []
     for r in [r for r in raw if r.get("skipped")]:           # Q-93 review M2: a trace, no applicant values
         _LOG.info("hidden file input skipped: no picker control%s", f" ({r['label']})" if r.get("label") else "")
     raw = [r for r in raw if not r.get("skipped")]
@@ -785,7 +812,8 @@ def entry_sections(page: Any, scope: str = "") -> list[EntrySection]:
     section's add control is a button named Add / Add Another. A section with an
     add control and no entries is listed with `entries=()`. Locators are CSS on
     marks this call sets (`data-llmfill-entry`, `-add`, `-del`)."""
-    rows = _safe(lambda: page.evaluate(ENTRIES_JS, {"scope": scope}), []) or []
+    arg = {"scope": scope, "inside": True} if _ALWAYS_READER.get() else {"scope": scope}
+    rows = _safe(lambda: page.evaluate(ENTRIES_JS, arg), []) or []
     out: list[EntrySection] = []
     used: dict[str, int] = {}
     for r in rows:
@@ -808,6 +836,42 @@ def entry_sections(page: Any, scope: str = "") -> list[EntrySection]:
         out.append(EntrySection(section=name, title=title, add_locator=r.get("add", ""),
                                 required=bool(r.get("required")), entries=entries))
     return out
+
+
+@contextlib.contextmanager
+def always_reader():
+    """The reader rules of fill policy `always` for the duration of a `with` block
+    (visible help only; entry-section titles from inside the section)."""
+    token = _ALWAYS_READER.set(True)
+    try:
+        yield
+    finally:
+        _ALWAYS_READER.reset(token)
+
+
+def control_types(page: Any, keys: Sequence[str]) -> dict[str, str]:
+    """Reader key -> the control's `type` attribute in lower case ("" when none). K1
+    backstop for the `always` path: a password input never reaches a prompt (READER_JS
+    already skips `type=password`; this re-checks before the model sees anything)."""
+    js = """(keys) => keys.map(k => { const e = document.querySelector(`[data-llmfill="${CSS.escape(k)}"]`);
+      if (!e) return ''; const i = e.matches('input') ? e : e.querySelector('input');
+      return i ? (i.getAttribute('type') || '').toLowerCase() : ''; })"""
+    got = _safe(lambda: page.evaluate(js, list(keys)), []) or []
+    return {k: str(t or "") for k, t in zip(keys, got)}
+
+
+def shown_visible(page: Any, pf: PageField) -> bool:
+    """A7 (K10): the field's control (or its label, its parent, its react-select control)
+    is visible now. A hidden file input is opened by a visible trigger the reader found,
+    so a FILE field counts as visible."""
+    if pf.widget == "file":
+        return True
+    js = "(el) => {" + HELPERS_JS + r"""
+      const ctl = el.closest('.select__container, [class*="select__container"]');
+      return vis(el) || [...(el.labels || [])].some(vis) || vis(el.parentElement) ||
+             !!(ctl && vis(ctl.querySelector('.select__control')));
+    }"""
+    return bool(_safe(lambda: page.locator(selector(pf.field.key)).first.evaluate(js), False))
 
 
 def section_name(title: str) -> str:

@@ -6,7 +6,7 @@
 // fetches. It is not in the KeepAlive list (O8), so every visit loads fresh numbers.
 // Design: docs/architecture/ux/overview_design.md, docs/architecture/q118_ui_polish_design.md §2.
 import { computed, onMounted, ref } from 'vue'
-import { ApiError, describeError, getApplications, getCurrentJob, getQuestions, getStats, startRun } from '../api.js'
+import { ApiError, describeError, getApplications, getCurrentJob, getStats, startRun } from '../api.js'
 import { useJob } from '../composables/useJob.js'
 import { newRoleCount } from '../badges.js'
 import { ago, plural } from '../format.js'
@@ -15,6 +15,7 @@ import { tabEmits, tabProps } from '../shell.js'
 import { showToast } from '../toast.js'
 import {
   FOLLOW_UP_SHOWN, HARD_RUN_FAILURES, PROFILE_VIEW_KEY, followUps, kpis, lastRunState, nextUp, pastWeek, pipeline,
+  stoppedCounts,
 } from '../overview.js'
 import Icon from '../components/Icon.vue'
 import SetupChecklist from '../components/SetupChecklist.vue'
@@ -26,9 +27,8 @@ defineEmits(tabEmits)
 
 const apps = ref(null)          // application rows, null until loaded or failed
 const statuses = ref([])        // the stage vocabulary from /api/stats (config order)
-const questions = ref(null)     // GET /api/questions?status=open
 const job = ref(null)           // the background job, if any
-const errors = ref({ apps: '', questions: '' })
+const errors = ref({ apps: '' })
 const firstLoad = ref(true)
 const starting = ref(false)
 const startError = ref('')
@@ -40,15 +40,11 @@ const now = ref(Date.now())
 const watcher = useJob({ kind: 'run', consume: false })
 
 async function load() {
-  const [a, s, q, j] = await Promise.allSettled([
-    getApplications(), getStats(), getQuestions('open'), getCurrentJob(),
-  ])
+  const [a, s, j] = await Promise.allSettled([getApplications(), getStats(), getCurrentJob()])
   now.value = Date.now()
   apps.value = a.status === 'fulfilled' ? a.value : null
   errors.value.apps = a.status === 'rejected' ? describeError(a.reason) : ''
   statuses.value = s.status === 'fulfilled' ? (s.value?.statuses ?? []) : []
-  questions.value = q.status === 'fulfilled' ? q.value : null
-  errors.value.questions = q.status === 'rejected' ? describeError(q.reason) : ''
   job.value = j.status === 'fulfilled' ? j.value : null
   firstLoad.value = false
 }
@@ -99,19 +95,21 @@ const segments = computed(() => pipe.value.segments.map(s => ({
   note: s.id === 'rejected' && pipe.value.withdrawn > 0 ? `(${pipe.value.withdrawn} withdrawn)` : '',
 })))
 
-const openGroups = computed(() =>
-  (questions.value?.groups ?? []).filter(g => !g.status || g.status === 'open').length)
-const waiting = computed(() => (questions.value?.waiting ?? []).length)
+// What the stopped applications wait for, counted from the application rows (Q-127 U3, D-215):
+// no question rows are read, and nothing here carries a company's wording.
+const stopped = computed(() => stoppedCounts(rows.value))
 
 const cards = computed(() => nextUp({
   newRoles: newRoleCount(props.jobs),
-  questions: openGroups.value,
+  waiting: stopped.value.waiting,
+  noField: stopped.value.noField,
+  stuck: stopped.value.stuck,
   followUps: due.value,
   run: lastRun.value,
   jobRunning: jobRunning.value,
 }))
-// Not "caught up" when the questions check failed: we don't know.
-const caughtUp = computed(() => cards.value.length === 0 && props.runs.length > 0 && !errors.value.questions)
+// Not "caught up" when the applications check failed: we don't know what is waiting.
+const caughtUp = computed(() => cards.value.length === 0 && props.runs.length > 0 && !errors.value.apps)
 
 // `week.saved` counts moves to "To apply" (a role saved or queued).
 const weekStats = computed(() => [
@@ -140,9 +138,8 @@ const lastRunFacts = computed(() => {
 })
 const lastRunReason = computed(() => (HARD_RUN_FAILURES.includes(lastRun.value.run?.status) ? failReason.value : ''))
 
-// The questions row opens Profile on Application details: Profile reads this
-// key on mount (O6), so Profile.vue needs no change.
-function openQuestions() {
+// "Add details" opens Profile on Your details: Profile reads this key on mount (O6).
+function openDetails() {
   try {
     window.localStorage.setItem(PROFILE_VIEW_KEY, 'details')
   } catch { /* storage blocked: Profile opens on its usual view */ }
@@ -224,7 +221,7 @@ async function start() {
       <div class="ui-grid">
         <div class="ov-col span-8">
           <section
-            v-if="cards.length || caughtUp || errors.questions"
+            v-if="cards.length || caughtUp || errors.apps"
             class="ui-card"
             aria-labelledby="todo-title"
           >
@@ -232,28 +229,38 @@ async function start() {
               <h3 id="todo-title" class="ui-card-title">To do</h3>
               <span v-if="cards.length" class="ui-count num">{{ cards.length }}</span>
             </header>
-            <div v-if="errors.questions" class="notice warn ov-notice" role="status">
-              <p>Could not check for open questions: {{ errors.questions.replace(/\.$/, '') }}.</p>
+            <div v-if="errors.apps" class="notice warn ov-notice" role="status">
+              <p>Could not check which applications are waiting: {{ errors.apps.replace(/\.$/, '') }}.</p>
               <button type="button" @click="load">Try again</button>
             </div>
             <ul v-if="cards.length" class="ui-list">
               <li
                 v-for="(item, i) in cards"
-                :key="item.id"
+                :key="item.fact ? `${item.id}:${item.fact}` : item.id"
                 class="ui-list-row todo-row"
                 :class="{ failed: item.id === 'run' && lastRun.state === 'failed' }"
                 :data-kind="item.id"
               >
-                <template v-if="item.id === 'questions'">
+                <template v-if="item.id === 'details'">
                   <div>
-                    <span class="ui-list-row-title">{{ plural(item.n, 'question') }} waiting for your answer</span>
-                    <span class="ui-list-row-desc">
-                      {{ waiting > 0
-                        ? `Auto-apply is paused on ${plural(waiting, 'application')} until you answer.`
-                        : 'Answer once; every later form reuses it.' }}
-                    </span>
+                    <span class="ui-list-row-title">{{ plural(item.n, 'application') }} {{ item.n === 1 ? 'is' : 'are' }} waiting for a detail</span>
+                    <span class="ui-list-row-desc">Add it to Your details, then try them again.</span>
                   </div>
-                  <button type="button" :class="{ primary: i === 0 }" @click="openQuestions">Answer questions</button>
+                  <button type="button" :class="{ primary: i === 0 }" @click="openDetails">Add details</button>
+                </template>
+                <template v-else-if="item.id === 'no-field'">
+                  <div>
+                    <span class="ui-list-row-title">{{ plural(item.n, 'application') }} stopped: {{ item.n === 1 ? 'its form asks' : 'their forms ask' }} for your {{ item.fact }}</span>
+                    <span class="ui-list-row-desc">Your details can't hold it, so nothing was sent. Apply by hand, or skip {{ item.n === 1 ? 'this role' : 'these roles' }}.</span>
+                  </div>
+                  <a class="button" :class="{ primary: i === 0 }" href="#/applications/active">See applications</a>
+                </template>
+                <template v-else-if="item.id === 'stuck'">
+                  <div>
+                    <span class="ui-list-row-title">{{ plural(item.n, 'application') }} stopped on a question JobScraper can't answer</span>
+                    <span class="ui-list-row-desc">Open one and choose What was filled to answer it for next time.</span>
+                  </div>
+                  <a class="button" :class="{ primary: i === 0 }" href="#/applications/active">See applications</a>
                 </template>
                 <template v-else-if="item.id === 'inbox'">
                   <div>

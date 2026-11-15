@@ -29,6 +29,14 @@ function row(job_id, status, events = []) {
   }
 }
 
+// Q-127: the "To do" rows count stopped applications from GET /api/applications (no question list).
+const stoppedRow = (id, attempt) => ({
+  ...row(id, 'to_apply', [['to_apply', '2026-09-28T08:00:00']]),
+  last_attempt: { id: 1, state: 'failed', mode: 'dry_run', kind: 'needs_input', reason_code: 'owner_fact_missing',
+    text: "This form asks for your date of birth, which isn't in your profile or resume. Nothing was sent.",
+    hint: 'Add it in Profile → Your details, then click Try again.', owner_fact_path: 'identity.date_of_birth',
+    ready_to_retry: false, no_field: false, ...attempt },
+})
 const group = (key, over = {}) => ({ key, title: key, status: 'open', labels: [key], employers: ['Acme'], waiting: 1, ...over })
 const questionsOf = (n, waiting = 0) => ({
   mode: 'dry_run', busy: false, ready: [],
@@ -134,15 +142,14 @@ describe('Overview: To do', () => {
   it('renders a card per pending item and only one primary CTA', async () => {
     vi.setSystemTime(new Date(LATER))
     useApi({
-      questions: questionsOf(2, 3),
-      applicationRows: [row('late', 'applied', [['to_apply', '2026-09-19T08:00:00'], ['applied', '2026-09-20T08:00:00']])],
+      applicationRows: [stoppedRow('w1'), stoppedRow('w2'),
+        row('late', 'applied', [['to_apply', '2026-09-19T08:00:00'], ['applied', '2026-09-20T08:00:00']])],
     })
     const wrapper = await mountOverview()
 
-    expect(kinds(wrapper)).toEqual(['questions', 'inbox', 'follow-up', 'run'])
+    expect(kinds(wrapper)).toEqual(['details', 'inbox', 'follow-up', 'run'])
     expect(wrapper.find('#todo-title').text()).toBe('To do')
-    expect(card(wrapper, 'questions').find('.ui-list-row-title').text()).toBe('2 questions waiting for your answer')
-    expect(card(wrapper, 'questions').find('.ui-list-row-desc').text()).toBe('Auto-apply is paused on 3 applications until you answer.')
+    expect(card(wrapper, 'details').find('.ui-list-row-title').text()).toBe('2 applications are waiting for a detail')
     expect(card(wrapper, 'inbox').find('.ui-list-row-title').text()).toBe('Triage 5 new roles')
     expect(card(wrapper, 'inbox').find('a.button').attributes('href')).toBe('#/inbox')
     expect(card(wrapper, 'follow-up').find('.ui-list-row-title').text()).toBe('Follow up on 1 application')
@@ -156,8 +163,8 @@ describe('Overview: To do', () => {
     // One primary action on the whole page, and it is the first row's.
     const primaries = wrapper.findAll('.overview .todo-row .primary')
     expect(primaries).toHaveLength(1)
-    expect(primaries[0].text()).toBe('Answer questions')
-    expect(card(wrapper, 'questions').find('.primary').exists()).toBe(true)
+    expect(primaries[0].text()).toBe('Add details')
+    expect(card(wrapper, 'details').find('.primary').exists()).toBe(true)
     expect(card(wrapper, 'run').find('button').classes()).not.toContain('primary')
   })
 
@@ -216,14 +223,13 @@ describe('Overview: To do', () => {
     expect(wrapper.find('.overview .primary').exists()).toBe(false)
   })
 
-  it('does not claim to be caught up when the questions check failed', async () => {
-    useApi({ statuses: ALL_TRACKED })               // /api/questions answers 404
+  it('does not claim to be caught up when the applications check failed', async () => {
+    useApi({ statuses: ALL_TRACKED })
+    intercept(async url => (url === 'api/applications' ? failure(500, 'Server Error') : undefined))
     const wrapper = await mountOverview()
     expect(wrapper.find('.ov-caught-up').exists()).toBe(false)
-    const notice = wrapper.find('.notice.warn')
-    expect(notice.text()).toContain('Could not check for open questions:')
-    expect(notice.text()).not.toContain('..')
-    expect(notice.find('button').text()).toBe('Try again')
+    expect(wrapper.text()).toContain('Could not check which applications are waiting:')
+    expect(wrapper.text()).not.toContain('..')
   })
 
   it('a run in progress is said so and hides the Start a run row', async () => {
@@ -266,19 +272,19 @@ describe('Overview: To do', () => {
   })
 })
 
-describe('Overview: the Questions card goes to Application details', () => {
-  it('Answer questions stores profile.view=details and opens #/profile', async () => {
-    useApi({ questions: questionsOf(1) })
+describe('Overview: the details row goes to Your details', () => {
+  it('Add details stores profile.view=details and opens #/profile', async () => {
+    useApi({ applicationRows: [stoppedRow('w1')] })
     const wrapper = await mountOverview()
-    const button = card(wrapper, 'questions').find('button')
-    expect(button.text()).toBe('Answer questions')
+    const button = card(wrapper, 'details').find('button')
+    expect(button.text()).toBe('Add details')
     expect(window.localStorage.getItem('profile.view')).toBeNull()
 
     await button.trigger('click')
     expect(window.localStorage.getItem('profile.view')).toBe('details')
     expect(window.location.hash).toBe('#/profile')
 
-    // And the Profile tab honours it: it opens on Application details.
+    // And the Profile tab honours it: it opens on Your details.
     window.dispatchEvent(new HashChangeEvent('hashchange'))
     await vi.waitFor(async () => {
       await flushPromises()
@@ -286,11 +292,10 @@ describe('Overview: the Questions card goes to Application details', () => {
     })
   })
 
-  it('one question reads in the singular', async () => {
-    useApi({ questions: questionsOf(1) })
+  it('one application reads in the singular', async () => {
+    useApi({ applicationRows: [stoppedRow('w1')] })
     const wrapper = await mountOverview()
-    expect(card(wrapper, 'questions').find('.ui-list-row-title').text()).toBe('1 question waiting for your answer')
-    expect(card(wrapper, 'questions').find('.ui-list-row-desc').text()).toBe('Answer once; every later form reuses it.')
+    expect(card(wrapper, 'details').find('.ui-list-row-title').text()).toBe('1 application is waiting for a detail')
   })
 })
 
@@ -473,11 +478,11 @@ describe('Overview: failures stay in their own section', () => {
     expect(kpi(wrapper, 'active').find('.ui-kpi-caption').text()).not.toBe('Unavailable')
   })
 
-  it('a failed questions check skips only that card', async () => {
-    const wrapper = await mountOverview()                              // /api/questions answers 404
-    expect(wrapper.find('.notice.warn').text()).toContain('Could not check for open questions:')
+  it('with no stopped application there is no details row and no warning, and the Pipeline still renders', async () => {
+    const wrapper = await mountOverview()
     expect(kinds(wrapper)).toEqual(['inbox'])
-    expect(wrapper.find('[aria-labelledby="pipe-title"]').exists()).toBe(true)          // the Pipeline card still renders
+    expect(wrapper.find('.notice.warn').exists()).toBe(false)
+    expect(wrapper.find('[aria-labelledby="pipe-title"]').exists()).toBe(true)
   })
 })
 

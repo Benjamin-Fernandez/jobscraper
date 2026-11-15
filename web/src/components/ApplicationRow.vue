@@ -15,21 +15,28 @@
 // and its Move menu is off with the reason; touch and keyboard always use Move to.
 //
 // The `.app-state` slot (Q-120 U3) says what is happening to the role: Queued · 3rd,
-// Applying…, Applied automatically, Needs your answers, Stopped: <reason>. "Try again"
+// Applying…, Applied automatically, Needs one detail: <fact>, Stopped: <reason>. "Try again"
 // adds a stopped, cancelled or waiting-for-answers role to the auto-apply queue again
 // (the same call and toast as the Inbox) and announces `jobscraper:apply-queue`; the
 // tab reloads its rows on that event.
-import { computed, ref, watch } from 'vue'
+//
+// Q-127 U2 (D-215): the Profile page no longer lists a company's questions, so the answers
+// live here. A row with an attempt that recorded answers offers "See what was sent" (or
+// "See what was filled"), which opens `WhatWasSent` in the row's own area below it. A stop
+// for a missing detail reads "Needs one detail: <fact>" with "Add it" (opens Your details
+// at the field); a stop whose details are all in reads "Ready to try again" and "Try again"
+// becomes the primary button. Saving a correction never applies: only "Try again" does.
+import { computed, nextTick, ref, watch } from 'vue'
 import { ApiError, describeError, enqueueMessage, removeFromApplyQueue, startAutoApply } from '../api.js'
-import { IN_PROGRESS_REMOVE, canRetry, refusalMessage, rowState } from '../attempts.js'
+import { ADD_IT, IN_PROGRESS_REMOVE, canRetry, openAnswer, refusalMessage, rowState, sentEntry } from '../attempts.js'
 import { LOCKED_REASON, ageLabel, inFlight, lastAt, needsFollowUp, secondLine } from '../applications.js'
 import { exactTime, safeUrl } from '../format.js'
-import { openProfile } from '../profileView.js'
 import { showToast } from '../toast.js'
 import MenuButton from '../ui/MenuButton.vue'
 import MoveMenu from '../ui/MoveMenu.vue'
 import CompanyMark from './CompanyMark.vue'
 import Icon from './Icon.vue'
+import WhatWasSent from './WhatWasSent.vue'
 
 const props = defineProps({
   row: { type: Object, required: true },
@@ -50,7 +57,8 @@ const role = computed(() => props.row.role ?? props.row.job_id)
 const name = computed(() => `${role.value} at ${company.value}`)
 const url = computed(() => safeUrl(props.row.url))
 const locked = computed(() => inFlight(props.row) || justQueued.value > 0)
-const canDrag = computed(() => props.dragEnabled && !locked.value && !props.saving)
+// An open answers panel has inputs in it: the row stays put while it is open.
+const canDrag = computed(() => props.dragEnabled && !locked.value && !props.saving && !sentOpen.value)
 const removable = computed(() => (props.row.events?.length ?? 0) <= 1)
 const meta = computed(() => [props.showCompany ? company.value : '', secondLine(props.row)].filter(Boolean).join(' · '))
 
@@ -60,10 +68,46 @@ const meta = computed(() => [props.showCompany ? company.value : '', secondLine(
 // load brings the real row (any change of the attempt or the queue place clears it).
 const justQueued = ref(0)
 const rowKey = computed(() => `${props.row.last_attempt?.id ?? ''}|${props.row.last_attempt?.kind ?? ''}|${props.row.queue?.position ?? ''}`)
-watch(rowKey, () => { justQueued.value = 0 })
+watch(rowKey, () => { justQueued.value = 0; readyNow.value = false; notAnswered.value = null })
 
-const shown = computed(() => (justQueued.value > 0 ? { ...props.row, queue: { position: justQueued.value } } : props.row))
+// What the open panel has learned that the list does not carry: how many questions had no
+// answer (the strict stop's chip), and that a saved correction made the role ready.
+const notAnswered = ref(null)
+const readyNow = ref(false)
+
+const shown = computed(() => {
+  let r = props.row
+  if (justQueued.value > 0) r = { ...r, queue: { position: justQueued.value } }
+  if (r.last_attempt && (notAnswered.value != null || readyNow.value)) {
+    r = {
+      ...r,
+      last_attempt: {
+        ...r.last_attempt,
+        ...(notAnswered.value != null ? { not_answered: notAnswered.value } : {}),
+        ...(readyNow.value ? { ready_to_retry: true } : {}),
+      },
+    }
+  }
+  return r
+})
 const state = computed(() => rowState(shown.value))
+
+// ---- What was sent / What was filled ----
+const entry = computed(() => sentEntry(props.row))
+const sentOpen = ref(false)
+const sentBtnRef = ref(null)
+const panelId = computed(() => `app-sent-${props.row.job_id}`)
+function toggleSent() {
+  if (sentOpen.value) closeSent()
+  else sentOpen.value = true
+}
+function closeSent() {
+  sentOpen.value = false
+  nextTick(() => sentBtnRef.value?.focus?.())
+}
+function onLoaded(c) { notAnswered.value = Number.isFinite(c?.notAnswered) ? c.notAnswered : null }
+function onSaved(r) { if (r?.ready) readyNow.value = true }
+const addLabel = computed(() => `${ADD_IT}: ${state.value?.label ?? ''} (${name.value})`)
 const stoppedLike = computed(() => state.value?.kind === 'stopped' || state.value?.kind === 'cancelled')
 const retryable = computed(() => canRetry(shown.value))
 const retrying = ref(false)
@@ -172,8 +216,9 @@ function onDragStart(event) {
     </div>
     <!-- The state slot (Q-118 §3, Q-120 U3): one chip for what is happening to the role,
          then what the owner can do about it. "Applied automatically" marks an applied
-         status that an auto-apply submit made. A later change adds "Submitted · N answers
-         assumed" here (llm_first_fill_design §6): the slot wraps, so it has room. -->
+         status that an auto-apply submit made. With assumptions (Q-121 §6.2) it reads
+         "Submitted · N answers assumed" and "Review answers" opens Profile's "Answered for
+         you"; a trial reads "Trial: filled, not sent". The slot wraps, so it has room. -->
     <div class="app-state" :data-kind="state?.kind || null">
       <span
         v-if="state"
@@ -186,11 +231,22 @@ function onDragStart(event) {
       <span v-if="state?.step" class="app-step">{{ state.step }}</span>
       <span v-if="state?.reason" class="app-reason" :title="state.title || undefined">{{ state.reason }}</span>
       <a
-        v-if="state?.kind === 'needs_input'"
-        class="button ghost app-act app-answer"
+        v-if="state?.add"
+        class="button ghost app-act app-add"
         href="#/profile"
-        @click.prevent="openProfile('details')"
-      >Answer in Profile</a>
+        :aria-label="addLabel"
+        @click.prevent="openAnswer(state.target)"
+      >{{ ADD_IT }}</a>
+      <button
+        v-if="entry"
+        ref="sentBtnRef"
+        type="button"
+        class="ghost app-act app-sent"
+        :aria-expanded="sentOpen ? 'true' : 'false'"
+        :aria-controls="sentOpen ? panelId : undefined"
+        :aria-label="`${entry.button} for ${name}`"
+        @click="toggleSent"
+      >{{ entry.button }}</button>
       <a
         v-if="stoppedLike && url"
         class="button ghost app-act app-open"
@@ -203,6 +259,7 @@ function onDragStart(event) {
         v-if="retryable"
         type="button"
         class="app-act app-retry"
+        :class="{ primary: state?.ready }"
         :disabled="retrying || saving"
         @click="tryAgain"
       >{{ retrying ? 'Adding…' : 'Try again' }}</button>
@@ -229,6 +286,18 @@ function onDragStart(event) {
       <template #trigger><Icon name="more" :size="18" /></template>
     </MenuButton>
     <div class="app-below">
+      <WhatWasSent
+        v-if="sentOpen && entry"
+        :id="panelId"
+        :key="entry.id"
+        :job-id="row.job_id"
+        :attempt-id="entry.id"
+        :sent="entry.sent"
+        :employer-name="row.company || ''"
+        @close="closeSent"
+        @loaded="onLoaded"
+        @saved="onSaved"
+      />
       <slot />
     </div>
   </li>
