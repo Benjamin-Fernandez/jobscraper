@@ -24,7 +24,8 @@ no job is started and nothing else is touched.
 
 Responses of `POST /api/apply`:
 - 202 `{queued: [{job_id, position}], accepted, refused, mode, paused, started,
-  disabled, job}` - at least one id was queued (`accepted` kept for older callers);
+  disabled, lifted, job}` - at least one id was queued (`accepted` kept for older
+  callers); `lifted` is the model pause this click cleared (Q-126 §4.4) or null;
 - 422 `{detail: "profile_incomplete", missing}` - nothing queued, details missing;
 - 422 `{detail: "refused", refused}` - every id was refused. Never 409.
 
@@ -44,11 +45,12 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, field_validator
 
 from jobscraper import applicant
-from jobscraper.apply.contracts import (QUEUE_PAUSE_TEXTS, QUEUE_REFUSAL_TEXTS, REASON_TEXTS,
+from jobscraper.apply.contracts import (MODEL_CLICK_RESUME, MODEL_PAUSE_VALUES,
+                                        QUEUE_PAUSE_TEXTS, QUEUE_REFUSAL_TEXTS, REASON_TEXTS,
                                         QueuePause, ReasonCode)
 from jobscraper.config import ApplyConfig
 from jobscraper.store import TIME_FMT, utcnow
-from jobscraper.web.applyqueue import slot_of
+from jobscraper.web.applyqueue import fill_detail, slot_of
 from jobscraper.web.deps import get_config, get_jobs, open_store
 from jobscraper.web.jobs import JobIdle, JobNotOurs, JobStuck
 from jobscraper.web.routers.applications import attempt_view
@@ -125,9 +127,11 @@ def apply_status(request: Request, cfg: Any = Depends(get_config),
         mode = _mode(cfg, store)
         paused = _pause_view(store, runner)
         waiting = len(store.queue_positions())
+        model = _model_view(store, slot)
     return {"mode": mode, "missing": _missing(cfg), "busy": slot != "free",
             "queue": {"waiting": waiting, "applying": slot == "apply",
-                      "paused": paused["reason"] if paused else None}}
+                      "paused": paused["reason"] if paused else None,
+                      "model": model}}
 
 
 def _settings_view(cfg: Any, store: Any) -> dict[str, Any]:
@@ -234,9 +238,29 @@ def _check_one(store: Any, job_id: str, mode: str, caps: Any,
     return job, None
 
 
-def enqueue(request: Request, cfg: Any, job_ids: list[str], source: str) -> JSONResponse:
+def _lift_model_pause(store: Any, runner: Any) -> Optional[str]:
+    """The Auto-apply click lifts a MODEL pause, and only that (Q-126 §4.4, D-217 R1).
+
+    One store call, one compare-and-clear: a pause that is not in
+    `MODEL_CLICK_RESUME` (the owner's own, cancelled, bot checks, restarted, ...) is
+    left as it is, and `resumed_at` is not written (`keep_window`), so the bot-check
+    streak survives. The route never waits for the model: the worker this click
+    kicks runs the start-and-wait service before its first take and stores the
+    precise pause again if the model still isn't ready. A runner that is off, or
+    whose restart gate is still closed (D-200), never lifts anything. Returns the
+    cleared reason or None."""
+    if not _enabled(runner) or runner.gate_closed:
+        return None
+    return store.queue_resume_if({r.value for r in MODEL_CLICK_RESUME}, utcnow(),
+                                 keep_window=MODEL_PAUSE_VALUES)
+
+
+def enqueue(request: Request, cfg: Any, job_ids: list[str], source: str, *,
+            lift_model_pause: bool = False) -> JSONResponse:
     """The enqueue helper of §3.5, shared by `POST /api/apply` and
     `POST /api/questions/retry`. Never a 409: a running job only means the role waits.
+    `lift_model_pause` is True only for the owner's Inbox Auto-apply click (§4.4):
+    the Questions retry path never lifts a pause.
 
     Per id, in one write transaction (BEGIN IMMEDIATE, so the worker's `queue_take`
     can't slip between the checks and the write): the checks, then `queue_add` and,
@@ -278,6 +302,10 @@ def enqueue(request: Request, cfg: Any, job_ids: list[str], source: str) -> JSON
     if not queued:
         return JSONResponse({"detail": "refused", "refused": refused}, status_code=422)
     runner = _runner(request)
+    lifted: Optional[str] = None
+    if lift_model_pause:                  # the rows are committed; the kick is next
+        with open_store(request) as store:
+            lifted = _lift_model_pause(store, runner)
     started = bool(runner.kick()) if _enabled(runner) else False
     slot, cur = slot_of(request.app.state.jobs)
     with open_store(request) as store:
@@ -285,14 +313,16 @@ def enqueue(request: Request, cfg: Any, job_ids: list[str], source: str) -> JSON
     return JSONResponse({
         "queued": queued, "accepted": [q["job_id"] for q in queued], "refused": refused,
         "mode": mode, "paused": paused and _enabled(runner), "started": started,
-        "disabled": not _enabled(runner),
+        "disabled": not _enabled(runner), "lifted": lifted,
         "job": cur if slot == "apply" else None}, status_code=202)
 
 
 @router.post("/apply", status_code=202)
 def start_apply(body: StartBody, request: Request, cfg: Any = Depends(get_config)) -> Any:
-    """Queue the clicked roles for auto-apply (D-205). 202 even while a job runs."""
-    return enqueue(request, cfg, body.job_ids, body.source)
+    """Queue the clicked roles for auto-apply (D-205). 202 even while a job runs.
+    The owner's click also lifts a stored MODEL pause (Q-126 §4.4); any other
+    pause stays until Resume."""
+    return enqueue(request, cfg, body.job_ids, body.source, lift_model_pause=True)
 
 
 # ------------------------------------------------------------------ the queue (§3.5)
@@ -316,11 +346,21 @@ def _pause_copy(reason: str, detail: Optional[str], since: Optional[str]) -> dic
         copy = QUEUE_PAUSE_TEXTS[QueuePause(reason)]
     except ValueError:                       # a reason from a newer build: plain "paused"
         copy = QUEUE_PAUSE_TEXTS[QueuePause.OWNER]
-    try:
-        text = copy.text.format(detail=detail or "")
-    except (KeyError, IndexError):
-        text = copy.text
-    return {"reason": reason, "text": text, "hint": copy.hint, "since": since}
+    return {"reason": reason, "text": fill_detail(copy.text, detail),
+            "hint": fill_detail(copy.hint, detail), "since": since}
+
+
+def _model_view(store: Any, slot: str) -> Optional[dict[str, Any]]:
+    """`{state, since}` while the worker is bringing the local model up
+    ("starting" | "loading"), else None (Q-126 §4.1). Only while the apply worker
+    holds the slot: a row left by a worker that died is never shown as live (the
+    next worker clears it). Reads only."""
+    if slot != "apply":
+        return None
+    view = store.queue_model_view()
+    if not view or view.get("state") not in ("starting", "loading"):
+        return None
+    return {"state": view["state"], "since": view.get("since")}
 
 
 def queue_view(request: Request) -> dict[str, Any]:
@@ -332,6 +372,7 @@ def queue_view(request: Request) -> dict[str, Any]:
         live = store.live_attempt()
         waiting = store.queue_items()
         recent = store.recent_attempts(RECENT_MAX)
+        model = _model_view(store, slot)
     now = None
     if live:
         now = {"attempt_id": live.get("id"), "job_id": live.get("job_id"),
@@ -349,7 +390,7 @@ def queue_view(request: Request) -> dict[str, Any]:
                      "finished_at": row.get("finished_at")})
     return {"paused": paused, "now": now, "slot": slot,
             "run_pending": bool(runner is not None and runner.pending_run is not None),
-            "waiting": waiting, "recent": done}
+            "waiting": waiting, "recent": done, "model": model}
 
 
 @router.get("/apply/queue")
@@ -420,8 +461,13 @@ def resume_queue(request: Request, cfg: Any = Depends(get_config)) -> Any:
     if missing:
         return JSONResponse({"detail": "profile_incomplete", "missing": missing},
                             status_code=422)
+    now = utcnow()
     with open_store(request) as store:
-        store.queue_resume(utcnow())
+        # One compare-and-clear. A model pause is lifted WITHOUT `resumed_at`, so
+        # the bot-check streak survives (Q-126 §4.4); any other pause is cleared and
+        # stamped as before. Nothing stored: stamp anyway, as Resume always did.
+        if store.queue_resume_if(None, now, keep_window=MODEL_PAUSE_VALUES) is None:
+            store.queue_resume(now)
     runner.open_gate()
     runner.kick()
     return queue_view(request)

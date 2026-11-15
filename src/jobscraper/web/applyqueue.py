@@ -42,7 +42,8 @@ import threading
 from pathlib import Path
 from typing import Any, Mapping, Optional
 
-from jobscraper.apply.contracts import QueuePause
+from jobscraper.apply.contracts import MODEL_PAUSE_VALUES, QueuePause
+from jobscraper.backends import running_from_worktree     # Q-126: one copy, in backends.py
 from jobscraper.store import utcnow
 from jobscraper.web.jobs import EXIT_CANCELLED, JobBusy
 
@@ -54,20 +55,6 @@ ENV_SWITCH = "JOBSCRAPER_APPLY_QUEUE"
 LIVE_PORT = 8765                   # the owner's live app (config default web.port; CLAUDE.md)
 # src/jobscraper/web/applyqueue.py -> the checkout this code was imported from
 _REPO_ROOT = Path(__file__).resolve().parents[3]
-
-
-def running_from_worktree(source_dir: Optional[os.PathLike | str] = None) -> bool:
-    """Whether this code runs from a git worktree, not the owner's main checkout.
-
-    `source_dir` is the checkout the code was imported from (default: this file's
-    repository root, `src/jobscraper/web/` → three levels up). A linked worktree has
-    a `.git` FILE (a `gitdir:` pointer); the main checkout has a `.git` directory.
-    The path test (`/.claude/worktrees/`) catches the agents' worktrees even when
-    `.git` cannot be read. No `.git` at all (a plain copy) is not a worktree."""
-    root = Path(source_dir) if source_dir is not None else _REPO_ROOT
-    if "/.claude/worktrees/" in root.resolve().as_posix().lower() + "/":
-        return True
-    return (root / ".git").is_file()
 
 
 def apply_queue_wanted(env: Mapping[str, str], *, config_path: Optional[str] = None,
@@ -102,7 +89,18 @@ def apply_queue_wanted(env: Mapping[str, str], *, config_path: Optional[str] = N
                 return False
     if port is not None and int(port) != LIVE_PORT:
         return False
-    return not running_from_worktree(source_dir)
+    # `_REPO_ROOT` stays here: a pin swaps it to pretend to be the main checkout.
+    return not running_from_worktree(source_dir if source_dir is not None else _REPO_ROOT)
+
+
+def fill_detail(template: str, detail: Optional[str]) -> str:
+    """A pause text or hint with `{detail}` filled in (the model pauses' hints name a
+    model tag too, Q-126 §4.2). Never a raw brace to the owner: a template that won't
+    format is shown as it is. Shared by the queue view and the Local AI card."""
+    try:
+        return template.format(detail=detail or "")
+    except (KeyError, IndexError, ValueError):
+        return template
 
 
 def slot_of(jobs: Any) -> tuple[str, dict[str, Any]]:
@@ -148,7 +146,10 @@ class ApplyQueueRunner:
         try:
             store = self._state.store_factory()
             store.queue_clear_yield()
-            if store.queue_pause_if_waiting(QueuePause.RESTARTED, utcnow()):
+            # Q-126 (§4.4): a model pause left from the last session becomes
+            # `restarted` when roles wait, and a click never lifts `restarted` (D-200).
+            if store.queue_pause_if_waiting(QueuePause.RESTARTED, utcnow(),
+                                            replace=MODEL_PAUSE_VALUES):
                 logger.info("auto-apply queue paused: roles were waiting from the last session")
         except Exception:                   # noqa: BLE001 - fail closed, never block start-up
             logger.exception("auto-apply queue start-up pause failed; the queue stays stopped")
