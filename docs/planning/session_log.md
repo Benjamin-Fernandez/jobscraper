@@ -146,3 +146,9 @@ One entry per session. Older handover notes end up here, so `handover.md` stays 
 ## 2026-11-15 · session jobscraper-7d
 - Owner: the queue paused because Ollama was closed ("it should start by itself": D-214) and the Profile page is a never-ending list of one company's questions (D-215: none of them on that page; a field only after more than 15 different applications). Counted the live database read-only: 24 open cards, all from one attempt. Final confirmation rehearsal of the always-answer filler read: clean on protected fields in four passes.
 - Lesson: the owner judged the product by the filler that is LIVE; three days of work on the replacement changed nothing they could see. Ship the visible fix (hide the dead-end, start the model) as soon as it is safe, not after the last review.
+
+## 2026-11-15 (later) · session jobscraper-7d / -fc
+- Q-126 model auto-start: design reviewed (no timer resume: D-217), built in four lanes with pins first, independent code review READY WITH CHANGES (M1 a NameError in `applicant refresh-resume`, M2 a test leaking `JOBSCRAPER_CONFIG`), fixed, merged into personal with one bundle; browser check on a DB copy (the dev-copy guard shows in the card; the switch saves). A real start of Ollama was not exercised.
+- Q-127 Release 1 built on `int/Q-121` (contract v9, store v9, web, flow, four Vue lanes, tester rounds).
+- Q-121: the fifth review found four HIGH (D-219). Lesson: four rehearsal passes of 361 fields never saw the country defect because the fixture pages spell country names out; rehearsal part 31 now carries abbreviations and the other review wordings. A final independent review before a go-live that sends for real paid for itself.
+- Process notes: agents' own full-suite runs died silently under load (run it once, unbuffered, on the integration tree); a ruling of mine loosened an existing check by a careless sentence (the plain-No control) and the tester caught it: rulings state only what tightens.
