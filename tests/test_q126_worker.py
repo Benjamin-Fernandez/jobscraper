@@ -309,3 +309,23 @@ def test_the_repository_config_turns_autostart_on_and_leaves_the_program_path_co
     assert budget.get("ollama_autostart") is True
     assert "ollama_path" not in budget                                   # never set in the repository
     assert "# ollama_path:" in text or "#ollama_path:" in text
+
+
+# ------------------------------------------------------------------ T13e
+
+def test_after_a_click_lift_a_failing_model_check_stores_the_precise_pause_again_and_takes_nothing():
+    from jobscraper.apply.contracts import MODEL_PAUSE_VALUES
+    w, ad, cid, (j1,) = _world(1)
+    _enqueue(w, cid, [j1], "dry_run")
+    w.store.queue_resume(utcnow())                                       # an earlier Resume: window start
+    resumed = w.store.get_setting("apply_queue.resumed_at")
+    w.store.queue_pause("model_unavailable", None, utcnow())
+    assert w.store.queue_resume_if(set(MODEL_PAUSE_VALUES), utcnow(),
+                                   keep_window=MODEL_PAUSE_VALUES) == "model_unavailable"
+    assert _pause(w) is None                                             # the click lifted it
+    _run(w, ad, Ensurer(w.store, "not_installed"))
+    st = _pause(w)
+    assert st["reason"] == "model_not_installed" and st["detail"] == "d", st
+    assert _rows(w) == [] and w.store.queue_positions() == {j1: 1}
+    assert w.store.get_setting("apply_queue.resumed_at") == resumed      # the streak window kept
+    w.close()
