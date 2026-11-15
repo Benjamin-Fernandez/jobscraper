@@ -31,7 +31,7 @@
 
 ## Watch out
 - **The full suite skips the Edge tests silently** (a leaked asyncio loop; `edge_available()` caches the failure). Until the peer's Q-84 lands, gate every apply merge on separate `-k apply_e2e` and `-k apply_flow` runs.
-- IDs: mine are Q-80..Q-83, Q-90..Q-93 (next Q-98) and D-150..D-189 (next D-186); the peer has Q-73..Q-79, Q-84..Q-89, D-100..D-119. Session jobscraper-c6/7c has Q-110..Q-119, D-200..D-209 (next Q-128, D-219); Q-100's session has Q-100..Q-109, D-190..D-199. Re-read queue/status before taking one. Message the other live sessions (ListAgents) before merging into personal or building the bundle.
+- IDs: mine are Q-80..Q-83, Q-90..Q-93 (next Q-98) and D-150..D-189 (next D-186); the peer has Q-73..Q-79, Q-84..Q-89, D-100..D-119. Session jobscraper-c6/7c has Q-110..Q-119, D-200..D-209 (next Q-128, D-220); Q-100's session has Q-100..Q-109, D-190..D-199. Re-read queue/status before taking one. Message the other live sessions (ListAgents) before merging into personal or building the bundle.
 - Always run the full suite on the integration tree after merging personal: name collisions (Q-74 `_MONTHS`) show only at runtime.
 - The engineer's scope hook refuses `tests/`: route test edits (even docstrings) to the tester.
 - **Mode is `auto`: any test, smoke or dev instance that starts an apply job sends a real application.** Dev instances run on a DB copy with `apply.mode` set to `dry_run` in the copy's settings table and `JOBSCRAPER_APPLY_QUEUE=0`; the Edge profile is shared with the live app. Smoke `POST /api/apply` with an unknown id only.
