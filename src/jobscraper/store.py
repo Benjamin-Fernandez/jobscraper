@@ -19,7 +19,7 @@ import json
 import sqlite3
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, Iterable, Optional, Sequence
+from typing import Any, Collection, Iterable, Optional, Sequence
 from urllib.parse import urlsplit
 
 from .models import RawJob, WatchedCompany, posting_key
@@ -1735,13 +1735,19 @@ class Store:
             raise
         return True
 
-    def queue_pause_if_waiting(self, reason: Any, now: str) -> bool:
+    def queue_pause_if_waiting(self, reason: Any, now: str, *,
+                               replace: Collection[str] = ()) -> bool:
         """The start-up pause (§3.4, D-200): pause only when roles are waiting and
-        the queue is not paused yet. Returns whether it wrote. Commits."""
+        the queue is not paused yet. Returns whether it wrote. Commits.
+
+        `replace` (Q-126, ollama_autostart_design §4.4): a stored pause whose reason
+        is in it is overwritten, so a model pause left over from the last session
+        becomes `restarted` when roles wait (a click never lifts `restarted`)."""
         try:
             self.begin_immediate()
             waiting = self.conn.execute("SELECT 1 FROM apply_queue LIMIT 1").fetchone()
-            if waiting is None or self.get_setting(self.QUEUE_PAUSED):
+            stored = self.get_setting(self.QUEUE_PAUSED)
+            if waiting is None or (stored and stored not in replace):
                 self.conn.commit()
                 return False
             self._setting_put(self.QUEUE_PAUSED, _state(reason))
@@ -1772,6 +1778,61 @@ class Store:
             return None
         return {"reason": reason, "detail": self.get_setting(self.QUEUE_PAUSED_DETAIL),
                 "since": self.get_setting(self.QUEUE_PAUSED_AT)}
+
+    # --- Q-126 (ollama_autostart_design §3, §4.4, §5): the local model's start ---
+    QUEUE_MODEL = "apply_queue.model"          # "starting" | "loading" while a worker waits
+    QUEUE_MODEL_AT = "apply_queue.model_at"
+
+    def queue_model_state(self, state: Optional[str], now: str) -> None:
+        """Record that the worker is bringing the local model up ("starting" or
+        "loading"), for the Runs panel; None clears it (the worker's `finally`, and
+        the next worker's start). Commits."""
+        try:
+            self.begin_immediate()
+            if state is None:
+                self._setting_del(self.QUEUE_MODEL, self.QUEUE_MODEL_AT)
+            else:
+                self._setting_put(self.QUEUE_MODEL, state)
+                self._setting_put(self.QUEUE_MODEL_AT, now)
+            self.conn.commit()
+        except BaseException:
+            self.conn.rollback()
+            raise
+
+    def queue_model_view(self) -> Optional[dict[str, Any]]:
+        """`{state, since}` while a worker is bringing the model up, else None."""
+        state = self.get_setting(self.QUEUE_MODEL)
+        if not state:
+            return None
+        return {"state": state, "since": self.get_setting(self.QUEUE_MODEL_AT)}
+
+    def queue_resume_if(self, reasons: Optional[Collection[str]], now: str, *,
+                        keep_window: Collection[str] = ()) -> Optional[str]:
+        """Lift the pause, in ONE `BEGIN IMMEDIATE` compare-and-clear. Commits.
+
+        `reasons` None lifts any pause (Resume); a collection lifts only a stored
+        reason in it (the Auto-apply click lifts only a model pause). The stored
+        reason is read inside the transaction, so a pause that changed to another
+        reason meanwhile (the owner's own) is not cleared.
+
+        `resumed_at` (the start of the bot-check / error streak window, §4.1) is
+        stamped only when the cleared reason is NOT in `keep_window`: lifting a
+        model pause acknowledges nothing about bot checks, so the streak survives
+        (D-217 R1). Returns the cleared reason, or None when nothing was cleared."""
+        try:
+            self.begin_immediate()
+            stored = self.get_setting(self.QUEUE_PAUSED)
+            if not stored or (reasons is not None and stored not in reasons):
+                self.conn.commit()
+                return None
+            self._setting_del(self.QUEUE_PAUSED, self.QUEUE_PAUSED_DETAIL, self.QUEUE_PAUSED_AT)
+            if stored not in keep_window:
+                self._setting_put(self.QUEUE_RESUMED_AT, now)
+            self.conn.commit()
+            return stored
+        except BaseException:
+            self.conn.rollback()
+            raise
 
     def queue_request_yield(self) -> None:
         """A search run waits its turn (§6): the worker stops after the current role
