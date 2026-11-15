@@ -473,6 +473,18 @@ def test_a_missing_model_is_model_missing_and_never_pulled():
         assert not any(m == "POST" for m, _ in rig.http.calls)
 
 
+def test_the_probe_is_reset_once_the_server_answers_even_when_the_model_is_missing():
+    """E1 departure 3: a stale cached failure is dropped as soon as the server answers
+    (a superset of design step 6), so the caller's next `available` asks again."""
+    with Rig(before=["refused"], after=["ollama"], tags=[]) as rig:
+        be = rig.backend(cls=_RecordingBackend)
+        assert be.available is False                             # cached failure (no tags)
+        r = rig.ensure(backend=be)
+        assert r.code == "model_missing" and be.resets >= 1
+        rig.tags = [TAG]
+        assert be.available is True                              # the cache was dropped
+
+
 def test_a_tag_without_a_colon_matches_latest():
     with Rig(tags=["qwen3:latest"]) as rig:
         assert rig.ensure(backend=rig.backend(model="qwen3")).ok
