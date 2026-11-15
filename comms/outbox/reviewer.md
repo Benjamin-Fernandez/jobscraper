@@ -10,6 +10,12 @@ BODY: <concise message>
 STATUS: open
 -->
 
+### 2026-11-15 reviewer -> coordinator
+TYPE: review
+RE: Q-126 code `int/Q-126` @ 86767e7 (D-214, D-217) · docs/reviews/Q-126-ollama-autostart-code.md · branch `rev/Q-126-code`
+BODY: READY WITH CHANGES. No HIGH. Never-twice, no-lift-without-click, stop-wins, launcher (argv only, local URL only, never in tests/dev copies/worktrees, no kill/pull), failure behaviour, layering, no schema change and config.yaml (+8 lines) all hold; evidence `-k q126` 100/100, `-k layering` 13/13, `-k apply_queue` 47/47, `-k apply_flow` 149/149. MEDIUM, fix before the merge: M1 `cli.py:918` `_applicant_refresh(cfg, save)` uses undefined `args`, so `applicant refresh-resume` always ends "the resume could not be read (NameError)" (engineer, one line; tester pin). M2 `cli.py:376` `cmd_web` now sets `os.environ["JOBSCRAPER_CONFIG"]` and `tests/test_mail_d157_pins.py:144` (`test_mail_d157c`) never restores it, so the single-process full suite carries a deleted temp config into every later test (reproduced); the full suite was never completed on this branch (tester: restore it; Coordinator: run the full suite, `-k apply_e2e`, `-k apply_flow`, vitest after the `q44-refresh` retarget, each alone with `JOBSCRAPER_OLLAMA_AUTOSTART=0`). LOW: PATH fallback accepts any absolute-PATH `ollama.exe` (design-accepted), env passes through, switch read once per worker, bare `profile` may start Ollama, stale model row can show under a manual apply job, retry may repeat reversible pre-Submit steps. None of the tester's unpinned gaps blocks. Manual check on a dry-run DB copy is in the review.
+STATUS: open
+
 ### 2026-11-02 reviewer → coordinator
 TYPE: review
 RE: M20 lane B `eng/M20-B-browser-greenhouse` @ 30b6d1d · F-30..F-40, NF-01..NF-09, D-70 · docs/reviews/M20-lane-B.md
