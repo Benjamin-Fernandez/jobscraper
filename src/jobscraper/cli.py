@@ -80,6 +80,92 @@ def _boot_v2(args):
     return cfg, StoreV2(cfg.db_path)
 
 
+def _pid_alive():
+    """`web.jobs.pid_alive` for the start lock's liveness rule (a lazy import: `backends`
+    never imports `web`). None when it can't be had: then only the lock's age counts."""
+    try:
+        from .web import jobs as web_jobs
+        return web_jobs.pid_alive
+    except Exception:                                  # noqa: BLE001
+        return None
+
+
+def _model_autostart(cfg, args, store=None) -> bool:
+    """May this command start Ollama (Q-126, design §6 rule 6)? The process rule
+    (`autostart_allowed_here`: the repository's own DB, no `--config`, no worktree, no
+    `JOBSCRAPER_OLLAMA_AUTOSTART=0`) AND the owner's switch (settings over config over
+    on). Reads the switch from `store`, opening the DB briefly only when the process
+    rule already allows it, so a test or a dev copy never touches it."""
+    if not backends.autostart_allowed_here(db_path=cfg.db_path,
+                                           config_given=bool(getattr(args, "config", None))):
+        return False
+    if store is not None:
+        return backends.autostart_switch(cfg.budget, store.get_setting)
+    own = StoreV2(cfg.db_path)
+    try:
+        return backends.autostart_switch(cfg.budget, own.get_setting)
+    finally:
+        own.close()
+
+
+def _ensure_model(cfg, store, args, *, backend=None, say=print) -> None:
+    """The one-shot model users (`apply`, `tailor`, `profile`, `titles suggest`): bring
+    the local model up before the command needs it (Q-126 §3). Only when starting is
+    allowed here; otherwise nothing changes (the command reports its own failure). It
+    says one line when it started Ollama or could not make the model ready, and never
+    fails the command. No load: the command's first call loads the model."""
+    try:
+        if not _model_autostart(cfg, args, store):
+            return
+        r = backends.ensure_model_running(
+            cfg.budget, autostart=True, backend=backend, pid_alive=_pid_alive(),
+            on_state=lambda s: say("model: starting Ollama") if s == "starting" else None)
+    except Exception as exc:                           # noqa: BLE001 - never fails the command
+        say(f"model: the check failed ({type(exc).__name__})")
+        return
+    if r.ok:
+        if r.started:
+            say(f"model: Ollama answered after {int(r.seconds)} s")
+    elif r.code != "cancelled":
+        say(f"model: {r.code}" + (f" {r.detail}" if r.detail else ""))
+
+
+def _doctor_autostart_line(cfg, args=None, store=None) -> str:
+    """`doctor`'s whole autostart line (§3): on and where the program is, or off and why.
+    Never a path or a URL. The owner's switch is read from `store` (opened briefly when
+    the process rule allows a start and none is given)."""
+    def line(text: str) -> str:
+        return f"autostart      {text}"
+    try:
+        here = backends.autostart_allowed_here(
+            db_path=cfg.db_path, config_given=bool(getattr(args, "config", None)))
+    except Exception:                                  # noqa: BLE001 - no usable DB path: not here
+        here = False
+    if not here:
+        return line("off in this copy (JOBSCRAPER_DB, worktree or test)")
+    if not _model_autostart(cfg, args, store):
+        return line("off (Settings → Local AI)")
+    if backends.configured_code(cfg.budget):
+        return line("off (the AI model is switched off in config.yaml)")
+    found = backends.find_ollama(cfg.budget)
+    if found is None:
+        return line("on, but Ollama isn't installed")
+    where = "configured location" if cfg.budget.get("ollama_path") else         ("default install location" if _is_default_ollama(found) else "PATH")
+    return line(f"on (found: {where})")
+
+
+def _is_default_ollama(found: str) -> bool:
+    """Was `found` one of the platform's default install locations (not a PATH entry)?"""
+    local = os.environ.get("LOCALAPPDATA", "")
+    pf = os.environ.get("ProgramFiles", "")
+    p = os.path.normcase(found)
+    prefixes = [os.path.normcase(os.path.join(b, *rest)) for b, rest in (
+        (local, ("Programs", "Ollama")), (pf, ("Ollama",))) if b]
+    prefixes += [os.path.normcase(x) for x in (
+        "/Applications/Ollama.app", "/opt/homebrew/bin", "/usr/local/bin", "/usr/bin")]
+    return any(p.startswith(x) for x in prefixes)
+
+
 def _sync_watchlist(cfg, store) -> dict[str, int]:
     """Reconcile watchlist.yaml into `companies`, keyed on the stable `key`.
 
@@ -124,6 +210,7 @@ def cmd_doctor(args) -> int:
     else:
         print(f"               UNAVAILABLE - {backend.unavailable_reason}")
         print("               (runs still work; survivors wait for the model)")
+    print(_doctor_autostart_line(cfg, args, store))
     # D-105 (q74_model_sees_sensitive.md §1): the effective switch, and why it is off
     # when the owner turned it on but the model runs elsewhere. No URL, no values.
     if not cfg.apply.model_sees_sensitive:
@@ -203,7 +290,9 @@ def cmd_run(args) -> int:
     cfg, store = _boot_v2(args)
     try:
         rep = pipeline.run(cfg, store, dry_run=args.dry_run,
-                           batch_size=_batch_size(cfg, store, args.batch_size))
+                           batch_size=_batch_size(cfg, store, args.batch_size),
+                           model_autostart=_model_autostart(cfg, args, store),
+                           model_pid_alive=_pid_alive())
     finally:
         store.close()
     print()
@@ -278,6 +367,13 @@ def cmd_web(args) -> int:
     from .web.api import create_app
 
     cfg = load_config(getattr(args, "config", None))
+    if getattr(args, "config", None):
+        # Q-126: `--config X web` must look like `JOBSCRAPER_CONFIG=X` to everything in
+        # this process (the Local AI card's `autostart_here`, `autostart_allowed_here`,
+        # the apply queue's own rule) and to its children: a dev setup never starts
+        # Ollama. Set for this web process only (a verb run in-process by a test would
+        # leak it); `load_config` resolves both spellings the same way.
+        os.environ["JOBSCRAPER_CONFIG"] = str(args.config)
     host, port = cfg.web["host"], int(cfg.web["port"])
     if host not in ("127.0.0.1", "localhost", "::1"):
         print(f"warning: binding {host} - this app has no authentication",
@@ -458,6 +554,8 @@ def cmd_profile(args) -> int:
     from .profile import resume_ingest as ri
 
     cfg = load_config(getattr(args, "config", None))
+    if not args.bump and (args.refresh or not args.show or getattr(args, "plan_applicant", False)):
+        _ensure_model(cfg, None, args)       # Q-126: the derive (and the plan) need the model
     try:
         if args.bump:
             print(f"profile_version bumped to {ri.bump_profile_version(cfg)}")
@@ -560,6 +658,7 @@ def cmd_titles(args) -> int:
                 print(f"titles: {exc}", file=sys.stderr)
                 return 1
             backend = backends.build(cfg.budget)
+            _ensure_model(cfg, store, args, backend=backend)      # Q-126: start Ollama if needed
             ceiling = filter_mod.load_rules(cfg.rules_path).ceiling_years or 3
             print(f"recommending {limit} new titles with "
                   f"{backend.model_id or backend.name} ...", flush=True)
@@ -645,6 +744,7 @@ def cmd_tailor(args) -> int:
     cfg, store = _boot_v2(args)
     try:
         backend = backends.build(cfg.budget)
+        _ensure_model(cfg, store, args, backend=backend)          # Q-126: start Ollama if needed
         res = tailor_flow.tailor(cfg, store, args.job_id, backend=backend,
                                  report_only=args.report, force=args.force, say=print)
         if not res.ok:
@@ -761,7 +861,7 @@ def cmd_applicant(args) -> int:
         pass
     cfg = load_config(getattr(args, "config", None))
     if args.applicant_cmd == "refresh-resume":
-        return _applicant_refresh(cfg, bool(getattr(args, "yes", False)))
+        return _applicant_refresh(cfg, bool(getattr(args, "yes", False)), args)
     path = Path(args.file) if getattr(args, "file", None) else cfg.applicant_path
     if not path.exists():
         print(f"applicant: no profile at {path} - copy config/applicant.example.yaml "
@@ -804,7 +904,7 @@ def _entry_line(lst: str, e) -> str:
     return f"{e.get(org) or '-'} · {e.get(title) or '-'} · {start} – {end}"
 
 
-def _applicant_refresh(cfg, save: bool) -> int:
+def _applicant_refresh(cfg, save: bool, args=None) -> int:
     """`applicant refresh-resume`: the Q-44 plan in the terminal (the owner's
     own screen; nothing here goes to a log file)."""
     from . import applicant
@@ -815,6 +915,7 @@ def _applicant_refresh(cfg, save: bool) -> int:
         return 1
     try:
         profile = applicant.load(path)
+        _ensure_model(cfg, None, args)       # Q-126: start Ollama if needed
         props = tailor_flow.profile_proposals(cfg, backends.build(cfg.budget))
         applicant.save_proposals(applicant.proposals_path(path), props)
     except applicant.ApplicantError as exc:
@@ -1268,6 +1369,9 @@ def cmd_apply(args) -> int:
             # D-78 (llm_fill_design §13.4): a form page plus facts and resume needs the
             # larger window; only this run's backend object changes, not config.
             backend.num_ctx = acfg.llm_fill.num_ctx
+        store.queue_model_state(None, utcnow())    # Q-126 review L5: no stale "starting the model" row
+        if acfg.fill == "llm":
+            _ensure_model(cfg, store, args, backend=backend)      # Q-126: start Ollama if needed
         results = apply_flow.run(cfg, store, words, dry_run=dry_run, backend=backend,
                                  apply_cfg=acfg)
         print(BAR)
@@ -1324,7 +1428,9 @@ def _apply_queue(args, rest: list[str]) -> int:
         out = apply_flow.run_queue(
             cfg, store, backend=backend, apply_cfg_fn=lambda: _effective_apply(cfg, store),
             should_stop=_parent_gone(pid) if pid is not None else None,
-            force_dry_run=bool(args.dry_run))
+            force_dry_run=bool(args.dry_run),
+            model_autostart=_model_autostart(cfg, args, store),   # Q-126: rule + owner's switch
+            model_pid_alive=_pid_alive())
         if out.lock_refused:
             print("queue: another apply run holds the browser; nothing was taken")
             return EXIT_APPLY_LOCKED

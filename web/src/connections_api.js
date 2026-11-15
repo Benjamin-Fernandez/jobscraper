@@ -44,6 +44,15 @@ export function checkModel() {
   return orAbsent('connections/model/check', { method: 'POST' })
 }
 
+// PUT /api/connections/model/autostart {enabled} (Q-126, D-214) -> { enabled, default }:
+// the "Start the local AI model when it is needed" switch on the Local AI card. `enabled`
+// must be a real boolean; the server answers 422 `{detail:"invalid", errors:[...]}`
+// otherwise, which throws an ApiError the caller words with saveErrorText. null when
+// the server has no such route. The program's path is never sent or settable here.
+export function putModelAutostart(enabled) {
+  return orAbsent('connections/model/autostart', json('PUT', { enabled }))
+}
+
 // GET /api/apply/status -> { mode: 'auto'|'dry_run', missing: [paths], busy }, or null.
 export function getApplyStatus() {
   return orAbsent('apply/status')

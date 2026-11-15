@@ -147,7 +147,8 @@ def test_mail_d157c_cmd_web_with_jobscraper_db_has_no_timer_unless_asked():
     tmp = tmpdir("d157c_")
     _, path = config(tmp, write=True)
     seen, saved = [], uvicorn.run
-    old = {k: os.environ.get(k) for k in ("JOBSCRAPER_DB", "JOBSCRAPER_MAIL_SYNC")}
+    # Q-126 review M2: `cmd_web --config` now sets JOBSCRAPER_CONFIG; restore it afterwards.
+    old = {k: os.environ.get(k) for k in ("JOBSCRAPER_DB", "JOBSCRAPER_MAIL_SYNC", "JOBSCRAPER_CONFIG")}
     uvicorn.run = lambda app, **kw: seen.append(app)
     try:
         os.environ["JOBSCRAPER_DB"] = str(tmp / "copy.db")
@@ -396,3 +397,14 @@ def test_mail_d157_pins_are_live():
 
 
 note_waiting("test_mail_d157_pins", _W0)
+
+
+# ------------------------------------------------------------------ env guard (Q-126 review M2)
+_CONFIG_AT_IMPORT = os.environ.get("JOBSCRAPER_CONFIG")
+
+
+def test_mail_zz_this_module_leaves_jobscraper_config_as_it_found_it():
+    """`cmd_web --config` sets JOBSCRAPER_CONFIG; a test that calls it must restore the variable
+    or every later test in the single-process suite inherits a temp config path. The runner
+    runs a file's tests in name order, so this one (sorted last) sees what the others left."""
+    assert os.environ.get("JOBSCRAPER_CONFIG") == _CONFIG_AT_IMPORT

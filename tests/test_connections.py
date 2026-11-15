@@ -358,7 +358,11 @@ def test_connections_model_facts_are_fixed_words_and_numbers_only():
     with _clean_env():
         for name in NEED:
             facts = _model(_compose(ROWS["cases"][name]["inputs"]))["facts"]
-            assert set(facts) == {"backend", "model", "local", "need_now", "need_reason", "pending_mail"}, (name, facts)
+            # Q-126 (design §4.5, stale by design): + autostart, autostart_here, installed (flags only)
+            assert set(facts) == {"backend", "model", "local", "need_now", "need_reason", "pending_mail",
+                                  "autostart", "autostart_here", "installed"}, (name, facts)
+            assert isinstance(facts["autostart"], bool) and isinstance(facts["autostart_here"], bool)
+            assert facts["installed"] in (True, False, None)
             assert facts["need_reason"] in (None, "run", "application", "mail"), (name, facts)
             assert isinstance(facts["pending_mail"], int) and not isinstance(facts["pending_mail"], bool)
 

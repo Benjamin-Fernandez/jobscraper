@@ -28,8 +28,10 @@ from datetime import datetime, timezone
 from typing import Any, Callable, Optional
 
 from jobscraper import backends, vault
+from jobscraper.apply.contracts import MODEL_PAUSE_VALUES, QUEUE_PAUSE_TEXTS, QueuePause
 from jobscraper.mailstatus.contracts import CONSENT_VERSION, SYNC_TEXTS, SyncCode
 from jobscraper.store import TIME_FMT, shift
+from jobscraper.web.applyqueue import fill_detail
 
 log = logging.getLogger(__name__)
 
@@ -42,6 +44,10 @@ IN_FLIGHT_HOURS = 2                   # D-198: an attempt older than this is a s
 # Worst first: the employer summary takes the worst row's state (§2.3).
 _SEVERITY = {"attention": 0, "neutral": 1, "checking": 2, "connected": 3,
              "paused": 4, "not_set_up": 5}
+
+# An attempt in one of these states used the model after warm-up (the form was filled),
+# so an older `model_unavailable` failure has recovered (Q-126 C9).
+PAST_WARM_UP = frozenset({"ready_to_submit", "submitted", "submitted_unconfirmed"})
 
 VaultHas = Callable[[str, str], bool]
 
@@ -344,10 +350,17 @@ def need_reason(current: dict[str, Any], in_flight: Optional[list],
     if any(not r.get("started_at") or in_flight_since is None
            or str(r["started_at"]) >= in_flight_since for r in in_flight or []):
         return "application"
-    # (c) an attempt ended model_unavailable in the last 24 h
+    # (c) an attempt ended model_unavailable in the last 24 h, and no attempt since
+    # then got as far as a filled form (Q-126 C9: the model was up again, so the
+    # old failure is not a need now). `attempts` holds each job's newest attempt,
+    # so a later attempt for the same job already replaced the failed one.
+    recovered_at = max((str(r["finished_at"]) for r in (attempts or {}).values()
+                        if r.get("state") in PAST_WARM_UP and r.get("finished_at")),
+                       default="")
     for r in (attempts or {}).values():
         if (r.get("reason_code") == "model_unavailable" and r.get("finished_at")
-                and str(r["finished_at"]) >= recent):
+                and str(r["finished_at"]) >= recent
+                and str(r["finished_at"]) >= recovered_at):
             return "application"
     # (d) a mailbox has messages waiting for the model
     if pending_mail(mail_rows) > 0:
@@ -363,11 +376,32 @@ def need_now(current: dict[str, Any], in_flight: Optional[list],
                        in_flight_since) is not None
 
 
+def _model_pause(store: Any) -> Optional[dict[str, Any]]:
+    """The stored queue pause when it is one of the model pauses (Q-126), as
+    `{reason, text, hint}` with `{detail}` filled in; else None. Reads only."""
+    if not hasattr(store, "queue_pause_state"):
+        return None
+    state = _safe(store.queue_pause_state, None, "queue pause")
+    if not state or state.get("reason") not in MODEL_PAUSE_VALUES:
+        return None
+    copy = QUEUE_PAUSE_TEXTS[QueuePause(state["reason"])]
+    detail = state.get("detail")
+    return {"reason": state["reason"], "text": fill_detail(copy.text, detail),
+            "hint": fill_detail(copy.hint, detail)}
+
+
 def _model_item(cfg: Any, snapshot: Optional[dict[str, Any]], reason: Optional[str],
-                n_mail: int) -> dict[str, Any]:
+                n_mail: int, *, autostart: bool = False, autostart_here: bool = False,
+                pause: Optional[dict[str, Any]] = None) -> dict[str, Any]:
     """`snapshot` is `ModelHealth.snapshot()`: the last probe, or None before the
     first answer. "off" and "misconfigured" are read from config here too, so a
-    cached probe never hides a config change."""
+    cached probe never hides a config change.
+
+    Q-126 (§4.5, C9): `autostart` is the owner's switch, `autostart_here` whether this
+    copy may start Ollama at all, `installed` (from the probe) whether an Ollama
+    program is on this computer. With all three true a stopped Ollama is expected,
+    not a problem: the card is neutral, unless the queue is paused for a model reason
+    (`pause`), which makes it attention with that pause's words."""
     budget = cfg.budget or {}
     snapshot = snapshot or {}
     configured = backends.configured_code(budget)
@@ -375,10 +409,13 @@ def _model_item(cfg: Any, snapshot: Optional[dict[str, Any]], reason: Optional[s
         {"ok": False, "code": configured} if configured
         else (snapshot if "ok" in snapshot else None))
     local = backends.is_local_config(budget)
+    installed = snapshot.get("installed")
     facts = {"backend": snapshot.get("backend") or str(budget.get("backend") or "ollama"),
              "model": snapshot.get("model") or str(budget.get("ollama_model") or ""),
              "local": local, "need_now": reason is not None,
-             "need_reason": reason, "pending_mail": n_mail}
+             "need_reason": reason, "pending_mail": n_mail,
+             "autostart": bool(autostart), "autostart_here": bool(autostart_here),
+             "installed": installed if isinstance(installed, bool) else None}
     need = reason is not None
     # Only a remote Ollama (D-107) is not "this PC"; off/misconfigured run nothing elsewhere.
     remote = not configured and not local
@@ -396,6 +433,11 @@ def _model_item(cfg: Any, snapshot: Optional[dict[str, Any]], reason: Optional[s
     if code == "misconfigured":
         return _item("model", "model", "attention", "misconfigured", **kw)
     code = code if code in ("unreachable", "model_missing") else "unreachable"
+    if code == "unreachable" and autostart and autostart_here and installed is True:
+        if pause is not None:
+            return _item("model", "model", "attention", code,
+                         message=f"{pause['text']} {pause['hint']}", **kw)
+        return _item("model", "model", "neutral", code, **kw)
     return _item("model", "model", "attention" if need else "neutral", code, **kw)
 
 
@@ -405,7 +447,8 @@ def compose(cfg: Any, store: Any, mail_runner_view: dict[str, Any],
             job_view: dict[str, Any], model_snapshot: Optional[dict[str, Any]],
             vault_has: VaultHas, lockfile_busy: Callable[[str], bool] = lockfile_busy,
             now: Optional[str] = None,
-            profile_dir_exists: Callable[[str], bool] = os.path.isdir) -> dict[str, Any]:
+            profile_dir_exists: Callable[[str], bool] = os.path.isdir,
+            autostart_here: Optional[bool] = None) -> dict[str, Any]:
     """The `GET /api/connections` body (schema v1, §3.1).
 
     Input shapes (as in the T0 fixture `tests/fixtures/connections_rows.json`):
@@ -416,9 +459,11 @@ def compose(cfg: Any, store: Any, mail_runner_view: dict[str, Any],
     - `model_snapshot`: `ModelHealth.snapshot()`, None before the first probe;
     - `vault_has(service, user)`: is there a vault entry (a boolean only);
     - `lockfile_busy(dir)`, `profile_dir_exists(dir)`: the Edge profile checks;
-    - `now`: UTC in `store.TIME_FMT`.
-    Store reads here: mail_accounts, settings, accounts. Each failing source
-    degrades only its own item."""
+    - `now`: UTC in `store.TIME_FMT`;
+    - `autostart_here` (Q-126): may this copy start Ollama at all; None = ask
+      `backends.autostart_allowed_here` for this database (a test passes a bool).
+    Store reads here: mail_accounts, settings, accounts, the queue pause. Each
+    failing source degrades only its own item."""
     now = now or datetime.now(timezone.utc).strftime(TIME_FMT)
     recent = shift(now, days=-RECENT_DAYS)
     stale_before = shift(now, seconds=-IN_FLIGHT_HOURS * 3600)
@@ -439,6 +484,13 @@ def compose(cfg: Any, store: Any, mail_runner_view: dict[str, Any],
     except Exception:
         mail_enabled = True
 
+    budget = cfg.budget or {}
+    if autostart_here is None:
+        autostart_here = _safe(lambda: backends.autostart_allowed_here(db_path=cfg.db_path),
+                               False, "autostart")
+    autostart = _safe(lambda: backends.autostart_switch(
+        budget, getattr(store, "get_setting", None)), False, "autostart switch")
+
     employer_item, employer_rows = _employer(store, vault_has)
     items = (_gmail_items(mail_rows, mail_error, mail_enabled, runner, recent)
              + _mailbox_items(cfg, store, vault_has)
@@ -446,7 +498,8 @@ def compose(cfg: Any, store: Any, mail_runner_view: dict[str, Any],
                 _model_item(cfg, model_snapshot,
                             need_reason(job, in_flight, attempts, mail_rows, recent,
                                         stale_before),
-                            pending_mail(mail_rows)),
+                            pending_mail(mail_rows), autostart=autostart,
+                            autostart_here=autostart_here, pause=_model_pause(store)),
                 employer_item])
     for item in items:
         # Never configured: the chip reads "Optional", and nothing is stored yet
@@ -554,7 +607,9 @@ class ModelHealth:
         try:
             p = self._probe(budget)
             result = {"ok": bool(p.ok), "code": str(p.code or ""), "backend": p.backend,
-                      "model": p.model, "local": bool(p.local)}
+                      "model": p.model, "local": bool(p.local),
+                      # Q-126: is an Ollama program installed here (None = not asked)
+                      "installed": getattr(p, "installed", None)}
         except Exception as exc:
             log.warning("model health probe failed (%s)", type(exc).__name__)
         finally:

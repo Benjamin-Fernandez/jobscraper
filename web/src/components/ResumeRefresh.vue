@@ -154,7 +154,7 @@ async function save() {
     <h3 id="resume-refresh-title" class="rr-title">Update your application details</h3>
 
     <p v-if="mode === 'unavailable'" class="notice warn rr-unavailable">
-      Couldn't compare with your application details: the AI model isn't running. Start Ollama, then choose "Re-read resume".
+      Couldn't compare with your application details: the local AI model couldn't start. See Settings → Accounts → Local AI.
     </p>
     <p v-else-if="mode === 'stale'" class="notice warn rr-stale">
       This was checked against an older resume. Choose "Re-read resume" to check again.

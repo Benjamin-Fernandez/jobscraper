@@ -66,6 +66,11 @@ export const COPY = Object.freeze({
   modeDryRun: 'Dry run. JobScraper fills each form and leaves it open for you. Nothing is sent.',
   modeAuto: 'Automatic. JobScraper sends an application only after its final check passes.',
   noAccountNeeded: 'They apply as a guest.',
+  // The Local AI card's switch (Q-126 design §4.5).
+  autostartLabel: 'Start the local AI model when it is needed',
+  autostartDesc: 'JobScraper starts Ollama and loads the model when auto-apply, a search run or a resume task needs it. It never downloads a model.',
+  autostartNotHere: ' Not in this copy of JobScraper.',
+  autostartNoRoute: "Couldn't save: this server doesn't accept changes yet.",
 })
 
 // The employer-row copy by code (§4.4); `ok` and `verified` say nothing.
@@ -126,14 +131,25 @@ function edgeCopy(item) {
   }
 }
 
+// Q-126 (D-214): the app starts Ollama itself. True when this copy will do it (the switch
+// is on, Ollama is installed, and this is not a dev copy or a worktree), so a model that
+// is simply not running is not a problem: it starts when a task needs it.
+export function startsItself(facts) {
+  return facts?.autostart === true && facts.autostart_here === true && facts.installed === true
+}
+
 function modelCopy(item, ctx) {
   const model = item.facts?.model || 'The model'
+  // A stored model pause: the server's own words (pause text and hint, detail filled in).
+  if (item.state === 'attention' && typeof item.message === 'string' && item.message) return item.message
   switch (item.code) {
     case 'ai_off':
       return 'Local AI is off in config.yaml (budget.enable_llm). Runs still work; screening and auto-apply wait for it.'
     case 'misconfigured':
       return "The AI setting in config.yaml isn't one JobScraper knows. Set budget.backend to ollama or off."
     case 'unreachable':
+      if (item.facts?.installed === false) return "Ollama isn't installed. Install it from ollama.com to use the local AI."
+      if (startsItself(item.facts)) return "Ollama isn't running. JobScraper starts it when a task needs it."
       return item.state === 'attention'
         ? `Ollama isn't running, and ${ctx.what || 'a task'} is waiting for it. Start Ollama, then check again.`
         : "Ollama isn't running. Nothing needs it right now."
@@ -175,6 +191,11 @@ const MODEL_CODES = new Set(['unreachable', 'model_missing'])
 // exception that the client double-checks: an Ollama that is down is a problem only
 // when something is waiting for it (`facts.need_now`), never "because it is down".
 function needsAttention(item) {
+  // The app starts Ollama itself: a model that is not running is attention only when the
+  // server stored a model pause (it then says `attention`); `need_now` alone is not enough.
+  if (item?.kind === 'model' && item.code === 'unreachable' && startsItself(item.facts)) {
+    return item.state === 'attention'
+  }
   if (item?.kind === 'model' && MODEL_CODES.has(item.code) && typeof item.facts?.need_now === 'boolean') {
     return item.facts.need_now
   }
