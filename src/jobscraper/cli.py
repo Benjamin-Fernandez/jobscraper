@@ -861,7 +861,7 @@ def cmd_applicant(args) -> int:
         pass
     cfg = load_config(getattr(args, "config", None))
     if args.applicant_cmd == "refresh-resume":
-        return _applicant_refresh(cfg, bool(getattr(args, "yes", False)))
+        return _applicant_refresh(cfg, bool(getattr(args, "yes", False)), args)
     path = Path(args.file) if getattr(args, "file", None) else cfg.applicant_path
     if not path.exists():
         print(f"applicant: no profile at {path} - copy config/applicant.example.yaml "
@@ -904,7 +904,7 @@ def _entry_line(lst: str, e) -> str:
     return f"{e.get(org) or '-'} · {e.get(title) or '-'} · {start} – {end}"
 
 
-def _applicant_refresh(cfg, save: bool) -> int:
+def _applicant_refresh(cfg, save: bool, args=None) -> int:
     """`applicant refresh-resume`: the Q-44 plan in the terminal (the owner's
     own screen; nothing here goes to a log file)."""
     from . import applicant
@@ -1369,6 +1369,7 @@ def cmd_apply(args) -> int:
             # D-78 (llm_fill_design §13.4): a form page plus facts and resume needs the
             # larger window; only this run's backend object changes, not config.
             backend.num_ctx = acfg.llm_fill.num_ctx
+        store.queue_model_state(None, utcnow())    # Q-126 review L5: no stale "starting the model" row
         if acfg.fill == "llm":
             _ensure_model(cfg, store, args, backend=backend)      # Q-126: start Ollama if needed
         results = apply_flow.run(cfg, store, words, dry_run=dry_run, backend=backend,
