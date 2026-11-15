@@ -130,22 +130,28 @@ def _ensure_model(cfg, store, args, *, backend=None, say=print) -> None:
         say(f"model: {r.code}" + (f" {r.detail}" if r.detail else ""))
 
 
-def _doctor_autostart_line(cfg, store, args) -> str:
-    """`doctor`'s autostart line (§3): on and where the program is, off and why. Never
-    a path or a URL."""
-    if not backends.autostart_allowed_here(db_path=cfg.db_path,
-                                           config_given=bool(getattr(args, "config", None))):
-        return "off in this copy (JOBSCRAPER_DB, worktree or test)"
-    if not backends.autostart_switch(cfg.budget, store.get_setting):
-        return "off (Settings → Local AI)"
+def _doctor_autostart_line(cfg, args=None, store=None) -> str:
+    """`doctor`'s whole autostart line (§3): on and where the program is, or off and why.
+    Never a path or a URL. The owner's switch is read from `store` (opened briefly when
+    the process rule allows a start and none is given)."""
+    def line(text: str) -> str:
+        return f"autostart      {text}"
+    try:
+        here = backends.autostart_allowed_here(
+            db_path=cfg.db_path, config_given=bool(getattr(args, "config", None)))
+    except Exception:                                  # noqa: BLE001 - no usable DB path: not here
+        here = False
+    if not here:
+        return line("off in this copy (JOBSCRAPER_DB, worktree or test)")
+    if not _model_autostart(cfg, args, store):
+        return line("off (Settings → Local AI)")
     if backends.configured_code(cfg.budget):
-        return "off (the AI model is switched off in config.yaml)"
+        return line("off (the AI model is switched off in config.yaml)")
     found = backends.find_ollama(cfg.budget)
     if found is None:
-        return "on, but Ollama isn't installed"
-    where = "configured location" if cfg.budget.get("ollama_path") else \
-        ("default install location" if _is_default_ollama(found) else "PATH")
-    return f"on (found: {where})"
+        return line("on, but Ollama isn't installed")
+    where = "configured location" if cfg.budget.get("ollama_path") else         ("default install location" if _is_default_ollama(found) else "PATH")
+    return line(f"on (found: {where})")
 
 
 def _is_default_ollama(found: str) -> bool:
@@ -204,7 +210,7 @@ def cmd_doctor(args) -> int:
     else:
         print(f"               UNAVAILABLE - {backend.unavailable_reason}")
         print("               (runs still work; survivors wait for the model)")
-    print(f"autostart      {_doctor_autostart_line(cfg, store, args)}")
+    print(_doctor_autostart_line(cfg, args, store))
     # D-105 (q74_model_sees_sensitive.md §1): the effective switch, and why it is off
     # when the owner turned it on but the model runs elsewhere. No URL, no values.
     if not cfg.apply.model_sees_sensitive:

@@ -1946,10 +1946,8 @@ class _Run:
     @staticmethod
     def model_pause(r: Any) -> tuple[QueuePause, Optional[str]]:
         """The pause a not-ready `ModelReady` causes, with its detail (a tag, a port or
-        fixed words; never a path). Unknown codes fall back to `model_unavailable`."""
+        fixed words; never a path; empty for `model_unavailable`). Unknown codes fall back to `model_unavailable`."""
         why = MODEL_PAUSE_BY_CODE.get(r.code, QueuePause.MODEL_UNAVAILABLE)
-        if why is QueuePause.MODEL_UNAVAILABLE:
-            return why, (r.code or "not running").replace("_", " ")
         return why, (r.detail or None)
 
     def ensure_model(self, *, load: bool = True) -> Any:
@@ -1965,12 +1963,12 @@ class _Run:
             self.log("model: starting Ollama" if s == "starting"
                      else f"model: loading {getattr(self.backend, 'model_id', '') or 'the model'}")
         ensurer = self.model_ensurer or backends.ensure_model_running
+        extra = {"pid_alive": self.model_pid_alive} if self.model_pid_alive else {}
         try:
             r = ensurer(self.cfg.budget, autostart=bool(self.model_autostart),
                         backend=self.backend, load=load,
                         keep_alive=(self.acfg.llm_fill.keep_alive or None),
-                        on_state=on_state, should_stop=self.should_stop,
-                        pid_alive=self.model_pid_alive)
+                        on_state=on_state, should_stop=self.should_stop, **extra)
         except Exception as exc:                          # noqa: BLE001 - fail closed, never a crash
             self.log(f"model: the check failed ({type(exc).__name__})")
             r = backends.ModelReady("not_running")
