@@ -88,6 +88,14 @@ budget:
   # Ollama's own default is far smaller and would silently truncate the prompt.
   ollama_num_ctx: 16384
   ollama_timeout: 600
+  # Q-126 (D-214): JobScraper starts Ollama (and loads the model) itself when auto-apply,
+  # a search run or a resume task needs it and nothing listens on ollama_url. It never
+  # downloads a model and never stops Ollama. Settings -> Accounts -> Local AI can turn
+  # this off (the stored switch wins over this line).
+  ollama_autostart: true
+  # Where ollama.exe is, when it is not in a default install location. Only a file
+  # named ollama.exe counts; read from this file only (the web app cannot change it).
+  # ollama_path:
   # Consecutive transport failures before the judge stands down for this run.
   max_consecutive_failures: 3
   # Postings per decide call. Per-call overhead dominates, so larger is faster -
