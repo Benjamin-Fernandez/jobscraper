@@ -141,6 +141,7 @@ def test_web_mail_no_timer_by_default_and_the_env_switch():
     from jobscraper import cli
     seen = []
     saved, old_env = uvicorn.run, os.environ.get("JOBSCRAPER_MAIL_SYNC")
+    old_cfg = os.environ.get("JOBSCRAPER_CONFIG")      # Q-126 review M2: cmd_web --config sets it
     uvicorn.run = lambda app, **kw: seen.append(app)
     _, path = config(tmpdir("web_mail_env_"), write=True)
     try:
@@ -156,6 +157,10 @@ def test_web_mail_no_timer_by_default_and_the_env_switch():
             os.environ.pop("JOBSCRAPER_MAIL_SYNC", None)
         else:
             os.environ["JOBSCRAPER_MAIL_SYNC"] = old_env
+        if old_cfg is None:
+            os.environ.pop("JOBSCRAPER_CONFIG", None)
+        else:
+            os.environ["JOBSCRAPER_CONFIG"] = old_cfg
 
 
 @needs(ROUTES)
@@ -263,3 +268,11 @@ def test_web_mail_oracles_are_live():
 
 
 note_waiting("test_web_mail", _W0)
+
+
+_CONFIG_AT_IMPORT = os.environ.get("JOBSCRAPER_CONFIG")
+
+
+def test_web_mail_zz_this_module_leaves_jobscraper_config_as_it_found_it():
+    """Q-126 review M2 guard: see tests/test_mail_d157_pins.py."""
+    assert os.environ.get("JOBSCRAPER_CONFIG") == _CONFIG_AT_IMPORT
