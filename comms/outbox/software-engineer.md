@@ -10,6 +10,20 @@ BODY: <concise message>
 STATUS: open
 -->
 
+### 2026-11-15 software-engineer → coordinator, tester
+TYPE: handoff
+RE: Q-126 WP-U1 (D-214, D-217; design §4.1, §4.5, §8, §9); `web/src/{connections.js,connections_api.js}`, `web/src/components/{ApplyQueuePanel,ConnectionsHub,ResumeRefresh}.vue`
+BODY: Branch `eng/Q-126-U1` (from `int/Q-126` 103cc21). Web only; no bundle built.
+- ApplyQueuePanel: `normalise` keeps `model` only for state `starting`|`loading`. With no `now` and no stored pause, the "Now applying" slot (inside the existing aria-live region) holds one `li.aq-model[data-state]`: title "Starting the local AI model…" or "Loading the model…" (+ `.aq-model-note` "The first load can take a minute." when loading), elapsed time from `model.since` (aria-hidden, ticks once a second), no Stop button, no banner (no pause is stored then). Header Pause stays available. Polling and `empty` unchanged apart from `model` counting as activity. Paused text/hint are shown as the server sends them.
+- connections.js: `startsItself(facts)` (autostart && autostart_here && installed === true). Model card line: an attention card with `message` shows it (any code); code `unreachable`: installed false -> "Ollama isn't installed. Install it from ollama.com to use the local AI."; startsItself -> "Ollama isn't running. JobScraper starts it when a task needs it."; else today's copy. `needsAttention`: unreachable + startsItself follows the server `state` (need_now ignored). New COPY keys `autostartLabel/Desc/NotHere/NoRoute`.
+- connections_api.js: `putModelAutostart(enabled)` -> PUT `connections/model/autostart {enabled}`; null when the route is absent (404/405).
+- ConnectionsHub: the switch row (reuses `SettingRow` kind switch + `useRows`) in the Local AI card body, above "Check again"; label/description as §4.5; saves on change, not optimistic, "Saved" flash, "Couldn't save: …" via `saveErrorText`, reloads the hub after a good save; `autostart_here === false` -> static row (value On/Off, description + " Not in this copy of JobScraper."); hidden when `facts.autostart` is not a boolean (older server) or `facts.local === false`.
+- ResumeRefresh: unavailable line now "Couldn't compare with your application details: the local AI model couldn't start. See Settings → Accounts → Local AI."
+FOR TESTER (vitest pins): panel starting and loading rows (copy, elapsed, no Stop, no `.aq-paused`, `aria-live`); a pause during the wait shows the banner with Resume and no model row; model pause text+hint rendered as given; card lines (neutral autostart line, not installed, attention with `message`); `attentionCount` 0 for unreachable+startsItself+need_now true, 1 when state attention; switch saves (PUT body `{enabled}`), flash, 422 error words and the unchanged value, static row with the suffix, hidden without the fact. Verified by a throwaway test (deleted): all of these passed.
+RED NOW: `web/tests/q44-refresh.test.js` "says the model is not running when the profile job logged the skip line" (lines 370-372; designed retarget: new wording, no "Start Ollama" / "Re-read resume"). `web/tests/connections.test.js` is NOT red (its fixtures have no autostart facts, so today's copy still applies); add pins for the new facts. Vitest in web: 1070 passed, 1 failed, 1 skipped (1072).
+DEPARTURES: (a) a stored pause beats the starting row (design §4.1 says no banner while starting, but an owner Pause pressed during the wait must keep its Resume button). (b) The auto-apply click's `lifted` reply is not shown: nothing in §4 asks for it and the click is the Inbox's. (c) `tabs/Profile.vue:98` still matches the backend log line "application details check skipped: the AI model isn't running" (not my file; the line itself is the backend's). (d) The not-installed card line applies whenever `installed === false`, regardless of the switch.
+STATUS: open
+
 ### 2026-11-15 software-engineer → coordinator, U1 (Vue), tester
 TYPE: handoff
 RE: Q-126 WP-W1 (D-214, D-217; design §4.1, §4.4, §4.5, §5); `src/jobscraper/web/{applyqueue.py,connections.py}`, `web/routers/{apply.py,connections.py}`

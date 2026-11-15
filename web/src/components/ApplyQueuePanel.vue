@@ -83,6 +83,8 @@ function normalise(v) {
   return {
     paused: v?.paused ?? null,
     now: v?.now ?? null,
+    // Q-126: the app is starting or loading the local AI model before it takes a role.
+    model: v?.model && (v.model.state === 'starting' || v.model.state === 'loading') ? v.model : null,
     slot: v?.slot ?? 'free',
     run_pending: Boolean(v?.run_pending),
     waiting: Array.isArray(v?.waiting) ? v.waiting : [],
@@ -177,8 +179,9 @@ onBeforeUnmount(() => {
   window.removeEventListener(EVENT, onQueueEvent)
 })
 
-// The elapsed time of the role in progress ticks once a second, only while there is one.
-watch(() => view.value?.now?.attempt_id ?? null, id => {
+// The elapsed time of the role in progress (or of the model start) ticks once a second,
+// only while there is one.
+watch(() => view.value?.now?.attempt_id ?? (view.value?.model ? `model:${view.value.model.since}` : null), id => {
   clearInterval(ticker)
   if (id !== null) {
     clock.value = Date.now()
@@ -193,7 +196,17 @@ const switchedOff = computed(() => paused.value?.reason === 'disabled')
 const now = computed(() => view.value?.now ?? null)
 const waiting = computed(() => view.value?.waiting ?? [])
 const recent = computed(() => view.value?.recent ?? [])
-const empty = computed(() => Boolean(view.value) && !paused.value && !now.value
+// The calm "starting the model" state (Q-126, design §4.1): no role has an attempt yet,
+// so there is no Stop button, and it is not an error, so there is no paused banner. A pause
+// the owner presses during the wait still wins (its banner carries Resume), so then the
+// row gives way: the start itself is not a pause.
+const model = computed(() => (now.value || paused.value ? null : view.value?.model ?? null))
+const modelTitle = computed(() => (model.value?.state === 'loading' ? 'Loading the model…' : 'Starting the local AI model…'))
+const modelElapsed = computed(() => {
+  const t = utcMs(model.value?.since)
+  return t === null ? '' : duration(Math.max(0, (clock.value - t) / 1000))
+})
+const empty = computed(() => Boolean(view.value) && !paused.value && !now.value && !model.value
   && !waiting.value.length && !recent.value.length && !view.value.run_pending)
 
 const label = item => [item.company, item.role].filter(Boolean).join(' · ') || 'A role'
@@ -379,7 +392,7 @@ async function remove(item, index) {
     <header class="ui-card-head">
       <h3 id="aq-title" class="ui-card-title">Auto-apply queue</h3>
       <span v-if="view" class="ui-count" :title="plural(waiting.length, 'role') + ' waiting'">{{ waiting.length }}</span>
-      <div v-if="view && !paused && (now || waiting.length)" class="ui-card-actions">
+      <div v-if="view && !paused && (now || model || waiting.length)" class="ui-card-actions">
         <button type="button" class="aq-pause" :disabled="busyAny" @click="pause">
           {{ acting === 'pause' ? 'Pausing…' : 'Pause queue' }}
         </button>
@@ -438,10 +451,22 @@ async function remove(item, index) {
       </div>
 
       <template v-else>
-        <h4 v-if="now" id="aq-now-title" class="aq-heading">Now applying</h4>
+        <h4 v-if="now || model" id="aq-now-title" class="aq-heading">Now applying</h4>
         <!-- The only live region: a role starting, a new step, the role ending. -->
         <div class="aq-live" aria-live="polite">
-          <ul v-if="now" class="ui-list aq-now-list" aria-labelledby="aq-now-title">
+          <!-- Before a role is taken, JobScraper starts the local AI model itself (Q-126). -->
+          <ul v-if="model" class="ui-list aq-now-list aq-model-list" aria-labelledby="aq-now-title">
+            <li class="ui-list-row aq-model" :data-state="model.state">
+              <div class="aq-main">
+                <span class="ui-list-row-title aq-name">{{ modelTitle }}</span>
+                <span v-if="model.state === 'loading'" class="ui-list-row-desc aq-model-note">The first load can take a minute.</span>
+                <span v-if="modelElapsed" class="ui-list-row-desc aq-meta">
+                  <span class="aq-elapsed" aria-hidden="true">{{ modelElapsed }}</span>
+                </span>
+              </div>
+            </li>
+          </ul>
+          <ul v-else-if="now" class="ui-list aq-now-list" aria-labelledby="aq-now-title">
             <li class="ui-list-row aq-now" :data-job="now.job_id">
               <div class="aq-main">
                 <span class="ui-list-row-title aq-name">{{ label(now) }}</span>

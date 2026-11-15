@@ -15,12 +15,14 @@
 // are shown in full (D-193).
 import { computed, nextTick, onActivated, onBeforeUnmount, onDeactivated, onMounted, ref, watch } from 'vue'
 import { COPY, codeCopy } from '../connections.js'
-import { checkModel } from '../connections_api.js'
+import { checkModel, putModelAutostart } from '../connections_api.js'
 import { when } from '../format.js'
 import { useHashItem } from '../route.js'
+import { saveErrorText, useRows } from '../settingsRows.js'
 import ConnectionCard from './ConnectionCard.vue'
 import EmployerAccounts from './EmployerAccounts.vue'
 import MailCard from './MailCard.vue'
+import SettingRow from './SettingRow.vue'
 import StateChip from './StateChip.vue'
 import TabLoading from './TabLoading.vue'
 
@@ -90,6 +92,39 @@ const model = computed(() => one('model'))
 const modelChecking = ref(false)
 const noCheckAgain = new Set(['ai_off', 'misconfigured', 'probing'])
 const canCheck = computed(() => model.value && !noCheckAgain.has(model.value.code))
+
+// The auto-start switch (Q-126, D-214; design §4.5). It saves on toggle, is not
+// optimistic (the row shows the saved value until the server says yes, so a failed save
+// leaves it as it was) and is read-only where the server says auto-start is not allowed
+// (a dev copy or a worktree). An older server sends no `autostart` fact: no row.
+const rows = useRows()
+const AUTOSTART_ID = 'model-autostart'
+const savedAutostart = ref(null)   // what the last good save answered, until a load catches up
+const serverAutostart = computed(() => model.value?.facts?.autostart)
+watch(serverAutostart, () => { savedAutostart.value = null })
+const autostartShown = computed(() => typeof serverAutostart.value === 'boolean' && model.value?.facts?.local !== false)
+const autostartOn = computed(() => savedAutostart.value ?? serverAutostart.value === true)
+const autostartHere = computed(() => model.value?.facts?.autostart_here !== false)
+
+async function saveAutostart(next) {
+  if (rows.busy[AUTOSTART_ID]) return
+  rows.clear(AUTOSTART_ID)
+  rows.setBusy(AUTOSTART_ID, true)
+  try {
+    const out = await putModelAutostart(next)
+    if (out === null) {
+      rows.fail(AUTOSTART_ID, COPY.autostartNoRoute)
+    } else {
+      savedAutostart.value = typeof out.enabled === 'boolean' ? out.enabled : next
+      rows.flash(AUTOSTART_ID)
+      emit('reload')
+    }
+  } catch (e) {
+    rows.fail(AUTOSTART_ID, saveErrorText(e, 'enabled'))
+  } finally {
+    rows.setBusy(AUTOSTART_ID, false)
+  }
+}
 
 // ---- employer accounts ----
 const employers = computed(() => one('employer_accounts'))
@@ -269,6 +304,20 @@ onBeforeUnmount(stop)
         :next-check-at="model.next_check_at"
         :target="target === 'model'"
       >
+        <div v-if="autostartShown" class="hub-switch">
+          <SettingRow
+            :id="AUTOSTART_ID"
+            :label="COPY.autostartLabel"
+            :description="autostartHere ? COPY.autostartDesc : COPY.autostartDesc + COPY.autostartNotHere"
+            :kind="autostartHere ? 'switch' : 'static'"
+            :checked="autostartOn"
+            :value="autostartOn ? 'On' : 'Off'"
+            :busy="rows.busy[AUTOSTART_ID]"
+            :saved="rows.saved[AUTOSTART_ID]"
+            :error="rows.error[AUTOSTART_ID]"
+            @change="saveAutostart"
+          />
+        </div>
         <template #actions>
           <button v-if="canCheck" type="button" class="check-again" :disabled="modelChecking" @click="checkAgain">
             {{ modelChecking ? 'Checking…' : 'Check again' }}
@@ -303,6 +352,7 @@ onBeforeUnmount(stop)
 .hub-stale, .hub-fact, .hub-link { margin: 0; font-size: var(--text-sm); }
 .hub-fact { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-1) var(--space-2); }
 .hub-value { font-weight: 600; overflow-wrap: anywhere; }
+.hub-switch { border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
 .hub-backup { display: grid; gap: var(--space-1); padding-top: var(--space-2); border-top: 1px solid var(--border); }
 .hub-backup-fix summary, .hub-link a { display: inline-flex; align-items: center; min-height: 2rem; }
 .hub-backup-fix summary { cursor: pointer; font-size: var(--text-sm); font-weight: 600; color: var(--accent); }
