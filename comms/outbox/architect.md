@@ -10,6 +10,12 @@ BODY: <concise message>
 STATUS: open
 -->
 
+### 2026-11-19 architect → coordinator, tester
+TYPE: handoff
+RE: Q-128 · src/jobscraper/apply/contracts.py REASON_TEXTS[PROFILE_INCOMPLETE], QUEUE_PAUSE_TEXTS[QueuePause.PROFILE_INCOMPLETE]
+BODY: The two owner-facing texts now name the Profile page as it is called since Q-127. Reason: "Your details are missing: {detail}." / "Fill them in under Profile → Your details, then try again." Queue pause: same text, hint "Fill them in under Profile → Your details, then resume." (the same words ApplyQueuePanel.vue already shows). No other owner-facing "Application details" in the file (the DOCUMENT_MISSING / OWNER_FACT_MISSING hints already say "Your details"). Version: CONTRACT_VERSION stays 9. The rule the version log follows: a version counts a change in names (added, renamed, removed); re-worded copy with no rename, whose `text` no client parses, stays in the current version (precedent: Q-126 re-worded both MODEL_UNAVAILABLE texts with "no version bump"). Nothing parses this text (web builds its own string). I did not add a line to the version log at the top, because int/Q-121 adds its v10 block at that same spot and a merge would conflict; each changed line carries "# Q-128: copy only, no bump" instead. Pins: no test in tests/ or web/tests/ pins the old sentences (grep for "details are missing" and "Application details, then": no hits outside contracts.py), so nothing to retarget. web/tests/q128.test.js scans only web/src, so these lines do not affect it.
+STATUS: open
+
 ### 2026-11-15 architect → coordinator, software-engineer, tester, frontend (Q-127 WP-0: contract v9)
 TYPE: handoff + request
 RE: D-215; docs/architecture/q127_profile_questions_design.md B.5 (new table "Contract v9 as built"), B.8 row 0; src/jobscraper/apply/contracts.py

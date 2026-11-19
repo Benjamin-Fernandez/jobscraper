@@ -240,8 +240,8 @@ REASON_TEXTS: dict[ReasonCode, ReasonText] = {
         "You've already applied to this role ({detail}).",
         "See it in Applications."),
     ReasonCode.PROFILE_INCOMPLETE: ReasonText(
-        "Your application details are missing: {detail}.",
-        "Fill them in under Profile → Application details, then try again."),
+        "Your details are missing: {detail}.",
+        "Fill them in under Profile → Your details, then try again."),   # Q-128: copy only, no bump
     ReasonCode.CANCELLED: ReasonText(
         "You cancelled this application before it was sent.",
         "Start it again whenever you like."),
@@ -392,8 +392,8 @@ QUEUE_PAUSE_TEXTS: dict[QueuePause, ReasonText] = {
         "You stopped an application, so the queue is paused.",
         "Resume to go on with the next role."),
     QueuePause.PROFILE_INCOMPLETE: ReasonText(
-        "Your application details are missing: {detail}.",
-        "Fill them in under Profile → Application details, then resume."),
+        "Your details are missing: {detail}.",
+        "Fill them in under Profile → Your details, then resume."),   # Q-128: copy only, no bump
     QueuePause.MODEL_UNAVAILABLE: ReasonText(
         "The local AI model isn't running, so the queue is paused. Nothing was sent.",
         "Start Ollama, then resume. To have JobScraper start it for you, turn on “Start "
