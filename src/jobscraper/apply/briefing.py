@@ -78,7 +78,9 @@ from typing import Any, Iterable, Mapping, Optional, Sequence, Union
 
 from .. import applicant
 from . import declarations, facts, resolve
-from .contracts import DEFAULT_RULES, Briefing, DeclarationLabel, FieldClass, ResolveContext
+from .contracts import (CONSENT_BACKGROUND_CHECKS_KEY, CONSENT_GROUP_SHARING_KEY,
+                        CONSENT_THIRD_PARTY_SHARING_KEY, DEFAULT_RULES, Briefing, DeclarationLabel,
+                        FieldClass, ResolveContext)
 from .plan import content_tokens
 
 _LOG = logging.getLogger(__name__)
@@ -981,6 +983,20 @@ _CONSENT_LABELS = {"privacy_consent": "processing your application data",
                    "certify_true": "certifying the information is true and complete"}
 
 
+# v10 (D-229): the owner's three switches (contracts.CONSENT_SWITCHES), worded for the model.
+_SWITCH_LABELS = (
+    (CONSENT_GROUP_SHARING_KEY,
+     "sharing your application within the employer's own group of companies (affiliates, "
+     "subsidiaries, parent, related corporations)"),
+    (CONSENT_THIRD_PARTY_SHARING_KEY,
+     "sharing your details with other companies (partners, clients, other employers, "
+     "third parties)"),
+    (CONSENT_BACKGROUND_CHECKS_KEY,
+     "background, reference and record checks (verifying education, employment history, "
+     "criminal record)"),
+)
+
+
 def _d5(profile: Mapping) -> str:
     c = profile.get("consents") if isinstance(profile.get("consents"), dict) else {}
     text = ("Consents, acknowledgements, certification that the information is true, privacy "
@@ -992,6 +1008,12 @@ def _d5(profile: Mapping) -> str:
     keep = c.get("data_retention_consent")
     text += (". Keeping your details on file to be considered for future roles or openings: "
              + ("yes" if keep is True else "no") + ".")
+    # v10 (D-229): three consents of their own, each a Profile switch, unset = no. They are
+    # not part of "agree" above: a box asking for one follows its own line.
+    text += (" Three consents are separate from the agreement above and follow only their own "
+             "line: " + "; ".join(
+                 f"{what}: " + ("yes" if applicant.get_path(profile, key) is True else "no")
+                 for key, what in _SWITCH_LABELS) + ".")
     return text
 
 

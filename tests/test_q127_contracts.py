@@ -116,7 +116,9 @@ def test_the_refused_sets_are_exactly_the_h3_lists():
         "profile", "field_map", "standing", "default", "declaration"}
     assert {k.value for k in C.REMEMBER_REFUSED_CLASSES} == {
         "declaration", "consent_privacy", "consent_retention", "marketing", "work_right",
-        "sponsorship", "self_id", "owner_fact"}
+        "sponsorship", "self_id", "owner_fact",
+        "consent_sharing", "consent_checks",      # v10 (D-229): follow their switches
+        "certification", "acknowledgement"}       # v10 (S2 L1, rule D5 / H3): never remembered
 
 
 def test_every_protected_source_refuses_a_remember():
@@ -131,6 +133,7 @@ def test_every_protected_class_refuses_a_remember_whatever_the_source():
     C = _c()
     classes = ["declaration:pep", "declaration:criminal_record", "declaration:other", "declaration",
                "consent_privacy", "consent_retention", "marketing", "work_right", "sponsorship",
+               "certification", "acknowledgement",
                "self_id:gender", "self_id:disability", "self_id:other", "owner_fact:date_of_birth",
                "owner_fact:passport", "owner_fact:other_id"]
     for cls in classes:
@@ -142,7 +145,9 @@ def test_an_ordinary_model_answer_may_be_remembered():
     C = _c()
     for source, cls in [("assumption", ""), ("assumption", "ordinary"), ("llm", "ordinary"),
                         ("resume", "ordinary"), ("job", "ordinary"), ("fallback:F2", "ordinary"),
-                        ("llm", "certification"), ("llm", "acknowledgement"), ("llm", "other_person"),
+                        # other_person STAYS allowed on purpose (coordinator ruling, Q-121 C): saving a
+                        # referee's or contact's details for next time is what the feature is for
+                        ("llm", "other_person"),
                         ("memory:extra.work_mode", "ordinary"), ("composed", ""), ("mygreenhouse", "")]:
         assert not C.follows_your_details(source, cls), (source, cls)
 
@@ -225,7 +230,8 @@ def test_the_answers_route_keys_and_statuses():
     assert C.ANSWERS_ATTEMPT_KEYS == ("id", "kind", "state", "finished_at", "trial", "entries_note")
     assert C.ANSWERS_FIELD_KEYS == (
         "id", "step", "label", "type", "required", "value_text", "basis_text", "assumed",
-        "reason_text", "status", "remembered_text", "can_remember", "refusal", "options")
+        "reason_text", "status", "remembered_text", "can_remember", "refusal", "options",
+        "reason", "reason_hint", "reason_code", "reason_key")   # v10 (D-229 C4), appended
     assert {s.value for s in C.SentFieldStatus} == {"sent", "not_answered", "not_sent"}
     for k in C.ANSWERS_ATTEMPT_KEYS + C.ANSWERS_FIELD_KEYS:      # no path, URL, log or password
         assert not any(w in k for w in ("path", "url", "log", "password", "secret")), k

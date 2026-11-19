@@ -1,0 +1,43 @@
+@form 11_sf_harbour_shipping | taleo | Harbour Shipping Group | Management Trainee, Operations (Singapore)
+@page Profile
+salute|DROPDOWN|O|Salutation|Mr;Ms;Mrs;Dr|of:other_id|~
+first|TEXT|R|Given Name||ord|Alex
+last|TEXT|R|Family Name||ord|Testcase
+email|EMAIL|R|Email||ord|alex.testcase@example.com
+mobile|PHONE|R|Mobile Phone||of:phone|91234567
+addr1|TEXT|R|Address||of:address|1 Example Road
+city|TEXT|R|City / Town||ord|Singapore
+postal|TEXT|R|Postal / ZIP Code||of:postal_code|000001
+country|DROPDOWN|R|Country of Residence|Singapore;Malaysia;India;China;Other|ord|Singapore
+nation|DROPDOWN|R|Country of Citizenship|Singapore;Malaysia;India;China;Other|wr|Singapore
+@page Education and Work
+deg|DROPDOWN|R|Highest Education Level|Diploma;Bachelor's Degree;Master's Degree;PhD;Other|ord|Bachelor's Degree
+school|TEXT|R|School / University||ord|Nanyang Example University
+field|TEXT|R|Area of Study||ord|Computer Engineering
+gradm|DATE|R|Graduation Date (MM/YYYY)||ord|2025-06
+gpa|TEXT|R|Grade / GPA||ord|4.20 / 5.00
+exp|NUMBER|R|Total years of working experience||ord|?1
+skills|TEXTAREA|R|Key skills||ord|Python, SQL, PostgreSQL, Git
+resume|FILE|R|Resume||ord|~
+@page Eligibility and Questions
+auth|RADIO|R|Are you legally entitled to work in Singapore?|Yes;No|wr|Yes
+spons|RADIO|R|Do you require sponsorship to work in Singapore?|Yes;No|sp|No
+pass|RADIO|R|Do you hold a Singapore Citizen, Permanent Resident status, or a valid work pass allowing you to work for Harbour Shipping Group?|Yes;No|wr|Yes
+ns|RADIO|R|Have you completed your National Service obligations?|Yes;No;Not applicable|ord|Yes
+sea|RADIO|R|Are you willing to be assigned to work at sea or at port terminals, including shift work?|Yes;No|ord|?Yes
+travel|RADIO|R|Are you willing to travel frequently, including overseas?|Yes;No|ord|Yes
+reloc|RADIO|R|Are you willing to relocate within Singapore or overseas?|Yes;No|ord|No
+medical|RADIO|R|Do you have any medical condition that may affect your ability to perform the duties of this role?|Yes;No|dec:health|No
+swim|RADIO|O|Can you swim?|Yes;No|ord|?Yes
+rel|RADIO|R|Are any of your relatives employed by Harbour Shipping Group?|Yes;No|dec:relatives_at_company|No
+prev|RADIO|R|Have you previously applied to Harbour Shipping Group?|Yes;No|dec:previously_applied|No
+crim|RADIO|R|Have you ever been convicted of a criminal offence?|Yes;No|dec:criminal_record|No
+sal|NUMBER|R|Expected monthly salary (SGD)||of:salary_expected|5000
+cursal|NUMBER|O|Current monthly salary (SGD)||of:salary_current|~
+availability|DATE|R|Date available to commence work||ord|2026-11-12
+source|DROPDOWN|R|How did you learn about this position?|Harbour Careers Site;Newspaper;Job Portal;University;Referral;Other|ord|Harbour Careers Site
+@page Consent
+cert|CHECKBOX|R|I certify that all statements made by me in this application are true, complete and correct.||cert|true
+privacy|CHECKBOX|R|I have read and accept the Harbour Shipping Group Privacy Statement and consent to the use of my personal data for recruitment.||priv|true
+global|CHECKBOX|R|I understand that my personal data may be transferred to and processed by Harbour Shipping Group companies and its service providers in other countries.||priv|true
+alert|CHECKBOX|O|I would like to receive email alerts about new vacancies.||mkt|false

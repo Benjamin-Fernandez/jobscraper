@@ -20,10 +20,12 @@ from pydantic import BaseModel, Field, field_validator
 
 from jobscraper import applicant
 from jobscraper.apply.contracts import (CONTENT_FAILURE_MARKERS, CONTENT_FAILURE_TEXT,
-                                        NO_FIELD_FACT_TITLES, OWNER_FACT_NO_FIELD_TEXT,
+                                        NO_FIELD_FACT_TITLES, NotAnsweredView,
+                                        OWNER_FACT_NO_FIELD_TEXT,
                                         QUEUE_REFUSAL_TEXTS, REASON_TEXTS, STATE_TEXTS,
-                                        TERMINAL_STATES, AnswerStatus, AttemptState, ReasonCode,
-                                        RememberRefusal, SentFieldStatus, basis_text)
+                                        TERMINAL_STATES, AnswerStatus, AttemptState,
+                                        ReasonCode, RememberRefusal, SentFieldStatus, basis_text,
+                                        not_answered_view)
 from jobscraper.config import Config
 from jobscraper.web import remember as remembering
 from jobscraper.web.data import load_shortlist
@@ -336,9 +338,27 @@ def _form_label(source: str) -> str:
     return chosen.label if chosen is not None else ""
 
 
+def empty_view(row: dict[str, Any], *, can_remember: bool,
+               question: Optional[dict[str, Any]] = None) -> NotAnsweredView:
+    """Why an audit row was left empty (D-229 C4): the contract's `not_answered_view` and
+    nothing else, so only its fixed sentences, its code and a closed-set key leave the server;
+    never the stored note, a label, a quote or a path. `question` is the question the attempt
+    captured for the field (the strict filler's reason; None when none). Its `target_path` is
+    the Your-details field the owner would fill, passed on only when the form knows it."""
+    asked = question or {}
+    path = str(asked.get("target_path") or "").strip()
+    item, sub = applicant.form_item(path) if path else (None, None)
+    return not_answered_view(str(row.get("note") or ""), field_class=str(row.get("field_class") or ""),
+                             required=bool(row.get("required")), can_remember=can_remember,
+                             question_reason=str(asked.get("reason") or ""),
+                             detail_key=path if (item or sub) else "")
+
+
+
 def sent_field(row: dict[str, Any], attempt_sent: bool, captured: Optional[dict[str, Any]],
-               extra: Any) -> dict[str, Any]:
-    """One `ANSWERS_FIELD_KEYS` item for an audit row."""
+               extra: Any, question: Optional[dict[str, Any]] = None) -> dict[str, Any]:
+    """One `ANSWERS_FIELD_KEYS` item for an audit row. `question` is the question the attempt
+    captured for the field, None when none (`empty_view`)."""
     ftype = str(row.get("field_type") or "")
     status = str(row.get("status") or "")
     assumed = bool(row.get("assumed"))
@@ -350,6 +370,8 @@ def sent_field(row: dict[str, Any], attempt_sent: bool, captured: Optional[dict[
     else:
         shown_status = SentFieldStatus.NOT_SENT
     refusal = remembering.remember_refusal(row, captured=captured, extra=extra)
+    why = (empty_view(row, can_remember=refusal is None, question=question)
+           if shown_status is SentFieldStatus.NOT_ANSWERED else None)
     return {
         "id": int(row["id"]), "step": str(row.get("step") or ""),
         "label": str(row.get("label") or ""), "type": ftype,
@@ -362,6 +384,8 @@ def sent_field(row: dict[str, Any], attempt_sent: bool, captured: Optional[dict[
         "can_remember": refusal is None,
         "refusal": refusal.value if refusal else "",
         "options": remembering.option_labels(row, captured),
+        "reason": why.text if why else "", "reason_hint": why.hint if why else "",
+        "reason_code": why.code.value if why else "", "reason_key": why.key if why else "",
     }
 
 
@@ -388,7 +412,13 @@ def attempt_answers(request: Request, attempt_id: int, job_id: str = JOB_ID,
             protected = remembering.remember_refusal(row) is RememberRefusal.FOLLOWS_YOUR_DETAILS
             captured = (None if protected
                         else store.attempt_field_question(attempt_id, row["field_key"]))
-            fields.append(sent_field(row, sent, captured, extra if isinstance(extra, dict) else {}))
+            # A field left empty that follows the details has no `captured` above; its question,
+            # if the attempt captured one, still says why (the strict filler's reason).
+            asked = captured
+            if asked is None and row.get("status") in _NOT_ANSWERED:
+                asked = store.attempt_field_question(attempt_id, row["field_key"])
+            fields.append(sent_field(row, sent, captured, extra if isinstance(extra, dict) else {},
+                                     question=asked))
     view = attempt_view(att)
     return {"attempt": {"id": att["id"], "kind": view["kind"], "state": view["state"],
                         "finished_at": att.get("finished_at"), "trial": bool(att.get("trial")),

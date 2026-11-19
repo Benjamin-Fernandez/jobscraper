@@ -107,7 +107,9 @@ function closeSent() {
 }
 function onLoaded(c) { notAnswered.value = Number.isFinite(c?.notAnswered) ? c.notAnswered : null }
 function onSaved(r) { if (r?.ready) readyNow.value = true }
-const addLabel = computed(() => `${ADD_IT}: ${state.value?.label ?? ''} (${name.value})`)
+// "Add it", or "Open the switch" for a refused consent (D-229).
+const addText = computed(() => state.value?.addText || ADD_IT)
+const addLabel = computed(() => `${addText.value}: ${state.value?.label ?? ''} (${name.value})`)
 const stoppedLike = computed(() => state.value?.kind === 'stopped' || state.value?.kind === 'cancelled')
 const retryable = computed(() => canRetry(shown.value))
 const retrying = ref(false)
@@ -236,7 +238,7 @@ function onDragStart(event) {
         href="#/profile"
         :aria-label="addLabel"
         @click.prevent="openAnswer(state.target)"
-      >{{ ADD_IT }}</a>
+      >{{ addText }}</a>
       <button
         v-if="entry"
         ref="sentBtnRef"

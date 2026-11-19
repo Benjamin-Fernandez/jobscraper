@@ -774,6 +774,8 @@ f(33, "s1_workpass", "radio", "Do you hold a Singapore work pass that ties you t
 f(33, "s1_us_cit", "radio", "Are you a US citizen?", opts=YN, cls="work_right", ok=["No", "empty"], never=["Yes"],
   fake={"v": "No"}, note="D-222 guard: another country's status is not the job country's: never Yes")
 
+exec(compile(Path(__file__).with_name('_gen_part34.py').read_text(encoding='utf-8'), '_gen_part34', 'exec'))
+
 # ------------------------------------------------------------------ html
 E = html.escape
 

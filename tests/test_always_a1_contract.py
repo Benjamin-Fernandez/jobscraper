@@ -15,7 +15,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import apply_support  # noqa: E402,F401  (puts src on sys.path)
 
-EXPECTED_CLASSES = ("consent_privacy", "consent_retention", "marketing", "certification",
+EXPECTED_CLASSES = ("consent_privacy", "consent_retention", "consent_sharing", "consent_checks",
+                    "marketing", "certification",
                     "acknowledgement", "declaration", "work_right", "sponsorship", "owner_fact",
                     "self_id", "other_person", "ordinary")
 
@@ -29,7 +30,8 @@ OWNER_FACT = ("date_of_birth", "age", "national_id", "passport", "bank", "grade"
 SELF_ID = ("gender", "race", "religion", "marital", "disability", "veteran", "other")
 
 EXPECTED_CHOICES = (
-    ("consent_privacy", "consent_retention", "marketing", "certification", "acknowledgement")
+    ("consent_privacy", "consent_retention", "consent_sharing:group", "consent_sharing:third_party",
+     "consent_checks", "marketing", "certification", "acknowledgement")   # v10: sharing + checks
     + tuple(f"declaration:{w}" for w in DECLARATION_WHICH)
     + ("work_right", "sponsorship")
     + tuple(f"owner_fact:{w}" for w in OWNER_FACT)
@@ -61,9 +63,10 @@ def test_a1_which_lists_are_exactly_the_designed_ones():
     assert tuple(C.FIELD_CLASS_WHICH[C.FieldClass.DECLARATION]) == DECLARATION_WHICH
     assert tuple(C.FIELD_CLASS_WHICH[C.FieldClass.OWNER_FACT]) == OWNER_FACT
     assert tuple(C.FIELD_CLASS_WHICH[C.FieldClass.SELF_ID]) == SELF_ID
-    # only these three classes take a `which`
+    # only these four classes take a `which` (v10: consent_sharing: group / third_party)
+    assert tuple(C.FIELD_CLASS_WHICH[C.FieldClass.CONSENT_SHARING]) == ("group", "third_party")
     assert set(C.FIELD_CLASS_WHICH) == {C.FieldClass.DECLARATION, C.FieldClass.OWNER_FACT,
-                                        C.FieldClass.SELF_ID}
+                                        C.FieldClass.SELF_ID, C.FieldClass.CONSENT_SHARING}
 
 
 def test_a1_declaration_which_excludes_disability_and_nda_willingness():
@@ -76,11 +79,11 @@ def test_a1_declaration_which_excludes_disability_and_nda_willingness():
     assert labels - set(w) == {"disability", "nda_willingness"}
 
 
-def test_a1_field_class_choices_are_the_42_strings_in_order_ordinary_last():
+def test_a1_field_class_choices_are_the_45_strings_in_order_ordinary_last():
     C = _c()
-    assert len(EXPECTED_CHOICES) == 42
+    assert len(EXPECTED_CHOICES) == 45     # v10: 42 + three consent strings
     assert tuple(C.FIELD_CLASS_CHOICES) == EXPECTED_CHOICES
-    assert len(set(C.FIELD_CLASS_CHOICES)) == 42
+    assert len(set(C.FIELD_CLASS_CHOICES)) == 45
     assert C.FIELD_CLASS_SEP == ":"
 
 
@@ -103,8 +106,9 @@ def test_a1_consent_refused_reason_code_and_texts_are_the_designed_sentences():
     t = C.REASON_TEXTS[C.ReasonCode.CONSENT_REFUSED]
     assert t.text == ("This form needs you to agree to {detail}, and your profile says no. "
                       "Nothing was sent.")
-    assert t.hint == ("To agree, change it in Profile → Consents, then click Try again. "
-                      "Otherwise apply by hand or skip this role.")
+    # v10: the hint names the screen as it is now; the `text` is byte-identical to v9
+    assert t.hint == ("To agree, switch it on in Profile → Your details → Consents and "
+                      "declarations, then click Try again. Otherwise apply by hand or skip this role.")
     assert set(C.REASON_TEXTS) == set(C.ReasonCode)
 
 
@@ -125,6 +129,10 @@ def test_a1_consent_refused_details_keys_and_texts():
         "consents.data_retention_consent": "keeping your details on file for future roles",
         "consents.certify_true": "a statement that your answers are true and complete",
         "consents.talent_pool_opt_in": "receiving marketing messages",
+        # v10 (D-229 C1-C3)
+        "consents.group_sharing": "sharing your details with the employer's group companies",
+        "consents.third_party_sharing": "sharing your details with other companies",
+        "consents.background_checks": "background, reference and record checks",
     }
     t = C.REASON_TEXTS[C.ReasonCode.CONSENT_REFUSED]
     for key, detail in C.CONSENT_REFUSED_DETAILS.items():

@@ -1,0 +1,31 @@
+@form 05_greenhouse_fabrikam_games | greenhouse | Fabrikam Games | Graduate Game Developer (Singapore)
+@page Application
+@use name_gh
+pref|TEXT|O|Preferred Name||ord|~
+loc|TYPEAHEAD|R|Location (City)||ord|Singapore
+@use files_resume
+cover|TEXTAREA|O|Cover Letter||ord|~
+linkedin|URL|O|LinkedIn Profile||ord|https://www.linkedin.com/in/example-alex-testcase
+portfolio|URL|R|Portfolio / GitHub link||ord|https://github.com/example-alex-testcase
+school|TYPEAHEAD|R|School||ord|Nanyang Example University
+degree|DROPDOWN|R|Degree|Bachelor's Degree;Master's Degree;Ph.D.;Other|ord|Bachelor's Degree
+discipline|TEXT|R|Discipline||ord|Computer Engineering
+start_m|NUMBER|R|Start year||ord|2021
+end_m|NUMBER|R|End year||ord|2025
+auth|DROPDOWN|R|Are you authorised to work in Singapore?|Yes, I am authorised to work in Singapore without sponsorship;No, I will need sponsorship|wr|Yes, I am authorised to work in Singapore without sponsorship
+vis|DROPDOWN|R|Do you now, or will you in the future, require a work visa or sponsorship to be employed in Singapore?|Yes;No|sp|No
+citz|DROPDOWN|R|Citizenship|Singapore Citizen;Singapore PR;Other|wr|Singapore Citizen
+ns|DROPDOWN|R|Have you completed your National Service?|Yes;No;Not applicable|ord|Yes
+earliest|DATE|R|Earliest start date||ord|2026-11-12
+salary|NUMBER|R|Expected monthly salary (SGD)||of:salary_expected|5000
+games|TEXTAREA|R|What games have inspired you most, and why?||ord|I enjoy puzzle and strategy games because they reward careful systems design, which is what I like building.
+engine|DROPDOWN|R|Which game engine are you most comfortable with?|Unity;Unreal;Godot;Custom engine;None of these|ord|?None of these
+py|DROPDOWN|R|How many years of experience do you have in C++?|None;Less than 1 year;1-3 years;3+ years|ord|?None
+hear|DROPDOWN|R|How did you hear about us?|Company website;LinkedIn;GameDev Forum;Referral;Other|ord|Company website
+referral|TEXT|O|If referred, who referred you?||oth|~
+fam|DROPDOWN|R|Are any of your relatives employed by Fabrikam Games?|Yes;No|dec:relatives_at_company|No
+crim|DROPDOWN|R|Have you ever been convicted of a criminal offence (excluding minor traffic offences)?|Yes;No|dec:criminal_record|No
+bgc|DROPDOWN|R|Are you willing to undergo a background check?|Yes;No|ord|Yes
+privacy|CHECKBOX|R|I agree to Fabrikam Games' Privacy Policy and to the processing of my data, including its transfer to Fabrikam Games' studios in other countries, for recruitment purposes.||priv|true
+marketing|CHECKBOX|O|I would like to receive updates about Fabrikam Games and future job opportunities.||mkt|false
+@use eeo_gh

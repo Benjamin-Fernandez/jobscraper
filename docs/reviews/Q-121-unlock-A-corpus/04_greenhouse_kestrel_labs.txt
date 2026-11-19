@@ -1,0 +1,31 @@
+@form 04_greenhouse_kestrel_labs | greenhouse | Kestrel Labs | Software Engineer, New Grad (Singapore)
+@page Application
+@use name_gh
+loc|TYPEAHEAD|R|Location (City)||ord|Singapore
+@use files_resume
+linkedin|URL|O|LinkedIn Profile||ord|https://www.linkedin.com/in/example-alex-testcase
+github|URL|O|GitHub||ord|https://github.com/example-alex-testcase
+website|URL|O|Website||ord|~
+school|TYPEAHEAD|R|School||ord|Nanyang Example University
+degree|DROPDOWN|R|Degree|Associate's Degree;Bachelor's Degree;Master's Degree;Doctor of Philosophy (Ph.D.);Other|ord|Bachelor's Degree
+discipline|DROPDOWN|R|Discipline|Computer Science;Computer Engineering;Electrical Engineering;Mathematics;Other|ord|Computer Engineering
+grad|DATE|R|Graduation date (month and year)||ord|2025-06
+gpa|TEXT|O|What is your GPA / grade, and on what scale?||ord|4.20 / 5.00
+auth|DROPDOWN|R|Are you legally authorized to work in the country in which you are applying?|Yes;No|wr|Yes
+spons|DROPDOWN|R|Will you now or in the future require sponsorship for employment visa status (e.g. H-1B, Employment Pass)?|Yes;No|sp|No
+usauth|DROPDOWN|R|Are you legally authorized to work in the United States?|Yes;No|wr|No
+sgstatus|DROPDOWN|R|Are you a Singapore citizen or PR?|Yes;No|wr|Yes
+reloc|DROPDOWN|R|Are you open to relocating to Singapore if you do not already live here?|Yes;No|ord|Yes
+start|TEXT|R|When could you start?||ord|Immediately
+salary|TEXT|R|What are your salary expectations (SGD per month)?||of:salary_expected|5000
+how|DROPDOWN|R|How did you hear about this job?|Kestrel Labs careers page;LinkedIn;Referral;Hacker News;Other|ord|Kestrel Labs careers page
+prevcomp|DROPDOWN|R|Have you previously worked at Kestrel Labs or applied for a role here?|Yes;No|dec:previously_applied|No
+rel|DROPDOWN|R|Do you have a relative or close friend who works at Kestrel Labs?|Yes;No|dec:relatives_at_company|No
+ndas|DROPDOWN|R|Are you subject to any non-compete or non-solicitation agreement that would affect your ability to work here?|Yes;No|dec:non_compete|No
+fav|TEXTAREA|R|Tell us about a project you built that you are proud of.||ord|I built REST APIs in Python and Postgres to track shipments during my internship, with automated tests and a weekly report.
+why|TEXTAREA|R|Why Kestrel Labs?||ord|Kestrel builds developer tools and I enjoy building tools for other engineers. I would like to work on a small team where I can ship quickly.
+lang|TEXT|R|What is your favourite programming language and why?||ord|Python, because it is quick to write and has great libraries.
+pronouns|TEXT|O|Pronouns||ord|~
+priv|CHECKBOX|R|I have read and agree to Kestrel Labs' Candidate Privacy Notice and consent to the processing of my personal data for this application.||priv|true
+future|CHECKBOX|O|I agree that Kestrel Labs may keep my personal data on file to contact me about future roles.||ret|true
+@use eeo_gh

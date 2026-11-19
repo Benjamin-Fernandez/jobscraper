@@ -183,8 +183,10 @@ F1_WORK = (
 # right to work in <country>?", "Is your right to work in <country> limited in any way?"; Yes = NOT freely authorised).
 # A frame is a reading: the right model answer costs 0 calls, a wrong one is overruled by ONE confirmation that equals the
 # frame, and an agreeing wrong pair is a veto (U10: 1 call, no meaning call). The other wordings keep the U9 no-reading path.
+# D-226: "Are you a foreigner?" (no country: the job's country) is a canonical status frame too: Yes = a foreign national.
 def _framed(label):
-    return label.startswith(("Do you have any restrictions on your right", "Is your right to work in"))
+    return (label.startswith(("Do you have any restrictions on your right", "Is your right to work in"))
+            or label == "Are you a foreigner?")
 
 
 def _work_cells():

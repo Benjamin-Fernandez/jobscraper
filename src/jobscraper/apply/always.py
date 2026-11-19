@@ -747,6 +747,9 @@ class PageCtx:
     # D-220 P: field key -> `work_place`'s reading (codes, named, unknown), so a field gets at
     # most ONE place call however many steps ask where its work would be
     places: dict[str, tuple[list[str], bool, bool]] = dc_field(default_factory=dict)
+    # D-223 G: (field key, label) -> the status question S2 answers (None: S2 silent), so a
+    # model class S2 yields to keeps it silent for the rest of the page (`status_of`)
+    status_q: dict[tuple[str, str], Any] = dc_field(default_factory=dict)
 
 
 def _page_call(ctx: PageCtx, msgs: list[dict], schema: dict, max_tokens: int) -> tuple[str, str]:
@@ -2781,6 +2784,13 @@ class CodeKey:
     classes: tuple = ()
     ordinary: bool = False
     confident: bool = False
+    # D-224 (5a): sharing the applicant's details with a third party (`share_frame`): its own
+    # consent, decided by `share_end` under every model class (the class string stays
+    # consent_privacy: the schema has no class of its own for it)
+    share: bool = False
+    # D-225 (3): sharing or processing INSIDE the employer for the application itself
+    # (`internal_share_frame`): the privacy consent, decided by `share_end` the same way
+    internal: bool = False
 
 
 def _key_on(pf: PageField, text: str, desc: str, ctx: Optional[PageCtx],
@@ -2788,6 +2798,14 @@ def _key_on(pf: PageField, text: str, desc: str, ctx: Optional[PageCtx],
     f = pf.field
     if f.type in (FieldType.FILE, FieldType.HIDDEN):
         return CodeKey()
+    if _consent_shape(f) and share_frame(text, ctx):
+        # D-224 (5a): before every other key (never the relatives / other-person key, never
+        # retention, never marketing by the employer)
+        return CodeKey(FC.CONSENT_PRIVACY, "", (FC.CONSENT_PRIVACY,), confident=True, share=True)
+    if _consent_shape(f) and internal_share_frame(text, ctx):
+        # D-225 (3): before the other-person key too ("the hiring manager" is no person whose
+        # details are asked: the applicant's details go to them)
+        return CodeKey(FC.CONSENT_PRIVACY, "", (FC.CONSENT_PRIVACY,), confident=True, internal=True)
     # D-211 M2: a yes/no, box or statement list naming a spouse / parent / manager is a
     # declaration about the applicant's relatives; `other_person` wins only for a detail field
     other = facts.about_other_person(pf)
@@ -2809,6 +2827,179 @@ _RELATED = ("spouse", "partner", "parent", "parents", "sibling", "siblings", "fa
             "children", "husband", "wife", "father", "mother", "brother", "sister")
 _EMPLOYED = ("employed", "work for", "works for", "working for", "work at", "works at",
              "working at", "work here", "works here", "employee", "employees")
+
+
+# D-224 (5a): a box or question that SHARES the applicant's details / CV / data / profile /
+# application WITH A THIRD PARTY is its own consent kind, keyed by code. The frame, in ONE
+# sentence: a share verb (not negated: "we never share ..." is no request) + what is shared
+# (the applicant's own: "my / your / personal / contact ..." details, data, information,
+# profile, application; a CV / resume) + a third-party recipient. Or the applicant's details
+# kept or considered for roles AT a third party ("... for roles at our partner companies").
+# NOT this frame: sharing inside the employer for the application (the hiring team, HR,
+# interviewers: no recipient word), service providers or third parties who process it on
+# the employer's behalf (privacy), a plain keep-on-file (retention), the employer's own
+# contact (marketing / talent pool).
+_SHARE_VERB_RE = re.compile(
+    r"\b(?:shar(?:e|es|ed|ing)|disclos(?:e|es|ed|ing)|transfer(?:s|red|ring)?|provid(?:e|es|ed|ing)"
+    r"|forward(?:s|ed|ing)?|send(?:s|ing)?|sent"
+    r"|pass(?:es|ed|ing)?(?= (?:on|along|to|my|your|the|this|it|them|these|such)\b)"
+    r"|(?:make|makes|made|making) (?:\w+ ){0,3}?available"
+    r"|(?:give|gives|gave|given|giving|grant|grants|granted|granting) (?:\w+ ){0,3}?access"
+    r"|(?:let|lets|letting|allow|allows|allowing|permit|permits|enable|enables) (?:\w+ ){1,6}?"
+    r"(?:see|view|access|review|look at))\b")
+_SHARE_OBJ_RE = re.compile(
+    r"\b(?:(?:my|your|the applicant s|applicant s|the candidate s|candidate s|this|these|personal|"
+    r"contact|candidate) (?:\w+ ){0,2}?(?:details|data|information|info|particulars|profile|"
+    r"profiles|application|applications|records?|documents?)|cvs?|resumes?)\b")
+_SHARE_NEG = frozenset("not no never nor neither without cannot dont wont t".split())
+_SHARE_BEHALF_RE = re.compile(r"\bon (?:our|its|their|the company s|the employer s) behalf\b|"
+                              r"\bon behalf of\b")
+_SHARE_VENDOR_RE = re.compile(r"\b(?:third part(?:y|ies) )?(?:service providers?|vendors?|suppliers?|"
+                              r"processors?)\b")
+_SHARE_VENDOR_PURPOSE_RE = re.compile(r"\b(?:recruit\w*|marketing|market|promot\w*|offers?|"
+                                      r"opportunit(?:y|ies)|their own)\b")
+_SHARE_TO = (r"(?:third part(?:y|ies)|affiliat(?:e|es|ed)|partnerorg"
+             r"|group (?:companies|company|entities|entity|members?|organi[sz]ations?)"
+             r"|(?:across|throughout) (?:the|our|its) (?:\w+ )?group"
+             r"|(?:entities|companies|members|businesses|organi[sz]ations) (?:of|in|within|across) "
+             r"(?:the|our|its) (?:\w+ )?group"
+             r"|other (?:\w+ )?(?:companies|company|employers?|organi[sz]ations?|firms?|businesses|entities)"
+             r"|clients?|sponsors?|agenc(?:y|ies)"
+             r"|external (?:recruiters?|recruitment|agenc(?:y|ies)|part(?:y|ies)|organi[sz]ations?|"
+             r"companies|firms?)"
+             r"|recruiters? from (?!theemployer\b)|vendorpurpose)")
+_SHARE_TO_RE = re.compile(r"\b" + _SHARE_TO + r"\b")
+_SHARE_ROLES_AT_RE = re.compile(r"\b(?:roles?|positions?|jobs?|vacanc(?:y|ies)|openings?|"
+                                r"opportunit(?:y|ies)) (?:at|with|in|across|within|from) (?:\w+ ){0,3}?"
+                                + _SHARE_TO + r"\b")
+# "partner" is a PERSON only in a person sense ("your / my / a partner", "spouse or partner",
+# "partner's", "domestic / civil / life / unmarried partner"); directly before an organisation
+# noun, or anywhere else in a sharing sentence, it is an organisation ("partner firms", "our
+# trusted partners", "its partners")
+_PARTNER_ORG_NEXT = frozenset("""firm firms company companies organisation organisations organization
+    organizations agency agencies institution institutions network networks employer employers
+    client clients vendor vendors supplier suppliers brand brands site sites university
+    universities school schools program programs programme programmes bank banks""".split())
+_PARTNER_PERSON_PREV = frozenset("my your his her a an spouse domestic civil life unmarried de".split())
+
+
+def _partner_senses(toks: list[str]) -> list[str]:
+    out = []
+    for i, t in enumerate(toks):
+        if t in ("partner", "partners"):
+            nxt = toks[i + 1] if i + 1 < len(toks) else ""
+            prev = toks[i - 1] if i else ""
+            person = nxt not in _PARTNER_ORG_NEXT and (
+                prev in _PARTNER_PERSON_PREV or nxt == "s" or toks[i + 1:i + 3] == ["or", "spouse"]
+                or toks[max(0, i - 2):i] in (["spouse", "or"], ["spouse", "and"]))
+            out.append("partnerperson" if person else "partnerorg")
+            continue
+        out.append(t)
+    return out
+
+
+def _share_sentences(text: str, ctx: Optional[PageCtx]) -> list[str]:
+    """The sentences of `text`, normalised, the employer's own names (`ctx`) as "theemployer",
+    each "partner" marked by its sense (`_partner_senses`)."""
+    names = sorted({norm_label(x) for x in declarations.employer_names_of(ctx.rctx) if norm_label(x)},
+                   key=len, reverse=True) if ctx is not None else []
+    out = []
+    for part in re.split(r"[.!?;]+", str(text or "")):
+        s = " " + norm_label(part) + " "
+        if not s.strip():
+            continue
+        for nm in names:
+            s = s.replace(" " + nm + " ", " theemployer ")
+        out.append(" ".join(_partner_senses(s.split())))
+    return out
+
+
+# D-225 (3): sharing or processing INSIDE the employer for the application itself: the PRIVACY
+# consent (truth `consents.privacy_consent`). The recipients: the hiring team, hiring
+# manager(s), interviewers, HR, the employer's recruiters / recruitment team, "our team", the
+# employer by name. Read only where no consent frame of `consent_frames` is in the label (a
+# privacy, retention or marketing frame keeps its own rule); a third-party recipient in the
+# same label wins (`share_frame` is read first).
+_INTERNAL_TO_RE = re.compile(
+    r"\b(?:hiring (?:team|teams|managers?|panels?|committee)|interviewers?|interview panels?"
+    r"|hr|human resources|(?:recruitment|recruiting|talent acquisition|people|hr) (?:team|teams|staff|"
+    r"department)|(?:our|its) (?:team|teams|recruiters?|staff|people)|theemployer)\b")
+_INTERNAL_VERB_RE = re.compile(r"\b(?:process(?:es|ed|ing)?|us(?:e|es|ed|ing)|review(?:s|ed|ing)?|"
+                               r"seen|view(?:s|ed|ing)?|access(?:es|ed|ing)?|handl(?:e|es|ed|ing))\b")
+# D-225 (3), the addition: parties acting ON THE EMPLOYER'S BEHALF for the application itself
+# are the privacy consent too ("service providers who process it on our behalf", "our
+# applicant-tracking provider", "processors acting for Example Co", "vendors who host our
+# recruitment system"). The sense must sit next to the recipient: a recipient noun within four
+# words before "on our / its / the company's behalf", "on behalf of us / the employer",
+# "acting for us / the employer", or "who host / operate / provide our <recruitment system |
+# careers site | applicant tracking>"; or the employer's own "<applicant tracking | recruitment
+# | careers> provider / vendor". A service provider without that sense ("service providers and
+# partners for their own marketing") stays with `share_frame` (third party). `norm_label`
+# drops a possessive "'s" ("the company's behalf" -> "the company behalf").
+_EMPLOYER_REF = r"(?:us|our company|our organi[sz]ation|the company|the employer|theemployer)"
+_BEHALF_WHO = r"(?:service providers?|providers?|vendors?|suppliers?|processors?|sub processors?|" \
+              r"subprocessors?|contractors?|third part(?:y|ies)|parties|party)"
+_BEHALF_SYSTEM = (r"(?:our|its|the company|the employer|theemployer) (?:\w+ ){0,2}?(?:recruitment|"
+                  r"recruiting|careers?|applicant tracking|hiring|job application|application|"
+                  r"talent acquisition)")
+_BEHALF_RE = re.compile(
+    r"\b" + _BEHALF_WHO + r" (?:\w+ ){0,4}?(?:"
+    r"(?:acting |who act |that act |which act )?on (?:our|its|the company|the employer|theemployer)"
+    r" behalf|(?:acting |who act |that act )?on behalf of " + _EMPLOYER_REF
+    + r"|(?:acting|who act|that act|which act) for " + _EMPLOYER_REF
+    + r"|(?:who|that|which) (?:host|hosts|operate|operates|provide|provides|run|runs|manage|manages|"
+    r"maintain|maintains|power|powers) " + _BEHALF_SYSTEM + r")\b"
+    r"|\b" + _BEHALF_SYSTEM + r"(?: (?:system|systems|platform|software|site|website|portal|tool))?"
+    r" (?:service providers?|providers?|vendors?|suppliers?|processors?|host|hosts)\b")
+_BEHALF_VERB_RE = re.compile(r"\b(?:stor(?:e|es|ed|ing)|host(?:s|ed|ing)?|held|hold(?:s|ing)?)\b")
+
+
+def behalf_sense(s: str) -> bool:
+    """D-225 (3) addition: does the normalised sentence `s` name a party acting on the
+    employer's behalf for the application (see the comment above)?"""
+    return bool(_BEHALF_RE.search(" " + s + " "))
+
+
+def internal_share_frame(text: str, ctx: Optional[PageCtx] = None) -> bool:
+    """D-225 (3): does one sentence of `text` share or process the applicant's details inside
+    the employer, or with a party acting on its behalf (see the block comments above)?"""
+    if consent_frames(text):
+        return False
+    for s in _share_sentences(text, ctx):
+        if not _SHARE_OBJ_RE.search(s):
+            continue
+        behalf = behalf_sense(s)
+        if not behalf and not _INTERNAL_TO_RE.search(s):
+            continue
+        verbs = (*_SHARE_VERB_RE.finditer(s), *_INTERNAL_VERB_RE.finditer(s),
+                 *(_BEHALF_VERB_RE.finditer(s) if behalf else ()))
+        for m in verbs:
+            if not _SHARE_NEG & set(s[:m.start()].split()[-4:]):
+                return True
+    return False
+
+
+def share_frame(text: str, ctx: Optional[PageCtx] = None) -> bool:
+    """D-224 (5a): does one sentence of `text` share the applicant's details with a third
+    party (see the block comment above)? The employer's own names (`ctx`) are no third party
+    ("recruiters from Example Co")."""
+    for s in _share_sentences(text, ctx):
+        s = " " + s + " "
+        behalf = bool(_SHARE_BEHALF_RE.search(s)) or behalf_sense(s)
+        if behalf:                       # a processor for the employer: the privacy consent
+            s = re.sub(r"\bthird part(?:y|ies)\b", " ", s)
+        vendor = "" if behalf or not _SHARE_VENDOR_PURPOSE_RE.search(s) else " vendorpurpose "
+        s = " ".join(_SHARE_VENDOR_RE.sub(vendor, s).split())
+        if not _SHARE_OBJ_RE.search(s):
+            continue
+        if _SHARE_ROLES_AT_RE.search(s):
+            return True                  # "... on file for roles at our partner companies"
+        if not _SHARE_TO_RE.search(s):
+            continue
+        for m in _SHARE_VERB_RE.finditer(s):
+            if not _SHARE_NEG & set(s[:m.start()].split()[-4:]):
+                return True              # not "we will not share ...", "never be passed to"
+    return False
 
 
 # fix9 (real-model run, page 26, class blanked): work-rights and sponsorship wordings the
@@ -2916,12 +3107,27 @@ def code_key_full(pf: PageField, ctx: Optional[PageCtx],
     under a generic label also from its help or context, only as one short sentence naming
     exactly one class, and never a date of birth or national ID from help unless the field
     is a DATE (M2 (a))."""
+    if standing is None and ctx is not None:
+        standing = standing_answer(pf, ctx)
+    key = _code_key_natural(pf, ctx, standing)
+    sq = _status_gate(pf, ctx, key)
+    if sq is not None:
+        # D-222 S2 / D-223 G1: a status question is keyed in the work-rights family unless
+        # code's own key is a class S2 yields to (`_S2_YIELDS`)
+        return CodeKey(FC.WORK_RIGHT, "status", confident=sq.plain)
+    return key
+
+
+def _code_key_natural(pf: PageField, ctx: Optional[PageCtx],
+                      standing: Optional[Standing] = None) -> CodeKey:
+    """`code_key_full` without the status question (D-223 G1: the key the field had before
+    S2, which S2 yields to when it is a protected class outside the work family)."""
     f = pf.field
-    if status_question(pf, _job_code(ctx) if ctx is not None else "SG") is not None:
-        return CodeKey(FC.WORK_RIGHT, "status", confident=True)     # D-222 S2
     if standing is None and ctx is not None:
         standing = standing_answer(pf, ctx)
     key = _key_on(pf, f.label, f.description, ctx, standing)
+    if key.klass in WORK_CLASSES and ns_question(f.label):
+        return CodeKey()        # D-224 (5b): the National Service detector first (fix7)
     if key.klass is not None or not is_generic(norm_label(f.label)):
         return key
     found = []
@@ -3032,6 +3238,9 @@ class ClassRule:
     neg: bool = False
     reader: str = ""
     plain: bool = False
+    # D-223 G3: a status wording with anything else in it: no truth, no reading; the model's
+    # answer is written only when ONE confirmation (no truth stated) agrees (`u_vote_end`)
+    status_open: bool = False
 
     @property
     def has_t(self) -> bool:
@@ -3159,6 +3368,81 @@ def _consent_rule(pf: PageField, ctx: PageCtx, classes: Sequence[FieldClass]) ->
         if fit is not None:
             rule.t_value, rule.t_labels = fit[0], tuple(fit[1])
     return rule
+
+
+# D-224 (5a): the third-party sharing consent. The profile holds no such consent today, so its
+# truth is FALSE; when a profile key for it exists (this path), a set true / false is read.
+SHARE_CONSENT_KEY = "consents.third_party_sharing"
+SHARE_DEFAULT_SOURCE = "default:no_third_party_sharing"
+SHARE_DETAIL = "sharing your details with other companies"
+
+
+def share_rule(pf: PageField, ctx: PageCtx) -> ClassRule:
+    """D-224 (5a): T of a third-party sharing consent: the profile's `SHARE_CONSENT_KEY` when
+    set, else False (a default, so a written refusal is assumed); T's option as asked."""
+    f = pf.field
+    v = applicant.get_path(ctx.profile, SHARE_CONSENT_KEY)
+    rule = ClassRule(FC.CONSENT_PRIVACY, classes=(FC.CONSENT_PRIVACY,), confident=True)
+    rule.t_truth = v if isinstance(v, bool) else False
+    rule.t_source = "profile:" + SHARE_CONSENT_KEY if isinstance(v, bool) else SHARE_DEFAULT_SOURCE
+    rule.t_kind = "set" if isinstance(v, bool) else "default"
+    rule.refused_key = "" if rule.t_truth else SHARE_CONSENT_KEY
+    rule.truth_text = "The applicant agrees." if rule.t_truth else \
+        f"The applicant does not agree to {SHARE_DETAIL}."
+    want = _as_asked(f, rule.t_truth, statement=False)
+    if want is not None:
+        fit = (_fit_stance(f, want) if _list_shaped(f) and not resolve.bool_shaped(f) else None) \
+            or resolve.fit_bool(f, want)
+        if fit is not None:
+            rule.t_value, rule.t_labels = fit[0], tuple(fit[1])
+    return rule
+
+
+def share_end(pf: PageField, d: Optional[ModelDecision], ctx: PageCtx, *,
+              internal: bool = False) -> FieldState:
+    """D-224 (5a): a third-party sharing consent follows its own truth under EVERY model class
+    and follows no other consent: T's option written (an optional box unticked, a yes/no
+    question "No", required or not: a truthful refusal the form offers, as the privacy rule);
+    refused, REQUIRED and no option states the refusal (a required tick box) ->
+    `consent_refused` (the existing stop, raised before anything is typed); an optional field
+    with no such option -> left empty / unticked. No confirmation or meaning call.
+    D-225 (3) `internal`: sharing / processing inside the employer or by a party acting on its
+    behalf, the same way with the privacy consent's truth (`_consent_rule`: set true / false,
+    unset -> agreed, assumed)."""
+    f = pf.field
+    rule = _consent_rule(pf, ctx, [FC.CONSENT_PRIVACY]) if internal else share_rule(pf, ctx)
+    ctx.decided[f.key] = class_string(FC.CONSENT_PRIVACY)
+    model_class = class_string(d.klass, d.which) if d is not None and d.klass is not None else ""
+    if not rule.t_truth and f.required and rule.t_value is None:
+        if internal:
+            raise AlwaysStop(ReasonCode.CONSENT_REFUSED,
+                             CONSENT_REFUSED_DETAILS.get(rule.refused_key, ""), step=ctx.step_title,
+                             field_key=f.key, label=f.label, target_path=rule.refused_key,
+                             sensitive=True)
+        raise AlwaysStop(ReasonCode.CONSENT_REFUSED, SHARE_DETAIL, step=ctx.step_title,
+                         field_key=f.key, label=f.label,
+                         target_path=SHARE_CONSENT_KEY if rule.t_kind == "set" else "",
+                         sensitive=True)
+    if rule.t_value is not None:
+        c = None
+        if d is not None and d.source not in (FillSource.NONE, FillSource.KEEP):
+            got = coerce(pf, d.value, ctx, allow_pick=False)
+            c = got if got.ok else None
+        if internal:
+            st = write_truth(pf, rule, c, note="" if c is not None else
+                             "shared inside the employer (or on its behalf) for this application: "
+                             "your privacy consent")
+        else:
+            st = write_truth(pf, rule, c, note="" if c is not None else
+                             "sharing your details with a third party: your profile does not agree")
+            if rule.t_kind != "set":
+                st.reason = f"check: {SHARE_DETAIL} (not agreed in your profile)"
+        st.rule, st.model_class = rule, model_class
+        return st
+    what_ = "your privacy consent" if internal else f"{SHARE_DETAIL}: not agreed in your profile"
+    out = _blank_end(pf, f"{what_}: left " + ("unticked" if f.type is FieldType.CHECKBOX else "empty"))
+    out.model_class = model_class
+    return out
 
 
 def _agrees(pf: PageField, c: Coerced) -> Optional[bool]:
@@ -3465,11 +3749,16 @@ _NOT_A_REGION = ("international student", "international students", "internation
 # the words a quoted place may be followed by (`quoted_place`). D-221 L5 (second ruling): the
 # ordinary prepositions and subordinators are function words too ("under", "as", "after",
 # "if" ...). Place-openers ("outside", "beyond", "elsewhere", "other" ...) are NOT: they stay
-# with `_PLACE_OPEN`.
+# with `_PLACE_OPEN`. D-223 M2: the time subordinators it lacked ("once your studies end",
+# "effective immediately", "beginning January"); a region or place after one is still code's
+# own place reading ("once in Asia", "starting in the region": unknown, empty). NOT
+# "throughout": code reads a place only after "in" / "within", so "in Singapore throughout the
+# region" would take Singapore's truth on a quote of "Singapore" (a ruling is asked)
 _PURE_FUNCTION = frozenset("""are is you your do does will would can could have has at any to
     be from on in within for of a an and or without not no under as per via upon until till
     during after before since while when if unless although though because so than then also
-    too either both each every all some yes""".split())
+    too either both each every all some yes once whilst whenever effective starting commencing
+    beginning immediately""".split())
 # D-221 L5 (second ruling): time and manner conditions the frames accept ("permanently",
 # "full-time", "unrestricted"). A duration or a manner names, widens or narrows no place, so
 # each is harmless in the pure form (it decides the place only; U / U9 read the meaning, and
@@ -3635,6 +3924,36 @@ def _job_status_re(jc: str) -> re.Pattern:
 # any work-rights field (no canonical U9 frame: the confirmation and the meaning call vote).
 
 _STATUS_NUMBER = ("number", "no", "id", "num", "expiry", "details", "copy", "photo", "scan")
+# D-223 G3: the confirmation's WANTED for a status wording code has no truth for: it states
+# no truth (TASK_CONFIRM's "the applicant's truth" is the one BRIEFING gives). D-225 (2): it
+# is given the owner's FACTS first, stated as facts and not as an answer (`status_facts`)
+STATUS_OPEN_WANTED = ("Answer the question as it is asked: the applicant's own true answer to "
+                      "QUESTION, as these facts and PROFILE in BRIEFING state it; answer \"\" if "
+                      "they do not settle it")
+_RESIDENCY_WORDS = {"citizen": "citizen", "pr": "permanent resident",
+                    "foreigner": "foreigner (neither citizen nor permanent resident)"}
+_WORK_PASS_WORDS = {"none_required": "none", "ep": "Employment Pass", "s_pass": "S Pass",
+                    "dp": "Dependant's Pass", "ltvp_loc": "Long-Term Visit Pass with a Letter of Consent",
+                    "student_pass": "Student's Pass", "other": "another pass"}
+
+
+def status_facts(ctx: PageCtx) -> str:
+    """D-225 (2): the owner's status FACTS in one line, from the profile rows S2 reads (the
+    nationality, the Singapore residency status, the work pass): "nationality Singapore;
+    residency status: citizen; work pass: none". Facts, not an answer: code derives no value
+    from them for a G3 wording, and a written value never cites them."""
+    p = ctx.profile
+    nat = str(applicant.get_path(p, BR.NATIONALITY_PATH) or "").strip().upper()
+    res = str(applicant.get_path(p, "singapore_status.residency_status") or "").strip().lower()
+    wp = str(applicant.get_path(p, "singapore_status.work_pass") or "").strip().lower()
+    nat_w = (resolve.country_names(nat) or (nat,))[0].title() if nat else "not stated"
+    return (f"nationality {nat_w}; residency status: {_RESIDENCY_WORDS.get(res, 'not stated')}; "
+            f"work pass: {_WORK_PASS_WORDS.get(wp, 'not stated')}")
+
+
+def status_open_wanted(ctx: PageCtx) -> str:
+    """D-225 (2): the G3 confirmation's WANTED: the facts, then the question as asked."""
+    return f"Facts about the applicant: {status_facts(ctx)}. {STATUS_OPEN_WANTED}"
 _STATUS_REGIONS = ("eu", "european union", "european")
 
 
@@ -3656,11 +3975,137 @@ def _status_kind(phrase: str) -> str:
 class StatusQ:
     """A status question: `country` = the ISO code it asks about ("" = two countries, a
     region or an unknown place: no truth); `kinds` = the status kinds asked; `join` = "or" /
-    "and" / "" (how several kinds are joined); `passes` = the pass phrases named."""
+    "and" / "" (how several kinds are joined); `passes` = the pass phrases named. `plain`
+    (D-223 G2): the whole label is a plain status sentence about the applicant, so the
+    profile's truth may answer it; False (G3) = a status wording with anything else in it:
+    no code truth, no reading (`_status_rule`)."""
     country: str
     kinds: frozenset
     join: str = ""
     passes: tuple = ()
+    plain: bool = True
+
+
+# D-223 G2 / D-225 (1): the ONLY words a plain status sentence may hold besides its status
+# phrases and their country. Its own small list, not the place rule's function words (the two
+# rules protect different things): the frame words ("Do you hold / have ...", "Are you ...",
+# "I am ..."), the articles, I / you / your / my, the copula, "or", and D-224 (3)'s form
+# furniture ("Are you currently a Singapore citizen?", "Please confirm whether ...", "(Y/N)",
+# "(required)"). Anything else asks a different question and goes to G3: "also", "too",
+# "then", "since", "before", "after", "during", "until", "while", "when", "if", "unless",
+# "although", "because", "than", "either", "both", "each", "every", "all", "any", "some",
+# "no", "and", "by birth", "by descent", previously, formerly, ever, only, dual, other,
+# another ... "not" stays: "Are you not a Singapore citizen?" is the same question negated,
+# which the plain path handles (the vote's meaning call; the fact is never cited under a
+# negation). As G3 a confirmation siding with a wrong model would be written (r8 pin)
+_STATUS_PLAIN = frozenset("""do does hold holds have has are is am a an the i you your my or
+    not currently presently now still please kindly confirm indicate select state whether
+    required""".split())
+# D-224 (3): "(Y/N)" / "Y/N" and "(Yes/No)" / "Yes/No" once normalised
+_STATUS_YN = re.compile(r"\by n\b|\byes no\b")
+# D-223 G2: a status sentence naming any other person is no S2 field at all. The other-person
+# detector's own tables, not a new list: `facts.OTHER_PERSON` (referee, manager, next of kin,
+# emergency contact, spouse, partner, parent, guardian ...), the relatives of D-211 M2 and the
+# personal-fact owners of D-212 N5 (dependant, child, father, mother ...)
+_STATUS_OTHER_PERSON = tuple(dict.fromkeys(facts.OTHER_PERSON + _RELATED + _OTHER_PERSON_FACT))
+
+# D-226: a STATUS question that names NO country asks about the JOB'S country, exactly as a
+# work-rights question with no place does ("of this country" / "here" too): "Are you a
+# citizen?", "Citizen or PR?", "Do you hold citizenship or permanent residency?", "Are you a
+# non-citizen?", "Are you a foreigner?", "Do you hold an Employment Pass?". Only where the
+# status word is the PREDICATE about the applicant: right after the frame ("are you (a)", "I
+# am (a)", "do you hold / have (a)"), or the whole label a bare status noun chain ("Citizen or
+# PR?"). So "senior / good / global citizen", "corporate citizenship" (a word between the
+# frame and the status word), "a citizen developer", "a Citizen Bank account" (a noun right
+# after it) and "the Citizen Services team" (no frame) are no status question. After the
+# status words, a tail that starts a clause or a qualifier ("by birth", "since 2020", "also")
+# makes it G3 (no code truth, the facts line), as with a country; a tail naming a place ("of
+# ...", "in ...") or anything else: no status question (the earlier paths decide). A
+# FOREIGNER / foreign national / non-citizen is not a citizen of that country: a permanent
+# resident IS one (a foreign national who needs no work pass), so "Are you a foreigner?" is
+# true for a PR; its truth is the nationality, else Singapore's residency status.
+_NC_KIND = {"citizen": "citizen", "national": "citizen", "citizenship": "citizen",
+            "nationality": "citizen", "permanent resident": "pr", "pr": "pr",
+            "permanent residency": "pr", "permanent resident status": "pr", "pr status": "pr",
+            "non citizen": "foreign", "noncitizen": "foreign", "foreigner": "foreign",
+            "foreign national": "foreign", "work pass": "pass", "employment pass": "pass",
+            "s pass": "pass"}
+# D-226 guard: region words that, before a status word, give it a non-status sense ("a global
+# citizen", "a worldwide citizen"): no status adjective (a real region, "an EU / ASEAN citizen",
+# stays one: no truth, empty)
+_NOT_STATUS_ADJ = frozenset({"global", "globally", "worldwide", "anywhere", "international",
+                             "internationally"})
+_NC_PERSON = ("permanent resident", "foreign national", "non citizen", "noncitizen", "foreigner",
+              "citizen", "national", "pr")
+_NC_HOLD = ("permanent resident status", "permanent residency", "citizenship", "nationality",
+            "pr status", "pr", "employment pass", "work pass", "s pass")
+_NC_HERE = r"(?: (?:of|in) (?:this|the) country| here)?"
+
+
+def _nc_chain(words: Sequence[str]) -> str:
+    w = "(?:" + "|".join(re.escape(x) for x in sorted(words, key=len, reverse=True)) + ")"
+    return rf"(?P<chain>{w}(?: (?:or |and )?(?:a |an )?{w})*)"
+
+
+_NC_ADV = r"(?: currently| presently| now| still)?"
+_NC_SHAPES = tuple(re.compile(p) for p in (
+    r"(?:are you|you are|i am)" + _NC_ADV + r" (?:a |an )?" + _nc_chain(_NC_PERSON) + _NC_HERE
+    + r"(?P<tail>(?: .*)?)",
+    r"do you" + _NC_ADV + r" (?:hold|have)(?: a| an| any)?(?: valid)? " + _nc_chain(_NC_HOLD) + _NC_HERE
+    + r"(?P<tail>(?: .*)?)",
+    r"(?:a |an )?" + _nc_chain(_NC_PERSON) + _NC_HERE + r"(?P<tail>)"))
+# D-228: the same status question in ANOTHER TENSE OR ASPECT ("Have you (ever) been a citizen
+# since 2020?", "Were you a PR?", "Will you be a citizen by the start date?", "Have you held
+# citizenship?", "Did you hold an Employment Pass?", "Are you becoming a PR?", "Do you expect to
+# be a citizen?") is a status wording WITH A TAIL: G3 always (no code truth, the facts line),
+# never canonical, with or without a tail of its own; a tail after it follows the same rule as
+# above ("Were you a PR professional?": no status question). With a country named the same
+# leads are already G3 (their words are not in `_STATUS_PLAIN`)
+_NC_TENSE_SHAPES = tuple(re.compile(p) for p in (
+    r"(?:have you(?: ever)? been|were you(?: ever)?|will you be|would you be|are you becoming|"
+    r"do you expect to be) (?:a |an )?" + _nc_chain(_NC_PERSON) + _NC_HERE + r"(?P<tail>(?: .*)?)",
+    r"(?:did you(?: ever)? hold|have you(?: ever)? held)(?: a| an| any)?(?: valid)? "
+    + _nc_chain(_NC_HOLD) + _NC_HERE + r"(?P<tail>(?: .*)?)"))
+_NC_LEAD = re.compile(r"^(?:(?:please|kindly) )?(?:(?:confirm|indicate|state|select) )?(?:whether )?")
+_NC_PHRASE = re.compile(r"(?<![a-z])(?:" + "|".join(
+    re.escape(x) for x in sorted(_NC_KIND, key=len, reverse=True)) + r")(?![a-z])")
+# a tail that qualifies the status (G3): a clause or qualifier word, or a number ("since 2020")
+_NC_TAIL_START = frozenset("""by since before after during until while when if unless although
+    because than either both each every all any some no also too then already yet still now
+    currently presently previously formerly ever only and or but who that which with for at
+    not""".split())
+
+
+def _no_country_status(pf: PageField, ln: str, box: bool, jc: str) -> Optional[StatusQ]:
+    """D-226: the status question a label naming no country asks about the job's country
+    `jc` (see the comment above), or None."""
+    s = " ".join(re.sub(r"\brequired\b", " ", _STATUS_YN.sub(" ", ln)).split())
+    s = _NC_LEAD.sub("", s)
+    m = next((x for x in (rx.fullmatch(s) for rx in _NC_SHAPES) if x), None)
+    tense = False
+    if m is None:                                    # D-228: another tense or aspect
+        m = next((x for x in (rx.fullmatch(s) for rx in _NC_TENSE_SHAPES) if x), None)
+        tense = m is not None
+    if m is None:
+        return None
+    chain, tail = m.group("chain"), m.group("tail").strip()
+    kinds = frozenset(_NC_KIND[p] for p in _NC_PHRASE.findall(chain))
+    if kinds == {"pass"}:     # as D-223 G for a named country: the one-employer tail is plain
+        tail = re.sub(r"^that ties you to one employer$", "", tail).strip()
+    if _phrase_in(_WORK_RIGHTS + _SPONSOR, tail) or any(
+            _u9_frame(pf.field.label, k, box) is not None for k in (FC.WORK_RIGHT, FC.SPONSORSHIP)):
+        return None
+    first = tail.split()[0] if tail else ""
+    if first and first not in _NC_TAIL_START and not first.isdigit():
+        return None
+    plain = not tense and not tail and not ("foreign" in kinds and len(kinds) > 1)   # "a citizen or a foreigner?"
+    if box and not plain:
+        return None
+    found, unknown, _place = code_place(pf, jc)
+    one = not (set(found) - {jc}) and not unknown
+    join = "or" if " or " in f" {chain} " else "and" if " and " in f" {chain} " else ""
+    passes = tuple(p for p in _NC_PHRASE.findall(chain) if _NC_KIND[p] == "pass")
+    return StatusQ(jc if one else "", kinds, join, passes, plain)
 
 
 def _place_runs() -> list[tuple[list[str], str, bool]]:
@@ -3694,11 +4139,18 @@ def _status_at(toks: Sequence[str], j: int) -> tuple[str, int]:
 def status_question(pf: PageField, jc: str = "SG") -> Optional[StatusQ]:
     """D-222 S2: the status question a yes/no or tick box asks, or None. A label that also
     holds a work-rights or sponsorship frame word outside its status words ("right to work",
-    "sponsor", ...) or a U9 work frame is a work-rights question, not a status one."""
+    "sponsor", ...) or a U9 work frame is a work-rights question, not a status one.
+    D-223 G: a label naming another person (G2) or asking about National Service (G1) is no
+    status question; `plain` (G2) = nothing but function words beside the status phrases and
+    their country (or an S3 frame); a tick box is one only when it is plain (G1). The code
+    keys and the model's class that S2 yields to are `status_of`'s."""
     f = pf.field
-    if not (f.type is FieldType.CHECKBOX or resolve.bool_shaped(f)):
+    box = f.type is FieldType.CHECKBOX
+    if not (box or resolve.bool_shaped(f)):
         return None
     ln = norm_label(f.label)
+    if _phrase_in(_STATUS_OTHER_PERSON, ln) or military_question(f.label) or ns_question(f.label):
+        return None
     toks = ln.split()
     runs = _place_runs()
     mentions: list[str] = []
@@ -3726,6 +4178,8 @@ def status_question(pf: PageField, jc: str = "SG") -> Optional[StatusQ]:
         for run, code, dem in runs:
             if list(toks[i:i + len(run)]) != run:
                 continue
+            if code == "?" and " ".join(run) in _NOT_STATUS_ADJ:
+                break                                # D-226: "a global citizen" is no place
             j = i + len(run)
             s, n = _status_at(toks, j)
             if n or (dem and (j >= len(toks) or toks[j] in ("or", "and"))):
@@ -3736,19 +4190,75 @@ def status_question(pf: PageField, jc: str = "SG") -> Optional[StatusQ]:
             break
         i += 1
     kinds.discard("")
-    if not mentions or not kinds:
+    if not mentions:
+        return _no_country_status(pf, ln, box, jc)      # D-226: the job's country
+    if not kinds:
         return None
     rest = " ".join(t for x, t in enumerate(toks) if x not in used)
     if _phrase_in(_WORK_RIGHTS + _SPONSOR, rest) or any(
             _u9_frame(f.label, k, f.type is FieldType.CHECKBOX) is not None
             for k in (FC.WORK_RIGHT, FC.SPONSORSHIP)):
         return None
+    if kinds == {"pass"}:
+        # D-223 G (work passes): the ruling's plain shapes also hold "currently" / "valid"
+        # ("Do you currently hold a valid Singapore work pass?") and the tail "... that ties
+        # you to one employer?"; an expiry, number or type is no plain shape (no bool there)
+        rest = re.sub(r"\b(?:currently|valid)\b|\bthat ties you to one employer\b", " ", rest)
+    rest = _STATUS_YN.sub(" ", rest)
+    plain = all(t in _STATUS_PLAIN for t in rest.split()) or u9_status_frame(f.label) is True
+    if box and not plain:
+        return None                      # G1: a box is a status field only as a plain statement
     found, unknown, _place = code_place(pf, jc)
     codes = set(mentions)
     others = set(found) - codes - {jc} if codes == {jc} else set(found) - codes
     join = "or" if "or" in toks else "and" if "and" in toks else ""
     one = len(codes) == 1 and "?" not in codes and not others and not unknown
-    return StatusQ(next(iter(codes)) if one else "", frozenset(kinds), join, tuple(passes))
+    return StatusQ(next(iter(codes)) if one else "", frozenset(kinds), join, tuple(passes), plain)
+
+
+# D-223 G1: the protected classes a status question never overrides (every protected class
+# but the work family): consent, marketing, certification, acknowledgement, declaration,
+# owner fact, self-ID, other person. Where code's own key names one, S2 is silent and the
+# field goes the way it went before S2; the model's class does so only on a non-plain label
+# (D-224 (1), `decide`)
+_S2_YIELDS = PROTECTED - WORK_CLASSES
+
+
+def _status_ref(pf: PageField) -> tuple[str, str]:
+    return pf.field.key, pf.field.label
+
+
+def _status_gate(pf: PageField, ctx: Optional[PageCtx], natural: CodeKey) -> Optional[StatusQ]:
+    """D-223 G1: `status_question`, unless code's natural key (`_code_key_natural`) is a
+    class S2 yields to; cached per field in `ctx.status_q` (a model class S2 yields to
+    silences it there for the rest of the page, `status_silence`)."""
+    ref = _status_ref(pf)
+    if ctx is not None and ref in ctx.status_q:
+        return ctx.status_q[ref]
+    sq = status_question(pf, _job_code(ctx) if ctx is not None else "SG")
+    if sq is not None and natural.klass in _S2_YIELDS:
+        sq = None
+    if ctx is not None:
+        ctx.status_q[ref] = sq
+    return sq
+
+
+def status_of(pf: PageField, ctx: Optional[PageCtx]) -> Optional[StatusQ]:
+    """D-223 G: the status question S2 answers for this field, or None (S2 silent)."""
+    if ctx is not None and _status_ref(pf) in ctx.status_q:
+        return ctx.status_q[_status_ref(pf)]
+    return _status_gate(pf, ctx, _code_key_natural(pf, ctx, None))
+
+
+def status_silence(pf: PageField, ctx: PageCtx) -> bool:
+    """D-223 G1: the model named a class S2 yields to: S2 stays silent for this field on this
+    page (its status place reading is dropped too). True when it was not silent before."""
+    ref = _status_ref(pf)
+    was = ctx.status_q.get(ref) if ref in ctx.status_q else status_of(pf, ctx)
+    ctx.status_q[ref] = None
+    if was is not None:
+        ctx.places.pop(pf.field.key, None)
+    return was is not None
 
 
 def _status_one(kind: str, x: str, ctx: PageCtx, passes: Sequence[str]) -> tuple[Optional[bool], str, str]:
@@ -3761,6 +4271,12 @@ def _status_one(kind: str, x: str, ctx: PageCtx, passes: Sequence[str]) -> tuple
     res = str(applicant.get_path(p, "singapore_status.residency_status") or "").strip().lower()
     wp = str(applicant.get_path(p, "singapore_status.work_pass") or "").strip().lower()
     nat_src, res_src = "profile:" + BR.NATIONALITY_PATH, "profile:singapore_status.residency_status"
+    if kind == "foreign":           # D-226: not a citizen of `x` (a permanent resident is one)
+        if nat:
+            return nat != x, nat_src, "set"
+        if x == "SG" and res in ("citizen", "pr", "foreigner"):
+            return res != "citizen", res_src, "set"
+        return None, "", "none"
     if kind == "citizen":
         return (nat == x, nat_src, "set") if nat else (None, "", "none")
     if kind in ("pr", "resident") and x == "SG" and res in ("citizen", "pr", "foreigner"):
@@ -3798,31 +4314,40 @@ def status_truth(sq: StatusQ, ctx: PageCtx) -> tuple[Optional[bool], str, str]:
     return truth, src, kind
 
 
-def _status_nouns(sq: StatusQ) -> list[str]:
+def _status_nouns(sq: StatusQ, held: bool = True) -> list[str]:
     name = (resolve.country_names(sq.country) or (sq.country,))[0].title()
     out = []
     for k in sorted(sq.kinds):
-        out.append({"citizen": f"is a citizen of {name}", "pr": f"is a permanent resident of {name}",
-                    "resident": f"is a resident of {name}",
-                    "pass": f"holds a work pass, visa or permit for {name}"}[k])
+        yes, no = {"citizen": (f"is a citizen of {name}", f"is not a citizen of {name}"),
+                   "pr": (f"is a permanent resident of {name}", f"is not a permanent resident of {name}"),
+                   "resident": (f"is a resident of {name}", f"is not a resident of {name}"),
+                   "pass": (f"holds a work pass, visa or permit for {name}",
+                            f"does not hold a work pass, visa or permit for {name}"),
+                   # D-226: a foreigner / non-citizen there (a permanent resident is one)
+                   "foreign": (f"is not a citizen of {name} (a foreign national there)",
+                               f"is a citizen of {name}")}[k]
+        out.append(yes if held else no)
     return out
 
 
 def status_sentence(sq: StatusQ, truth: bool) -> str:
     """The owner's truth in words (the confirmation's WANTED), or its contradiction with
     `truth` flipped (the meaning call): "the applicant is a citizen of Singapore"."""
-    nouns = _status_nouns(sq)
-    joiner = " and " if sq.join == "and" else " or "
     if truth:
-        return "the applicant " + joiner.join(nouns)
-    neg = [n.replace("is a ", "is not a ", 1).replace("holds a ", "does not hold a ", 1) for n in nouns]
-    return "the applicant " + (" and " if sq.join != "and" else " or ").join(neg)
+        return "the applicant " + (" and " if sq.join == "and" else " or ").join(_status_nouns(sq))
+    return "the applicant " + (" and " if sq.join != "and" else " or ").join(_status_nouns(sq, False))
 
 
 def _status_rule(pf: PageField, ctx: PageCtx, sq: StatusQ) -> ClassRule:
     """D-222 S2: the work-rights family rule of a status question: T from `status_truth`, in
     words for the confirmation; the option T gives (`fit_bool`) is the reader's option, which
     U9 keeps only for a canonical frame (none here: the vote decides, U2-U8)."""
+    if not sq.plain:
+        # D-223 G3: "... by birth", "... since 2020", "renounced", "a scholarship", "or a
+        # citizen of another country": code has no truth for it; the confirmation states none,
+        # only the owner's facts (D-225 (2))
+        return ClassRule(FC.WORK_RIGHT, which="status", truth_text=status_open_wanted(ctx),
+                         status_open=True)
     rule = ClassRule(FC.WORK_RIGHT, which="status", confident=True)
     truth, src, kind = status_truth(sq, ctx)
     if truth is None:
@@ -3969,7 +4494,10 @@ def quoted_place(raw: Optional[str], label: str, jc: str) -> str:
     if (at and lab[at - 1].isalnum() and fq[:1].isalnum()) or re.match(r"[a-z0-9]|'s\b", rest):
         return ""
     after = tokens(rest)
-    if after and (after[0] in _PLACE_JOINS or not complete_place_follow(after)):
+    # D-223 M2: sentence punctuation (. ? ! ; :) or an opening bracket ENDS the follower run
+    # ("... in Singapore? Please answer honestly.", "... in Singapore (May to August)")
+    run = tokens(re.split(r"[.?!;:(\[]", rest, maxsplit=1)[0])
+    if after and (after[0] in _PLACE_JOINS or not complete_place_follow(run)):
         return ""
     n0 = re.sub(r"^(?:in|within) ", "", norm_label(q))
     n = re.sub(r"^the ", "", n0)
@@ -4000,7 +4528,7 @@ def work_place(pf: PageField, ctx: PageCtx) -> tuple[list[str], bool, bool]:
         return hit
     jc = _job_code(ctx)
     found, unknown, place = code_place(pf, jc)
-    sq = status_question(pf, jc)
+    sq = status_of(pf, ctx)
     if sq is not None:
         # D-222 S2: a status question names its country itself (the adjective, "of X", the
         # demonym): that country, no place call; two countries, a region or an unknown place
@@ -4440,7 +4968,7 @@ def class_rule(pf: PageField, ctx: PageCtx, klass: FieldClass, which: str, key: 
         return _declaration_rule(pf, ctx, classes, which or (classes[0] if classes else "other"),
                                  standing, key.confident and key.klass is FC.DECLARATION)
     if klass in WORK_CLASSES:
-        sq = status_question(pf, _job_code(ctx))
+        sq = status_of(pf, ctx)
         if sq is not None:
             return _status_rule(pf, ctx, sq)          # D-222 S2: a status question's own truth
         return _work_rule(pf, ctx, klass, standing, key.confident and key.klass in WORK_CLASSES)
@@ -4725,6 +5253,20 @@ def _u9_status_frames() -> list[re.Pattern]:
             rf"are you {a}{d} or (?:a )?{c} (?:pr|permanent resident)",
             rf"do you hold {c} (?:citizenship|nationality)",
             rf"do you hold a {c} passport"))
+        # D-226: the same frames with the country slot empty or "this country" / "here" (the
+        # job's country, `_no_country_status`); a foreigner / non-citizen frame too. Still no
+        # work-pass frame (a pass stays on the vote path, as with a country)
+        h = r"(?: (?:of|in) (?:this|the) country| here)?"
+        pr = r"(?:permanent resident|pr)"
+        fo = r"(?:non citizen|noncitizen|foreigner|foreign national)"
+        _U9_STATUS.extend(re.compile(p) for p in (
+            rf"are you {a}(?:citizen|national){h}",
+            rf"are you {a}citizen or (?:a )?{pr}{h}",
+            rf"are you {a}{pr}(?: (?:or )?(?:a )?{pr})?{h}",
+            rf"{a}citizen or (?:a |an )?{pr}",
+            rf"do you hold (?:citizenship|nationality)(?: or (?:permanent residency|permanent "
+            rf"resident status|pr status|pr))?{h}",
+            rf"are you {a}{fo}(?: (?:or )?(?:a |an )?{fo})?{h}"))
     return _U9_STATUS
 
 
@@ -4800,7 +5342,8 @@ def reading_kept(pf: PageField, rule: ClassRule) -> bool:
             and _u9_frame(f.label, FC.SPONSORSHIP, False) is not None:
         klass = FC.SPONSORSHIP          # a sponsorship wording under the work-rights rule
     if klass is FC.WORK_RIGHT and rule.which == "status":
-        pol = None if box else u9_status_frame(f.label)      # D-222 S3: whole-label frames only
+        # D-222 S3: whole-label frames only; D-223 G3: an open status wording has no reading
+        pol = None if box or rule.status_open else u9_status_frame(f.label)
     else:
         pol = True if klass is FC.DECLARATION and u12_bare_noun(pf) else _u9_frame(f.label, klass, box)
     if pol is None:
@@ -4849,6 +5392,26 @@ def military_question(label: str) -> bool:
     National Service)?" is not)."""
     toks = declarations.strip_ns_exclusions(list(tokens(label)))
     return _phrase_in(declarations._MILITARY, " ".join(toks))
+
+
+# D-224 (5b): the National Service words the ruling names beyond the declaration reader's
+# military list ("NS", "NSF", "NSman", "National Service" are in it): reservist, ORD, and
+# "National Serviceman" spelled out (NSman)
+_NS_EXTRA = ("reservist", "reservists", "ord", "national serviceman", "national servicemen")
+
+
+def ns_question(label: str) -> bool:
+    """D-224 (5b): a National Service question (`military_question` or `_NS_EXTRA`, an
+    excluded NS not counted) that is not a work-rights or sponsorship question as well (no
+    `_WORK_RIGHTS` / `_SPONSOR` phrase, no U9 work frame): keyed by the National Service
+    detector BEFORE any work-rights or status key, so its answer comes from `ns_status`
+    (fix7, `ns_truth`) whatever the standing reader or the model's work class says."""
+    toks = " ".join(declarations.strip_ns_exclusions(list(tokens(label))))
+    if not (military_question(label) or _phrase_in(_NS_EXTRA, toks)):
+        return False
+    if _phrase_in(_WORK_RIGHTS + _SPONSOR, norm_label(label)):
+        return False
+    return all(_u9_frame(label, k, False) is None for k in (FC.WORK_RIGHT, FC.SPONSORSHIP))
 
 
 # fix7 ruling 2: a label that plainly asks whether the applicant has served or completed
@@ -5016,12 +5579,29 @@ def decide(pf: PageField, d: Optional[ModelDecision], ctx: PageCtx,
     f = pf.field
     standing = standing or Standing()
     key = key if key is not None else code_key_full(pf, ctx, standing)
-    status_q = status_question(pf, _job_code(ctx))
+    if key.share or key.internal:
+        # D-224 (5a) / D-225 (3): whatever class the model names
+        return share_end(pf, d, ctx, internal=key.internal)
+    if d is not None and d.klass in _S2_YIELDS and d.klass is not FC.OWNER_FACT:
+        # D-228: the model's owner_fact class never silences a status wording, plain or with a
+        # tail (a mislabel that ended as an ID-number stop on a question plainly about status:
+        # a tail -> G3); code's own owner-fact key (an ID-number label) still wins in `status_of`
+        sq0 = status_of(pf, ctx)
+        if sq0 is not None and not sq0.plain:
+            # D-223 G1 as narrowed by D-224 (1): the model's class silences S2 only on a
+            # NON-plain status label; on a plain one code's status key decides whatever
+            # class the model names (owner_fact, ordinary, ...). Code's own protected keys
+            # still win, plain or not (`status_of`)
+            status_silence(pf, ctx)
+    status_q = status_of(pf, ctx)
     if status_q is not None:
         # D-222 S2: a status question ("Are you a Singapore citizen?", "Do you hold a UK
-        # visa?") is keyed by code in the work-rights family, whatever the key or the model's
-        # class says: never an owner-fact (ID number) request, never the model's answer alone
-        key = CodeKey(FC.WORK_RIGHT, "status", confident=True)
+        # visa?") is keyed by code in the work-rights family whatever class the model names
+        # in that family or none (D-223 G1: never over a consent, declaration, owner-fact,
+        # self-ID or other-person class, either key): never the model's answer alone
+        key = CodeKey(FC.WORK_RIGHT, "status", confident=status_q.plain)
+    elif key.klass is FC.WORK_RIGHT and key.which == "status":
+        key = _code_key_natural(pf, ctx, standing)     # G1: silenced after the page's keys
     st = FieldState(pf)
     if d is not None and d.klass is not None:
         st.model_class = class_string(d.klass, d.which)
@@ -5079,6 +5659,12 @@ def decide(pf: PageField, d: Optional[ModelDecision], ctx: PageCtx,
     if status_q is not None:
         mk, mw, drop = FC.WORK_RIGHT, "", ""     # D-222 S2: the model's class is the family's
     corrected = ""
+    if WORK_CLASSES & {ck, mk} and ns_question(f.label):
+        # D-224 (5b): a National Service question is no work-rights question, whatever the
+        # model's class: the ordinary path below, where fix7 takes `ns_status`
+        corrected, mk, mw = "check: national service", None, ""
+        ck = None if ck in WORK_CLASSES else ck
+        drop = corrected
     if FC.DECLARATION in (ck, mk) and military_question(f.label):
         # review 4 F3: military / National Service is not government employment and has no
         # declaration truth in code: the model's answer stands, assumed, after the neutral
@@ -6167,7 +6753,12 @@ def _same(pf: PageField, v: Any, labs: Sequence[str], w: Any, wlabs: Sequence[st
 
 
 def contradiction_text(pf: PageField, ctx: PageCtx, rule: ClassRule) -> str:
-    """D-212 U3: the statement that contradicts the owner's truth, for the meaning call."""
+    """D-212 U3: the statement that contradicts the owner's truth, for the meaning call.
+    D-225 (2), a G3 status wording (no truth): a nationality, residency status or work pass
+    other than the owner's facts say."""
+    if rule.status_open:
+        return ("the applicant's nationality, residency status or work pass is other than these "
+                f"facts say ({status_facts(ctx)})")
     if rule.klass is FC.DECLARATION:
         if rule.t_truth is False:
             return adverse_text(rule.classes or (rule.which,))
@@ -6177,7 +6768,7 @@ def contradiction_text(pf: PageField, ctx: PageCtx, rule: ClassRule) -> str:
     if rule.t_truth is None:
         return ""
     if rule.which == "status":
-        sq = status_question(pf, _job_code(ctx))       # D-222 S2: the status, flipped
+        sq = status_of(pf, ctx)                        # D-222 S2: the status, flipped
         return status_sentence(sq, not rule.t_truth[0]) if sq is not None and sq.country else ""
     auth, need = rule.t_truth
     where, free = _work_where(pf, ctx)
@@ -6203,14 +6794,53 @@ def u_vote_end(pf: PageField, ctx: PageCtx, st: FieldState, rule: ClassRule) -> 
     end. A none-applies option the confirmation itself named -> written (U4). With no reading,
     a confirmation that differs from the first answer (or a silent model) -> the meaning call
     on the confirmation's value, "no" -> written (U8). Anything else -> None: the protective end, which never
-    writes code's own reading. Always assumed, option labels only in the note (L2)."""
+    writes code's own reading. Always assumed, option labels only in the note (L2).
+    D-223 G3 (an open status wording, `rule.status_open`): no truth, so no reading and no
+    meaning call; the model's answer is written (source `assumption`) only when the ONE
+    confirmation, which states no truth, picks the same; a silent model, an unusable
+    confirmation or a differing one -> the protective end (empty)."""
+    if rule.status_open and st.first is None:
+        st.vote_why = "no usable answer from the AI"
+        return None
     got = _u_confirm(pf, ctx, rule)
     if got is None:
         st.vote_why = "no usable confirmation"
         return None
     v, labs = got
     first, shown = st.first, (labs[0] if labs else ("ticked" if _bool_word(v) else "unticked"))[:60]
-    if rule.t_value is not None and _same(pf, v, labs, rule.t_value, rule.t_labels):
+    if rule.status_open:
+        # D-225 (2): the confirmation was given the owner's facts (`status_open_wanted`).
+        # Agreeing -> the model's answer; differing -> U8b: the meaning call on BOTH answers
+        # ("does it state a status other than the facts say?"), only a consistent pair is
+        # written. Never the facts as the source: code derived no answer here
+        if first is None:
+            st.vote_why = "no usable answer from the AI"
+            return None
+        if _same(pf, v, labs, first[0], first[1]):
+            out = FieldState(pf, usable=True, value=first[0], labels=tuple(first[1]))
+            out.note = (f"votes: the AI's answer and the check agree ({shown}); no truth in "
+                        "your profile for this wording")
+        else:
+            m_conf = verify_meaning(pf, ctx, rule, (v, tuple(labs)))
+            if m_conf is None:
+                st.vote_why = _why_meaning("the check's answer", None)
+                return None
+            m_first = verify_meaning(pf, ctx, rule, first)
+            said = _shown_text(first[0], first[1])[:60]
+            if m_conf is False and m_first is True:
+                out = FieldState(pf, usable=True, value=v, labels=tuple(labs))
+                out.note = (f"votes: the check and two meaning checks agree ({shown}); the AI "
+                            f"answered {said}; no truth in your profile for this wording")
+            elif m_conf is True and m_first is False:
+                out = FieldState(pf, usable=True, value=first[0], labels=tuple(first[1]))
+                out.note = (f"votes: the AI's answer and two meaning checks agree ({said}); the "
+                            f"check answered {shown}; no truth in your profile for this wording")
+            else:
+                st.vote_why = (f"the check differs from the AI; meaning: check's {_yn(m_conf)}, "
+                               f"AI's {_yn(m_first)} (no truth in your profile for this wording)")
+                return None
+        out.source = AnswerSource.ASSUMPTION.value
+    elif rule.t_value is not None and _same(pf, v, labs, rule.t_value, rule.t_labels):
         out = FieldState(pf, usable=True, value=rule.t_value, labels=tuple(rule.t_labels))
         out.source = rule.t_source or f"default:{rule.klass.value}"
         said = _shown_text(first[0], first[1])[:60] if first is not None else "nothing usable"
@@ -6497,6 +7127,10 @@ def last_resort(pf: PageField, ctx: PageCtx, prev: Optional[FieldState] = None,
     nothing truthful for comes back `empty_for_site` (§4.7)."""
     f = pf.field
     key = key if key is not None else code_key_full(pf, ctx)
+    if key.share or key.internal:       # D-224 (5a) / D-225 (3): its own truth, never a fallback
+        return share_end(pf, None, ctx, internal=key.internal)
+    if key.klass is FC.WORK_RIGHT and key.which == "status" and status_of(pf, ctx) is None:
+        key = _code_key_natural(pf, ctx)          # D-223 G1: S2 silenced by the model's class
     if prev is not None and prev.vote == "E":
         got = experience_check(pf, ctx, prev.first, prev.source)     # ruling E1
         if got is not None:
@@ -6508,6 +7142,9 @@ def last_resort(pf: PageField, ctx: PageCtx, prev: Optional[FieldState] = None,
         if FC.DECLARATION in (ck, mk) and military_question(f.label):
             ck = None if ck is FC.DECLARATION else ck          # review 4 F3: no declaration end
             mk = None if mk is FC.DECLARATION else mk
+        if WORK_CLASSES & {ck, mk} and ns_question(f.label):
+            ck = None if ck in WORK_CLASSES else ck            # D-224 (5b): no work-rights end
+            mk = None if mk in WORK_CLASSES else mk
         if ck is not None or mk is not None:
             prev = prev or FieldState(pf)
             prev.rule = class_rule(pf, ctx, ck or mk, key.which if ck else mw, key, Standing())

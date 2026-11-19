@@ -1,0 +1,41 @@
+@form 12_sf_pinnacle_insurance | successfactors | Pinnacle Insurance | Graduate Trainee, Actuarial and Data (Singapore)
+@page Personal Details
+first|TEXT|R|First name||ord|Alex
+last|TEXT|R|Last name||ord|Testcase
+email|EMAIL|R|Email||ord|alex.testcase@example.com
+mobile|PHONE|R|Mobile||of:phone|91234567
+dob|DATE|R|Date of birth||of:date_of_birth|2002-03-14
+addr|TEXT|R|Home address||of:address|1 Example Road
+postal|TEXT|R|Postal code||of:postal_code|000001
+cit|DROPDOWN|R|Citizenship / immigration status|Singapore Citizen;Singapore Permanent Resident;Employment Pass;S Pass;Student Pass;Other|wr|Singapore Citizen
+nsstat|DROPDOWN|R|National Service status|Completed;Serving;Exempted;Not applicable|ord|Completed
+@page Education and Work
+uni|TEXT|R|University / institution||ord|Nanyang Example University
+deg|TEXT|R|Degree||ord|Bachelor of Engineering
+maj|TEXT|R|Major||ord|Computer Engineering
+grade|TEXT|R|Final grade / CAP||ord|4.20 / 5.00
+gradyr|NUMBER|R|Graduation year||ord|2025
+emp|TEXT|O|Latest employer||ord|Sample Analytics
+title|TEXT|O|Latest job title||ord|Data Intern
+resume|FILE|R|Resume||ord|~
+transcript|FILE|R|Academic transcript||ord|~
+@page Questions
+legal|RADIO|R|Are you legally permitted to work in Singapore for any employer?|Yes;No|wr|Yes
+visa|RADIO|R|Do you now or in the future require a work pass or visa sponsorship?|Yes;No|sp|No
+restr|RADIO|R|Do you have any restrictions on your right to work in Singapore?|Yes;No|wr|No
+prev|RADIO|R|Have you ever been employed by Pinnacle Insurance, including as an intern?|Yes;No|dec:prior_employment_at_company|No
+agent|RADIO|R|Are you, or have you ever been, a licensed insurance agent or representative of another insurer?|Yes;No|ord|No
+rel|RADIO|R|Do you have family members or close friends employed by Pinnacle Insurance or any other insurance company?|Yes;No|dec:relatives_at_company|No
+fit|RADIO|R|Have you ever been refused or had revoked any licence, registration or professional qualification?|Yes;No|dec:regulatory_disciplinary|No
+crim|RADIO|R|Have you ever been convicted of an offence involving fraud, dishonesty or breach of trust?|Yes;No|dec:criminal_record|No
+bank|RADIO|R|Have you ever been bankrupt or had a judgment entered against you for a debt?|Yes;No|dec:bankruptcy|No
+conf|RADIO|R|Are you subject to any restrictive covenant or confidentiality obligation that may affect your employment with Pinnacle Insurance?|Yes;No|dec:non_compete|No
+exam|DROPDOWN|R|Actuarial exams passed|None;1-2 exams;3-5 exams;More than 5 exams|ord|?None
+sal|NUMBER|R|Expected monthly salary (SGD)||of:salary_expected|5000
+why|TEXTAREA|R|Why are you interested in Pinnacle Insurance? (max 100 words)||ord|Insurance depends on data and risk modelling, which fits my engineering background and my internship in analytics. Pinnacle's graduate programme gives structured rotations and exam support.
+hear|DROPDOWN|R|How did you hear about us?|Pinnacle Careers Site;LinkedIn;Campus Talk;Referral;Other|ord|Pinnacle Careers Site
+@page Declaration
+cert|CHECKBOX|R|I declare that the above information is true and complete and I understand that false information may result in rejection or dismissal.||cert|true
+priv|CHECKBOX|R|I consent to Pinnacle Insurance collecting, using and disclosing my personal data for recruitment, including to its parent company, subsidiaries and affiliates.||priv|true
+bgc|CHECKBOX|R|I authorise Pinnacle Insurance to verify my education, employment history and criminal record.||ack|true
+tc|CHECKBOX|R|I accept the Terms of Use of the Pinnacle Insurance careers portal.||ack|true

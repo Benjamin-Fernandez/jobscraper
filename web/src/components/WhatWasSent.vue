@@ -21,8 +21,8 @@
 import { computed, nextTick, onMounted, ref } from 'vue'
 import { describeError, getApplicant, getAttemptAnswers, problemOf, rememberAnswer } from '../api.js'
 import {
-  FILLED_TITLE, SAVED_SENT, SAVED_STOPPED, SENT_TITLE, answerBody, correctionLabel, fieldCounts, fieldKind,
-  fieldTitle, filterFields, openAnswer, refusalCopy, sentSubLine, startValue, wasSent,
+  FILLED_TITLE, SAVED_SENT, SAVED_STOPPED, SENT_TITLE, answerBody, correctionLabel, emptyAction, fieldCounts,
+  fieldKind, fieldTitle, filterFields, openAnswer, refusalCopy, sentSubLine, startValue, wasSent,
 } from '../attempts.js'
 import Segmented from '../ui/Segmented.vue'
 
@@ -68,6 +68,12 @@ const blankNumber = computed(() => {
   return out
 })
 const titleOf = f => fieldTitle(f, blankNumber.value[f.id] ?? 0)
+// Why a field was left empty (D-229): the contract's sentence and hint, and the link the hint
+// points at. A not-answered protected field shows these INSTEAD of the "follows your details"
+// refusal (that sentence is for answered fields, and sent the owner in a circle).
+const hasWhy = f => f.status === 'not_answered' && Boolean(String(f.reason ?? '').trim() || String(f.reason_hint ?? '').trim())
+const whyLink = f => emptyAction(f)
+const showRefusal = f => !f.can_remember && !(hasWhy(f) && f.refusal === 'follows_your_details') && refusalView(f)
 const filterOptions = computed(() => [
   { value: 'all', label: `All ${counts.value.all}`, ariaLabel: `All ${counts.value.all} answers` },
   { value: 'assumed', label: `Assumed ${counts.value.assumed}`, ariaLabel: `${counts.value.assumed} assumed answers`, disabled: counts.value.assumed === 0 },
@@ -288,6 +294,19 @@ function toggleMulti(option, on) {
               <template v-else><span aria-hidden="true">—</span><span class="visually-hidden">No value</span></template>
             </p>
             <p v-if="f.basis_text" class="wws-basis">{{ f.basis_text }}</p>
+            <div v-if="hasWhy(f)" class="wws-why" data-why>
+              <p v-if="f.reason" class="wws-reason"><span class="visually-hidden">Why it was left empty: </span>{{ f.reason }}</p>
+              <p v-if="f.reason_hint || whyLink(f)" class="wws-hint">
+                <span v-if="f.reason_hint">{{ f.reason_hint }}</span>
+                <a
+                  v-if="whyLink(f)"
+                  class="button ghost wws-why-link"
+                  href="#/profile"
+                  :aria-label="`${whyLink(f).label}: ${titleOf(f)}`"
+                  @click.prevent="openAnswer(whyLink(f).target)"
+                >{{ whyLink(f).label }}</a>
+              </p>
+            </div>
             <p v-if="f.remembered_text" class="wws-next">Next time: {{ f.remembered_text }}</p>
           </div>
           <div class="wws-badges">
@@ -305,7 +324,7 @@ function toggleMulti(option, on) {
               :aria-label="`${correctionLabel(f, sent)}: ${titleOf(f)}`"
               @click="open(f)"
             >{{ correctionLabel(f, sent) }}</button>
-            <p v-else-if="!f.can_remember && refusalView(f)" class="wws-refusal">
+            <p v-else-if="showRefusal(f)" class="wws-refusal">
               {{ refusalView(f).lead }}
               <button
                 v-if="refusalView(f).to === 'details'"
@@ -441,6 +460,12 @@ function toggleMulti(option, on) {
 .wws-value { margin-top: 2px; font-weight: var(--weight-semibold); white-space: pre-wrap; }
 .wws-value.is-empty { color: var(--muted); font-weight: var(--weight-regular, 400); }
 .wws-basis, .wws-next { margin-top: 2px; font-size: var(--text-xs); color: var(--muted); }
+/* Why a field was left empty: plain sentences (not colour alone), the link on the hint's line. */
+.wws-why { margin-top: var(--space-1); display: grid; gap: 2px; min-width: 0; }
+.wws-reason { font-size: var(--text-sm); color: var(--text-2); }
+.wws-hint { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-1) var(--space-2); font-size: var(--text-xs); color: var(--muted); }
+.wws-hint span { min-width: 0; overflow-wrap: anywhere; }
+.wws-why-link { min-height: 1.75rem; padding: 0 var(--space-2); font-size: var(--text-xs); }
 .wws-badges { grid-area: badges; display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: flex-end; gap: var(--space-1); }
 .wws-act { grid-area: act; min-width: 0; }
 .wws-act:empty { display: none; }
@@ -477,6 +502,7 @@ function toggleMulti(option, on) {
   .wws-option, .wws-scope { min-height: var(--touch-min); }
   .wws-buttons button { min-height: var(--touch-min); }
   .wws-refusal-link { min-height: var(--touch-min); }
+  .wws-why-link { min-height: var(--touch-min); display: inline-flex; align-items: center; }
   .wws-retry { min-height: var(--touch-min); }
 }
 </style>

@@ -1,0 +1,47 @@
+@form 02_workday_acme_trading | workday | Acme Trading | Management Associate Programme 2027 (Singapore)
+@page My Information
+how|DROPDOWN|R|How Did You Hear About Us?|Acme Careers Site;LinkedIn;Indeed;JobStreet;Friend or Family;Campus Event;Other|ord|Acme Careers Site
+prev_worker|RADIO|R|Are you a former employee, intern or contractor of Acme Trading?|Yes;No|dec:prior_employment_at_company|No
+country|DROPDOWN|R|Country/Territory|Singapore;Malaysia;Hong Kong;China;India;Other|ord|Singapore
+@use name_wd
+addr1|TEXT|R|Address Line 1||of:address|1 Example Road
+city|TEXT|R|City||ord|Singapore
+postal|TEXT|R|Postal Code||of:postal_code|000001
+@use phone_wd
+@page My Experience
+@use job_wd
+@use school_wd
+lang|DROPDOWN|R|English Language Proficiency|Native;Fluent;Professional;Basic|ord|Native
+@use files_resume
+@use links
+@page Application Questions
+auth|RADIO|R|Are you legally authorised to work in the country where this job is located?|Yes;No|wr|Yes
+spons|RADIO|R|Do you now or in the future require visa sponsorship to work in Singapore?|Yes;No|sp|No
+sgpr|RADIO|R|Are you a Singapore Citizen or Permanent Resident?|Yes;No|wr|Yes
+pass|DROPDOWN|R|If you are not a Singapore Citizen or PR, which work pass do you hold?|Not applicable (Citizen / PR);Employment Pass;S Pass;Dependant's Pass (LOC);Student Pass;Other|wr|Not applicable (Citizen / PR)
+usauth|RADIO|R|Are you legally authorized to work in the United States?|Yes;No|wr|No
+reloc|RADIO|R|Are you willing to relocate to another Acme Trading office in Asia Pacific if required?|Yes;No|ord|No
+travel|RADIO|R|Are you able to travel up to 25% of the time?|Yes;No|ord|No
+age18|RADIO|R|Are you at least 18 years of age?|Yes;No|ord|Yes
+prevapp|RADIO|R|Have you previously applied for a role at Acme Trading?|Yes;No|dec:previously_applied|No
+relatives|RADIO|R|Do you have any family members or close relationships with employees of Acme Trading or its customers or suppliers?|Yes;No|dec:relatives_at_company|No
+coi|RADIO|R|Do you have any personal, financial or business interest that could conflict, or appear to conflict, with the interests of Acme Trading?|Yes;No|dec:conflict_audit_independence|No
+govt|RADIO|R|Are you or have you ever been a government official or a public servant?|Yes;No|dec:government_employment|No
+crim|RADIO|R|Have you ever been convicted of, or pleaded guilty to, any criminal offence?|Yes;No|dec:criminal_record|No
+restr|RADIO|R|Are you subject to any restrictive covenant (such as a non-compete) that would limit your ability to work for Acme Trading?|Yes;No|dec:non_compete|No
+salexp|TEXT|R|Expected Salary (SGD per month)||of:salary_expected|5000
+salcur|TEXT|O|Current Salary (SGD per month)||of:salary_current|~
+availdate|DATE|R|When are you available to start?||ord|2026-11-12
+whyus|TEXTAREA|R|Tell us why you are interested in the Management Associate Programme at Acme Trading (max 150 words).||ord|I enjoy turning operational data into decisions. My internships in logistics and analytics showed me how trading depends on reliable data, and the programme's rotations would let me learn the business end to end.
+proud|TEXTAREA|O|Describe a project or achievement you are proud of.||ord|?I built REST APIs in Python and Postgres for shipment tracking during my internship.
+tshirt|DROPDOWN|R|Graduation event: what is your T-shirt size?|XS;S;M;L;XL|ord|?M
+@page Voluntary Disclosures
+gender|DROPDOWN|O|Gender|Male;Female;Non-binary;Prefer not to say|sid:gender|Prefer not to say
+race|DROPDOWN|O|Race / Ethnicity|Chinese;Malay;Indian;Eurasian;Other;Prefer not to say|sid:race|Prefer not to say
+disab|RADIO|O|Do you consider yourself to have a disability?|Yes;No;Prefer not to say|sid:disability|Prefer not to say
+@page Self Identify
+priv|CHECKBOX|R|I acknowledge that I have read the Acme Trading Candidate Privacy Notice and consent to Acme Trading processing my personal data for recruitment.||priv|true
+affil|CHECKBOX|R|I consent to my personal data being shared with Acme Trading's affiliates and group companies, in Singapore and overseas, for recruitment purposes.||priv|true
+retain|CHECKBOX|O|I would like Acme Trading to keep my details on file for 12 months and contact me about other opportunities.||ret|true
+alerts|CHECKBOX|O|Send me Acme Trading job alerts and newsletters.||mkt|false
+cert|CHECKBOX|R|I confirm the information provided in this application is accurate.||cert|true

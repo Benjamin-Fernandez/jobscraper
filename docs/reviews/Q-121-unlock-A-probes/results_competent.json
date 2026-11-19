@@ -1,0 +1,854 @@
+[
+ {
+  "form": "01_workday_northwind_bank",
+  "style": "workday",
+  "employer": "Northwind Bank",
+  "pages": [
+   {
+    "title": "My Information",
+    "n": 14,
+    "calls": 1,
+    "base_cap": 23,
+    "stops": [],
+    "ready": true
+   },
+   {
+    "title": "My Experience",
+    "n": 19,
+    "calls": 2,
+    "base_cap": 26,
+    "stops": [],
+    "ready": true
+   },
+   {
+    "title": "Application Questions",
+    "n": 17,
+    "calls": 12,
+    "base_cap": 26,
+    "stops": [
+     {
+      "page": "Application Questions",
+      "reason": "owner_fact_missing",
+      "detail": "bank details",
+      "field": "coi",
+      "label": "Do you have any outside business interests or shareholdings that could conflict with your duties at Northwind Bank?"
+     }
+    ],
+    "ready": false
+   },
+   {
+    "title": "Voluntary Disclosures",
+    "n": 3,
+    "calls": 1,
+    "base_cap": 23,
+    "stops": [],
+    "ready": true
+   },
+   {
+    "title": "Self Identify",
+    "n": 3,
+    "calls": 1,
+    "base_cap": 23,
+    "stops": [],
+    "ready": true
+   }
+  ],
+  "stops": [
+   {
+    "page": "Application Questions",
+    "reason": "owner_fact_missing",
+    "detail": "bank details",
+    "field": "coi",
+    "label": "Do you have any outside business interests or shareholdings that could conflict with your duties at Northwind Bank?"
+   }
+  ],
+  "empty_required": [
+   {
+    "page": "Application Questions",
+    "key": "coi",
+    "label": "Do you have any outside business interests or shareholdings that could conflict with your duties at Northwind Bank?",
+    "why": "STOP: owner_fact_missing: bank details"
+   }
+  ],
+  "answered": 49,
+  "optional_empty": 5,
+  "assumed": 32,
+  "fields": 56,
+  "required": 40,
+  "wrong_written": [],
+  "composed": 1,
+  "place_calls": 0,
+  "ready": false
+ },
+ {
+  "form": "02_workday_acme_trading",
+  "style": "workday",
+  "employer": "Acme Trading",
+  "pages": [
+   {
+    "title": "My Information",
+    "n": 12,
+    "calls": 1,
+    "base_cap": 23,
+    "stops": [],
+    "ready": true
+   },
+   {
+    "title": "My Experience",
+    "n": 19,
+    "calls": 2,
+    "base_cap": 26,
+    "stops": [],
+    "ready": true
+   },
+   {
+    "title": "Application Questions",
+    "n": 20,
+    "calls": 9,
+    "base_cap": 26,
+    "stops": [],
+    "ready": false
+   },
+   {
+    "title": "Voluntary Disclosures",
+    "n": 3,
+    "calls": 1,
+    "base_cap": 23,
+    "stops": [],
+    "ready": true
+   },
+   {
+    "title": "Self Identify",
+    "n": 5,
+    "calls": 2,
+    "base_cap": 23,
+    "stops": [
+     {
+      "page": "Self Identify",
+      "reason": "consent_refused",
+      "detail": "sharing your details with other companies",
+      "field": "affil",
+      "label": "I consent to my personal data being shared with Acme Trading's affiliates and group companies, in Singapore and overseas, for recruitment purposes."
+     }
+    ],
+    "ready": false
+   }
+  ],
+  "stops": [
+   {
+    "page": "Self Identify",
+    "reason": "consent_refused",
+    "detail": "sharing your details with other companies",
+    "field": "affil",
+    "label": "I consent to my personal data being shared with Acme Trading's affiliates and group companies, in Singapore and overseas, for recruitment purposes."
+   }
+  ],
+  "empty_required": [
+   {
+    "page": "Application Questions",
+    "key": "usauth",
+    "label": "Are you legally authorized to work in the United States?",
+    "why": "left empty for the site's validation: work rights: place not recognised",
+    "class": "wr"
+   },
+   {
+    "page": "Self Identify",
+    "key": "affil",
+    "label": "I consent to my personal data being shared with Acme Trading's affiliates and group companies, in Singapore and overseas, for recruitment purposes.",
+    "why": "STOP: consent_refused: sharing your details with other companies"
+   }
+  ],
+  "answered": 52,
+  "optional_empty": 4,
+  "assumed": 34,
+  "fields": 59,
+  "required": 42,
+  "wrong_written": [
+   {
+    "key": "retain",
+    "label": "I would like Acme Trading to keep my details on file for 12 months and contact me about other opportunities.",
+    "wrote": "false",
+    "truth": "true",
+    "source": "profile:consents.talent_pool_opt_in",
+    "note": "the AI answered true; your standing answer was kept"
+   }
+  ],
+  "composed": 1,
+  "place_calls": 2,
+  "ready": false
+ },
+ {
+  "form": "03_workday_contoso_logistics",
+  "style": "workday",
+  "employer": "Contoso Logistics",
+  "pages": [
+   {
+    "title": "My Information",
+    "n": 14,
+    "calls": 1,
+    "base_cap": 23,
+    "stops": [],
+    "ready": true
+   },
+   {
+    "title": "My Experience",
+    "n": 19,
+    "calls": 5,
+    "base_cap": 26,
+    "stops": [
+     {
+      "page": "My Experience",
+      "reason": "owner_fact_missing",
+      "detail": "grade",
+      "field": "honours",
+      "label": "Class of Degree"
+     }
+    ],
+    "ready": false
+   },
+   {
+    "title": "Application Questions",
+    "n": 16,
+    "calls": 9,
+    "base_cap": 26,
+    "stops": [],
+    "ready": false
+   },
+   {
+    "title": "Voluntary Disclosures",
+    "n": 2,
+    "calls": 1,
+    "base_cap": 23,
+    "stops": [],
+    "ready": true
+   },
+   {
+    "title": "Self Identify",
+    "n": 3,
+    "calls": 1,
+    "base_cap": 23,
+    "stops": [],
+    "ready": true
+   }
+  ],
+  "stops": [
+   {
+    "page": "My Experience",
+    "reason": "owner_fact_missing",
+    "detail": "grade",
+    "field": "honours",
+    "label": "Class of Degree"
+   }
+  ],
+  "empty_required": [
+   {
+    "page": "My Experience",
+    "key": "honours",
+    "label": "Class of Degree",
+    "why": "STOP: owner_fact_missing: grade"
+   },
+   {
+    "page": "Application Questions",
+    "key": "status",
+    "label": "What is your current immigration status in Singapore?",
+    "why": "left empty for the site's validation: work rights: place not recognised",
+    "class": "wr"
+   }
+  ],
+  "answered": 47,
+  "optional_empty": 5,
+  "assumed": 34,
+  "fields": 54,
+  "required": 39,
+  "wrong_written": [],
+  "place_calls": 2,
+  "ready": false
+ },
+ {
+  "form": "04_greenhouse_kestrel_labs",
+  "style": "greenhouse",
+  "employer": "Kestrel Labs",
+  "pages": [
+   {
+    "title": "Application",
+    "n": 37,
+    "calls": 8,
+    "base_cap": 29,
+    "stops": [],
+    "ready": false
+   }
+  ],
+  "stops": [],
+  "empty_required": [
+   {
+    "page": "Application",
+    "key": "usauth",
+    "label": "Are you legally authorized to work in the United States?",
+    "why": "left empty for the site's validation: work rights: place not recognised",
+    "class": "wr"
+   }
+  ],
+  "answered": 33,
+  "optional_empty": 3,
+  "assumed": 18,
+  "fields": 37,
+  "required": 25,
+  "wrong_written": [
+   {
+    "key": "future",
+    "label": "I agree that Kestrel Labs may keep my personal data on file to contact me about future roles.",
+    "wrote": "false",
+    "truth": "true",
+    "source": "profile:consents.talent_pool_opt_in",
+    "note": "the AI answered true; your standing answer was kept"
+   }
+  ],
+  "place_calls": 2,
+  "ready": false
+ },
+ {
+  "form": "05_greenhouse_fabrikam_games",
+  "style": "greenhouse",
+  "employer": "Fabrikam Games",
+  "pages": [
+   {
+    "title": "Application",
+    "n": 37,
+    "calls": 10,
+    "base_cap": 29,
+    "stops": [],
+    "ready": true
+   }
+  ],
+  "stops": [],
+  "empty_required": [],
+  "answered": 33,
+  "optional_empty": 3,
+  "assumed": 21,
+  "fields": 37,
+  "required": 26,
+  "wrong_written": [],
+  "place_calls": 0,
+  "ready": true
+ },
+ {
+  "form": "06_greenhouse_initech_analytics",
+  "style": "greenhouse",
+  "employer": "Initech Analytics",
+  "pages": [
+   {
+    "title": "Application",
+    "n": 36,
+    "calls": 12,
+    "base_cap": 29,
+    "stops": [
+     {
+      "page": "Application",
+      "reason": "consent_refused",
+      "detail": "sharing your details with other companies",
+      "field": "share",
+      "label": "I understand that Initech Analytics will share my personal data with its group companies and service providers for the purposes of processing my application."
+     }
+    ],
+    "ready": false
+   }
+  ],
+  "stops": [
+   {
+    "page": "Application",
+    "reason": "consent_refused",
+    "detail": "sharing your details with other companies",
+    "field": "share",
+    "label": "I understand that Initech Analytics will share my personal data with its group companies and service providers for the purposes of processing my application."
+   }
+  ],
+  "empty_required": [
+   {
+    "page": "Application",
+    "key": "share",
+    "label": "I understand that Initech Analytics will share my personal data with its group companies and service providers for the purposes of processing my application.",
+    "why": "STOP: consent_refused: sharing your details with other companies"
+   },
+   {
+    "page": "Application",
+    "key": "workother",
+    "label": "Are you legally authorised to work in any country other than Singapore?",
+    "why": "left empty for the site's validation: work rights: place not recognised",
+    "class": "wr"
+   }
+  ],
+  "answered": 32,
+  "optional_empty": 1,
+  "assumed": 18,
+  "fields": 36,
+  "required": 28,
+  "wrong_written": [],
+  "composed": 1,
+  "place_calls": 2,
+  "ready": false
+ },
+ {
+  "form": "07_lever_blue_heron_studios",
+  "style": "lever",
+  "employer": "Blue Heron Studios",
+  "pages": [
+   {
+    "title": "Apply",
+    "n": 30,
+    "calls": 8,
+    "base_cap": 29,
+    "stops": [
+     {
+      "page": "Apply",
+      "reason": "consent_refused",
+      "detail": "receiving marketing messages",
+      "field": "q_priv",
+      "label": "I consent to Blue Heron Studios storing my personal data for 12 months for the purposes of this recruitment process."
+     }
+    ],
+    "ready": false
+   }
+  ],
+  "stops": [
+   {
+    "page": "Apply",
+    "reason": "consent_refused",
+    "detail": "receiving marketing messages",
+    "field": "q_priv",
+    "label": "I consent to Blue Heron Studios storing my personal data for 12 months for the purposes of this recruitment process."
+   }
+  ],
+  "empty_required": [
+   {
+    "page": "Apply",
+    "key": "q_priv",
+    "label": "I consent to Blue Heron Studios storing my personal data for 12 months for the purposes of this recruitment process.",
+    "why": "STOP: consent_refused: receiving marketing messages"
+   }
+  ],
+  "answered": 22,
+  "optional_empty": 7,
+  "assumed": 11,
+  "fields": 30,
+  "required": 18,
+  "wrong_written": [],
+  "place_calls": 0,
+  "ready": false
+ },
+ {
+  "form": "08_lever_tidewater_ventures",
+  "style": "lever",
+  "employer": "Tidewater Ventures",
+  "pages": [
+   {
+    "title": "Apply",
+    "n": 32,
+    "calls": 14,
+    "base_cap": 29,
+    "stops": [],
+    "ready": true
+   }
+  ],
+  "stops": [],
+  "empty_required": [],
+  "answered": 30,
+  "optional_empty": 2,
+  "assumed": 19,
+  "fields": 32,
+  "required": 23,
+  "wrong_written": [],
+  "place_calls": 3,
+  "ready": true
+ },
+ {
+  "form": "09_lever_lumen_payments",
+  "style": "lever",
+  "employer": "Lumen Payments",
+  "pages": [
+   {
+    "title": "Apply",
+    "n": 32,
+    "calls": 9,
+    "base_cap": 29,
+    "stops": [],
+    "ready": true
+   }
+  ],
+  "stops": [],
+  "empty_required": [],
+  "answered": 30,
+  "optional_empty": 1,
+  "assumed": 15,
+  "fields": 32,
+  "required": 27,
+  "wrong_written": [],
+  "composed": 1,
+  "place_calls": 1,
+  "ready": true
+ },
+ {
+  "form": "10_sf_meridian_bank",
+  "style": "successfactors",
+  "employer": "Meridian Bank",
+  "pages": [
+   {
+    "title": "Personal Information",
+    "n": 15,
+    "calls": 19,
+    "base_cap": 23,
+    "stops": [
+     {
+      "page": "Personal Information",
+      "reason": "owner_fact_missing",
+      "detail": "national ID number",
+      "field": "nric",
+      "label": "NRIC / FIN No."
+     },
+     {
+      "page": "Personal Information",
+      "reason": "validation_error",
+      "detail": "no gender option matches your profile (prefer not to say) on Personal Information",
+      "field": "gender",
+      "label": "Gender"
+     },
+     {
+      "page": "Personal Information",
+      "reason": "validation_error",
+      "detail": "no race option matches your profile (prefer not to say) on Personal Information",
+      "field": "race",
+      "label": "Race"
+     },
+     {
+      "page": "Personal Information",
+      "reason": "validation_error",
+      "detail": "no marital option matches your profile (prefer not to say) on Personal Information",
+      "field": "marital",
+      "label": "Marital Status"
+     }
+    ],
+    "ready": false
+   },
+   {
+    "title": "Education and Experience",
+    "n": 13,
+    "calls": 6,
+    "base_cap": 23,
+    "stops": [
+     {
+      "page": "Education and Experience",
+      "reason": "owner_fact_missing",
+      "detail": "grade",
+      "field": "class",
+      "label": "Class of Honours"
+     },
+     {
+      "page": "Education and Experience",
+      "reason": "owner_fact_missing",
+      "detail": "current salary",
+      "field": "lastsal",
+      "label": "Last drawn monthly salary (SGD)"
+     }
+    ],
+    "ready": false
+   },
+   {
+    "title": "Questions",
+    "n": 7,
+    "calls": 2,
+    "base_cap": 23,
+    "stops": [],
+    "ready": true
+   },
+   {
+    "title": "Declarations",
+    "n": 8,
+    "calls": 2,
+    "base_cap": 23,
+    "stops": [
+     {
+      "page": "Declarations",
+      "reason": "consent_refused",
+      "detail": "sharing your details with other companies",
+      "field": "pdpa",
+      "label": "I consent to Meridian Bank and its related corporations, affiliates and service providers collecting, using and disclosing my personal data for employment purposes, in accordance with the PDPA."
+     }
+    ],
+    "ready": false
+   }
+  ],
+  "stops": [
+   {
+    "page": "Personal Information",
+    "reason": "owner_fact_missing",
+    "detail": "national ID number",
+    "field": "nric",
+    "label": "NRIC / FIN No."
+   },
+   {
+    "page": "Personal Information",
+    "reason": "validation_error",
+    "detail": "no gender option matches your profile (prefer not to say) on Personal Information",
+    "field": "gender",
+    "label": "Gender"
+   },
+   {
+    "page": "Personal Information",
+    "reason": "validation_error",
+    "detail": "no race option matches your profile (prefer not to say) on Personal Information",
+    "field": "race",
+    "label": "Race"
+   },
+   {
+    "page": "Personal Information",
+    "reason": "validation_error",
+    "detail": "no marital option matches your profile (prefer not to say) on Personal Information",
+    "field": "marital",
+    "label": "Marital Status"
+   },
+   {
+    "page": "Education and Experience",
+    "reason": "owner_fact_missing",
+    "detail": "grade",
+    "field": "class",
+    "label": "Class of Honours"
+   },
+   {
+    "page": "Education and Experience",
+    "reason": "owner_fact_missing",
+    "detail": "current salary",
+    "field": "lastsal",
+    "label": "Last drawn monthly salary (SGD)"
+   },
+   {
+    "page": "Declarations",
+    "reason": "consent_refused",
+    "detail": "sharing your details with other companies",
+    "field": "pdpa",
+    "label": "I consent to Meridian Bank and its related corporations, affiliates and service providers collecting, using and disclosing my personal data for employment purposes, in accordance with the PDPA."
+   }
+  ],
+  "empty_required": [
+   {
+    "page": "Personal Information",
+    "key": "nric",
+    "label": "NRIC / FIN No.",
+    "why": "STOP: owner_fact_missing: national ID number"
+   },
+   {
+    "page": "Personal Information",
+    "key": "gender",
+    "label": "Gender",
+    "why": "STOP: validation_error: no gender option matches your profile (prefer not to say) on Personal Information"
+   },
+   {
+    "page": "Personal Information",
+    "key": "race",
+    "label": "Race",
+    "why": "STOP: validation_error: no race option matches your profile (prefer not to say) on Personal Information"
+   },
+   {
+    "page": "Personal Information",
+    "key": "marital",
+    "label": "Marital Status",
+    "why": "STOP: validation_error: no marital option matches your profile (prefer not to say) on Personal Information"
+   },
+   {
+    "page": "Personal Information",
+    "key": "title",
+    "label": "Title",
+    "why": "left empty for the site's validation: F2: not classed (no class): left for the site",
+    "class": "of:other_id"
+   },
+   {
+    "page": "Education and Experience",
+    "key": "class",
+    "label": "Class of Honours",
+    "why": "STOP: owner_fact_missing: grade"
+   },
+   {
+    "page": "Education and Experience",
+    "key": "lastsal",
+    "label": "Last drawn monthly salary (SGD)",
+    "why": "STOP: owner_fact_missing: current salary"
+   },
+   {
+    "page": "Education and Experience",
+    "key": "ref1_email",
+    "label": "Referee 1: Email",
+    "why": "left empty for the site's validation: F4: never the applicant's own contact",
+    "class": "oth"
+   },
+   {
+    "page": "Education and Experience",
+    "key": "ref1_phone",
+    "label": "Referee 1: Contact number",
+    "why": "left empty for the site's validation: F4: never the applicant's own contact",
+    "class": "oth"
+   },
+   {
+    "page": "Declarations",
+    "key": "pdpa",
+    "label": "I consent to Meridian Bank and its related corporations, affiliates and service providers collecting, using and disclosing my personal data for employment purposes, in accordance with the PDPA.",
+    "why": "STOP: consent_refused: sharing your details with other companies"
+   }
+  ],
+  "answered": 33,
+  "optional_empty": 0,
+  "assumed": 19,
+  "fields": 43,
+  "required": 39,
+  "wrong_written": [],
+  "place_calls": 0,
+  "ready": false
+ },
+ {
+  "form": "11_sf_harbour_shipping",
+  "style": "taleo",
+  "employer": "Harbour Shipping Group",
+  "pages": [
+   {
+    "title": "Profile",
+    "n": 10,
+    "calls": 5,
+    "base_cap": 23,
+    "stops": [],
+    "ready": true
+   },
+   {
+    "title": "Education and Work",
+    "n": 8,
+    "calls": 2,
+    "base_cap": 26,
+    "stops": [],
+    "ready": true
+   },
+   {
+    "title": "Eligibility and Questions",
+    "n": 16,
+    "calls": 3,
+    "base_cap": 23,
+    "stops": [],
+    "ready": true
+   },
+   {
+    "title": "Consent",
+    "n": 4,
+    "calls": 1,
+    "base_cap": 23,
+    "stops": [],
+    "ready": true
+   }
+  ],
+  "stops": [],
+  "empty_required": [],
+  "answered": 36,
+  "optional_empty": 2,
+  "assumed": 23,
+  "fields": 38,
+  "required": 34,
+  "wrong_written": [],
+  "place_calls": 1,
+  "ready": true
+ },
+ {
+  "form": "12_sf_pinnacle_insurance",
+  "style": "successfactors",
+  "employer": "Pinnacle Insurance",
+  "pages": [
+   {
+    "title": "Personal Details",
+    "n": 9,
+    "calls": 4,
+    "base_cap": 23,
+    "stops": [],
+    "ready": true
+   },
+   {
+    "title": "Education and Work",
+    "n": 9,
+    "calls": 1,
+    "base_cap": 23,
+    "stops": [
+     {
+      "page": "Education and Work",
+      "reason": "document_missing",
+      "detail": "Academic transcript",
+      "field": "transcript",
+      "label": "Academic transcript"
+     }
+    ],
+    "ready": false
+   },
+   {
+    "title": "Questions",
+    "n": 14,
+    "calls": 4,
+    "base_cap": 26,
+    "stops": [],
+    "ready": true
+   },
+   {
+    "title": "Declaration",
+    "n": 4,
+    "calls": 4,
+    "base_cap": 23,
+    "stops": [
+     {
+      "page": "Declaration",
+      "reason": "consent_refused",
+      "detail": "sharing your details with other companies",
+      "field": "priv",
+      "label": "I consent to Pinnacle Insurance collecting, using and disclosing my personal data for recruitment, including to its parent company, subsidiaries and affiliates."
+     }
+    ],
+    "ready": false
+   }
+  ],
+  "stops": [
+   {
+    "page": "Education and Work",
+    "reason": "document_missing",
+    "detail": "Academic transcript",
+    "field": "transcript",
+    "label": "Academic transcript"
+   },
+   {
+    "page": "Declaration",
+    "reason": "consent_refused",
+    "detail": "sharing your details with other companies",
+    "field": "priv",
+    "label": "I consent to Pinnacle Insurance collecting, using and disclosing my personal data for recruitment, including to its parent company, subsidiaries and affiliates."
+   }
+  ],
+  "empty_required": [
+   {
+    "page": "Education and Work",
+    "key": "transcript",
+    "label": "Academic transcript",
+    "why": "STOP: document_missing: Academic transcript"
+   },
+   {
+    "page": "Declaration",
+    "key": "priv",
+    "label": "I consent to Pinnacle Insurance collecting, using and disclosing my personal data for recruitment, including to its parent company, subsidiaries and affiliates.",
+    "why": "STOP: consent_refused: sharing your details with other companies"
+   },
+   {
+    "page": "Declaration",
+    "key": "bgc",
+    "label": "I authorise Pinnacle Insurance to verify my education, employment history and criminal record.",
+    "why": "left empty for the site's validation: declaration:criminal_record: the check did not agree (meaning of the agreed answer: contradicts): left for the site",
+    "class": "ack"
+   }
+  ],
+  "answered": 32,
+  "optional_empty": 0,
+  "assumed": 19,
+  "fields": 36,
+  "required": 34,
+  "wrong_written": [],
+  "composed": 1,
+  "place_calls": 0,
+  "ready": false
+ }
+]

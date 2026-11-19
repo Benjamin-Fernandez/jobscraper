@@ -1,0 +1,47 @@
+[name_wd]
+first|TEXT|R|Legal First Name||ord|Alex
+last|TEXT|R|Legal Last Name||ord|Testcase
+[name_gh]
+first|TEXT|R|First Name||ord|Alex
+last|TEXT|R|Last Name||ord|Testcase
+email|EMAIL|R|Email||ord|alex.testcase@example.com
+phone|PHONE|R|Phone||of:phone|91234567
+[phone_wd]
+phone_type|DROPDOWN|R|Phone Device Type|Mobile;Home;Work|ord|Mobile
+phone_cc|DROPDOWN|R|Country Phone Code|Singapore (+65);Malaysia (+60);India (+91);United Kingdom (+44);United States (+1)|ord|Singapore (+65)
+phone|PHONE|R|Phone Number||of:phone|91234567
+phone_ext|TEXT|O|Phone Extension||ord|~
+[address_wd]
+country|DROPDOWN|R|Country|Singapore;Malaysia;Indonesia;India;Other|ord|Singapore
+addr1|TEXT|R|Address Line 1||of:address|1 Example Road
+addr2|TEXT|O|Address Line 2||of:address|~
+city|TEXT|R|City||ord|Singapore
+postal|TEXT|R|Postal Code||of:postal_code|000001
+[links]
+linkedin|URL|O|LinkedIn Profile||ord|https://www.linkedin.com/in/example-alex-testcase
+github|URL|O|GitHub||ord|https://github.com/example-alex-testcase
+portfolio|URL|O|Website / Portfolio||ord|~
+[school_wd]
+school|DROPDOWN|R|School or University|Nanyang Example University;National Example University;Singapore Sample Institute;Other|ord|Nanyang Example University
+degree|DROPDOWN|R|Degree|Diploma;Bachelor's Degree;Master's Degree;Doctorate;Other|ord|Bachelor's Degree
+field|TEXT|R|Field of Study||ord|Computer Engineering
+gpa|TEXT|O|Overall Result (GPA)||ord|4.20
+edu_from|NUMBER|R|From (year)||ord|2021
+edu_to|NUMBER|R|To (year) (Actual or Expected)||ord|2025
+[job_wd]
+job_title|TEXT|R|Job Title||ord|Data Intern
+job_company|TEXT|R|Company||ord|Sample Analytics
+job_loc|TEXT|O|Location||ord|Singapore
+job_current|CHECKBOX|O|I currently work here||ord|false
+job_from|DATE|R|From (MM/YYYY)||ord|2025-01
+job_to|DATE|O|To (MM/YYYY)||ord|2025-06
+job_desc|TEXTAREA|O|Role Description||ord|Automated weekly reports with SQL and Python.
+[files_resume]
+resume|FILE|R|Resume/CV||ord|~
+cover|FILE|O|Cover Letter||ord|~
+[eeo_gh]
+eeo_gender|DROPDOWN|O|Gender|Male;Female;Decline To Self Identify|sid:gender|Decline To Self Identify
+eeo_hisp|DROPDOWN|O|Are you Hispanic/Latino?|Yes;No;Decline To Self Identify|sid:race|Decline To Self Identify
+eeo_race|DROPDOWN|O|Race|Asian;Black or African American;White;Two or More Races;Decline To Self Identify|sid:race|Decline To Self Identify
+eeo_vet|DROPDOWN|O|Veteran Status|I am not a protected veteran;I identify as one or more of the classifications of protected veteran;I don't wish to answer|sid:veteran|I don't wish to answer
+eeo_dis|DROPDOWN|O|Disability Status|Yes, I have a disability, or have had one in the past;No, I do not have a disability and have not had one in the past;I do not want to answer|sid:disability|I do not want to answer

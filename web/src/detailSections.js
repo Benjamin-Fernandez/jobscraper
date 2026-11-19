@@ -148,13 +148,19 @@ const SUMMARISERS = {
   ],
   consents_declarations: (p, form, section) => {
     const items = itemsOfSection(section, form).map(x => x.item).filter(i => i.kind === 'bool')
-    const consents = items.filter(i => i.path.startsWith('consents.'))
+    // The switches the server marks `default_off` (sharing, checks) are a decision, not a gap:
+    // they stay out of the "n of m consents given" count and are mentioned only when on.
+    const all = items.filter(i => i.path.startsWith('consents.'))
+    const consents = all.filter(i => !i.default_off)
+    const switches = all.filter(i => i.default_off)
+    const switchesOn = switches.filter(i => valueOf(p, i.path) === true).length
     const decls = items.filter(i => i.path.startsWith('declarations.'))
     const given = consents.filter(i => valueOf(p, i.path) === true).length
     const answered = decls.filter(i => typeof valueOf(p, i.path) === 'boolean')
     const yes = answered.filter(i => valueOf(p, i.path) === true).length
     return [
       !consents.length ? '' : given === consents.length ? 'Consents given' : given === 0 ? 'No consents given' : `${given} of ${consents.length} consents given`,
+      !switchesOn ? '' : switchesOn === switches.length ? 'sharing and checks agreed' : `${switchesOn} of ${switches.length} sharing and check switches on`,
       !decls.length || !answered.length ? '' : yes === 0 && answered.length === decls.length ? 'every declaration No' : yes === 0 ? 'declarations No where set' : `${plural(yes, 'declaration', 'declarations')} Yes`,
     ]
   },

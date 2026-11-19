@@ -426,10 +426,8 @@ S3_SHAPES = (
     "Are you a Singapore Citizen or Permanent Resident?", "Are you a Singaporean or Singapore PR?", "Are you a Singaporean?",
     "Do you hold Singapore citizenship?", "Do you hold a Singapore passport?")
 S3_NON_CANONICAL = (    # (label, the truth for the sample citizen, the WRONG value): they stay on the vote path (assumed, 2-3 calls)
-    ("Are you a Singapore citizen by birth?", "Yes", "No"),
     ("Are you a Singapore citizen or a citizen of another country?", "Yes", "No"),
     ("Are you not a Singapore citizen?", "No", "Yes"),
-    ("Have you been a Singapore citizen since 2020?", "Yes", "No"),
 )
 
 
@@ -479,10 +477,48 @@ def test_s3_a_bare_permanent_resident_question_follows_the_residency_status_not_
     assert not bad, report(bad, 12)
 
 
-def test_s3_non_canonical_citizenship_wordings_stay_on_the_vote_path_and_never_write_the_wrong_value():
-    """"... citizen by birth", "... citizen or a citizen of another country", "Are you NOT a Singapore citizen", "... citizen since 2020"
-    are not canonical frames: the right value is written only through the votes (assumed True, 2-3 pick calls) or the field ends
-    empty (a joined or negated wording may), and the WRONG value is never written, whatever the confirmation says."""
+G3_ROWS = (   # D-223 G3: a status wording with anything else in it has NO code truth; (label, the sample citizen's truth, the wrong value)
+    ("Are you a Singapore citizen by birth?", "Yes", "No"),
+    ("Have you been a Singapore citizen since 2020?", "Yes", "No"),
+)
+
+
+def _g3_cite(res):
+    """True when the written answer cites the nationality / residency fact as its source (a G3 answer must not)."""
+    return not is_stop(res) and ("nationality" in _src(res) or "residency_status" in _src(res) or "singapore_status" in _src(res))
+
+
+def test_s3_a_status_wording_with_anything_else_has_no_code_truth_g3_model_plus_one_agreeing_confirmation():
+    """RETARGETED (was `..._non_canonical_..._stay_on_the_vote_path_and_never_write_the_wrong_value`; D-223 G3 / D-224 4): "... citizen by
+    birth?" and "... citizen since 2020?" carry more than a plain status sentence, so code states NO truth for them. (a) a right model
+    + a confirmation that agrees -> written, assumed True, source `assumption`, ONE confirmation call. (b) a confirmation that differs
+    from the model -> RETARGETED AGAIN for D-225 (2): the confirmation is given the owner's facts and ruling U8b applies: each of the two answers gets
+    a meaning call and a value is written ONLY when the pair is consistent (one call says "no contradiction", the other "contradiction"):
+    then that value, assumed, source `assumption` (never a fact), 3 picks; otherwise EMPTY. (c) pinned HONESTLY as the engineer reports it INHERENT: a WRONG model whose
+    confirmation sides with it IS written, but it is marked assumed and it never cites a profile fact as its source."""
+    bad = []
+    for label, truth, wrong in G3_ROWS:
+        for klass in ("work_right", NO_CLASS):
+            res, ask = _go(label, truth, klass, pick=pick_faithful(truth, truth), scripted="NONE")      # (a)
+            if (is_stop(res) or shown(res) != truth or not res.assumed or _src(res) != "assumption" or len(ask.picks) != 1
+                    or _g3_cite(res)):
+                bad.append((label[:50], klass, "(a) right model, agreeing check", what(res), f"{len(ask.picks)} picks"))
+            # (b) differing confirmation: the meaning calls decide (a faithful reader sides with `truth`): written, assumed, 3 picks
+            for who, mval, conf in (("right model", truth, wrong), ("wrong model", wrong, truth)):
+                res, ask = _go(label, mval, klass, pick=pick_faithful(conf, truth), scripted="NONE")
+                if (is_stop(res) or shown(res) != truth or not res.assumed or _src(res) != "assumption" or len(ask.picks) != 3
+                        or _g3_cite(res)):
+                    bad.append((label[:50], klass, f"(b) {who}, differing check, consistent pair", what(res), f"{len(ask.picks)} picks"))
+            res, ask = _go(label, wrong, klass, pick=pick_faithful(wrong, truth), scripted="NONE")      # (c) inherent limit
+            if is_stop(res) or shown(res) != wrong or not res.assumed or _src(res) != "assumption" or _g3_cite(res):
+                bad.append((label[:50], klass, "(c) wrong model, siding check: written but assumed", what(res)))
+    assert not bad, report(bad, 12)
+
+
+def test_s3_a_joined_or_negated_status_wording_stays_on_the_vote_path_and_never_writes_the_wrong_value():
+    """The remaining two rows of the old non-canonical table, assertions unchanged: "... citizen or a citizen of another country" and
+    "Are you NOT a Singapore citizen" are right only through the votes (assumed True, 2-3 pick calls) or empty, and the WRONG value is
+    never written, whatever the confirmation says."""
     bad = []
     for label, truth, wrong in S3_NON_CANONICAL:
         for klass in ("work_right", NO_CLASS):

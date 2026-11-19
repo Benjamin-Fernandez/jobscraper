@@ -39,7 +39,7 @@ def test_a1_reply_schema_gives_class_first_then_value_basis_ref_assumed_reason()
         assert list(one["properties"]) == ["class", "value", "basis", "ref", "assumed", "reason"], list(one["properties"])
         assert one["required"] == ["class", "value", "basis", "ref", "assumed", "reason"], one["required"]
         enum = one["properties"]["class"]["enum"]
-        assert enum == list(FIELD_CLASS_CHOICES) and len(enum) == 42 and enum[-1] == "ordinary" and enum[0] != "ordinary"
+        assert enum == list(FIELD_CLASS_CHOICES) and len(enum) == 45 and enum[-1] == "ordinary" and enum[0] != "ordinary"
 
 
 def test_a1_output_budget_is_80_tokens_a_field_plus_200():

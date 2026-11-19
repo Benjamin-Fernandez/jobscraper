@@ -140,6 +140,7 @@ function clip(text, n = REASON_CLIP) {
 // Q-127 (D-215, design B.4 copy table): the words of a role that waits for the owner.
 export const READY_LABEL = 'Ready to try again'
 export const ADD_IT = 'Add it'
+export const OPEN_SWITCH = 'Open the switch'   // the link of a refused consent (D-229)
 export const FILES_GROUP = 'documents'        // the Profile group (section Files) a file chip opens
 
 // The words of a Profile path when the sentence names no fact: "identity.date_of_birth"
@@ -223,8 +224,13 @@ export function rowState(row) {
         return { ...base, label: fact ? `Needs one detail: ${fact}` : 'Needs one detail', fact, target, add: true }
       }
       if (code === 'consent_refused') {
+        // The link is the switch itself (D-229): `target` is `consents.<key>` (the server's
+        // owner_fact_path) or the Consents group when the server named none.
         const consent = refusedConsent(a)
-        return { ...base, label: consent ? `Needs your agreement: ${consent}` : 'Needs your agreement', consent, target, add: true }
+        return {
+          ...base, label: consent ? `Needs your agreement: ${consent}` : 'Needs your agreement',
+          consent, target, add: true, addText: OPEN_SWITCH,
+        }
       }
       if (code === 'unanswerable_required') {
         const n = Number(a?.not_answered)
@@ -358,6 +364,25 @@ export function refusalCopy(code, label = '') {
     }
     return { lead: `This question is too general to save on its own (“${label}”).`, link: 'Change it in your details instead.', to: 'details' }
   }
+  return null
+}
+
+// ---- why a field was left empty (Q-121 W, D-229) ----
+
+// A field left empty carries the contract's fixed sentence (`reason`), what to do
+// (`reason_hint`), the reason's code (`reason_code`) and, for three codes, the profile key the
+// hint points at (`reason_key`, "" = none). The link comes from code + key alone, never from
+// the sentence: no key, no link.
+//   consent_not_agreed -> "Open the switch" at `consents.<key>`
+//   place_unknown      -> "Add it" at the Work rights field the server names
+//   detail_missing     -> "Add it" at the detail the server found for the field
+// `{label, target}` for `openAnswer(target)`, or null.
+export function emptyAction(field) {
+  if (field?.status !== 'not_answered') return null
+  const key = typeof field.reason_key === 'string' ? field.reason_key.trim() : ''
+  if (!key || !PROFILE_PATH.test(key)) return null
+  if (field.reason_code === 'consent_not_agreed') return { label: OPEN_SWITCH, target: key }
+  if (field.reason_code === 'place_unknown' || field.reason_code === 'detail_missing') return { label: ADD_IT, target: key }
   return null
 }
 

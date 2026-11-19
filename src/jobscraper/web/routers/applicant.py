@@ -45,6 +45,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from jobscraper import applicant, backends
+from jobscraper.apply.contracts import CONSENTS_DEFAULT_OFF
 from jobscraper.config import Config
 from jobscraper.web.deps import get_config, open_store
 
@@ -139,10 +140,15 @@ def waiting_roles(store: Any, profile: dict) -> list[dict[str, Any]]:
 
 
 def needed_by(profile: dict, waiting: list[dict[str, Any]]) -> dict[str, int]:
-    """{path: applications waiting} for the paths still empty ("Needed by 2 applications")."""
+    """{path: applications waiting} for the paths still empty ("Needed by 2 applications").
+    v10 (D-229): the three default-off consent switches are left out: a switch that is off is
+    the owner's decision, never a missing detail (badge, section state, status line). The
+    waiting role still shows as not ready (`waiting_roles`) until the switch is on."""
     out: dict[str, int] = {}
     for w in waiting:
         for p in w["paths"]:
+            if p in CONSENTS_DEFAULT_OFF:
+                continue
             if not applicant.path_filled(profile, p):
                 out[p] = out.get(p, 0) + 1
     return out

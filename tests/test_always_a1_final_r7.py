@@ -136,14 +136,16 @@ M8_RESIDUE = (    # keep on file PLUS something else: a contact, a share, an eve
     "Keep my application on file and call me about opportunities",
     "Keep my application on file and invite me to events",
     "Retain my details for future positions and get in touch",
-    "Keep my CV on file and share my details with affiliates",
     "Keep my CV on file for 2 years for marketing purposes",
     "Keep my application on file for future opportunities and events",
-    "Keep my application on file for positions with our clients",
     "Keep my application on file and let hiring managers see it",
     "Keep my application on file for roles in other regions",
     "Keep my application on file and notify me of new jobs",
     "Keep my application on file and send me updates",
+)
+M8_SHARING = (    # D-224 5a: third-party SHARING is its own consent: moved out of the both-consents table
+    "Keep my CV on file and share my details with affiliates",
+    "Keep my application on file for positions with our clients",
 )
 ONLY = dict(consents__data_retention_consent=True, consents__talent_pool_opt_in=False)
 BOTH = dict(consents__data_retention_consent=True, consents__talent_pool_opt_in=True)
@@ -204,6 +206,23 @@ def test_m8_any_residue_needs_both_consents_under_every_class():
                 res = attempt(_box(label), ask, profile_with(**edits))
                 if is_stop(res) or is_ticked(res) is not want:
                     bad.append((label[:56], klass, name, "want ticked" if want else "want NOT ticked", what(res)))
+    assert not bad, report(bad, 12)
+
+
+def test_m8_sharing_with_a_third_party_is_unticked_in_every_consent_combination():
+    """D-224 5a (moved out of the both-consents test above): "... share my details with affiliates" and "... positions with our
+    clients" are third-party SHARING: NOT ticked in any retention / talent-pool combination under every model class, source
+    `default:no_third_party_sharing`."""
+    bad = []
+    for label in M8_SHARING:
+        for ret in (True, False):
+            for pool in (True, False):
+                prof = profile_with(consents__data_retention_consent=ret, consents__talent_pool_opt_in=pool)
+                for klass in ("marketing", "consent_retention", "ordinary", NO_CLASS):
+                    ask = FakeAsk(lambda v, k=klass: lie("true", k), pick=pick_by("", ""))
+                    res = attempt(_box(label), ask, prof)
+                    if is_stop(res) or is_ticked(res) or "no_third_party_sharing" not in str(res.source):
+                        bad.append((label[:56], ret, pool, klass, what(res)))
     assert not bad, report(bad, 12)
 
 

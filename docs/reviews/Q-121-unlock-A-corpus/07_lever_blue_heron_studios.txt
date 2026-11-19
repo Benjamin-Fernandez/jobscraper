@@ -1,0 +1,32 @@
+@form 07_lever_blue_heron_studios | lever | Blue Heron Studios | Junior Backend Engineer (Singapore)
+@page Apply
+resume|FILE|R|Resume/CV||ord|~
+name|TEXT|R|Full name||ord|Alex Testcase
+email|EMAIL|R|Email||ord|alex.testcase@example.com
+phone|PHONE|R|Phone||of:phone|91234567
+loc|TEXT|R|Current location||ord|Singapore
+org|TEXT|O|Current company||ord|~
+linkedin|URL|O|LinkedIn URL||ord|https://www.linkedin.com/in/example-alex-testcase
+twitter|URL|O|Twitter URL||ord|~
+github|URL|O|GitHub URL||ord|https://github.com/example-alex-testcase
+portfolio|URL|O|Portfolio URL||ord|~
+other|URL|O|Other website||ord|~
+additional|TEXTAREA|O|Additional information||ord|~
+q_auth|RADIO|R|Are you legally authorised to work in Singapore?|Yes;No|wr|Yes
+q_spons|RADIO|R|Will you require visa sponsorship to work in Singapore?|Yes;No|sp|No
+q_status|RADIO|R|Are you a Singaporean or Singapore PR?|Yes;No|wr|Yes
+q_ns|RADIO|R|Have you completed National Service?|Yes;No;Not applicable|ord|Yes
+q_notice|TEXT|R|What is your notice period?||ord|Immediate
+q_salary|TEXT|R|Expected salary (SGD / month)||of:salary_expected|5000
+q_start|TEXT|R|When can you start?||ord|Immediately
+q_stack|TEXTAREA|R|Tell us about the backend stack you have worked with.||ord|Python, SQL and PostgreSQL, building REST APIs for shipment tracking.
+q_why|TEXTAREA|R|Why Blue Heron?||ord|Blue Heron ships real products used by many people and has a small engineering team, which means a new graduate can own meaningful pieces of work.
+q_hear|TEXT|R|How did you hear about us?||ord|Blue Heron careers page
+q_ref|TEXT|O|Referred by||oth|~
+q_relative|RADIO|R|Do you have any relatives working at Blue Heron Studios?|Yes;No|dec:relatives_at_company|No
+q_nc|RADIO|R|Are you bound by a non-compete or other restrictive agreement that limits where you can work?|Yes;No|dec:non_compete|No
+q_dog|TEXT|O|What is the name of your first pet? (we are checking you read the whole form)||ord|~
+q_priv|CHECKBOX|R|I consent to Blue Heron Studios storing my personal data for 12 months for the purposes of this recruitment process.||priv|true
+q_gender|DROPDOWN|O|Gender|Male;Female;Decline to self-identify|sid:gender|Decline to self-identify
+q_race|DROPDOWN|O|Race|Chinese;Malay;Indian;Other;Decline to self-identify|sid:race|Decline to self-identify
+q_vet|DROPDOWN|O|Veteran status|Veteran;Not a veteran;Decline to self-identify|sid:veteran|Decline to self-identify

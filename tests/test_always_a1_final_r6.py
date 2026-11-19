@@ -385,15 +385,17 @@ N2_REVIEW = (
     "Keep my application on file and call me about opportunities",
     "Keep my application on file and invite me to events",
     "Retain my details for future positions and get in touch",
-    "Keep my CV on file and share my details with affiliates",
 )
 N2_OWN = (   # wordings with a residue the engineer has never seen
     "Keep my application on file and add me to your WhatsApp group",
-    "Keep my application on file and pass it to hiring managers in other group companies",
     "Keep my application on file and tell me about graduate programmes",
     "Keep my CV on file and email me about graduate programmes",
     "Keep my details on file and enrol me in your alumni network",
     "Keep my application on file and ping me when something opens up",
+)
+N2_SHARING = (   # D-224 5a: third-party SHARING is its own consent, not retention: moved out of the both-consents table
+    "Keep my CV on file and share my details with affiliates",
+    "Keep my application on file and pass it to hiring managers in other group companies",
 )
 N2_CLASSES = ("marketing", "consent_retention", "ordinary", NO_CLASS)
 N2_PURE = (
@@ -423,6 +425,23 @@ def test_n2_a_keep_on_file_label_with_any_residue_needs_both_consents():
                 res = attempt(_box(label), ask, prof)
                 if is_stop(res) or is_ticked(res) is not want:
                     bad.append((label[:56], name, klass, "want ticked" if want else "want NOT ticked", what(res)))
+    assert not bad, report(bad, 12)
+
+
+def test_n2_sharing_with_a_third_party_is_unticked_in_every_consent_combination():
+    """D-224 5a (moved out of the both-consents test above): "... share my details with affiliates" and "... pass it to hiring
+    managers in other group companies" are third-party SHARING, which no profile consent covers: NOT ticked whatever the
+    retention / opt-in values and whatever class the model names, source `default:no_third_party_sharing`."""
+    bad = []
+    for label in N2_SHARING:
+        for ret in (True, False):
+            for pool in (True, False):
+                prof = profile_with(consents__data_retention_consent=ret, consents__talent_pool_opt_in=pool)
+                for klass in N2_CLASSES:
+                    ask = FakeAsk(lambda v, k=klass: lie("true", k), pick=pick_by("", ""))
+                    res = attempt(_box(label), ask, prof)
+                    if is_stop(res) or is_ticked(res) or "no_third_party_sharing" not in str(res.source):
+                        bad.append((label[:56], ret, pool, klass, what(res)))
     assert not bad, report(bad, 12)
 
 

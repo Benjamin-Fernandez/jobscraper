@@ -1,0 +1,89 @@
+bundles 88 ticked against talent_pool_opt_in=false: 67
+ok    ['consent_privacy', 'marketing'] opt agree/refuse: ['false', 'false'] req: STOP:consent_refused | I agree to the processing of my personal data and to receive job alerts
+ok    ['consent_privacy', 'marketing'] opt agree/refuse: ['false', 'false'] req: STOP:consent_refused | I agree to the processing of my personal data and to be contacted about other vacancies
+TICK  ['consent_privacy'] opt agree/refuse: ['true', 'true'] req: true | I agree to the processing of my personal data and to being contacted about other vacancies
+TICK  ['consent_privacy'] opt agree/refuse: ['true', 'true'] req: true | I agree to the processing of my personal data and to being contacted about future opportunities
+TICK  ['consent_privacy'] opt agree/refuse: ['true', 'true'] req: true | I agree to the processing of my personal data and to Example Employer contacting me about future opportunities
+TICK  ['consent_privacy'] opt agree/refuse: ['true', 'true'] req: true | I agree to the processing of my personal data and to Example Employer contacting me about other roles
+ok    ['consent_privacy', 'marketing'] opt agree/refuse: ['false', 'false'] req: STOP:consent_refused | I agree to the processing of my personal data and for Example Employer to contact me about future roles
+TICK  ['consent_privacy'] opt agree/refuse: ['true', 'true'] req: true | I agree to the processing of my personal data and to be contacted by Example Employer about similar roles
+TICK  ['consent_privacy'] opt agree/refuse: ['true', 'true'] req: true | I agree to the processing of my personal data and to receive emails from Example Employer
+TICK  ['consent_privacy'] opt agree/refuse: ['true', 'true'] req: true | I agree to the processing of my personal data and to receive communications from Example Employer
+ok    ['consent_privacy', 'marketing'] opt agree/refuse: ['false', 'false'] req: STOP:consent_refused | I agree to the processing of my personal data and to receive updates
+ok    ['consent_privacy', 'marketing'] opt agree/refuse: ['false', 'false'] req: STOP:consent_refused | I agree to the processing of my personal data and to receive our newsletter
+ok    ['consent_privacy', 'marketing'] opt agree/refuse: ['false', 'false'] req: STOP:consent_refused | I agree to the processing of my personal data and to receive marketing communications
+TICK  ['consent_privacy'] opt agree/refuse: ['true', 'true'] req: true | I agree to the processing of my personal data and to receive SMS messages
+TICK  ['consent_privacy'] opt agree/refuse: ['true', 'true'] req: true | I agree to the processing of my personal data and to stay in touch
+TICK  ['consent_privacy'] opt agree/refuse: ['true', 'true'] req: true | I agree to the processing of my personal data and to hear about career opportunities
+TICK  ['consent_privacy'] opt agree/refuse: ['true', 'true'] req: true | I agree to the processing of my personal data and to receive information about events
+TICK  ['consent_privacy'] opt agree/refuse: ['true', 'true'] req: true | I agree to the processing of my personal data and to be added to your talent community
+ok    ['consent_privacy', 'marketing'] opt agree/refuse: ['false', 'false'] req: STOP:consent_refused | I agree to the processing of my personal data and to be contacted by recruiters
+TICK  ['consent_privacy'] opt agree/refuse: ['true', 'true'] req: true | I agree to the processing of my personal data and to Example Employer keeping in touch with me about vacancies
+TICK  ['consent_privacy'] opt agree/refuse: ['true', 'true'] req: true | I agree to the processing of my personal data and to be emailed about new openings
+TICK  ['consent_privacy'] opt agree/refuse: ['true', 'true'] req: true | I agree to the processing of my personal data and to be sent job recommendations
+ok    ['marketing'] opt agree/refuse: ['false', 'false'] req: - | I consent to the collection and use of my data by Example Employer, and to receive job alerts
+ok    ['marketing'] opt agree/refuse: ['false', 'false'] req: - | I consent to the collection and use of my data by Example Employer, and to be contacted about other vacancies
+TICK  ['consent_privacy'] opt agree/refuse: ['true', 'true'] req: true | I consent to the collection and use of my data by Example Employer, and to being contacted about other vacanci
+TICK  ['consent_privacy'] opt agree/refuse: ['true', 'true'] req: true | I consent to the collection and use of my data by Example Employer, and to being contacted about future opport
+TICK  ['consent_privacy'] opt agree/refuse: ['true', 'true'] req: true | I consent to the collection and use of my data by Example Employer, and to Example Employer contacting me abou
+TICK  ['consent_privacy'] opt agree/refuse: ['true', 'true'] req: true | I consent to the collection and use of my data by Example Employer, and to Example Employer contacting me abou
+ok    ['marketing'] opt agree/refuse: ['false', 'false'] req: - | I consent to the collection and use of my data by Example Employer, and for Example Employer to contact me abo
+TICK  ['consent_privacy'] opt agree/refuse: ['true', 'true'] req: true | I consent to the collection and use of my data by Example Employer, and to be contacted by Example Employer ab
+TICK  ['consent_privacy'] opt agree/refuse: ['true', 'true'] req: true | I consent to the collection and use of my data by Example Employer, and to receive emails from Example Employe
+TICK  ['consent_privacy'] opt agree/refuse: ['true', 'true'] req: true | I consent to the collection and use of my data by Example Employer, and to receive communications from Example
+ok    ['marketing'] opt agree/refuse: ['false', 'false'] req: - | I consent to the collection and use of my data by Example Employer, and to receive updates
+ok    ['marketing'] opt agree/refuse: ['false', 'false'] req: - | I consent to the collection and use of my data by Example Employer, and to receive our newsletter
+ok    ['marketing'] opt agree/refuse: ['false', 'false'] req: - | I consent to the collection and use of my data by Example Employer, and to receive marketing communications
+TICK  ['consent_privacy'] opt agree/refuse: ['true', 'true'] req: true | I consent to the collection and use of my data by Example Employer, and to receive SMS messages
+TICK  ['consent_privacy'] opt agree/refuse: ['true', 'true'] req: true | I consent to the collection and use of my data by Example Employer, and to stay in touch
+TICK  ['consent_privacy'] opt agree/refuse: ['true', 'true'] req: true | I consent to the collection and use of my data by Example Employer, and to hear about career opportunities
+TICK  ['consent_privacy'] opt agree/refuse: ['true', 'true'] req: true | I consent to the collection and use of my data by Example Employer, and to receive information about events
+TICK  ['consent_privacy'] opt agree/refuse: ['true', 'true'] req: true | I consent to the collection and use of my data by Example Employer, and to be added to your talent community
+ok    ['marketing'] opt agree/refuse: ['false', 'false'] req: - | I consent to the collection and use of my data by Example Employer, and to be contacted by recruiters
+TICK  ['consent_privacy'] opt agree/refuse: ['true', 'true'] req: true | I consent to the collection and use of my data by Example Employer, and to Example Employer keeping in touch w
+TICK  ['consent_privacy'] opt agree/refuse: ['true', 'true'] req: true | I consent to the collection and use of my data by Example Employer, and to be emailed about new openings
+TICK  ['consent_privacy'] opt agree/refuse: ['true', 'true'] req: true | I consent to the collection and use of my data by Example Employer, and to be sent job recommendations
+TICK  ['acknowledgement'] opt agree/refuse: ['true', 'false'] req: true | I have read the Privacy Policy and to receive job alerts
+TICK  ['acknowledgement'] opt agree/refuse: ['true', 'false'] req: true | I have read the Privacy Policy and to be contacted about other vacancies
+TICK  ['acknowledgement'] opt agree/refuse: ['true', 'false'] req: true | I have read the Privacy Policy and to being contacted about other vacancies
+TICK  ['acknowledgement'] opt agree/refuse: ['true', 'false'] req: true | I have read the Privacy Policy and to being contacted about future opportunities
+TICK  ['acknowledgement'] opt agree/refuse: ['true', 'false'] req: true | I have read the Privacy Policy and to Example Employer contacting me about future opportunities
+TICK  ['acknowledgement'] opt agree/refuse: ['true', 'false'] req: true | I have read the Privacy Policy and to Example Employer contacting me about other roles
+TICK  ['acknowledgement'] opt agree/refuse: ['true', 'false'] req: true | I have read the Privacy Policy and for Example Employer to contact me about future roles
+TICK  ['acknowledgement'] opt agree/refuse: ['true', 'false'] req: true | I have read the Privacy Policy and to be contacted by Example Employer about similar roles
+TICK  ['acknowledgement'] opt agree/refuse: ['true', 'false'] req: true | I have read the Privacy Policy and to receive emails from Example Employer
+TICK  ['acknowledgement'] opt agree/refuse: ['true', 'false'] req: true | I have read the Privacy Policy and to receive communications from Example Employer
+TICK  ['acknowledgement'] opt agree/refuse: ['true', 'false'] req: true | I have read the Privacy Policy and to receive updates
+TICK  ['acknowledgement'] opt agree/refuse: ['true', 'false'] req: true | I have read the Privacy Policy and to receive our newsletter
+TICK  ['acknowledgement'] opt agree/refuse: ['true', 'false'] req: true | I have read the Privacy Policy and to receive marketing communications
+TICK  ['acknowledgement'] opt agree/refuse: ['true', 'false'] req: true | I have read the Privacy Policy and to receive SMS messages
+TICK  ['acknowledgement'] opt agree/refuse: ['true', 'false'] req: true | I have read the Privacy Policy and to stay in touch
+TICK  ['acknowledgement'] opt agree/refuse: ['true', 'false'] req: true | I have read the Privacy Policy and to hear about career opportunities
+TICK  ['acknowledgement'] opt agree/refuse: ['true', 'false'] req: true | I have read the Privacy Policy and to receive information about events
+TICK  ['acknowledgement'] opt agree/refuse: ['true', 'false'] req: true | I have read the Privacy Policy and to be added to your talent community
+TICK  ['acknowledgement'] opt agree/refuse: ['true', 'false'] req: true | I have read the Privacy Policy and to be contacted by recruiters
+TICK  ['acknowledgement'] opt agree/refuse: ['true', 'false'] req: true | I have read the Privacy Policy and to Example Employer keeping in touch with me about vacancies
+TICK  ['acknowledgement'] opt agree/refuse: ['true', 'false'] req: true | I have read the Privacy Policy and to be emailed about new openings
+TICK  ['acknowledgement'] opt agree/refuse: ['true', 'false'] req: true | I have read the Privacy Policy and to be sent job recommendations
+ok    ['consent_privacy', 'acknowledgement', 'marketing'] opt agree/refuse: ['false', 'false'] req: STOP:consent_refused | I agree to the privacy notice and to receive job alerts
+ok    ['consent_privacy', 'acknowledgement', 'marketing'] opt agree/refuse: ['false', 'false'] req: STOP:consent_refused | I agree to the privacy notice and to be contacted about other vacancies
+TICK  ['consent_privacy', 'acknowledgement'] opt agree/refuse: ['true', 'true'] req: true | I agree to the privacy notice and to being contacted about other vacancies
+TICK  ['consent_privacy', 'acknowledgement'] opt agree/refuse: ['true', 'true'] req: true | I agree to the privacy notice and to being contacted about future opportunities
+TICK  ['consent_privacy', 'acknowledgement'] opt agree/refuse: ['true', 'true'] req: true | I agree to the privacy notice and to Example Employer contacting me about future opportunities
+TICK  ['consent_privacy', 'acknowledgement'] opt agree/refuse: ['true', 'true'] req: true | I agree to the privacy notice and to Example Employer contacting me about other roles
+ok    ['consent_privacy', 'acknowledgement', 'marketing'] opt agree/refuse: ['false', 'false'] req: STOP:consent_refused | I agree to the privacy notice and for Example Employer to contact me about future roles
+TICK  ['consent_privacy', 'acknowledgement'] opt agree/refuse: ['true', 'true'] req: true | I agree to the privacy notice and to be contacted by Example Employer about similar roles
+TICK  ['consent_privacy', 'acknowledgement'] opt agree/refuse: ['true', 'true'] req: true | I agree to the privacy notice and to receive emails from Example Employer
+TICK  ['consent_privacy', 'acknowledgement'] opt agree/refuse: ['true', 'true'] req: true | I agree to the privacy notice and to receive communications from Example Employer
+ok    ['consent_privacy', 'acknowledgement', 'marketing'] opt agree/refuse: ['false', 'false'] req: STOP:consent_refused | I agree to the privacy notice and to receive updates
+ok    ['consent_privacy', 'acknowledgement', 'marketing'] opt agree/refuse: ['false', 'false'] req: STOP:consent_refused | I agree to the privacy notice and to receive our newsletter
+ok    ['consent_privacy', 'acknowledgement', 'marketing'] opt agree/refuse: ['false', 'false'] req: STOP:consent_refused | I agree to the privacy notice and to receive marketing communications
+TICK  ['consent_privacy', 'acknowledgement'] opt agree/refuse: ['true', 'true'] req: true | I agree to the privacy notice and to receive SMS messages
+TICK  ['consent_privacy', 'acknowledgement'] opt agree/refuse: ['true', 'true'] req: true | I agree to the privacy notice and to stay in touch
+TICK  ['consent_privacy', 'acknowledgement'] opt agree/refuse: ['true', 'true'] req: true | I agree to the privacy notice and to hear about career opportunities
+TICK  ['consent_privacy', 'acknowledgement'] opt agree/refuse: ['true', 'true'] req: true | I agree to the privacy notice and to receive information about events
+TICK  ['consent_privacy', 'acknowledgement'] opt agree/refuse: ['true', 'true'] req: true | I agree to the privacy notice and to be added to your talent community
+ok    ['consent_privacy', 'acknowledgement', 'marketing'] opt agree/refuse: ['false', 'false'] req: STOP:consent_refused | I agree to the privacy notice and to be contacted by recruiters
+TICK  ['consent_privacy', 'acknowledgement'] opt agree/refuse: ['true', 'true'] req: true | I agree to the privacy notice and to Example Employer keeping in touch with me about vacancies
+TICK  ['consent_privacy', 'acknowledgement'] opt agree/refuse: ['true', 'true'] req: true | I agree to the privacy notice and to be emailed about new openings
+TICK  ['consent_privacy', 'acknowledgement'] opt agree/refuse: ['true', 'true'] req: true | I agree to the privacy notice and to be sent job recommendations

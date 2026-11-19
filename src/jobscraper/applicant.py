@@ -42,7 +42,8 @@ from typing import Any, Iterable, NamedTuple, Optional, Sequence
 
 import yaml
 
-from .apply.contracts import EXTRA_EMPLOYER_FIELD, EXTRA_KEY_PATTERN, QuestionKind
+from .apply.contracts import (CONSENT_SWITCHES, CONSENTS_DEFAULT_OFF, EXTRA_EMPLOYER_FIELD,
+                              EXTRA_KEY_PATTERN, QuestionKind)
 from .config import ROOT
 
 APPLICANT_PATH_DEFAULT = "data/applicant.yaml"          # config paths.applicant overrides
@@ -222,6 +223,8 @@ BOOLS: tuple[str, ...] = (
     "pay.expected_salary.negotiable",
     "consents.privacy_consent", "consents.data_retention_consent",
     "consents.talent_pool_opt_in", "consents.certify_true",
+    # v10 (D-229): the three switches, unset = off; bool-only validation, never written as a default
+    *(c.key for c in CONSENT_SWITCHES),
     "declarations.pep", "declarations.conflict_audit_independence",
     "declarations.shareholding_in_company", "declarations.relatives_at_company",
     "declarations.criminal_record", "declarations.bankruptcy",
@@ -1600,6 +1603,9 @@ FORM: tuple[FormGroup, ...] = (
         _I("consents.talent_pool_opt_in", "Add me to talent pools", "bool"),
         _I("consents.certify_true",
            "I certify the information I give is true and complete", "bool"),
+        # v10 (D-229): sharing within the employer's group, sharing with other companies and
+        # background checks: titles and helper lines come from the contract, default OFF
+        *(_I(c.key, c.title, "bool", help=c.help) for c in CONSENT_SWITCHES),
     )),
     FormGroup("declarations", "Declarations", (
         _I("declarations.pep", "Are you a politically exposed person, or a family member "
@@ -1714,6 +1720,8 @@ def _under(path: str, paths: Iterable[str]) -> bool:
 # Q-71 G2: rendering hints that live beside FORM, not in its tuples, so the
 # declarations group (edited on other branches) stays free of merge conflicts.
 # Each is optional in the item JSON: a client that ignores them still works.
+# (`default_off: true` marks the three v10 consent switches, CONSENTS_DEFAULT_OFF: unset reads
+# as off, the Profile summary counts them apart and never as something missing.)
 #
 # YES_NO_CONTROL: a bool item whose path starts with one of these (a trailing
 # "." = a prefix) or equals one is drawn as Yes / No radios (`control:
@@ -1783,6 +1791,8 @@ def _item_json(item: FormItem, parent: str = "") -> dict:
             out["control"] = "yes_no"
             if item.path in NULLABLE_BOOL:
                 out["nullable_bool"] = True
+        if item.kind == "bool" and item.path in CONSENTS_DEFAULT_OFF:
+            out["default_off"] = True    # unset = off: a decision, never a missing detail
         if item.path in SHOW_WHEN:
             out["show_when"] = copy.deepcopy(SHOW_WHEN[item.path])
         if item.path in AUTOCOMPLETE:
@@ -2297,7 +2307,7 @@ def redaction_values(profile: dict) -> list[str]:
     D-201 review F1 (what the local model may now read): the names, `name_order`,
     `pronouns`, the salary currency/period and sensitive `extra` answers are strings,
     so they are listed here. Left out on purpose, numbers and booleans:
-    `pay.current_salary.amount`, `pay.months_per_year` and the four `consents` (and a
+    `pay.current_salary.amount`, `pay.months_per_year` and the seven `consents` (and a
     yes/no `extra` answer). `scrub` matches a value with a digit anywhere, so a
     salary such as 4500 or a "13" would blank parts of ids, timings and URLs, and
     "yes"/"true" are ordinary words. No log line carries an answer value, and a

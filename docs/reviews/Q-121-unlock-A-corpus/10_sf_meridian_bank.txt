@@ -1,0 +1,48 @@
+@form 10_sf_meridian_bank | successfactors | Meridian Bank | Graduate Associate Programme (Singapore)
+@page Personal Information
+title|DROPDOWN|R|Title|Mr;Ms;Mrs;Miss;Dr;Mx|of:other_id|~
+first|TEXT|R|First Name (as in NRIC/passport)||ord|Alex
+last|TEXT|R|Last Name / Surname||ord|Testcase
+dob|DATE|R|Date of Birth||of:date_of_birth|2002-03-14
+nric|TEXT|R|NRIC / FIN No.||of:national_id|~
+gender|DROPDOWN|R|Gender|Male;Female|sid:gender|~
+race|DROPDOWN|R|Race|Chinese;Malay;Indian;Eurasian;Others|sid:race|~
+religion|DROPDOWN|O|Religion|Buddhism;Christianity;Hinduism;Islam;Taoism;Free Thinker;Others;Prefer not to say|sid:religion|Prefer not to say
+marital|DROPDOWN|R|Marital Status|Single;Married;Divorced;Widowed|sid:marital|~
+nationality|DROPDOWN|R|Nationality|Singaporean;Malaysian;Indian;Chinese;Others|wr|Singaporean
+residency|DROPDOWN|R|Residency Status|Singapore Citizen;Singapore PR;Employment Pass;S Pass;Others|wr|Singapore Citizen
+email|EMAIL|R|Email Address||ord|alex.testcase@example.com
+mobile|PHONE|R|Mobile Number||of:phone|91234567
+addr|TEXT|R|Residential Address||of:address|1 Example Road
+postal|TEXT|R|Postal Code||of:postal_code|000001
+@page Education and Experience
+inst|TEXT|R|Name of Institution||ord|Nanyang Example University
+qual|DROPDOWN|R|Highest Qualification|Diploma;Bachelor's Degree;Master's Degree;Doctorate;Others|ord|Bachelor's Degree
+major|TEXT|R|Major / Field of Study||ord|Computer Engineering
+class|DROPDOWN|R|Class of Honours|Highest Distinction;Distinction;Honours (Merit);Honours;Pass;Not applicable|of:grade|~
+gradyr|NUMBER|R|Year of Graduation||ord|2025
+cap|TEXT|R|CGPA / CAP (out of 5.0 / 4.0)||ord|4.20 / 5.00
+emp|TEXT|O|Most recent employer||ord|Sample Analytics
+role|TEXT|O|Most recent job title||ord|Data Intern
+lastsal|NUMBER|R|Last drawn monthly salary (SGD)||of:salary_current|~
+ref1_name|TEXT|R|Referee 1: Name||oth|~
+ref1_email|EMAIL|R|Referee 1: Email||oth|~
+ref1_phone|PHONE|R|Referee 1: Contact number||oth|~
+resume|FILE|R|Resume / CV||ord|~
+@page Questions
+auth|RADIO|R|Do you have the legal right to work in Singapore?|Yes;No|wr|Yes
+ns|RADIO|R|Have you completed National Service (for male Singapore citizens / PRs)?|Yes;No;Not applicable|ord|Yes
+prevemp|RADIO|R|Have you been employed by Meridian Bank or any of its subsidiaries before?|Yes;No|dec:prior_employment_at_company|No
+relatives|RADIO|R|Do you have any relatives or close friends working in Meridian Bank?|Yes;No|dec:relatives_at_company|No
+how|DROPDOWN|R|Source of Application|Meridian Careers Website;JobStreet;LinkedIn;University Career Fair;Employee Referral;Others|ord|Meridian Careers Website
+expsal|NUMBER|R|Expected monthly salary (SGD)||of:salary_expected|5000
+notice|TEXT|R|Notice period||ord|Immediate
+@page Declarations
+crim|RADIO|R|Have you ever been convicted in a court of law in any country, or are there any criminal proceedings pending against you?|Yes;No|dec:criminal_record|No
+bank|RADIO|R|Have you ever been adjudged a bankrupt, or had a judgment debt?|Yes;No|dec:bankruptcy|No
+disc|RADIO|R|Have you ever been dismissed or asked to resign from any employment, or been disqualified from holding any office?|Yes;No|dec:regulatory_disciplinary|No
+pep|RADIO|R|Are you a politically exposed person or a close family member of one?|Yes;No|dec:pep|No
+bond|RADIO|R|Are you currently under any bond or scholarship obligation to a government agency or another organisation?|Yes;No|dec:other|No
+decl|CHECKBOX|R|I declare that the information I have given in this application is true and complete. I understand that any false statement may lead to withdrawal of an offer or dismissal.||cert|true
+pdpa|CHECKBOX|R|I consent to Meridian Bank and its related corporations, affiliates and service providers collecting, using and disclosing my personal data for employment purposes, in accordance with the PDPA.||priv|true
+keep|CHECKBOX|O|I consent to Meridian Bank retaining my application for future vacancies.||ret|true

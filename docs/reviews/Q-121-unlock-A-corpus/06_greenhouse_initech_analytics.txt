@@ -1,0 +1,30 @@
+@form 06_greenhouse_initech_analytics | greenhouse | Initech Analytics | Graduate Data Analyst (Singapore)
+@page Application
+@use name_gh
+loc|TYPEAHEAD|R|Current location||ord|Singapore
+@use files_resume
+linkedin|URL|R|LinkedIn Profile||ord|https://www.linkedin.com/in/example-alex-testcase
+school|TYPEAHEAD|R|School||ord|Nanyang Example University
+degree|DROPDOWN|R|Degree|Bachelor's Degree;Master's Degree;Ph.D.;Other|ord|Bachelor's Degree
+discipline|TEXT|R|Discipline||ord|Computer Engineering
+grad|DATE|R|Expected or actual graduation date||ord|2025-06
+cgpa|TEXT|R|Cumulative GPA / CAP||ord|4.20 / 5.00
+auth|DROPDOWN|R|Do you have the legal right to work in Singapore?|Yes;No|wr|Yes
+sponsor|DROPDOWN|R|Are you able to work in Singapore without employer sponsorship?|Yes;No|sp|Yes
+workother|DROPDOWN|R|Are you legally authorised to work in any country other than Singapore?|Yes;No|wr|~
+stat|DROPDOWN|R|Your work authorisation status in Singapore|Citizen;Permanent Resident;Employment Pass;S Pass;Dependant Pass;Student Pass;Other|wr|Citizen
+nsman|DROPDOWN|R|Are you a National Service man / have you completed National Service?|Yes;No;Not applicable|ord|Yes
+sql|DROPDOWN|R|How would you rate your SQL skills?|Beginner;Intermediate;Advanced;Expert|ord|?Intermediate
+tools|MULTI_CHOICE|O|Which of the following tools have you used?|Excel;Tableau;Power BI;Python;R;SAS|ord|Python
+salexp|TEXT|R|Expected salary (SGD per month)||of:salary_expected|5000
+notice|TEXT|R|How much notice do you need to give your current employer?||ord|None, I am available immediately
+case|TEXTAREA|R|Describe a time you used data to solve a problem (200 words max).||ord|At Sample Analytics I automated weekly reports with SQL and Python, which removed manual copy and paste and cut the time to produce them.
+why|TEXTAREA|R|What interests you about Initech Analytics?||ord|Initech works on analytics for retailers. I like data work with a clear business use and want to grow in that environment.
+hear|DROPDOWN|R|How did you find this opening?|Initech website;LinkedIn;University;Referral;Other|ord|Initech website
+cons|DROPDOWN|R|Do you have any conflict of interest, or hold any shares in Initech Analytics or its clients?|Yes;No|dec:shareholding_in_company|No
+nda|DROPDOWN|R|Are you currently bound by a confidentiality or non-compete agreement with a former or current employer?|Yes;No|dec:non_compete|No
+disc|DROPDOWN|R|Have you ever been subject to disciplinary action by an employer, a regulator or a professional body?|Yes;No|dec:regulatory_disciplinary|No
+share|CHECKBOX|R|I understand that Initech Analytics will share my personal data with its group companies and service providers for the purposes of processing my application.||priv|true
+ack|CHECKBOX|R|I have read the Candidate Privacy Notice.||ack|true
+talent|CHECKBOX|O|Add me to the Initech talent community.||mkt|false
+@use eeo_gh

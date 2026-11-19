@@ -1,0 +1,42 @@
+@form 03_workday_contoso_logistics | workday | Contoso Logistics | Graduate Software Engineer (Singapore)
+@page My Information
+how|DROPDOWN|R|How Did You Hear About Us?|Contoso Website;LinkedIn;Glassdoor;Referral;Career Fair;Other|ord|Contoso Website
+refer|TEXT|O|If you were referred by a Contoso employee, please enter their name||oth|~
+prev_worker|RADIO|R|Have you ever worked for Contoso Logistics or any of its affiliates?|Yes;No|dec:prior_employment_at_company|No
+@use name_wd
+country|DROPDOWN|R|Country/Territory|Singapore;Malaysia;Vietnam;Thailand;Other|ord|Singapore
+addr1|TEXT|R|Address Line 1||of:address|1 Example Road
+addr2|TEXT|O|Address Line 2||of:address|~
+city|TEXT|R|City||ord|Singapore
+postal|TEXT|R|Postal Code||of:postal_code|000001
+@use phone_wd
+@page My Experience
+@use job_wd
+@use school_wd
+honours|DROPDOWN|R|Class of Degree|First Class Honours;Second Class Honours (Upper);Second Class Honours (Lower);Third Class Honours;Pass;Not applicable|of:grade|~
+@use files_resume
+@use links
+@page Application Questions
+auth|RADIO|R|Are you authorized to work in Singapore?|Yes;No|wr|Yes
+spons|RADIO|R|Will you require Contoso Logistics to sponsor you for a work visa or employment pass now or in the future?|Yes;No|sp|No
+status|DROPDOWN|R|What is your current immigration status in Singapore?|Citizen;Permanent Resident;Employment Pass;S Pass;Student Pass;Other|wr|Citizen
+ns|DROPDOWN|R|National Service Status|Completed;Currently serving;Exempted;Not applicable|ord|Completed
+nationality|DROPDOWN|R|Nationality|Singapore;Malaysia;India;China;Philippines;Other|wr|Singapore
+noncomp|RADIO|R|Are you currently bound by any non-compete, non-solicitation or non-disclosure agreement?|Yes;No|dec:non_compete|No
+dismiss|RADIO|R|Have you ever been dismissed, or asked to resign, from any employment?|Yes;No|dec:other|No
+crim|RADIO|R|Do you have a criminal record?|Yes;No|dec:criminal_record|No
+coi|RADIO|R|Do you currently hold any position or interest outside Contoso Logistics that may create a conflict of interest?|Yes;No|dec:conflict_audit_independence|No
+python|NUMBER|R|Years of professional experience with Python||ord|?1
+lang|TEXT|R|Which programming languages are you strongest in?||ord|Python and SQL
+relocate|RADIO|R|Are you open to working at our Jurong office five days a week?|Yes;No|ord|?Yes
+notice|TEXT|R|Notice period||ord|Immediate
+salary|TEXT|R|Expected monthly salary (SGD)||of:salary_expected|5000
+licence|RADIO|O|Do you hold a valid Class 3 driving licence?|Yes;No|ord|?No
+whyus|TEXTAREA|R|Why Contoso Logistics?||ord|Contoso moves goods across the region and software sits at the centre of that. My internship building shipment tracking APIs gave me a taste for it and I want to build more.
+@page Voluntary Disclosures
+gender|DROPDOWN|O|Gender|Male;Female;Other;Prefer not to disclose|sid:gender|Prefer not to disclose
+race|DROPDOWN|O|Race|Chinese;Malay;Indian;Others;Prefer not to disclose|sid:race|Prefer not to disclose
+@page Self Identify
+priv|CHECKBOX|R|I have read and understood the Contoso Logistics Recruitment Privacy Policy and I consent to the collection, use and disclosure of my personal data for recruitment purposes.||priv|true
+retain|CHECKBOX|R|I agree that Contoso Logistics may retain my personal data for up to 24 months to consider me for future vacancies.||ret|true
+cert|CHECKBOX|R|I declare that all the information I have given is true and correct.||cert|true

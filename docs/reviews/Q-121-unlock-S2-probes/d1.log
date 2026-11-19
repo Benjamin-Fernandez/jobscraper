@@ -1,0 +1,28 @@
+cells 1824
+adverse written with <=1 wrong call (HIGH): 8
+   ('Are you a director of any company?', 'R', 'req', 'model=Yes', 'ordinary', 'F', 'Yes')
+   ('Are you a director of any company?', 'R', 'req', 'model=Yes', '<no class>', 'F', 'Yes')
+   ('Are you a director of any company?', 'R', 'opt', 'model=Yes', 'ordinary', 'F', 'Yes')
+   ('Are you a director of any company?', 'R', 'opt', 'model=Yes', '<no class>', 'F', 'Yes')
+   ('Do you have any outside business interests?', 'R', 'req', 'model=Yes', 'ordinary', 'F', 'Yes')
+   ('Do you have any outside business interests?', 'R', 'req', 'model=Yes', '<no class>', 'F', 'Yes')
+   ('Do you have any outside business interests?', 'R', 'opt', 'model=Yes', 'ordinary', 'F', 'Yes')
+   ('Do you have any outside business interests?', 'R', 'opt', 'model=Yes', '<no class>', 'F', 'Yes')
+adverse written with >=2 wrong calls (accepted residual): 78
+  distinct labels with a double-fault cell: 11
+     Are you a director of any company?
+     Are you currently or have you been a government employee?
+     Are you free of any non-compete obligations?
+     Can you confirm you have no criminal record?
+     Do you confirm that no relative or partner of yours works at
+     Do you currently work for a competitor of Example Employer?
+     Do you have any criminal convictions that are not spent?
+     Do you have any outside business interests?
+     Do you have no conflict of interest?
+     Have you signed a non-disclosure agreement with a previous e
+     Is it true that you have never been bankrupt?
+
+CONTROL: willingness to sign an NDA (truth: Yes). Model Yes / No, class ordinary / none:
+  Are you willing to sign a non-disclosure agreement?                    ['Yes/ordi->Yes', 'Yes/<no ->Yes', 'No/ordi->No', 'No/<no ->No']
+  Are you willing to sign a confidentiality agreement as a condition of  ['Yes/ordi->Yes', 'Yes/<no ->Yes', 'No/ordi->No', 'No/<no ->No']
+  Would you be willing to sign an NDA?                                   ['Yes/ordi->Yes', 'Yes/<no ->Yes', 'No/ordi->No', 'No/<no ->No']

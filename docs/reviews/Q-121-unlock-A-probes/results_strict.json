@@ -1,0 +1,622 @@
+[
+ {
+  "form": "01_workday_northwind_bank",
+  "required": 40,
+  "locked": 10,
+  "model_answered": 8,
+  "unknown_required": [
+   {
+    "label": "How Did You Hear About Us?",
+    "why": "model: unknown"
+   },
+   {
+    "label": "Phone Device Type",
+    "why": "model: unknown"
+   },
+   {
+    "label": "Degree",
+    "why": "model: unknown"
+   },
+   {
+    "label": "Have you completed, or are you currently serving, National Service (NSF / NSman)?",
+    "why": "profile rule singapore_status.ns_status: no offered option fits"
+   },
+   {
+    "label": "Do you have any relatives or close friends currently working at Northwind Bank?",
+    "why": "attestation not recognised: do you have any relatives or close friends currently working a"
+   },
+   {
+    "label": "Are you, or are you an immediate family member or close associate of, a politically expose",
+    "why": "attestation not recognised: are you or are you an immediate family member or close associa"
+   },
+   {
+    "label": "Are you currently employed by, or have you been employed in the last 2 years by, a governm",
+    "why": "attestation not recognised: are you currently employed by or have you been employed in the"
+   },
+   {
+    "label": "Have you ever been declared bankrupt or entered into a voluntary arrangement with creditor",
+    "why": "not a status question"
+   },
+   {
+    "label": "Have you ever been subject to regulatory or disciplinary action, or been dismissed from an",
+    "why": "not a status question"
+   },
+   {
+    "label": "Do you have any outside business interests or shareholdings that could conflict with your ",
+    "why": "attestation not recognised: do you have any outside business interests or shareholdings th"
+   },
+   {
+    "label": "Why do you want to join Northwind Bank?",
+    "why": "compose_needed: off"
+   },
+   {
+    "label": "Are you willing to undergo a background and reference check?",
+    "why": "G5: second opinion disagrees"
+   }
+  ],
+  "filled_required": 18,
+  "scoping_artefact": 10
+ },
+ {
+  "form": "02_workday_acme_trading",
+  "required": 42,
+  "locked": 14,
+  "model_answered": 7,
+  "unknown_required": [
+   {
+    "label": "How Did You Hear About Us?",
+    "why": "model: unknown"
+   },
+   {
+    "label": "Phone Device Type",
+    "why": "model: unknown"
+   },
+   {
+    "label": "Degree",
+    "why": "model: unknown"
+   },
+   {
+    "label": "Are you willing to relocate to another Acme Trading office in Asia Pacific if required?",
+    "why": "G5: second opinion disagrees"
+   },
+   {
+    "label": "Are you able to travel up to 25% of the time?",
+    "why": "G5: second opinion disagrees"
+   },
+   {
+    "label": "Do you have any personal, financial or business interest that could conflict, or appear to",
+    "why": "attestation not recognised: do you have any personal financial or business interest that c"
+   },
+   {
+    "label": "Tell us why you are interested in the Management Associate Programme at Acme Trading (max ",
+    "why": "compose_needed: off"
+   },
+   {
+    "label": "Graduation event: what is your T-shirt size?",
+    "why": "model: unknown"
+   },
+   {
+    "label": "I confirm the information provided in this application is accurate.",
+    "why": "model: unknown"
+   }
+  ],
+  "filled_required": 21,
+  "scoping_artefact": 12
+ },
+ {
+  "form": "03_workday_contoso_logistics",
+  "required": 39,
+  "locked": 9,
+  "model_answered": 7,
+  "unknown_required": [
+   {
+    "label": "How Did You Hear About Us?",
+    "why": "model: unknown"
+   },
+   {
+    "label": "Phone Device Type",
+    "why": "model: unknown"
+   },
+   {
+    "label": "Degree",
+    "why": "model: unknown"
+   },
+   {
+    "label": "Class of Degree",
+    "why": "model: unknown"
+   },
+   {
+    "label": "Will you require Contoso Logistics to sponsor you for a work visa or employment pass now o",
+    "why": "G5: second opinion disagrees"
+   },
+   {
+    "label": "Have you ever been dismissed, or asked to resign, from any employment?",
+    "why": "attestation not recognised: have you ever been dismissed or asked to resign from any emplo"
+   },
+   {
+    "label": "Do you currently hold any position or interest outside Contoso Logistics that may create a",
+    "why": "not a status question"
+   },
+   {
+    "label": "Years of professional experience with Python",
+    "why": "model: unknown"
+   },
+   {
+    "label": "Which programming languages are you strongest in?",
+    "why": "model: unknown"
+   },
+   {
+    "label": "Are you open to working at our Jurong office five days a week?",
+    "why": "model: unknown"
+   },
+   {
+    "label": "Notice period",
+    "why": "model: unknown"
+   },
+   {
+    "label": "Why Contoso Logistics?",
+    "why": "model: unknown"
+   },
+   {
+    "label": "I agree that Contoso Logistics may retain my personal data for up to 24 months to consider",
+    "why": "model: unknown"
+   }
+  ],
+  "filled_required": 16,
+  "scoping_artefact": 10
+ },
+ {
+  "form": "04_greenhouse_kestrel_labs",
+  "required": 25,
+  "locked": 9,
+  "model_answered": 5,
+  "unknown_required": [
+   {
+    "label": "Degree",
+    "why": "model: unknown"
+   },
+   {
+    "label": "Are you open to relocating to Singapore if you do not already live here?",
+    "why": "G5: second opinion disagrees"
+   },
+   {
+    "label": "When could you start?",
+    "why": "model: unknown"
+   },
+   {
+    "label": "How did you hear about this job?",
+    "why": "model: unknown"
+   },
+   {
+    "label": "Are you subject to any non-compete or non-solicitation agreement that would affect your ab",
+    "why": "not a status question"
+   },
+   {
+    "label": "Tell us about a project you built that you are proud of.",
+    "why": "model: unknown"
+   },
+   {
+    "label": "Why Kestrel Labs?",
+    "why": "model: unknown"
+   },
+   {
+    "label": "What is your favourite programming language and why?",
+    "why": "model: unknown"
+   }
+  ],
+  "filled_required": 14,
+  "scoping_artefact": 3
+ },
+ {
+  "form": "05_greenhouse_fabrikam_games",
+  "required": 26,
+  "locked": 6,
+  "model_answered": 6,
+  "unknown_required": [
+   {
+    "label": "Degree",
+    "why": "model: unknown"
+   },
+   {
+    "label": "Have you completed your National Service?",
+    "why": "profile rule singapore_status.ns_status: no offered option fits"
+   },
+   {
+    "label": "What games have inspired you most, and why?",
+    "why": "model: unknown"
+   },
+   {
+    "label": "Which game engine are you most comfortable with?",
+    "why": "model: unknown"
+   },
+   {
+    "label": "How many years of experience do you have in C++?",
+    "why": "model: unknown"
+   },
+   {
+    "label": "How did you hear about us?",
+    "why": "model: unknown"
+   },
+   {
+    "label": "Are any of your relatives employed by Fabrikam Games?",
+    "why": "attestation not recognised: are any of your relatives employed by fabrikam games"
+   },
+   {
+    "label": "Are you willing to undergo a background check?",
+    "why": "G5: second opinion disagrees"
+   }
+  ],
+  "filled_required": 12,
+  "scoping_artefact": 6
+ },
+ {
+  "form": "06_greenhouse_initech_analytics",
+  "required": 28,
+  "locked": 6,
+  "model_answered": 6,
+  "unknown_required": [
+   {
+    "label": "Degree",
+    "why": "model: unknown"
+   },
+   {
+    "label": "Are you able to work in Singapore without employer sponsorship?",
+    "why": "G5: second opinion disagrees"
+   },
+   {
+    "label": "Your work authorisation status in Singapore",
+    "why": "profile rule singapore_status.authorised_to_work: no value fits"
+   },
+   {
+    "label": "Are you a National Service man / have you completed National Service?",
+    "why": "profile rule singapore_status.ns_status: no offered option fits"
+   },
+   {
+    "label": "How would you rate your SQL skills?",
+    "why": "model: unknown"
+   },
+   {
+    "label": "How much notice do you need to give your current employer?",
+    "why": "model: unknown"
+   },
+   {
+    "label": "What interests you about Initech Analytics?",
+    "why": "compose_needed: off"
+   },
+   {
+    "label": "How did you find this opening?",
+    "why": "model: unknown"
+   },
+   {
+    "label": "Do you have any conflict of interest, or hold any shares in Initech Analytics or its clien",
+    "why": "attestation not recognised: do you have any conflict of interest or hold any shares in ini"
+   },
+   {
+    "label": "Are you currently bound by a confidentiality or non-compete agreement with a former or cur",
+    "why": "not a status question"
+   },
+   {
+    "label": "Have you ever been subject to disciplinary action by an employer, a regulator or a profess",
+    "why": "not a status question"
+   }
+  ],
+  "filled_required": 12,
+  "scoping_artefact": 5
+ },
+ {
+  "form": "07_lever_blue_heron_studios",
+  "required": 18,
+  "locked": 7,
+  "model_answered": 3,
+  "unknown_required": [
+   {
+    "label": "Have you completed National Service?",
+    "why": "profile rule singapore_status.ns_status: no offered option fits"
+   },
+   {
+    "label": "What is your notice period?",
+    "why": "model: unknown"
+   },
+   {
+    "label": "When can you start?",
+    "why": "model: unknown"
+   },
+   {
+    "label": "Tell us about the backend stack you have worked with.",
+    "why": "model: unknown"
+   },
+   {
+    "label": "Why Blue Heron?",
+    "why": "model: unknown"
+   },
+   {
+    "label": "How did you hear about us?",
+    "why": "model: unknown"
+   },
+   {
+    "label": "Are you bound by a non-compete or other restrictive agreement that limits where you can wo",
+    "why": "not a status question"
+   }
+  ],
+  "filled_required": 10,
+  "scoping_artefact": 1
+ },
+ {
+  "form": "08_lever_tidewater_ventures",
+  "required": 23,
+  "locked": 8,
+  "model_answered": 2,
+  "unknown_required": [
+   {
+    "label": "Are you, or is any member of your family or any close associate, a politically exposed per",
+    "why": "not a status question"
+   },
+   {
+    "label": "Do you hold, or have you held, a position in a government, regulatory body or listed compa",
+    "why": "not a status question"
+   },
+   {
+    "label": "Expected annual salary (SGD)",
+    "why": "model: unknown"
+   },
+   {
+    "label": "Current / last drawn monthly salary (SGD)",
+    "why": "model: unknown"
+   },
+   {
+    "label": "Available from",
+    "why": "model: unknown"
+   },
+   {
+    "label": "Are you proficient in financial modelling in Excel?",
+    "why": "model: unknown"
+   },
+   {
+    "label": "Pitch us an investment idea in 150 words.",
+    "why": "model: unknown"
+   },
+   {
+    "label": "Why Tidewater?",
+    "why": "model: unknown"
+   }
+  ],
+  "filled_required": 10,
+  "scoping_artefact": 5
+ },
+ {
+  "form": "09_lever_lumen_payments",
+  "required": 27,
+  "locked": 12,
+  "model_answered": 4,
+  "unknown_required": [
+   {
+    "label": "Do you currently hold a valid Singapore work pass?",
+    "why": "model: unknown"
+   },
+   {
+    "label": "Have you ever been involved in, or been subject to any investigation for, fraud, financial",
+    "why": "G5: second opinion disagrees"
+   },
+   {
+    "label": "Which languages and frameworks have you used professionally or in internships?",
+    "why": "model: unknown"
+   },
+   {
+    "label": "Describe the hardest bug you have fixed.",
+    "why": "model: unknown"
+   },
+   {
+    "label": "Why are you interested in Lumen Payments?",
+    "why": "compose_needed: off"
+   },
+   {
+    "label": "How did you hear about this role?",
+    "why": "model: unknown"
+   },
+   {
+    "label": "Are you comfortable being on an on-call rota after your first six months?",
+    "why": "model: unknown"
+   },
+   {
+    "label": "Are you available to work from our office in Singapore at least 3 days a week?",
+    "why": "model: unknown"
+   },
+   {
+    "label": "I consent to Lumen Payments carrying out background, reference and criminal record checks ",
+    "why": "attestation not recognised: i consent to lumen payments carrying out background reference "
+   }
+  ],
+  "filled_required": 16,
+  "scoping_artefact": 2
+ },
+ {
+  "form": "10_sf_meridian_bank",
+  "required": 39,
+  "locked": 9,
+  "model_answered": 5,
+  "unknown_required": [
+   {
+    "label": "Title",
+    "why": "model: unknown"
+   },
+   {
+    "label": "First Name (as in NRIC/passport)",
+    "why": "G7: sensitive question"
+   },
+   {
+    "label": "NRIC / FIN No.",
+    "why": "model: unknown"
+   },
+   {
+    "label": "Gender",
+    "why": "profile rule identity.gender: no offered option fits"
+   },
+   {
+    "label": "Race",
+    "why": "profile rule singapore_status.race: no offered option fits"
+   },
+   {
+    "label": "Marital Status",
+    "why": "profile rule singapore_status.marital_status: no offered option fits"
+   },
+   {
+    "label": "Highest Qualification",
+    "why": "model: unknown"
+   },
+   {
+    "label": "Class of Honours",
+    "why": "model: unknown"
+   },
+   {
+    "label": "Last drawn monthly salary (SGD)",
+    "why": "model: unknown"
+   },
+   {
+    "label": "Referee 1: Name",
+    "why": "model: unknown"
+   },
+   {
+    "label": "Referee 1: Email",
+    "why": "model: unknown"
+   },
+   {
+    "label": "Referee 1: Contact number",
+    "why": "model: unknown"
+   },
+   {
+    "label": "Have you completed National Service (for male Singapore citizens / PRs)?",
+    "why": "profile rule singapore_status.ns_status: no offered option fits"
+   },
+   {
+    "label": "Source of Application",
+    "why": "model: unknown"
+   },
+   {
+    "label": "Notice period",
+    "why": "model: unknown"
+   },
+   {
+    "label": "Have you ever been convicted in a court of law in any country, or are there any criminal p",
+    "why": "not a status question"
+   },
+   {
+    "label": "Have you ever been adjudged a bankrupt, or had a judgment debt?",
+    "why": "not a status question"
+   },
+   {
+    "label": "Have you ever been dismissed or asked to resign from any employment, or been disqualified ",
+    "why": "attestation not recognised: have you ever been dismissed or asked to resign from any emplo"
+   },
+   {
+    "label": "Are you a politically exposed person or a close family member of one?",
+    "why": "attestation not recognised: are you a politically exposed person or a close family member "
+   },
+   {
+    "label": "Are you currently under any bond or scholarship obligation to a government agency or anoth",
+    "why": "not a status question"
+   }
+  ],
+  "filled_required": 14,
+  "scoping_artefact": 5
+ },
+ {
+  "form": "11_sf_harbour_shipping",
+  "required": 34,
+  "locked": 9,
+  "model_answered": 7,
+  "unknown_required": [
+   {
+    "label": "Highest Education Level",
+    "why": "model: unknown"
+   },
+   {
+    "label": "Total years of working experience",
+    "why": "model: unknown"
+   },
+   {
+    "label": "Key skills",
+    "why": "G2e: no_option_fits"
+   },
+   {
+    "label": "Have you completed your National Service obligations?",
+    "why": "profile rule singapore_status.ns_status: no offered option fits"
+   },
+   {
+    "label": "Are you willing to be assigned to work at sea or at port terminals, including shift work?",
+    "why": "model: unknown"
+   },
+   {
+    "label": "Are you willing to travel frequently, including overseas?",
+    "why": "G5: second opinion disagrees"
+   },
+   {
+    "label": "Are you willing to relocate within Singapore or overseas?",
+    "why": "G5: second opinion disagrees"
+   },
+   {
+    "label": "Do you have any medical condition that may affect your ability to perform the duties of th",
+    "why": "health question with no decline option"
+   },
+   {
+    "label": "Are any of your relatives employed by Harbour Shipping Group?",
+    "why": "attestation not recognised: are any of your relatives employed by harbour shipping group"
+   },
+   {
+    "label": "How did you learn about this position?",
+    "why": "model: unknown"
+   },
+   {
+    "label": "I certify that all statements made by me in this application are true, complete and correc",
+    "why": "model: unknown"
+   }
+  ],
+  "filled_required": 16,
+  "scoping_artefact": 7
+ },
+ {
+  "form": "12_sf_pinnacle_insurance",
+  "required": 34,
+  "locked": 12,
+  "model_answered": 6,
+  "unknown_required": [
+   {
+    "label": "Academic transcript",
+    "why": "L1b: no transcript file"
+   },
+   {
+    "label": "Do you have family members or close friends employed by Pinnacle Insurance or any other in",
+    "why": "attestation not recognised: do you have family members or close friends employed by pinnac"
+   },
+   {
+    "label": "Have you ever been convicted of an offence involving fraud, dishonesty or breach of trust?",
+    "why": "not a status question"
+   },
+   {
+    "label": "Have you ever been bankrupt or had a judgment entered against you for a debt?",
+    "why": "not a status question"
+   },
+   {
+    "label": "Are you subject to any restrictive covenant or confidentiality obligation that may affect ",
+    "why": "not a status question"
+   },
+   {
+    "label": "Actuarial exams passed",
+    "why": "model: unknown"
+   },
+   {
+    "label": "Why are you interested in Pinnacle Insurance? (max 100 words)",
+    "why": "compose_needed: off"
+   },
+   {
+    "label": "How did you hear about us?",
+    "why": "model: unknown"
+   },
+   {
+    "label": "I authorise Pinnacle Insurance to verify my education, employment history and criminal rec",
+    "why": "checkbox statement not recognised"
+   }
+  ],
+  "filled_required": 18,
+  "scoping_artefact": 7
+ }
+]

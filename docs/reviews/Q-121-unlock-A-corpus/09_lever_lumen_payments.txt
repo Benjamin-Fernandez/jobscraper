@@ -1,0 +1,34 @@
+@form 09_lever_lumen_payments | lever | Lumen Payments | Associate Software Engineer, Graduate (Singapore)
+@page Apply
+resume|FILE|R|Resume/CV||ord|~
+name|TEXT|R|Full name||ord|Alex Testcase
+email|EMAIL|R|Email||ord|alex.testcase@example.com
+phone|PHONE|R|Phone||of:phone|91234567
+pronouns|TEXT|O|Pronouns||ord|~
+loc|TEXT|R|Current location||ord|Singapore
+linkedin|URL|O|LinkedIn URL||ord|https://www.linkedin.com/in/example-alex-testcase
+github|URL|O|GitHub URL||ord|https://github.com/example-alex-testcase
+q_cit|RADIO|R|Are you a Singapore citizen?|Yes;No|wr|Yes
+q_work|RADIO|R|Are you legally authorized to work in Singapore on a full-time basis?|Yes;No|wr|Yes
+q_visa|RADIO|R|Will you now or in the future require a visa or sponsorship to work in Singapore?|Yes;No|sp|No
+q_pass|RADIO|R|Do you currently hold a valid Singapore work pass?|Yes;No;Not required|wr|Not required
+q_ns|RADIO|R|Have you served National Service (NSF) or are you exempted?|Served;Exempted;Not applicable|ord|Served
+q_age|RADIO|R|Are you 21 years of age or older?|Yes;No|ord|Yes
+q_fin|RADIO|R|Have you ever been involved in, or been subject to any investigation for, fraud, financial crime or breach of financial regulations?|Yes;No|dec:other|No
+q_crim|RADIO|R|Have you ever been convicted of a criminal offence?|Yes;No|dec:criminal_record|No
+q_bank|RADIO|R|Have you ever been adjudged a bankrupt?|Yes;No|dec:bankruptcy|No
+q_prev|RADIO|R|Have you previously worked at Lumen Payments as an employee, intern or contractor?|Yes;No|dec:prior_employment_at_company|No
+q_cur|RADIO|R|Are you currently an employee of Lumen Payments?|Yes;No|dec:current_employee_at_company|No
+q_sal|TEXT|R|Salary expectations (SGD per month)||of:salary_expected|5000
+q_notice|TEXT|R|Notice period in days||ord|0
+q_lang|TEXTAREA|R|Which languages and frameworks have you used professionally or in internships?||ord|Python and SQL, with PostgreSQL and Git.
+q_case|TEXTAREA|R|Describe the hardest bug you have fixed.||ord|?An intermittent report failure caused by time zone handling in a scheduled job; I added logging, reproduced it with a test and fixed the conversion.
+q_why|TEXTAREA|R|Why are you interested in Lumen Payments?||ord|Payments is a domain where reliability matters and I want to learn how to build it well. Lumen's graduate programme gives mentoring on that.
+q_hear|TEXT|R|How did you hear about this role?||ord|Lumen Payments careers page
+q_oncall|RADIO|R|Are you comfortable being on an on-call rota after your first six months?|Yes;No|ord|?Yes
+q_hours|RADIO|R|Are you available to work from our office in Singapore at least 3 days a week?|Yes;No|ord|?Yes
+q_priv|CHECKBOX|R|I consent to Lumen Payments processing my personal data for recruitment purposes as described in the Candidate Privacy Notice.||priv|true
+q_bg|CHECKBOX|R|I consent to Lumen Payments carrying out background, reference and criminal record checks before I am hired.||ack|true
+q_cert|CHECKBOX|R|I confirm that the information given in this application is true and complete.||cert|true
+q_gender|DROPDOWN|O|Gender|Male;Female;Non-binary;Decline to self-identify|sid:gender|Decline to self-identify
+q_race|DROPDOWN|O|Race|Chinese;Malay;Indian;Other;Decline to self-identify|sid:race|Decline to self-identify

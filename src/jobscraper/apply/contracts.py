@@ -20,7 +20,7 @@ from dataclasses import dataclass, field
 from enum import Enum, IntEnum
 from typing import Any, Callable, Optional, Protocol, Sequence, Union, runtime_checkable
 
-CONTRACT_VERSION = 9   # 2: D-69 (no FAILED after the Submit click, ADR-0004), D-68 context fields
+CONTRACT_VERSION = 10  # 2: D-69 (no FAILED after the Submit click, ADR-0004), D-68 context fields
                        # 3: D-70 (additive): prefill sources/policy, PREFILLED status, account
                        #    statuses, sign-up outcomes, Workday entry, identity email, adapter
                        #    `prefill`/`read_values`, SIGNING_UP -> SIGNING_UP (backup email)
@@ -82,6 +82,29 @@ CONTRACT_VERSION = 9   # 2: D-69 (no FAILED after the Submit click, ADR-0004), D
                        #    MODEL_PAUSE_VALUES, MODEL_CLICK_RESUME, MODEL_PAUSE_BY_CODE; the copy of
                        #    QueuePause.MODEL_UNAVAILABLE and ReasonCode.MODEL_UNAVAILABLE reworded.
                        #    No timed resume (R1): a model pause lifts only on an owner click.
+                       # 10: Q-121 C, D-229 (additive; llm_first_fill_design.md §18): FieldClass
+                       #    CONSENT_SHARING (which: CONSENT_SHARING_WHICH "group" / "third_party")
+                       #    and CONSENT_CHECKS (placed after CONSENT_RETENTION; 45 class strings),
+                       #    both in REMEMBER_REFUSED_CLASSES (with CERTIFICATION and
+                       #    ACKNOWLEDGEMENT, review S2 L1); CONSENT_REFUSED_DETAILS gains
+                       #    consents.group_sharing / .third_party_sharing / .background_checks;
+                       #    CONSENT_*_KEY, CONSENTS_DEFAULT_OFF, CONSENT_KEY_BY_CLASS, ConsentSwitch
+                       #    + CONSENT_SWITCHES (the three Profile switches, default OFF);
+                       #    NotAnsweredReason, NOT_ANSWERED_REASONS, NOT_ANSWERED_MARKERS,
+                       #    NOT_ANSWERED_HINT_*, CONSENT_NOT_AGREED_NOTE, not_answered_reason();
+                       #    ANSWERS_FIELD_KEYS gains "reason" and "reason_hint" (at the end). The
+                       #    CONSENT_REFUSED hint re-worded (Your details → Consents and declarations);
+                       #    its `text` unchanged (attempts.js parses it). Nothing renamed or removed.
+                       #    Completed after lane W's first build (still v10, unreleased, additive):
+                       #    NotAnsweredReason COMPOSE_NEEDED (+ marker "compose needed") and
+                       #    NO_ANSWER (a required row no marker or question reason explains; an
+                       #    optional one stays UNKNOWN); NOT_ANSWERED_HINT_BY_HAND (+ the
+                       #    `can_remember=` keyword), NOT_ANSWERED_ROW_HINTS, NOT_ANSWERED_WITHOUT_MARKER,
+                       #    NOT_ANSWERED_KEY_CODES, NOT_ANSWERED_WORK_RIGHTS_KEY, QUESTION_REASONS_ANSWERED,
+                       #    STRICT_QUESTION_REASON_TO_NOT_ANSWERED (the `question_reason=` keyword),
+                       #    NotAnsweredView + not_answered_view() (code, text, hint, key);
+                       #    not_answered_reason() still returns (code, text, hint); ANSWERS_FIELD_KEYS
+                       #    gains "reason_code" and "reason_key" (at the end, after "reason_hint").
 
 
 # --------------------------------------------------------------------------
@@ -261,8 +284,10 @@ REASON_TEXTS: dict[ReasonCode, ReasonText] = {
         "Add it in Profile → Your details, then click Try again."),
     ReasonCode.CONSENT_REFUSED: ReasonText(
         "This form needs you to agree to {detail}, and your profile says no. Nothing was sent.",
-        "To agree, change it in Profile → Consents, then click Try again. "
-        "Otherwise apply by hand or skip this role."),
+        # v10: the hint names the screen as it is now; the `text` above is unchanged because
+        # attempts.js parses "This form needs you to agree to (.+?), and your profile says no".
+        "To agree, switch it on in Profile → Your details → Consents and declarations, then "
+        "click Try again. Otherwise apply by hand or skip this role."),
 }
 
 # v8 (Q-121 A1, §17.2, review C5): the `reason_detail` of a CONSENT_REFUSED stop, by the
@@ -273,6 +298,12 @@ CONSENT_REFUSED_DETAILS: dict[str, str] = {
     "consents.data_retention_consent": "keeping your details on file for future roles",
     "consents.certify_true": "a statement that your answers are true and complete",
     "consents.talent_pool_opt_in": "receiving marketing messages",
+    # v10 (D-229 C1-C3): the three kinds a privacy box may also ask for. Read in two places:
+    # "This form needs you to agree to {detail}, and ..." and the chip "Needs your agreement:
+    # {detail}". `consents.third_party_sharing` equals always.SHARE_DETAIL.
+    "consents.group_sharing": "sharing your details with the employer's group companies",
+    "consents.third_party_sharing": "sharing your details with other companies",
+    "consents.background_checks": "background, reference and record checks",
 }
 
 # v8 (Q-121 A1, §17.6; flow review F4, review C8): a content failure under fill_policy
@@ -1207,7 +1238,11 @@ class FieldClass(str, Enum):
     schema enum and rule 12 list the protected classes first."""
     CONSENT_PRIVACY = "consent_privacy"        # agree to processing / storing data for this application
     CONSENT_RETENTION = "consent_retention"    # keep the applicant's details on file for other roles
-    MARKETING = "marketing"                    # newsletters, job alerts, talent community (D6)
+    # v10 (D-229, §18): two permissions a privacy box may also ask, each with its own switch
+    CONSENT_SHARING = "consent_sharing"        # share the details beyond the employer (which:
+                                               # "group" = its own group, "third_party" = others)
+    CONSENT_CHECKS = "consent_checks"          # permit background / reference / record checks
+    MARKETING = "marketing"                   # newsletters, job alerts, talent community (D6)
     CERTIFICATION = "certification"            # the information given is true and complete
     ACKNOWLEDGEMENT = "acknowledgement"        # has read / accepts a policy, terms, a code
     DECLARATION = "declaration"                # a personal status or history (which: a DeclarationLabel)
@@ -1228,12 +1263,17 @@ OWNER_FACT_WHICH: tuple[str, ...] = (
     "salary_expected", "address", "postal_code", "phone", "other_id")
 SELF_ID_WHICH: tuple[str, ...] = (
     "gender", "race", "religion", "marital", "disability", "veteran", "other")
+# v10 (D-229 C1 / C2): who the details go to. "group" = the employer's own group (affiliates,
+# subsidiaries, parent, related corporations, group companies, also abroad); "third_party" =
+# anyone outside it (partners, clients, other employers, unnamed "third parties").
+CONSENT_SHARING_WHICH: tuple[str, ...] = ("group", "third_party")
 FIELD_CLASS_WHICH: dict[FieldClass, tuple[str, ...]] = {
     FieldClass.DECLARATION: tuple(d.value for d in DeclarationLabel
                                   if d not in (DeclarationLabel.DISABILITY,
                                                DeclarationLabel.NDA_WILLINGNESS)) + ("other",),
     FieldClass.OWNER_FACT: OWNER_FACT_WHICH,
     FieldClass.SELF_ID: SELF_ID_WHICH,
+    FieldClass.CONSENT_SHARING: CONSENT_SHARING_WHICH,
 }
 # The reply schema's `class` enum: "<class>" or "<class>:<which>" (e.g. "declaration:pep",
 # "owner_fact:date_of_birth"); parsed into ModelDecision.klass / .which.
@@ -1349,6 +1389,8 @@ REMEMBER_REFUSED_CLASSES = frozenset({
     FieldClass.DECLARATION, FieldClass.CONSENT_PRIVACY, FieldClass.CONSENT_RETENTION,
     FieldClass.MARKETING, FieldClass.WORK_RIGHT, FieldClass.SPONSORSHIP,
     FieldClass.SELF_ID, FieldClass.OWNER_FACT,
+    FieldClass.CONSENT_SHARING, FieldClass.CONSENT_CHECKS,      # v10: follow their switches
+    FieldClass.CERTIFICATION, FieldClass.ACKNOWLEDGEMENT,       # v10, review S2 L1: D5 consents
 })
 
 
@@ -1420,7 +1462,304 @@ class SentFieldStatus(str, Enum):
 ANSWERS_ATTEMPT_KEYS: tuple[str, ...] = ("id", "kind", "state", "finished_at", "trial", "entries_note")
 ANSWERS_FIELD_KEYS: tuple[str, ...] = (
     "id", "step", "label", "type", "required", "value_text", "basis_text", "assumed",
-    "reason_text", "status", "remembered_text", "can_remember", "refusal", "options")
+    "reason_text", "status", "remembered_text", "can_remember", "refusal", "options",
+    # v10 (D-229 C4): why a field was left empty, from not_answered_view(); "" when answered
+    "reason", "reason_hint",
+    # v10 (completed after lane W's first build): the NotAnsweredReason value and the one
+    # Your-details key the owner can act on (NOT_ANSWERED_KEY_CODES only; a closed set, never
+    # text from the note). The panel picks its link from these two, never from `reason`.
+    # "" when answered or when there is no key.
+    "reason_code", "reason_key")
+
+
+# --------------------------------------------------------------------------
+# v10: Q-121 C (D-229; llm_first_fill_design.md §18). Three consents of their own, each a
+# switch in Profile → Your details → Consents and declarations (default OFF), and a plain
+# reason on every field left empty. Constants and pure functions only (web/ shares them).
+# --------------------------------------------------------------------------
+
+CONSENT_GROUP_SHARING_KEY = "consents.group_sharing"               # C1
+CONSENT_THIRD_PARTY_SHARING_KEY = "consents.third_party_sharing"   # C2 (= always.SHARE_CONSENT_KEY)
+CONSENT_BACKGROUND_CHECKS_KEY = "consents.background_checks"       # C3
+# Unset reads as OFF (False) for these three: a required box asking for one stops with
+# `consent_refused`; an optional one is left unticked / takes its refusing option. They never
+# count as a missing detail (Overview, the shell badge, the Profile status line).
+CONSENTS_DEFAULT_OFF = frozenset({CONSENT_GROUP_SHARING_KEY, CONSENT_THIRD_PARTY_SHARING_KEY,
+                                  CONSENT_BACKGROUND_CHECKS_KEY})
+
+# The profile key each consent class string follows (acknowledgement is absent: its key
+# depends on what is acknowledged, always._consent_key_of). A combined box follows every key
+# it matches and names its first refused one, in this order.
+CONSENT_KEY_BY_CLASS: dict[str, str] = {
+    "consent_privacy": "consents.privacy_consent",
+    "consent_retention": "consents.data_retention_consent",
+    "consent_sharing:group": CONSENT_GROUP_SHARING_KEY,
+    "consent_sharing:third_party": CONSENT_THIRD_PARTY_SHARING_KEY,
+    "consent_checks": CONSENT_BACKGROUND_CHECKS_KEY,
+    "certification": "consents.certify_true",
+    "marketing": "consents.talent_pool_opt_in",
+}
+
+
+@dataclass(frozen=True)
+class ConsentSwitch:
+    """v10 (D-229): one consent switch in Profile → Your details → Consents and declarations.
+    applicant.FORM builds its three new `consents` items from CONSENT_SWITCHES (bool)."""
+    key: str           # the profile path
+    field_class: str   # the class string the filler decides for a box asking this
+    title: str         # the switch's label, sentence case
+    help: str          # one helper line under it
+
+
+_SWITCH_OFF = "When off, JobScraper stops any application whose form requires it."
+CONSENT_SWITCHES: tuple[ConsentSwitch, ...] = (
+    ConsentSwitch(CONSENT_GROUP_SHARING_KEY, "consent_sharing:group",
+                  "Employers may share my application within their own group of companies",
+                  "Many privacy boxes ask this, sometimes for group companies in other "
+                  "countries too. " + _SWITCH_OFF),
+    ConsentSwitch(CONSENT_THIRD_PARTY_SHARING_KEY, "consent_sharing:third_party",
+                  "Employers may share my details with other companies",
+                  "For example their partners, clients or other employers. " + _SWITCH_OFF),
+    ConsentSwitch(CONSENT_BACKGROUND_CHECKS_KEY, "consent_checks",
+                  "Employers may run background, reference and record checks",
+                  "Employers usually require this before an offer. " + _SWITCH_OFF),
+)
+
+
+class NotAnsweredReason(str, Enum):
+    """v10 (D-229 C4): why a field was left empty: `fields[].reason` / `.reason_hint` of the
+    What was filled route, shown under "Not answered". Derived from the row's stored `note`
+    by not_answered_reason(); the note itself never reaches the browser."""
+    CONSENT_NOT_AGREED = "consent_not_agreed"  # a consent the owner's switch says no to
+    PLACE_UNKNOWN = "place_unknown"            # work rights for a place the details don't cover
+    WORK_RIGHTS_DIFFER = "work_rights_differ"  # several countries whose rights differ
+    CHECK_DISAGREED = "check_disagreed"        # the AI's answer and its check disagreed
+    OTHER_PERSON = "other_person"              # someone else's contact details
+    ENTRY_DETAIL = "entry_detail"              # a past job's / school's fact the resume lacks
+    DETAIL_MISSING = "detail_missing"          # an owner-only detail the details lack
+    NO_OPTION_FITS = "no_option_fits"          # no offered option or format fits the details
+    UNTRUE_STATEMENT = "untrue_statement"      # a required box that would state a falsehood
+    UNCLEAR_STATEMENT = "unclear_statement"    # a box whose statement could not be read
+    TOO_MANY_CALLS = "too_many_calls"          # the page's model-call cap was spent
+    SURPLUS_ENTRY = "surplus_entry"            # more entry slots than the details have entries
+    SITE_CLEARED = "site_cleared"              # the site removed the value after it was filled
+    NOT_IN_DETAILS = "not_in_details"          # nothing in the details or resume answers it
+    NOT_CONFIRMED = "not_confirmed"            # a protected field no reader could confirm
+    COMPOSE_NEEDED = "compose_needed"          # a letter / longer text JobScraper didn't write
+    NO_ANSWER = "no_answer"                    # REQUIRED, and no marker or question reason explains it
+    UNKNOWN = "unknown"                        # optional, and no marker or question reason explains it
+
+
+_NA = NotAnsweredReason
+# (text, hint). A hint of "" depends on the row (not_answered_reason): optional -> _OPTIONAL;
+# a class that follows the details (follows_your_details) -> _DETAILS; else -> _REMEMBER.
+# CONSENT_NOT_AGREED's text holds {detail} = CONSENT_REFUSED_DETAILS[key]; no other slot.
+NOT_ANSWERED_REASONS: dict[NotAnsweredReason, ReasonText] = {
+    _NA.CONSENT_NOT_AGREED: ReasonText(
+        "You haven't agreed to {detail}.",
+        "To agree, switch it on in Profile → Your details → Consents and declarations."),
+    _NA.PLACE_UNKNOWN: ReasonText(
+        "The form asks about working in a place your details don't cover.",
+        "Add that country under Work rights in Your details, or apply by hand."),
+    _NA.WORK_RIGHTS_DIFFER: ReasonText(
+        "The form asks about several countries at once, and your right to work differs "
+        "between them.",
+        "Apply by hand, so you can answer for each country."),
+    _NA.CHECK_DISAGREED: ReasonText(
+        "The AI's two readings of this question disagreed, so it was left empty.", ""),
+    _NA.OTHER_PERSON: ReasonText(
+        "This asks for someone else's contact details.",
+        "Apply by hand if you want to give them."),
+    _NA.ENTRY_DETAIL: ReasonText(
+        "Your resume doesn't give this for that job or school.",
+        "Add it to your resume if you want it filled in."),
+    _NA.DETAIL_MISSING: ReasonText(
+        "This asks for a detail that's missing from Your details.",
+        "Add it in Your details, then click Try again."),
+    _NA.NO_OPTION_FITS: ReasonText(
+        "None of the form's options matches your details.", ""),
+    _NA.UNTRUE_STATEMENT: ReasonText(
+        "Ticking this box would state something your details say isn't true.",
+        "If your details are out of date, correct them in Your details. Otherwise apply by "
+        "hand or skip this role."),
+    _NA.UNCLEAR_STATEMENT: ReasonText(
+        "It wasn't clear what this box would say about you, so it was left unticked.", ""),
+    _NA.TOO_MANY_CALLS: ReasonText(
+        "The page asked more than the AI could check in one go.",
+        "Try again, or apply by hand."),
+    _NA.SURPLUS_ENTRY: ReasonText(
+        "The form has room for more entries than your details hold.",
+        "Nothing to do, unless you want to add another entry in Your details."),
+    _NA.SITE_CLEARED: ReasonText(
+        "The site removed this answer after it was filled in.",
+        "Try again, or apply by hand."),
+    _NA.NOT_IN_DETAILS: ReasonText(
+        "Your details and resume don't answer this.", ""),
+    _NA.NOT_CONFIRMED: ReasonText(
+        "JobScraper couldn't confirm a true answer from your details, so it was left empty.", ""),
+    _NA.COMPOSE_NEEDED: ReasonText(
+        "This asks for a letter or a longer text that JobScraper didn't write.",
+        "Apply by hand to write it yourself."),
+    _NA.NO_ANSWER: ReasonText("JobScraper had no answer for this required question.", ""),
+    _NA.UNKNOWN: ReasonText("It was left empty.", ""),
+}
+NOT_ANSWERED_HINT_REMEMBER = "Answer it for next time, or apply by hand."
+NOT_ANSWERED_HINT_DETAILS = "Check the matching item in Your details, or apply by hand."
+NOT_ANSWERED_HINT_OPTIONAL = "It was optional, so the form didn't need it."
+NOT_ANSWERED_HINT_BY_HAND = "Apply by hand to answer it."   # REMEMBER's place when can_remember
+                                                            # is False (the row shows a refusal)
+# Every hint a row can get when the table leaves it "" (the finite set the pins build from).
+NOT_ANSWERED_ROW_HINTS: tuple[str, ...] = (NOT_ANSWERED_HINT_REMEMBER, NOT_ANSWERED_HINT_DETAILS,
+                                           NOT_ANSWERED_HINT_OPTIONAL, NOT_ANSWERED_HINT_BY_HAND)
+NOT_ANSWERED_ANY_DETAIL = "what this box asks"   # CONSENT_NOT_AGREED with no known key
+# The codes no marker leads to: picked by `required` alone when neither a marker nor a strict
+# question reason explains the row (required -> NO_ANSWER, optional -> UNKNOWN).
+NOT_ANSWERED_WITHOUT_MARKER = frozenset({_NA.NO_ANSWER, _NA.UNKNOWN})
+
+# `reason_key`: the codes that may carry one, and where it comes from (a closed set each):
+# CONSENT_NOT_AGREED -> a key of CONSENT_REFUSED_DETAILS (named in the note, else the class's);
+# PLACE_UNKNOWN -> NOT_ANSWERED_WORK_RIGHTS_KEY (the country map the owner adds a place to);
+# DETAIL_MISSING -> the caller's `detail_key` (the attempt's owner_fact_path for that row; the
+# route checks it names a Your-details item, this module checks its shape). Every other code: "".
+NOT_ANSWERED_KEY_CODES = frozenset({_NA.CONSENT_NOT_AGREED, _NA.PLACE_UNKNOWN, _NA.DETAIL_MISSING})
+NOT_ANSWERED_WORK_RIGHTS_KEY = "singapore_status.authorised_to_work"
+
+# The strict filler captures a required field it could not answer as a question with a
+# QuestionReason and rarely writes a marker note. When no marker matches, the row's question
+# reason picks the code. Total over QuestionReason minus QUESTION_REASONS_ANSWERED (an assumed
+# row was answered and never reaches here): a new QuestionReason fails the pin until it is mapped.
+QUESTION_REASONS_ANSWERED = frozenset({QuestionReason.ASSUMED})
+STRICT_QUESTION_REASON_TO_NOT_ANSWERED: dict[QuestionReason, NotAnsweredReason] = {
+    QuestionReason.NO_RULE: _NA.NOT_IN_DETAILS,
+    QuestionReason.UNGROUNDED: _NA.NOT_CONFIRMED,
+    QuestionReason.PROFILE_GAP: _NA.DETAIL_MISSING,
+    QuestionReason.NO_OPTION_FITS: _NA.NO_OPTION_FITS,
+    QuestionReason.ATTESTATION_UNCLEAR: _NA.NOT_CONFIRMED,
+    QuestionReason.CONFLICT: _NA.WORK_RIGHTS_DIFFER,
+    QuestionReason.COMPOSE_NEEDED: _NA.COMPOSE_NEEDED,
+}
+
+# The note markers the fillers write on a field they leave empty (always.py, resolve.py,
+# pagefill.py), matched in this order as substrings of the case-folded note after
+# NOT_ANSWERED_SITE_PREFIX is dropped; the first match wins, none -> UNKNOWN. A new note for
+# an empty field gets a marker here (a contract change), never a new text in the filler.
+NOT_ANSWERED_SITE_PREFIX = "left empty for the site's validation: "   # always.to_answer
+CONSENT_NOT_AGREED_NOTE = "not agreed: {key}"   # v10: what always.py writes on a consent left
+                                                # empty because its switch is off (key = path)
+NOT_ANSWERED_MARKERS: tuple[tuple[str, NotAnsweredReason], ...] = (
+    ("not agreed: ", _NA.CONSENT_NOT_AGREED),                  # CONSENT_NOT_AGREED_NOTE
+    ("your profile says no to this", _NA.CONSENT_NOT_AGREED),  # always protective end (pre-v10)
+    ("place not recognised", _NA.PLACE_UNKNOWN),               # resolve.UNKNOWN_PLACE_NOTE
+    ("work rights differ", _NA.WORK_RIGHTS_DIFFER),            # resolve.WORK_RIGHTS_CONFLICT
+    ("the check did not agree", _NA.CHECK_DISAGREED),          # always U2-U4 protective end
+    ("never the applicant's own contact", _NA.OTHER_PERSON),   # always F4
+    ("an entry's fact the resume does not give", _NA.ENTRY_DETAIL),   # always F4 / F5
+    ("comes only from your profile", _NA.DETAIL_MISSING),      # always owner fact, optional
+    ("no option is your", _NA.NO_OPTION_FITS),                 # always owner fact (grade bands)
+    ("no option fits", _NA.NO_OPTION_FITS),
+    ("does not fit the field", _NA.NO_OPTION_FITS),            # always coercion
+    ("stating a falsehood", _NA.UNTRUE_STATEMENT),             # always F2
+    ("statement not recognised", _NA.UNCLEAR_STATEMENT),       # always F2
+    ("too many model calls", _NA.TOO_MANY_CALLS),              # always call cap
+    ("surplus entry", _NA.SURPLUS_ENTRY),                      # pagefill.SURPLUS_NOTE
+    ("reverted", _NA.SITE_CLEARED),                            # pagefill.REVERTED_NOTE
+    ("compose needed", _NA.COMPOSE_NEEDED),                    # always: a compose target left
+                                                               # without its text ("compose needed: ...")
+    ("not classed", _NA.NOT_IN_DETAILS),                       # always F2 ask
+    ("nothing in the briefing", _NA.NOT_IN_DETAILS),           # always optional, basis none
+    ("nothing truthful to type", _NA.NOT_IN_DETAILS),          # always F4
+    ("check was unusable", _NA.NOT_CONFIRMED),                 # always owner-fact check
+    ("would not answer", _NA.NOT_CONFIRMED),                   # always declaration end
+    ("could not state", _NA.NOT_CONFIRMED),                    # always work-rights end
+    ("says otherwise", _NA.NOT_CONFIRMED),                     # always: a fact contradicted the AI
+    ("protective end", _NA.NOT_CONFIRMED),                     # always protective end, blank
+)
+
+
+@dataclass(frozen=True)
+class NotAnsweredView:
+    """One row left empty, as the What was filled route sends it: `reason_code` = code.value,
+    `reason` = text, `reason_hint` = hint, `reason_key` = key ("" = no link)."""
+    code: NotAnsweredReason
+    text: str
+    hint: str
+    key: str = ""
+
+
+_KEY_CHARS = frozenset("abcdefghijklmnopqrstuvwxyz0123456789_.")
+
+
+def _profile_key_shaped(key: str) -> bool:
+    """A Your-details key's shape: lower-case dotted segments, <= 80 chars, no space, colon,
+    slash, capital or quote (so no URL, file path, sentence or employer name fits)."""
+    return (0 < len(key) <= 80 and set(key) <= _KEY_CHARS and key[0].isalpha()
+            and all(key.split(".")))
+
+
+def _question_reason_of(value: object) -> "QuestionReason | None":
+    try:
+        return QuestionReason(getattr(value, "value", value))
+    except (ValueError, TypeError):
+        return None
+
+
+def not_answered_view(note: str, *, field_class: str = "", required: bool = False,
+                      can_remember: bool = True, question_reason: object = "",
+                      detail_key: str = "") -> NotAnsweredView:
+    """D-229 C4: why a field was left empty, from its stored note, its stored class string,
+    whether it was required, whether the row offers "Answer for next time" (`can_remember`),
+    the reason of the strict filler's captured question for it (`question_reason`, "" when
+    none) and the Your-details key the route found for it (`detail_key`, "" when none).
+
+    Code: the first NOT_ANSWERED_MARKERS match; else STRICT_QUESTION_REASON_TO_NOT_ANSWERED;
+    else NO_ANSWER if required, UNKNOWN if not. A table hint of "" resolves per row: optional
+    -> _OPTIONAL; a class that follows the details -> _DETAILS; else _REMEMBER, or _BY_HAND
+    when the row cannot be remembered.
+
+    PRIVACY: only fixed sentences, an enum value and a key from a closed set come back; never
+    the note, a label, an employer name, a URL, a file path or a model quote. The one slot,
+    {detail} of CONSENT_NOT_AGREED, comes from CONSENT_REFUSED_DETAILS: the key named in the
+    note, else the class's key (CONSENT_KEY_BY_CLASS), else NOT_ANSWERED_ANY_DETAIL. The key
+    is a CONSENT_REFUSED_DETAILS key (consent), NOT_ANSWERED_WORK_RIGHTS_KEY (place) or a
+    well-shaped `detail_key` (DETAIL_MISSING only); every other code gets ""."""
+    n = " ".join(str(note or "").casefold().split())
+    if n.startswith(NOT_ANSWERED_SITE_PREFIX):
+        n = n[len(NOT_ANSWERED_SITE_PREFIX):]
+    code = next((c for marker, c in NOT_ANSWERED_MARKERS if marker in n), None) \
+        or STRICT_QUESTION_REASON_TO_NOT_ANSWERED.get(_question_reason_of(question_reason)) \
+        or (_NA.NO_ANSWER if required else _NA.UNKNOWN)
+    entry = NOT_ANSWERED_REASONS[code]
+    text, hint, key = entry.text, entry.hint, ""
+    if code is _NA.CONSENT_NOT_AGREED:
+        found = next((k for k in CONSENT_REFUSED_DETAILS if k in n), "") \
+            or CONSENT_KEY_BY_CLASS.get(field_class or "", "")
+        text = text.format(detail=CONSENT_REFUSED_DETAILS.get(found, NOT_ANSWERED_ANY_DETAIL))
+        key = found if found in CONSENT_REFUSED_DETAILS else ""
+    elif code is _NA.PLACE_UNKNOWN:
+        key = NOT_ANSWERED_WORK_RIGHTS_KEY
+    elif code is _NA.DETAIL_MISSING:
+        dk = detail_key if isinstance(detail_key, str) else ""
+        key = dk if _profile_key_shaped(dk) else ""
+    if not hint:
+        if not required:
+            hint = NOT_ANSWERED_HINT_OPTIONAL
+        elif follows_your_details("", field_class):
+            hint = NOT_ANSWERED_HINT_DETAILS
+        elif can_remember:
+            hint = NOT_ANSWERED_HINT_REMEMBER
+        else:
+            hint = NOT_ANSWERED_HINT_BY_HAND
+    return NotAnsweredView(code, text, hint, key)
+
+
+def not_answered_reason(note: str, *, field_class: str = "", required: bool = False,
+                        can_remember: bool = True, question_reason: object = ""
+                        ) -> tuple[NotAnsweredReason, str, str]:
+    """(code, text, hint) of not_answered_view(), kept for its v10 callers and pins (same
+    rules and privacy guarantee; no key)."""
+    v = not_answered_view(note, field_class=field_class, required=required,
+                          can_remember=can_remember, question_reason=question_reason)
+    return v.code, v.text, v.hint
 
 # M5: `GET /api/questions` answers its old shape, empty, with `retired: true`; the old writers
 # (answer, dismiss, retry, keep, change) answer 410 with this code and text.

@@ -4,7 +4,7 @@
   Used only by tests/manual/always_rehearsal.py; not part of the test suite. No network: the
   rehearsal serves it from 127.0.0.1. Made-up employer ("Example Co"), made-up wording, no personal data.
 
-  One file, 33 "parts". The rehearsal server serves part N at /exampleco/jobs/N by writing N into
+  One file, 34 "parts". The rehearsal server serves part N at /exampleco/jobs/N by writing N into
   <body data-active-part>; the script below then removes the other parts, so each part is a
   page of at most ~20 fields (what one real employer page holds, and what one model call set
   should handle in under a minute). Opened straight from disk (no number) it shows every part.
@@ -49,7 +49,7 @@
 
 <form id="application-form" novalidate>
 <section class="part" data-part="1">
-  <h2>Part 1 of 33: Your details</h2>
+  <h2>Part 1 of 34: Your details</h2>
   <p class="intro">Tell us how to reach you.</p>
   <div class="field" data-field="first_name" data-kind="text">
     <label for="first_name">First name *</label>
@@ -117,7 +117,7 @@
   </div>
 </section>
 <section class="part" data-part="2">
-  <h2>Part 2 of 33: Date of birth, identity numbers and pay</h2>
+  <h2>Part 2 of 34: Date of birth, identity numbers and pay</h2>
   <p class="intro">Optional details. Leave anything you do not want to share.</p>
   <input type="hidden" id="first_name" value="">
   <div class="field" data-field="dob_year" data-kind="select">
@@ -186,7 +186,7 @@
   </div>
 </section>
 <section class="part" data-part="3">
-  <h2>Part 3 of 33: Application questions</h2>
+  <h2>Part 3 of 34: Application questions</h2>
   <p class="intro">A few questions about your experience. Some of them mention data, roles or newsletters: they are ordinary questions.</p>
   <input type="hidden" id="first_name" value="">
   <div class="field" data-field="h1_exp" data-kind="radio">
@@ -296,7 +296,7 @@
   </div>
 </section>
 <section class="part" data-part="4">
-  <h2>Part 4 of 33: Consents and acknowledgements</h2>
+  <h2>Part 4 of 34: Consents and acknowledgements</h2>
   <p class="intro">Please read and agree where you wish.</p>
   <input type="hidden" id="first_name" value="">
   <div class="field" data-field="c_priv1" data-kind="checkbox">
@@ -381,7 +381,7 @@
   </div>
 </section>
 <section class="part" data-part="5">
-  <h2>Part 5 of 33: Declarations (1 of 2)</h2>
+  <h2>Part 5 of 34: Declarations (1 of 2)</h2>
   <p class="intro">Please answer every question.</p>
   <input type="hidden" id="first_name" value="">
   <div class="field" data-field="d5_01" data-kind="radio">
@@ -470,7 +470,7 @@
   </div>
 </section>
 <section class="part" data-part="6">
-  <h2>Part 6 of 33: Declarations (2 of 2)</h2>
+  <h2>Part 6 of 34: Declarations (2 of 2)</h2>
   <p class="intro">Please answer every question.</p>
   <input type="hidden" id="first_name" value="">
   <div class="field" data-field="d6_01" data-kind="radio">
@@ -587,7 +587,7 @@
   </div>
 </section>
 <section class="part" data-part="7">
-  <h2>Part 7 of 33: Declarations (statements and lists)</h2>
+  <h2>Part 7 of 34: Declarations (statements and lists)</h2>
   <p class="intro">Tick, select or answer as it applies to you.</p>
   <input type="hidden" id="first_name" value="">
   <div class="field" data-field="t_pep1" data-kind="checkbox">
@@ -690,7 +690,7 @@
   </div>
 </section>
 <section class="part" data-part="8">
-  <h2>Part 8 of 33: History and right to work</h2>
+  <h2>Part 8 of 34: History and right to work</h2>
   <p class="intro">A few more questions about your background and work eligibility.</p>
   <input type="hidden" id="first_name" value="">
   <div class="field" data-field="o_dismiss" data-kind="radio">
@@ -787,7 +787,7 @@
   </div>
 </section>
 <section class="part" data-part="9">
-  <h2>Part 9 of 33: Equal opportunity (voluntary)</h2>
+  <h2>Part 9 of 34: Equal opportunity (voluntary)</h2>
   <p class="intro">These questions are voluntary. Your answers are kept apart from your application.</p>
   <input type="hidden" id="first_name" value="">
   <div class="field" data-field="s_gender1" data-kind="select">
@@ -868,7 +868,7 @@
   </div>
 </section>
 <section class="part" data-part="10">
-  <h2>Part 10 of 33: References and contacts</h2>
+  <h2>Part 10 of 34: References and contacts</h2>
   <p class="intro">Tell us who we may contact. These people are not you.</p>
   <input type="hidden" id="first_name" value="">
   <div class="field" data-field="ref_name" data-kind="text">
@@ -925,7 +925,7 @@
   </div>
 </section>
 <section class="part" data-part="11">
-  <h2>Part 11 of 33: Date of birth (required)</h2>
+  <h2>Part 11 of 34: Date of birth (required)</h2>
   <p class="intro">This form needs your date of birth.</p>
   <input type="hidden" id="first_name" value="">
   <div class="field" data-field="dob_req" data-kind="date">
@@ -938,7 +938,7 @@
   </div>
 </section>
 <section class="part" data-part="12">
-  <h2>Part 12 of 33: National ID (required)</h2>
+  <h2>Part 12 of 34: National ID (required)</h2>
   <p class="intro">This form needs your national ID number.</p>
   <input type="hidden" id="first_name" value="">
   <div class="field" data-field="nid_req" data-kind="text">
@@ -951,7 +951,7 @@
   </div>
 </section>
 <section class="part" data-part="13">
-  <h2>Part 13 of 33: Keeping your details (required)</h2>
+  <h2>Part 13 of 34: Keeping your details (required)</h2>
   <p class="intro">This form needs your answer on keeping your details.</p>
   <input type="hidden" id="first_name" value="">
   <div class="field" data-field="ret_req" data-kind="checkbox">
@@ -964,7 +964,7 @@
   </div>
 </section>
 <section class="part" data-part="14">
-  <h2>Part 14 of 33: Privacy and marketing (required)</h2>
+  <h2>Part 14 of 34: Privacy and marketing (required)</h2>
   <p class="intro">This form needs one combined agreement.</p>
   <input type="hidden" id="first_name" value="">
   <div class="field" data-field="combo_req" data-kind="checkbox">
@@ -977,7 +977,7 @@
   </div>
 </section>
 <section class="part" data-part="15">
-  <h2>Part 15 of 33: Gender (required, no decline option)</h2>
+  <h2>Part 15 of 34: Gender (required, no decline option)</h2>
   <p class="intro">This form needs your gender.</p>
   <input type="hidden" id="first_name" value="">
   <div class="field" data-field="gender_req" data-kind="radio">
@@ -994,7 +994,7 @@
   </div>
 </section>
 <section class="part" data-part="16">
-  <h2>Part 16 of 33: Stray negations</h2>
+  <h2>Part 16 of 34: Stray negations</h2>
   <p class="intro">Please answer each question as it is asked.</p>
   <input type="hidden" id="first_name" value="">
   <div class="field" data-field="x16_01" data-kind="radio">
@@ -1109,7 +1109,7 @@
   </div>
 </section>
 <section class="part" data-part="17">
-  <h2>Part 17 of 33: Short declaration labels</h2>
+  <h2>Part 17 of 34: Short declaration labels</h2>
   <p class="intro">Please answer every item.</p>
   <input type="hidden" id="first_name" value="">
   <div class="field" data-field="b17_yn1" data-kind="radio">
@@ -1225,7 +1225,7 @@
   </div>
 </section>
 <section class="part" data-part="18">
-  <h2>Part 18 of 33: Employer and role details</h2>
+  <h2>Part 18 of 34: Employer and role details</h2>
   <p class="intro">Details about the employer and the role, not about you.</p>
   <input type="hidden" id="first_name" value="">
   <div class="field" data-field="e18_addr" data-kind="text">
@@ -1298,7 +1298,7 @@
 </fieldset>
 </section>
 <section class="part" data-part="19">
-  <h2>Part 19 of 33: Family and household</h2>
+  <h2>Part 19 of 34: Family and household</h2>
   <p class="intro">Please answer about your relatives and household.</p>
   <input type="hidden" id="first_name" value="">
   <div class="field" data-field="r19_01" data-kind="radio">
@@ -1389,7 +1389,7 @@
   </div>
 </section>
 <section class="part" data-part="20">
-  <h2>Part 20 of 33: Staying in touch</h2>
+  <h2>Part 20 of 34: Staying in touch</h2>
   <p class="intro">Tell us how you would like us to stay in touch.</p>
   <input type="hidden" id="first_name" value="">
   <div class="field" data-field="t20_posted" data-kind="checkbox">
@@ -1448,7 +1448,7 @@
   </div>
 </section>
 <section class="part" data-part="21">
-  <h2>Part 21 of 33: Employment and legal history</h2>
+  <h2>Part 21 of 34: Employment and legal history</h2>
   <p class="intro">Please answer every question.</p>
   <input type="hidden" id="first_name" value="">
   <div class="field" data-field="a21_01" data-kind="radio">
@@ -1537,7 +1537,7 @@
   </div>
 </section>
 <section class="part" data-part="22">
-  <h2>Part 22 of 33: Referrers and contacts</h2>
+  <h2>Part 22 of 34: Referrers and contacts</h2>
   <p class="intro">Tell us who referred you and who may vouch for you.</p>
   <input type="hidden" id="first_name" value="">
   <div class="field" data-field="o22_ref" data-kind="text">
@@ -1610,7 +1610,7 @@
   </div>
 </section>
 <section class="part" data-part="23">
-  <h2>Part 23 of 33: Academic results</h2>
+  <h2>Part 23 of 34: Academic results</h2>
   <p class="intro">Tell us about your results.</p>
   <input type="hidden" id="first_name" value="">
   <div class="field" data-field="g23_grade" data-kind="text">
@@ -1651,7 +1651,7 @@
   </div>
 </section>
 <section class="part" data-part="24">
-  <h2>Part 24 of 33: Declarations (other scripts)</h2>
+  <h2>Part 24 of 34: Declarations (other scripts)</h2>
   <p class="intro">Please answer every question.</p>
   <input type="hidden" id="first_name" value="">
   <div class="field" data-field="z24_cn1" data-kind="radio">
@@ -1684,7 +1684,7 @@
   </div>
 </section>
 <section class="part" data-part="25">
-  <h2>Part 25 of 33: Standing and good record</h2>
+  <h2>Part 25 of 34: Standing and good record</h2>
   <p class="intro">Please answer each question about your record and standing as it is asked.</p>
   <input type="hidden" id="first_name" value="">
   <div class="field" data-field="w25_01" data-kind="radio">
@@ -1789,7 +1789,7 @@
   </div>
 </section>
 <section class="part" data-part="26">
-  <h2>Part 26 of 33: Right to work</h2>
+  <h2>Part 26 of 34: Right to work</h2>
   <p class="intro">Tell us about your right to work in Singapore and in the United States.</p>
   <input type="hidden" id="first_name" value="">
   <div class="field" data-field="r26_sg1" data-kind="radio">
@@ -1907,7 +1907,7 @@
   </div>
 </section>
 <section class="part" data-part="27">
-  <h2>Part 27 of 33: Your earlier application to Example Co</h2>
+  <h2>Part 27 of 34: Your earlier application to Example Co</h2>
   <p class="intro">You have applied to Example Co before: this is a repeat application. Please answer every question as it applies to you now.</p>
   <input type="hidden" id="first_name" value="">
   <div class="field" data-field="q27_applied" data-kind="radio">
@@ -2021,7 +2021,7 @@
   </div>
 </section>
 <section class="part" data-part="28">
-  <h2>Part 28 of 33: Military and National Service</h2>
+  <h2>Part 28 of 34: Military and National Service</h2>
   <p class="intro">Tell us about any military, National Service or government service.</p>
   <input type="hidden" id="first_name" value="">
   <div class="field" data-field="n28_served" data-kind="radio">
@@ -2101,7 +2101,7 @@
   </div>
 </section>
 <section class="part" data-part="29">
-  <h2>Part 29 of 33: Declarations (some already filled in)</h2>
+  <h2>Part 29 of 34: Declarations (some already filled in)</h2>
   <p class="intro">Some answers were filled in from an earlier visit. Check each one.</p>
   <input type="hidden" id="first_name" value="">
   <div class="field" data-field="s29_conv" data-kind="select">
@@ -2167,7 +2167,7 @@
   </div>
 </section>
 <section class="part" data-part="30">
-  <h2>Part 30 of 33: Your experience</h2>
+  <h2>Part 30 of 34: Your experience</h2>
   <p class="intro">A few questions about the work you have done. They are ordinary questions.</p>
   <input type="hidden" id="first_name" value="">
   <div class="field" data-field="x30_01" data-kind="radio">
@@ -2264,7 +2264,7 @@
   </div>
 </section>
 <section class="part" data-part="31">
-  <h2>Part 31 of 33: Other countries, mixed questions and exceptions</h2>
+  <h2>Part 31 of 34: Other countries, mixed questions and exceptions</h2>
   <p class="intro">A few questions with unusual wordings.</p>
   <input type="hidden" id="first_name" value="">
   <div class="field" data-field="h1_auth1" data-kind="radio">
@@ -2393,7 +2393,7 @@
   </div>
 </section>
 <section class="part" data-part="32">
-  <h2>Part 32 of 33: More places and keep-on-file boxes</h2>
+  <h2>Part 32 of 34: More places and keep-on-file boxes</h2>
   <p class="intro">A few more questions with unusual wordings.</p>
   <input type="hidden" id="first_name" value="">
   <div class="field" data-field="n1_states_auth" data-kind="radio">
@@ -2478,7 +2478,7 @@
   </div>
 </section>
 <section class="part" data-part="33">
-  <h2>Part 33 of 33: Applying country and friendlier boxes</h2>
+  <h2>Part 33 of 34: Applying country and friendlier boxes</h2>
   <p class="intro">A few more wordings of the stock forms.</p>
   <input type="hidden" id="first_name" value="">
   <div class="field" data-field="m7_1" data-kind="radio">
@@ -2554,6 +2554,130 @@
     </fieldset>
   </div>
 </section>
+<section class="part" data-part="34">
+  <h2>Part 34 of 34: Consents, other people and status wordings</h2>
+  <p class="intro">A few questions that mention citizenship or sharing.</p>
+  <input type="hidden" id="first_name" value="">
+  <div class="field" data-field="h1_priv_box" data-kind="checkbox">
+    <input type="checkbox" id="h1_priv_box" name="h1_priv_box" value="1">
+    <label for="h1_priv_box" class="inline">I consent to the collection and use of my personal data as a Singapore citizen or PR under the PDPA</label>
+  </div>
+  <div class="field" data-field="h1_mkt_box" data-kind="checkbox">
+    <input type="checkbox" id="h1_mkt_box" name="h1_mkt_box" value="1">
+    <label for="h1_mkt_box" class="inline">I am a Singapore citizen and agree to receive job alerts</label>
+  </div>
+  <div class="field" data-field="h1_ret_box" data-kind="checkbox">
+    <input type="checkbox" id="h1_ret_box" name="h1_ret_box" value="1">
+    <label for="h1_ret_box" class="inline">Keep my application on file; I am a Singapore citizen</label>
+  </div>
+  <div class="field" data-field="h1_priv_rad" data-kind="radio">
+    <fieldset role="radiogroup" aria-labelledby="h1_priv_rad_lbl" aria-required="true">
+      <legend id="h1_priv_rad_lbl">Do you consent to the processing of your personal data as a Singapore citizen? *</legend>
+      <label class="opt"><input type="radio" name="h1_priv_rad" id="h1_priv_rad__0" value="Yes" required> Yes</label>
+      <label class="opt"><input type="radio" name="h1_priv_rad" id="h1_priv_rad__1" value="No"> No</label>
+    </fieldset>
+  </div>
+  <div class="field" data-field="h1_mkt_rad" data-kind="radio">
+    <fieldset role="radiogroup" aria-labelledby="h1_mkt_rad_lbl">
+      <legend id="h1_mkt_rad_lbl">As a Singapore citizen, do you agree to be contacted about other roles?</legend>
+      <label class="opt"><input type="radio" name="h1_mkt_rad" id="h1_mkt_rad__0" value="Yes"> Yes</label>
+      <label class="opt"><input type="radio" name="h1_mkt_rad" id="h1_mkt_rad__1" value="No"> No</label>
+    </fieldset>
+  </div>
+  <div class="field" data-field="h2_spouse" data-kind="radio">
+    <fieldset role="radiogroup" aria-labelledby="h2_spouse_lbl">
+      <legend id="h2_spouse_lbl">Is your spouse a Singapore citizen?</legend>
+      <label class="opt"><input type="radio" name="h2_spouse" id="h2_spouse__0" value="Yes"> Yes</label>
+      <label class="opt"><input type="radio" name="h2_spouse" id="h2_spouse__1" value="No"> No</label>
+    </fieldset>
+  </div>
+  <div class="field" data-field="h2_spouse_pr" data-kind="radio">
+    <fieldset role="radiogroup" aria-labelledby="h2_spouse_pr_lbl">
+      <legend id="h2_spouse_pr_lbl">Is your spouse a Singapore PR?</legend>
+      <label class="opt"><input type="radio" name="h2_spouse_pr" id="h2_spouse_pr__0" value="Yes"> Yes</label>
+      <label class="opt"><input type="radio" name="h2_spouse_pr" id="h2_spouse_pr__1" value="No"> No</label>
+    </fieldset>
+  </div>
+  <div class="field" data-field="h2_ns" data-kind="radio">
+    <fieldset role="radiogroup" aria-labelledby="h2_ns_lbl" aria-required="true">
+      <legend id="h2_ns_lbl">Have you completed Singapore National Service? *</legend>
+      <label class="opt"><input type="radio" name="h2_ns" id="h2_ns__0" value="Yes" required> Yes</label>
+      <label class="opt"><input type="radio" name="h2_ns" id="h2_ns__1" value="No"> No</label>
+    </fieldset>
+  </div>
+  <div class="field" data-field="sh_box1" data-kind="checkbox">
+    <input type="checkbox" id="sh_box1" name="sh_box1" value="1">
+    <label for="sh_box1" class="inline">Keep my CV on file and let recruiters from partner firms see it</label>
+  </div>
+  <div class="field" data-field="sh_box2" data-kind="checkbox">
+    <input type="checkbox" id="sh_box2" name="sh_box2" value="1">
+    <label for="sh_box2" class="inline">I agree that my details may be shared with our trusted partners</label>
+  </div>
+  <div class="field" data-field="sh_box3" data-kind="checkbox">
+    <input type="checkbox" id="sh_box3" name="sh_box3" value="1">
+    <label for="sh_box3" class="inline">Consider me for future roles and share my details with hiring managers across the group</label>
+  </div>
+  <div class="field" data-field="sh_rad" data-kind="radio">
+    <fieldset role="radiogroup" aria-labelledby="sh_rad_lbl">
+      <legend id="sh_rad_lbl">May we share your CV with our clients?</legend>
+      <label class="opt"><input type="radio" name="sh_rad" id="sh_rad__0" value="Yes"> Yes</label>
+      <label class="opt"><input type="radio" name="sh_rad" id="sh_rad__1" value="No"> No</label>
+    </fieldset>
+  </div>
+  <div class="field" data-field="pl_passport" data-kind="radio">
+    <fieldset role="radiogroup" aria-labelledby="pl_passport_lbl" aria-required="true">
+      <legend id="pl_passport_lbl">Do you hold a Singapore passport? *</legend>
+      <label class="opt"><input type="radio" name="pl_passport" id="pl_passport__0" value="Yes" required> Yes</label>
+      <label class="opt"><input type="radio" name="pl_passport" id="pl_passport__1" value="No"> No</label>
+    </fieldset>
+  </div>
+  <div class="field" data-field="pl_box" data-kind="checkbox">
+    <input type="checkbox" id="pl_box" name="pl_box" value="1">
+    <label for="pl_box" class="inline">I am a Singapore citizen</label>
+  </div>
+  <div class="field" data-field="g3_birth" data-kind="radio">
+    <fieldset role="radiogroup" aria-labelledby="g3_birth_lbl">
+      <legend id="g3_birth_lbl">Are you a Singapore citizen by birth?</legend>
+      <label class="opt"><input type="radio" name="g3_birth" id="g3_birth__0" value="Yes"> Yes</label>
+      <label class="opt"><input type="radio" name="g3_birth" id="g3_birth__1" value="No"> No</label>
+    </fieldset>
+  </div>
+  <div class="field" data-field="g3_since" data-kind="radio">
+    <fieldset role="radiogroup" aria-labelledby="g3_since_lbl">
+      <legend id="g3_since_lbl">Have you been a Singapore citizen since 2020?</legend>
+      <label class="opt"><input type="radio" name="g3_since" id="g3_since__0" value="Yes"> Yes</label>
+      <label class="opt"><input type="radio" name="g3_since" id="g3_since__1" value="No"> No</label>
+    </fieldset>
+  </div>
+  <div class="field" data-field="g2_cit_pr" data-kind="radio">
+    <fieldset role="radiogroup" aria-labelledby="g2_cit_pr_lbl" aria-required="true">
+      <legend id="g2_cit_pr_lbl">Are you a citizen or permanent resident? *</legend>
+      <label class="opt"><input type="radio" name="g2_cit_pr" id="g2_cit_pr__0" value="Yes" required> Yes</label>
+      <label class="opt"><input type="radio" name="g2_cit_pr" id="g2_cit_pr__1" value="No"> No</label>
+    </fieldset>
+  </div>
+  <div class="field" data-field="g2_foreigner" data-kind="radio">
+    <fieldset role="radiogroup" aria-labelledby="g2_foreigner_lbl" aria-required="true">
+      <legend id="g2_foreigner_lbl">Are you a foreigner? *</legend>
+      <label class="opt"><input type="radio" name="g2_foreigner" id="g2_foreigner__0" value="Yes" required> Yes</label>
+      <label class="opt"><input type="radio" name="g2_foreigner" id="g2_foreigner__1" value="No"> No</label>
+    </fieldset>
+  </div>
+  <div class="field" data-field="g2_pr_exp" data-kind="radio">
+    <fieldset role="radiogroup" aria-labelledby="g2_pr_exp_lbl">
+      <legend id="g2_pr_exp_lbl">Do you have PR experience?</legend>
+      <label class="opt"><input type="radio" name="g2_pr_exp" id="g2_pr_exp__0" value="Yes"> Yes</label>
+      <label class="opt"><input type="radio" name="g2_pr_exp" id="g2_pr_exp__1" value="No"> No</label>
+    </fieldset>
+  </div>
+  <div class="field" data-field="g2_pr_prof" data-kind="radio">
+    <fieldset role="radiogroup" aria-labelledby="g2_pr_prof_lbl">
+      <legend id="g2_pr_prof_lbl">Are you a PR professional?</legend>
+      <label class="opt"><input type="radio" name="g2_pr_prof" id="g2_pr_prof__0" value="Yes"> Yes</label>
+      <label class="opt"><input type="radio" name="g2_pr_prof" id="g2_pr_prof__1" value="No"> No</label>
+    </fieldset>
+  </div>
+</section>
   <button type="submit" id="submit-app">Submit application</button>
 </form>
 
@@ -2593,7 +2717,8 @@
   "30": {"title": "Your experience", "intro": "A few questions about the work you have done. They are ordinary questions.", "stop": {}},
   "31": {"title": "Other countries, mixed questions and exceptions", "intro": "A few questions with unusual wordings.", "stop": {}},
   "32": {"title": "More places and keep-on-file boxes", "intro": "A few more questions with unusual wordings.", "stop": {}},
-  "33": {"title": "Applying country and friendlier boxes", "intro": "A few more wordings of the stock forms.", "stop": {}}
+  "33": {"title": "Applying country and friendlier boxes", "intro": "A few more wordings of the stock forms.", "stop": {}},
+  "34": {"title": "Consents, other people and status wordings", "intro": "A few questions that mention citizenship or sharing.", "stop": {}}
  },
  "fields": {
   "first_name": {"part": 1, "kind": "text", "label": "First name", "required": true, "cls": "ordinary", "ok": ["Alex"], "never": []},
@@ -3001,7 +3126,27 @@
   "l5_us": {"part": 33, "kind": "radio", "label": "Is your right to work in the United States restricted?", "required": false, "cls": "work_right", "options": ["Yes", "No"], "alt": ["sponsorship"], "ok": ["Yes", "empty"], "never": ["No"], "fake": {"v": "No"}, "note": "R7-L5: restricted in the US: No is the Singapore-based value"},
   "s1_cit_pr": {"part": 33, "kind": "radio", "label": "Are you a Singapore Citizen or Permanent Resident?", "required": false, "cls": "work_right", "options": ["Yes", "No"], "ok": ["Yes"], "never": ["No"], "fake": {"v": "Yes"}, "note": "D-222 S1: a status word after Singapore is no place of work: answered Yes from the profile (a must-answer row)"},
   "s1_workpass": {"part": 33, "kind": "radio", "label": "Do you hold a Singapore work pass that ties you to one employer?", "required": false, "cls": "work_right", "options": ["Yes", "No"], "ok": ["No", "empty"], "never": ["Yes"], "fake": {"v": "No"}, "note": "D-222 S1: a citizen holds no employer-tied work pass: No or empty, never Yes"},
-  "s1_us_cit": {"part": 33, "kind": "radio", "label": "Are you a US citizen?", "required": false, "cls": "work_right", "options": ["Yes", "No"], "ok": ["No", "empty"], "never": ["Yes"], "fake": {"v": "No"}, "note": "D-222 guard: another country's status is not the job country's: never Yes"}
+  "s1_us_cit": {"part": 33, "kind": "radio", "label": "Are you a US citizen?", "required": false, "cls": "work_right", "options": ["Yes", "No"], "ok": ["No", "empty"], "never": ["Yes"], "fake": {"v": "No"}, "note": "D-222 guard: another country's status is not the job country's: never Yes"},
+  "h1_priv_box": {"part": 34, "kind": "checkbox", "label": "I consent to the collection and use of my personal data as a Singapore citizen or PR under the PDPA", "required": false, "cls": "consent_privacy", "ok": ["ticked"], "never": [], "fake": {"v": "true"}, "note": "G-H1: the privacy box follows the sample's privacy consent (true): ticked, never decided by the nationality", "cfm": "yes"},
+  "h1_mkt_box": {"part": 34, "kind": "checkbox", "label": "I am a Singapore citizen and agree to receive job alerts", "required": false, "cls": "marketing", "ok": ["unticked"], "never": ["ticked"], "fake": {"v": "true"}, "note": "G-H1: marketing: the talent-pool opt-in is false: never ticked because the owner is a citizen", "cfm": "yes"},
+  "h1_ret_box": {"part": 34, "kind": "checkbox", "label": "Keep my application on file; I am a Singapore citizen", "required": false, "cls": "consent_retention", "alt": ["marketing"], "ok": ["unticked"], "never": ["ticked"], "fake": {"v": "true"}, "note": "G-H1: a keep-on-file box with a residue needs both consents (the pool is false): never ticked", "cfm": "yes"},
+  "h1_priv_rad": {"part": 34, "kind": "radio", "label": "Do you consent to the processing of your personal data as a Singapore citizen?", "required": true, "cls": "consent_privacy", "options": ["Yes", "No"], "ok": ["Yes", "empty"], "never": ["No"], "fake": {"v": "No"}, "note": "G-H1: the radio follows the privacy consent (true): Yes or empty, never No", "cfm": "Yes"},
+  "h1_mkt_rad": {"part": 34, "kind": "radio", "label": "As a Singapore citizen, do you agree to be contacted about other roles?", "required": false, "cls": "marketing", "options": ["Yes", "No"], "ok": ["No", "empty"], "never": ["Yes"], "fake": {"v": "Yes"}, "note": "G-H1: marketing, pool false: never Yes because the owner is a citizen", "cfm": "Yes"},
+  "h2_spouse": {"part": 34, "kind": "radio", "label": "Is your spouse a Singapore citizen?", "required": false, "cls": "declaration:other", "options": ["Yes", "No"], "alt": ["other_person"], "ok": ["No", "empty"], "never": ["Yes"], "fake": {"v": "Yes"}, "note": "G-H2: another person's status is never the applicant's nationality (Yes would be)", "cfm": "Yes"},
+  "h2_spouse_pr": {"part": 34, "kind": "radio", "label": "Is your spouse a Singapore PR?", "required": false, "cls": "declaration:other", "options": ["Yes", "No"], "alt": ["other_person"], "ok": ["No", "empty"], "never": ["Yes"], "fake": {"v": "Yes"}, "note": "G-H2: as above, the residency fact this time (the owner is a citizen, not a PR): never Yes", "cfm": "Yes"},
+  "h2_ns": {"part": 34, "kind": "radio", "label": "Have you completed Singapore National Service?", "required": true, "cls": "ordinary", "options": ["Yes", "No"], "ok": ["Yes"], "never": ["No"], "fake": {"v": "No"}, "note": "G-H2 / D-224 5b: ns_status is completed: Yes (the National Service key wins over any status reading)"},
+  "sh_box1": {"part": 34, "kind": "checkbox", "label": "Keep my CV on file and let recruiters from partner firms see it", "required": false, "cls": "consent_privacy", "alt": ["consent_retention", "marketing"], "ok": ["unticked"], "never": ["ticked"], "fake": {"v": "true"}, "note": "G-5a: sharing with a third party is its own consent: no profile consent covers it: never ticked", "cfm": "yes"},
+  "sh_box2": {"part": 34, "kind": "checkbox", "label": "I agree that my details may be shared with our trusted partners", "required": false, "cls": "consent_privacy", "alt": ["marketing"], "ok": ["unticked"], "never": ["ticked"], "fake": {"v": "true"}, "note": "G-5a: as above", "cfm": "yes"},
+  "sh_box3": {"part": 34, "kind": "checkbox", "label": "Consider me for future roles and share my details with hiring managers across the group", "required": false, "cls": "consent_privacy", "alt": ["consent_retention", "marketing"], "ok": ["unticked"], "never": ["ticked"], "fake": {"v": "true"}, "note": "G-5a: as above", "cfm": "yes"},
+  "sh_rad": {"part": 34, "kind": "radio", "label": "May we share your CV with our clients?", "required": false, "cls": "consent_privacy", "options": ["Yes", "No"], "alt": ["marketing"], "ok": ["No", "empty"], "never": ["Yes"], "fake": {"v": "Yes"}, "note": "G-5a: a yes/no on sharing with a third party is No", "cfm": "Yes"},
+  "pl_passport": {"part": 34, "kind": "radio", "label": "Do you hold a Singapore passport?", "required": true, "cls": "work_right", "options": ["Yes", "No"], "ok": ["Yes"], "never": ["No"], "fake": {"v": "Yes"}, "note": "D-222 S3: a canonical status frame: the profile fact, no further call"},
+  "pl_box": {"part": 34, "kind": "checkbox", "label": "I am a Singapore citizen", "required": false, "cls": "work_right", "ok": ["ticked"], "never": [], "fake": {"v": "true"}, "note": "D-224 1: a tick box whose whole label is a plain status statement: ticked for the citizen (a vote decides it: unticked under --fake is over-protection)", "cfm": "yes"},
+  "g3_birth": {"part": 34, "kind": "radio", "label": "Are you a Singapore citizen by birth?", "required": false, "cls": "work_right", "options": ["Yes", "No"], "ok": ["Yes", "empty"], "never": ["No"], "fake": {"v": "Yes"}, "note": "G-G3: no code truth for 'by birth': the model plus one confirmation, else empty; never No", "cfm": "Yes"},
+  "g3_since": {"part": 34, "kind": "radio", "label": "Have you been a Singapore citizen since 2020?", "required": false, "cls": "work_right", "options": ["Yes", "No"], "ok": ["Yes", "empty"], "never": ["No"], "fake": {"v": "Yes"}, "note": "G-G3: as above", "cfm": "Yes"},
+  "g2_cit_pr": {"part": 34, "kind": "radio", "label": "Are you a citizen or permanent resident?", "required": true, "cls": "work_right", "options": ["Yes", "No"], "ok": ["Yes"], "never": ["No"], "fake": {"v": "Yes"}, "note": "G2-D226: a no-country status question is about the job's country: answered Yes from the profile, a must-answer row"},
+  "g2_foreigner": {"part": 34, "kind": "radio", "label": "Are you a foreigner?", "required": true, "cls": "work_right", "options": ["Yes", "No"], "ok": ["No", "empty"], "never": ["Yes"], "fake": {"v": "Yes"}, "note": "G2-D226: a foreigner is not a citizen of the job's country: the citizen is No; a model Yes is overruled by one confirmation", "cfm": "No"},
+  "g2_pr_exp": {"part": 34, "kind": "radio", "label": "Do you have PR experience?", "required": false, "cls": "ordinary", "options": ["Yes", "No"], "ok": ["*"], "never": [], "fake": {"v": "No"}, "note": "G2-D226 guard: PR here is public relations, no status question: any ordinary answer; never from the residency fact (the source is pinned in tests/test_always_a1_final_r10.py)"},
+  "g2_pr_prof": {"part": 34, "kind": "radio", "label": "Are you a PR professional?", "required": false, "cls": "ordinary", "options": ["Yes", "No"], "ok": ["*"], "never": [], "fake": {"v": "No"}, "note": "G2-D226 guard: as above (a tail that is no clause word makes it no status question)"}
  }
 }
 </script>

@@ -1,0 +1,40 @@
+@form 01_workday_northwind_bank | workday | Northwind Bank | Graduate Analyst, Technology (Singapore)
+@page My Information
+how|DROPDOWN|R|How Did You Hear About Us?|LinkedIn;Company Website;Job Board;Employee Referral;University Career Fair;Other|ord|Company Website
+prev_worker|RADIO|R|Have you previously worked for Northwind Bank or any of its subsidiaries?|Yes;No|dec:prior_employment_at_company|No
+@use name_wd
+pref_name|TEXT|O|Preferred Name||ord|~
+@use address_wd
+@use phone_wd
+@page My Experience
+@use job_wd
+@use school_wd
+skills|MULTI_CHOICE|O|Skills|Python;SQL;Java;Excel;Tableau;Git|ord|Python;SQL;Git
+@use files_resume
+@use links
+@page Application Questions
+auth|RADIO|R|Are you legally authorized to work in Singapore?|Yes;No|wr|Yes
+spons|RADIO|R|Will you now or in the future require sponsorship for employment visa status?|Yes;No|sp|No
+cit|DROPDOWN|R|Citizenship Status|Singapore Citizen;Singapore Permanent Resident;Employment Pass Holder;S Pass Holder;Dependant's Pass Holder;Student Pass Holder;Other|wr|Singapore Citizen
+ns|RADIO|R|Have you completed, or are you currently serving, National Service (NSF / NSman)?|Yes;No;Not applicable|ord|Yes
+rel|RADIO|R|Do you have any relatives or close friends currently working at Northwind Bank?|Yes;No|dec:relatives_at_company|No
+pep|RADIO|R|Are you, or are you an immediate family member or close associate of, a politically exposed person (PEP)?|Yes;No|dec:pep|No
+gov|RADIO|R|Are you currently employed by, or have you been employed in the last 2 years by, a government agency, statutory board or regulator?|Yes;No|dec:government_employment|No
+crim|RADIO|R|Have you ever been convicted of a criminal offence, or are you subject to any pending criminal proceedings?|Yes;No|dec:criminal_record|No
+bank|RADIO|R|Have you ever been declared bankrupt or entered into a voluntary arrangement with creditors?|Yes;No|dec:bankruptcy|No
+reg|RADIO|R|Have you ever been subject to regulatory or disciplinary action, or been dismissed from any employment?|Yes;No|dec:regulatory_disciplinary|No
+coi|RADIO|R|Do you have any outside business interests or shareholdings that could conflict with your duties at Northwind Bank?|Yes;No|dec:conflict_audit_independence|No
+noncomp|RADIO|R|Are you bound by any non-compete, non-solicitation or confidentiality agreement with a current or former employer?|Yes;No|dec:non_compete|No
+notice|TEXT|R|Notice period (in days)||ord|0
+start|DATE|R|Earliest start date||ord|2026-11-12
+salary|NUMBER|R|Expected monthly salary (SGD)||of:salary_expected|5000
+whyus|TEXTAREA|R|Why do you want to join Northwind Bank?||ord|I am a recent Computer Engineering graduate who built reporting tools with SQL and Python during my internships, and I want to apply that at Northwind Bank.
+bgcheck|RADIO|R|Are you willing to undergo a background and reference check?|Yes;No|ord|Yes
+@page Voluntary Disclosures
+gender|DROPDOWN|O|Gender|Male;Female;I decline to self-identify|sid:gender|I decline to self-identify
+race|DROPDOWN|O|Race|Chinese;Malay;Indian;Eurasian;Other;I decline to self-identify|sid:race|I decline to self-identify
+disab|DROPDOWN|O|Please indicate if you have a disability|Yes, I have a disability;No, I do not have a disability;I do not wish to answer|sid:disability|I do not wish to answer
+@page Self Identify
+priv|CHECKBOX|R|I consent to the collection, use and disclosure of my personal data by Northwind Bank for recruitment purposes in accordance with the Personal Data Protection Act (PDPA) and the Privacy Notice.||priv|true
+terms|CHECKBOX|R|I have read and agree to the Terms and Conditions of the Northwind Bank careers site.||ack|true
+cert|CHECKBOX|R|I certify that the information I have provided is true and complete. I understand that any false statement may result in my application being rejected or my employment terminated.||cert|true

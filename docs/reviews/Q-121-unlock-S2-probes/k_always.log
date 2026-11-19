@@ -1,0 +1,80 @@
+test_always_a1           29/29
+test_always_a1_b         18/18
+test_always_a1_c         22/22
+test_always_a1_cache     7/7
+test_always_a1_close     3/3
+test_always_a1_close_rf  10/10
+test_always_a1_contract  12/12
+test_always_a1_d         9/9
+test_always_a1_final     14/14
+test_always_a1_final_r10 21/22   <-- failures
+test_always_a1_final_r5  26/26
+test_always_a1_final_r6  24/24
+test_always_a1_final_r7  16/16
+test_always_a1_final_r8  24/24
+test_always_a1_final_r9  31/31
+test_always_a1_fix10     11/11
+test_always_a1_fix6      12/12
+test_always_a1_fix8      30/30
+test_always_a1_fix9      8/8
+test_always_a1_p         23/23
+test_always_a1_prompt    11/11
+test_always_a1_u         29/29
+test_always_a1_u9        17/17
+test_always_a1_u9_b      18/18
+test_always_a1_w         18/18
+test_always_briefing     10/10
+test_always_consent_pins 12/12
+test_always_fill         26/26
+test_always_fix_pins     37/37
+test_always_flow         13/13
+test_always_flow_fixes   12/12
+test_always_flow_stops   17/17
+test_always_flow_trial   14/14
+test_always_lock         18/18
+REFUSED: the release lock (apply.always_available) is open in a config that did not go through open_lock()
+Nothing was started (no server, no browser).
+REFUSED: the effective apply mode is 'dry_run'/'auto', not 'dry_run'
+Nothing was started (no server, no browser).
+REFUSED: the effective apply mode is 'auto'/'dry_run', not 'dry_run'
+Nothing was started (no server, no browser).
+REFUSED: the target URL host is 'jobs.example.com', not 127.0.0.1
+Nothing was started (no server, no browser).
+REFUSED: the database path C:\Users\Admin\Documents\All_Created_Folders\Misc\Projects\JobScraper\.claude\worktrees\agent-a2d9921bf5aca16f7\tests\x.db is outside the temp directory C:\Users\Admin\AppData\Local\Temp\tmpie2dw_5q
+Nothing was started (no server, no browser).
+REFUSED: the Edge profile path C:\Users\Admin\Documents\All_Created_Folders\Misc\Projects\JobScraper\.claude\worktrees\agent-a2d9921bf5aca16f7\tests\edge is outside the temp directory C:\Users\Admin\AppData\Local\Temp\tmpie2dw_5q
+Nothing was started (no server, no browser).
+REFUSED: the applicant profile C:\Users\Admin\Documents\All_Created_Folders\Misc\Projects\JobScraper\.claude\worktrees\agent-a2d9921bf5aca16f7\README.md is not under tests/fixtures/
+Nothing was started (no server, no browser).
+REFUSED: JOBSCRAPER_DB is set in the environment (it could point the run at a real database)
+Nothing was started (no server, no browser).
+test_always_rehearsal_lock 4/4
+test_always_vote_pins    14/14
+test_apply_d70           2/2
+test_connections         1/1
+test_m17                 1/1
+test_no_real_model_port  1/1
+test_q127_close          1/1
+test_q127_ship           1/1
+test_store_always        6/6
+test_web_always          9/9
+
+======================================================================
+
+FAIL  test_always_a1_final_r10::test_t4_DEFECT_medium_have_you_been_a_pr_or_citizen_since_2020_with_no_country_is_written_with_no_check_at_all
+Traceback (most recent call last):
+  File "C:\Users\Admin\Documents\All_Created_Folders\Misc\Projects\JobScraper\.claude\worktrees\agent-a2d9921bf5aca16f7\tests\run_tests.py", line 134, in main
+    fn()
+  File "C:\Users\Admin\Documents\All_Created_Folders\Misc\Projects\JobScraper\.claude\worktrees\agent-a2d9921bf5aca16f7\tests\test_always_a1_final_r10.py", line 314, in test_t4_DEFECT_medium_have_you_been_a_pr_or_citizen_since_2020_with_no_country_is_written_with_no_check_at_all
+    assert not bad, report(bad, 8)
+           ^^^^^^^
+AssertionError: ('Have you been a permanent resident since 2020?', 'ordinary', "'Yes' source=assumption assumed=True evidence='guess' note=''", '0 picks')
+('Have you been a permanent resident since 2020?', 'work_right', "'No' source=profile:singapore_status.authorised_to_work assumed=True evidence='check: work_right' note='votes: the check and two meaning checks agree (No); the AI answered Ye'", '3 picks')
+('Have you been a permanent resident since 2020?', '<no class>', "'Yes' source=assumption assumed=True evidence='guess' note=''", '0 picks')
+('Have you been a citizen since 2020?', 'ordinary', "'Yes' source=assumption assumed=True evidence='guess' note=''", '0 picks')
+('Have you been a citizen since 2020?', 'work_right', "'No' source=profile:singapore_status.authorised_to_work assumed=True evidence='check: work_right' note='votes: the check and two meaning checks agree (No); the AI answered Ye'", '3 picks')
+('Have you been a citizen since 2020?', '<no class>', "'Yes' source=assumption assumed=True evidence='guess' note=''", '0 picks')
+(6 failing inputs)
+
+
+642/643 passed  (-k 'always')

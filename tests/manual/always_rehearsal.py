@@ -43,6 +43,13 @@ HARD SAFETY (all checked before the server or the browser starts; a failed check
   5. the applicant profile file is under tests/fixtures/ (the refusing variant is built in memory
      and written only into the temp directory)
   6. JOBSCRAPER_DB is not set in the environment
+  7. THE RELEASE LOCK (D-223): the released install ships `apply.always_available: false`, under which `fill_policy: always`
+     is ignored and the flow runs the STRICT filler, so a plain run would score the wrong filler. This script opens the
+     lock only in its OWN in-memory apply config, and only AFTER checks 1-6 have all passed (`open_lock`; a config that
+     arrives with the lock already open is refused); config/config.yaml is never written (its hash is compared on exit).
+     The run header prints `policy=always (lock opened in memory)`; if the flow reports the strict policy (before the
+     run: `effective_policy`; after it: a "fill_policy always ignored" log line) the run exits 3, so a locked run can
+     never be mistaken for a rehearsal.
 Also: no real job id (the jobs are made up in a temp database); nothing here calls submit (the
 adapter's submit is replaced by one that raises, and every page's Submit counter must read 0); a
 read guard refuses any open() of data/ or .env; config/config.yaml is read for the model name and
@@ -724,8 +731,11 @@ def model_url() -> str:
     return m.group(1) if m else "http://127.0.0.1:11434"
 
 
-def preflight(args, tmp: Path, db_path: Path, edge_dir: Path, profile_src: Path, acfg) -> None:
-    """Every hard-safety check. Raises Refused (exit 3) on the first failure."""
+def preflight(args, tmp: Path, db_path: Path, edge_dir: Path, profile_src: Path, acfg, *, lock_open: bool = False) -> None:
+    """Every hard-safety check. Raises Refused (exit 3) on the first failure. `lock_open` is True only for the config
+    `open_lock` returned: a config that has `always_available` true without that is refused (check 7)."""
+    if getattr(acfg, "always_available", False) is True and not lock_open:
+        raise refuse("the release lock (apply.always_available) is open in a config that did not go through open_lock()")
     if str(getattr(acfg, "mode", "")) != "dry_run" or args.mode != "dry_run":
         raise refuse(f"the effective apply mode is {args.mode!r}/{getattr(acfg, 'mode', '')!r}, not 'dry_run'")
     if urlsplit(args.target_url or "http://127.0.0.1/").hostname != "127.0.0.1":
@@ -738,6 +748,23 @@ def preflight(args, tmp: Path, db_path: Path, edge_dir: Path, profile_src: Path,
         raise refuse(f"the applicant profile {profile_src} is not under tests/fixtures/")
     if os.environ.get("JOBSCRAPER_DB"):
         raise refuse("JOBSCRAPER_DB is set in the environment (it could point the run at a real database)")
+
+
+def open_lock(args, tmp: Path, db_path: Path, edge_dir: Path, profile_src: Path, acfg):
+    """Check 7: the in-memory apply config with the release lock (D-223 `always_available`) opened, returned only when EVERY
+    check of `preflight` holds for it (dry run, 127.0.0.1 target, temp database, temp Edge profile, a profile under
+    tests/fixtures/, JOBSCRAPER_DB unset); otherwise exit 3. Nothing is written anywhere: no file is touched."""
+    preflight(args, tmp, db_path, edge_dir, profile_src, acfg)                  # all of 1-6, on the still-locked config
+    return dataclasses.replace(acfg, always_available=True)
+
+
+def _config_hash() -> str:
+    import hashlib
+    return hashlib.sha256(CONFIG.read_bytes()).hexdigest()
+
+
+LOCK_LINE = "policy=always (lock opened in memory)"
+STRICT_LOG = re.compile(r"fill_policy always ignored", re.I)
 
 
 def run_once(args, exp: dict, run_no: int) -> dict:
@@ -775,6 +802,7 @@ def run_once(args, exp: dict, run_no: int) -> dict:
         acfg = dataclasses.replace(w.cfg.apply, mode=args.mode)
         edge_dir = tmp_world / "edge-profile"
         preflight(args, tmp_world, w.cfg.db_path, edge_dir, profile_src, acfg)
+        acfg = open_lock(args, tmp_world, w.cfg.db_path, edge_dir, profile_src, acfg)   # check 7: the lock, in memory only
         install_read_guard()
 
         server = Server().start()
@@ -895,12 +923,19 @@ def run_once(args, exp: dict, run_no: int) -> dict:
             say = S.Say()
             acfg_run = S.edge_acfg(acfg, str(edge_dir), fill="llm", mygreenhouse=False)
             acfg_run = dataclasses.replace(acfg_run, mode=args.mode)
-            preflight(args, tmp_world, w.cfg.db_path, edge_dir, profile_src, acfg_run)
+            preflight(args, tmp_world, w.cfg.db_path, edge_dir, profile_src, acfg_run, lock_open=True)
+            pol, why = apply_flow.effective_policy(acfg_run, backend)
+            if pol is not apply_flow.FillPolicy.ALWAYS:
+                raise refuse(f"the flow would run the {pol.value.upper()} policy ({why or 'no reason given'}), not `always`: "
+                             "this would not be a rehearsal of the always-answer filler")
             t_run = time.monotonic()
             results = apply_flow.run(w.cfg, w.store, [j for _n, j in jids], dry_run=True, backend=backend,
                                      http=S.local_http(), browser_factory=factory, apply_cfg=acfg_run, say=say,
                                      evidence_dir=w.tmp / "evidence")
             run_seconds = time.monotonic() - t_run
+            strict = [l for l in say.lines if STRICT_LOG.search(l)]
+            if strict:
+                raise refuse("the flow reported the strict policy during the run (" + strict[0][:140] + "): not a rehearsal")
         finally:
             apply_flow.fill_page = orig_fill_page
             AL.fill_page_always = orig_always
@@ -1323,8 +1358,9 @@ def main(argv=None) -> int:
     install_read_guard()
     exp = load_expected()
     print_coverage(exp)
+    cfg_hash = _config_hash()
     print(f"RUN: variant={args.variant} blind_class={args.blind_class} fake={args.fake} model={args.model} "
-          f"url={args.url} repeat={args.repeat}\n")
+          f"url={args.url} repeat={args.repeat} {LOCK_LINE}\n")
 
     runs = []
     t_all = time.monotonic()
@@ -1374,6 +1410,8 @@ def main(argv=None) -> int:
     write_out(path, rows, parts, lines, args)
     print(f"\nfull table written to {path}")
     print(f"total {time.monotonic() - t_all:.0f} s")
+    if _config_hash() != cfg_hash:
+        raise refuse("config/config.yaml changed during the run (this script never writes it)")
     return 0
 
 

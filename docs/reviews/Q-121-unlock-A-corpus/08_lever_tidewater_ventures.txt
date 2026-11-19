@@ -1,0 +1,34 @@
+@form 08_lever_tidewater_ventures | lever | Tidewater Ventures | Investment Analyst Intern to Full-time Programme (Singapore)
+@page Apply
+resume|FILE|R|Resume/CV||ord|~
+name|TEXT|R|Full name||ord|Alex Testcase
+email|EMAIL|R|Email||ord|alex.testcase@example.com
+phone|PHONE|R|Phone||of:phone|91234567
+loc|TEXT|O|Current location||ord|Singapore
+org|TEXT|O|Current company||ord|~
+linkedin|URL|R|LinkedIn URL||ord|https://www.linkedin.com/in/example-alex-testcase
+github|URL|O|GitHub URL||ord|https://github.com/example-alex-testcase
+additional|TEXTAREA|O|Add a cover letter or anything else you want to share||ord|~
+q_degree|TEXT|R|Highest qualification obtained||ord|Bachelor of Engineering (Computer Engineering)
+q_uni|TEXT|R|University||ord|Nanyang Example University
+q_grad|TEXT|R|Graduation (month / year)||ord|June 2025
+q_gpa|TEXT|R|Final grade / CAP||ord|4.20 / 5.00
+q_auth|RADIO|R|Do you have the right to work in Singapore?|Yes;No|wr|Yes
+q_nospons|RADIO|R|Are you able to work in Singapore without visa sponsorship from Tidewater Ventures?|Yes;No|sp|Yes
+q_cit|RADIO|R|Are you a Singapore Citizen / Permanent Resident / Other?|Singapore Citizen;Singapore Permanent Resident;Other|wr|Singapore Citizen
+q_uk|RADIO|O|Are you eligible to work in the United Kingdom?|Yes;No|wr|~
+q_pep|RADIO|R|Are you, or is any member of your family or any close associate, a politically exposed person?|Yes;No|dec:pep|No
+q_gov|RADIO|R|Do you hold, or have you held, a position in a government, regulatory body or listed company that may create a conflict of interest?|Yes;No|dec:conflict_audit_independence|No
+q_trade|RADIO|R|Do you or your immediate family hold shares in any company we invest in?|Yes;No|dec:shareholding_in_company|No
+q_crim|RADIO|R|Have you ever been convicted of a criminal offence, or been declared bankrupt?|Yes;No|dec:criminal_record|No
+q_sal|TEXT|R|Expected annual salary (SGD)||of:salary_expected|65000
+q_curr|TEXT|R|Current / last drawn monthly salary (SGD)||of:salary_current|~
+q_avail|TEXT|R|Available from||ord|Immediately
+q_excel|RADIO|R|Are you proficient in financial modelling in Excel?|Yes;No|ord|?No
+q_pitch|TEXTAREA|R|Pitch us an investment idea in 150 words.||ord|?I would look at logistics software providers whose recurring revenue is growing steadily as regional trade expands.
+q_why|TEXTAREA|R|Why Tidewater?||ord|Tidewater backs early-stage companies across Southeast Asia, and I want to learn how founders and investors think about building businesses.
+q_hear|TEXT|O|How did you hear about us?||ord|Tidewater careers page
+q_priv|CHECKBOX|R|I agree to Tidewater Ventures collecting and processing my personal data for recruitment and to its disclosure to our affiliated funds and portfolio companies where necessary.||priv|true
+q_keep|CHECKBOX|O|Keep my details on file for future roles.||ret|true
+q_gender|DROPDOWN|O|Gender|Male;Female;Prefer not to say|sid:gender|Prefer not to say
+q_race|DROPDOWN|O|Race|Chinese;Malay;Indian;Other;Prefer not to say|sid:race|Prefer not to say
