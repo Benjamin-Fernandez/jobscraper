@@ -1366,6 +1366,10 @@ The mailbox for an address `a`:
 
 ### 12.1 Order of checks per job (in `apply_flow`, after creating the `queued` row)
 
+> **Superseded 2026-11-15 (D-215), in part.** The checks below still run, but a stop never becomes a question on the Profile page: the question inbox there is retired (Q-127 Release 1, live). A role that stops on an unanswered question shows it on its own Applications row and in "See what was filled", where "Answer for next time" saves an answer and "Try again" queues the role again; Profile → "Your details" holds only the owner's details. Built but locked (D-223, `apply.always_available: false`): the always-answer filler, which would also stop on one missing detail with a "Needs one detail: …" chip that opens that field. Planned (Release 2, not started): one proposed field under "More about you", only for a question seen at more than 15 employers. Design: `q127_profile_questions_design.md` B.1, B.2, B.6; `adr/0012-no-per-company-questions.md`.
+>
+> **Also changed (2026-11-12, 2026-11-15).** D-204 / D-205: a cap of 0 means no limit, and these checks run at the click (`POST /api/apply` adds the role to the auto-apply queue) and again when the queue worker takes the role (`apply_queue_design.md` §3.5, §4.1). D-214: before its first take the worker starts the local model (`ollama_autostart_design.md` §3).
+
 1. **Profile** (`applicant.missing_for_apply` + resume exists) → `profile_incomplete`.
 2. **Duplicate** (`store.apply_duplicate(job_id) -> Optional[str]` returns a detail or None):
    - `applications` row for `job_id` with status ≠ `to_apply` → "applied <applied_at>"
@@ -1494,6 +1498,10 @@ D-74 (Q-block, no `SCHEMA_VERSION` change): tables `questions` and `question_sig
 
 ### 14.3 Web API (M21; routers `web/routers/applicant.py`, `web/routers/apply.py`)
 
+> **Superseded 2026-11-15 (D-215), in part.** The `/api/questions…` routes named below (`questions_design.md` §9.2) are retired: `GET /api/questions` returns its old shape with nothing in it, the writers answer 410, and the old question rows stay in the store. What replaces them (Q-127 Release 1, live): `GET /api/applications/{job_id}/attempts/{attempt_id}/answers` (What was sent / What was filled); `POST …/answers/{answer_id}/remember` ("Answer for next time"; it also replaces the M22 row `POST /api/apply/answers/{id}/correct`); `GET /api/apply/remembered` and `DELETE /api/apply/remembered/{key}` (Settings → Apply → "Answers you corrected"). Planned (Release 2, not started): `POST /api/applicant/topics/{key}` and `…/dismiss` for a proposed field. Design: `q127_profile_questions_design.md` B.5, B.6; `adr/0012-no-per-company-questions.md`.
+>
+> **Also changed (2026-11-12).** `POST /api/apply` (body `{job_ids, source}`) never answers 409: it adds the roles to the auto-apply queue and returns 202 `{queued, accepted, refused, mode, paused, started, disabled, job}`; the queue has its own routes under `/api/apply/queue`; `GET/PUT /api/apply/settings` carry the Settings → Apply keys (D-204, D-205, Q-111, Q-116). Design: `apply_queue_design.md` §3.5, `q116_settings_design.md` §2.
+
 D-74: `GET/PUT /api/applicant` move into **M20** with the extended shape in `questions_design.md` §9.1 (`etag`, `form`, `file`; 409 on a stale etag or an unreadable file), and the new `/api/questions…` endpoints are in §9.2 there. The rows below for `/api/applicant` are superseded by that section.
 
 | Method, path | Request | Response |
@@ -1521,6 +1529,10 @@ D-74: `GET/PUT /api/applicant` move into **M20** with the extended shape in `que
 `text`/`hint` come from `REASON_TEXTS` with `{detail}` filled (web imports `apply.contracts`). Settings are stored in the `settings` table under keys `apply.mode`, `apply.daily_cap`, `apply.per_employer_daily_cap`, `apply.headed`, `apply.captcha_wait_s`, `apply.mail.host`, `apply.mail.port`, `apply.mail.username`; each falls back to `config.yaml`'s `apply:` block. The mail username is never written to config (the repo is public).
 
 ### 14.4 UI (M21; fast-track spec, Vue)
+
+> **Superseded 2026-11-15 (D-215).** The bullets "Profile → Application details", "What I told this employer" and the attempt panel's D-74 addition ("Answer it in Profile", Retry) are replaced (Q-127 Release 1, live): Profile → "Your details" (one status line, ten sections, "Save section") lists no question from an application; each attempt has Applications → "See what was sent" / "See what was filled" (answer, basis, Assumed / Not answered), "Answer for next time", the row chips and "Try again"; saved answers are listed under Settings → Apply → "Answers you corrected". Built but locked (D-223): the always-answer filler and its "Needs one detail: …" chip with "Add it". Planned (Release 2, not started): one proposed field under "More about you", only for a question seen at more than 15 employers. Design: `q127_profile_questions_design.md` B.2, B.4, B.6; `adr/0012-no-per-company-questions.md`.
+>
+> **Also changed (2026-11-12).** D-203 / D-205: the Inbox Auto-apply click has no confirm dialog in any mode and adds the role to the auto-apply queue (no multi-select), shown in Runs → "Auto-apply queue"; Settings is one page (Accounts / Apply / Search / Preferences). Design: `apply_queue_design.md` §7, `q116_settings_design.md` §2–§3, `q100_ui_design.md` §4.
 
 - **Inbox detail actions:** "Auto-apply" (primary) beside "Apply on company site"; in multi-select mode "Auto-apply to selected (N)". While the profile is incomplete the button is disabled with "Finish your application details first" linking to Profile. Clicking shows a confirm only in `auto` mode: "Send applications to N employers now? JobScraper fills and submits them in Edge." [Send applications] [Cancel]. Refusals from the response show as a toast list.
 - **Attempt panel** (Inbox and Applications detail, when the job has attempts): state chip (Queued, Tailoring, Filling (step), Submitted, Needs your check, Dry run ready, Failed), the reason `text` + `hint`, "Open the posting" link on any failure, "It went through" / "It didn't go through" on `submitted_unconfirmed`, link "What I told this employer".
