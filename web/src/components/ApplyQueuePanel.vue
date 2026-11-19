@@ -298,7 +298,7 @@ function failed(name, e) {
     say('error', 'Auto-apply is switched off in this copy of JobScraper (JOBSCRAPER_APPLY_QUEUE=0).')
   } else if (name === 'resume' && e instanceof ApiError && e.status === 422 && e.detail === 'profile_incomplete') {
     const missing = missingPaths(e)
-    say('error', `Your application details are missing${missing ? `: ${missing}` : ''}. Fill them in under Profile → Application details, then resume.`)
+    say('error', `Your details are missing${missing ? `: ${missing}` : ''}. Fill them in under Profile → Your details, then resume.`)
   } else if (name === 'stop' && e instanceof ApiError && e.status === 409 && e.detail === 'already_finished') {
     say('error', 'That application had already finished. The queue is paused.')
     load()

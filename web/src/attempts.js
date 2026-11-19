@@ -264,7 +264,7 @@ export function canRetry(row) {
 // What a refused enqueue (422) says, in the owner's words: the refusals' own sentences,
 // or the profile. Same wording as the Inbox.
 export function refusalMessage(body) {
-  if (body?.detail === 'profile_incomplete') return 'Finish your application details first.'
+  if (body?.detail === 'profile_incomplete') return 'Finish your details first.'
   const refused = Array.isArray(body?.refused) ? body.refused : []
   const texts = refused.map(r => [r.text, r.hint].filter(Boolean).join(' '))
   return texts.length ? texts.join(' ') : 'Could not add this role to the auto-apply queue.'

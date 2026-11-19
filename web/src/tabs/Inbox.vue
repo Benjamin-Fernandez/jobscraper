@@ -352,7 +352,7 @@ const announceQueue = () => window.dispatchEvent(new Event('jobscraper:apply-que
 
 // What a 422 means, in the owner's words: the refusals' own sentences, or the profile.
 function refusalText(body) {
-  if (body?.detail === 'profile_incomplete') return 'Finish your application details first.'
+  if (body?.detail === 'profile_incomplete') return 'Finish your details first.'
   const refused = Array.isArray(body?.refused) ? body.refused : []
   const texts = refused.map(r => [r.text, r.hint].filter(Boolean).join(' '))
   return texts.length ? texts.join(' ') : 'Could not add this role to the auto-apply queue.'
@@ -708,7 +708,7 @@ onDeactivated(() => window.removeEventListener('keydown', onShortcut))
             </div>
             <p v-if="applyState" class="auto-apply-note muted small">
               <template v-if="applyState.missing.length">
-                <a class="auto-apply-profile" href="#/profile">Finish your application details first</a>
+                <a class="auto-apply-profile" href="#/profile">Finish your details first</a>
                 ({{ applyState.missing.length }} missing).
               </template>
               <template v-else>{{ applyHint }}</template>

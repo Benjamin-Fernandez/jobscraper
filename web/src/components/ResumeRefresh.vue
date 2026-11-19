@@ -1,5 +1,5 @@
 <script setup>
-// "Update your application details" (Q-44, docs/architecture/q44_refresh_from_resume.md
+// "Update your details" (Q-44, docs/architecture/q44_refresh_from_resume.md
 // sections 4 and 5). After a resume upload the profile job compares the resume
 // with data/applicant.yaml; this panel lists what would change, one checkbox
 // per change with its before and after, and saves only the ticked ones.
@@ -151,22 +151,22 @@ async function save() {
 
 <template>
   <section v-if="mode !== 'hidden'" class="resume-refresh" aria-labelledby="resume-refresh-title">
-    <h3 id="resume-refresh-title" class="rr-title">Update your application details</h3>
+    <h3 id="resume-refresh-title" class="rr-title">Update your details</h3>
 
     <p v-if="mode === 'unavailable'" class="notice warn rr-unavailable">
-      Couldn't compare with your application details: the local AI model couldn't start. See Settings → Accounts → Local AI.
+      Couldn't compare with your details: the local AI model couldn't start. See Settings → Accounts → Local AI.
     </p>
     <p v-else-if="mode === 'stale'" class="notice warn rr-stale">
       This was checked against an older resume. Choose "Re-read resume" to check again.
     </p>
-    <p v-else-if="mode === 'empty'" class="muted rr-empty">Your application details match your resume.</p>
+    <p v-else-if="mode === 'empty'" class="muted rr-empty">Your details match your resume.</p>
     <p v-else-if="mode === 'saved'" class="notice ok rr-saved" role="status">
       Saved {{ savedCount }} {{ savedCount === 1 ? 'change' : 'changes' }}. Check them in
-      <button type="button" class="link rr-go" @click="emit('go-view', 'details')">Application details</button>.
+      <button type="button" class="link rr-go" @click="emit('go-view', 'details')">Your details</button>.
     </p>
 
     <template v-else-if="mode === 'plan'">
-      <p class="rr-intro">Your resume has changes your application details don't. Pick what to update. Entries you edited yourself are never changed.</p>
+      <p class="rr-intro">Your resume has changes your details don't. Pick what to update. Entries you edited yourself are never changed.</p>
       <ul class="rr-list">
         <li v-for="c in actionable" :key="c.id" class="rr-row" :data-op="c.op">
           <label class="rr-label">

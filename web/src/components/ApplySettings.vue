@@ -786,7 +786,7 @@ watch([() => props.item, visible], followItem)
         v-if="summary"
         :ref="el => setRef('details', el)"
         id="details"
-        label="Application details"
+        label="Your details"
         description="Contact details, work rights and the answers forms ask for."
         :value="detailsText"
         kind="link"
