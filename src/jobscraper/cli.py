@@ -241,6 +241,7 @@ def _fill_policy_lines(cfg, store, backend) -> list[str]:
     work-rights rows in the profile; "every other country: yes" with one nationality.
     Counts and switches only, never a profile value."""
     from . import applicant
+    from .apply.contracts import FILL_POLICY_LABELS, FillPolicy
     from .config import fill_policy_value
 
     try:
@@ -250,20 +251,22 @@ def _fill_policy_lines(cfg, store, backend) -> list[str]:
     want = fill_policy_value(acfg.fill_policy)
     local = backends.is_local(backend)
     out: list[str] = []
+    # Q-128: the screens' words (Settings → Apply), from the one table; nothing "asks" any more.
+    stop = FILL_POLICY_LABELS[FillPolicy.STRICT]            # "Stop when unsure"
+    always = FILL_POLICY_LABELS[FillPolicy.ALWAYS]          # "Always answer"
     if want != "always":
-        out.append("fill policy    Ask me first (strict): stops and asks when the profile "
-                   "doesn't cover a question")
+        out.append(f"fill policy    {stop}: an application stops when your details don't cover a "
+                   "question; answer it in that application's What was filled, then Try again")
         return out
     if getattr(acfg, "always_available", False) is not True:      # D-223 release lock
-        out.append("fill policy    Ask me first (strict) - always answer is not released on "
-                   "this install")
+        out.append(f"fill policy    {stop} - {always} is not released on this install")
         return out
     if not local:
-        out.append("fill policy    Ask me first (strict) - always answer is off for now")
+        out.append(f"fill policy    {stop} - {always} is off for now")
         out.append("               WARNING: fill_policy always is ignored: the AI model isn't "
                    "on this computer")
         return out
-    out.append("fill policy    Always answer: the local AI fills every field and marks what "
+    out.append(f"fill policy    {always}: the local AI fills every field and marks what "
                "it assumed")
     try:
         up = bool(backend.available)
