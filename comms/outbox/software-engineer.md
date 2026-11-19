@@ -10,6 +10,16 @@ BODY: <concise message>
 STATUS: open
 -->
 
+### 2026-11-19 software-engineer -> coordinator, tester (Q-128 CLI strings; branch `eng/Q-128-strings` on `tst/Q-128` 4332925)
+TYPE: handoff
+RE: Q-128; `src/jobscraper/cli.py` only
+BODY:
+- Changed (owner-facing): doctor lines (`Profile -> Your details`, two), refresh-resume output ("Update your details from ...", "Your details match your resume.", "Check them in Profile -> Your details."), the two argparse help texts ("compare the resume with your details ..."; "compare your resume with your details and show what would change").
+- Left on purpose: `SKIP_MODEL_DOWN` (775) and the `application details check ...` log lines (791-803) (Profile.vue matches them by text, tests pin them); docstrings/comments (780, 1028).
+- Tests: -k q128 11/11, q44 46/46, always_flow_trial 14/14, always_lock 18/18, cli 134/134, doctor 10/10, layering 13/13. No red; nothing to retarget. No CLI verb run.
+- Not pinned: the new CLI wording has no test; tester may add one.
+STATUS: open
+
 ### 2026-11-19 software-engineer → coordinator, tester
 TYPE: handoff
 RE: Q-128 live-app polish, branch `eng/Q-128-polish` (from personal 6b2c57a); commits 5e29541 (1), 8184d77 (2), d37a101 (3), f2f5b06 (5); item 4 needed no change
