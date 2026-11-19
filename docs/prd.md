@@ -1,7 +1,7 @@
 # JobScraper (personal): PRD r2 — cloud port, ATS resume tailor, auto-apply
 
 **Status:** APPROVED r1 (2026-11-01; the owner delegated approval to the Coordinator: "ensure a full proper plan is created and approve it if acceptable"); r2 2026-11-02 · **Owner:** Benjamin · **Created:** 2026-11-01
-**Changelog:** r2 (2026-11-02, planner, Q-09): folds in D-65 (answer memory = resolver tier 3; "I have this" → `data/applicant.yaml` `attested_skills`; reason codes `cancelled`, `mail_not_set_up`; `vault.py` in the foundation; `apply_flow` → `tailor_flow` edge; `app_events.by`) and D-67 (spike S-2: the LLM bullet and summary rewrite move to M22, `tailor.llm` off by default).
+**Changelog:** r3 (2026-11-19, planner, Q-129): what is live since 2026-11-15: F-11, F-12, F-30, F-39, F-40, NF-05, R-5, §4.1, §4.2, §7.2 and the D-61 status updated (D-203, D-204, D-214, D-215, D-216, D-223); F-13 (Questions from applications, D-74, never pasted here before) added struck through as superseded by D-215; new F-14 (What was sent), F-15 (a detail many employers ask for, PLANNED), F-42 (the app starts the local model), F-43 (the release lock on Always answer). Decisions after D-67 are recorded in `instructions/02_status.md` §4. r2 (2026-11-02, planner, Q-09): folds in D-65 (answer memory = resolver tier 3; "I have this" → `data/applicant.yaml` `attested_skills`; reason codes `cancelled`, `mail_not_set_up`; `vault.py` in the foundation; `apply_flow` → `tailor_flow` edge; `app_events.by`) and D-67 (spike S-2: the LLM bullet and summary rewrite move to M22, `tailor.llm` off by default).
 **Covers milestones:** M19 (cloud port), M20 (walking skeleton), M21 (MVP), M22 (breadth). M0–M17 are specified and recorded in `.claude/prds/jobscraper-v2.prd.md`, which stays the reference for the existing pipeline. M18 (frontend audit, worktree `../JobScraper-frontend`) is paused and not part of this PRD.
 
 ## 0. How to use this document (for agents)
@@ -47,13 +47,13 @@ One user: the owner, a new-graduate computer engineer in Singapore, who runs Job
 
 ### 4.1 MVP (M19–M21)
 - **Cloud port (M19):** engine fixes C-1 to C-8, C-22, C-23 and UI/UX items C-10, C-12 to C-18 from `docs/research/cloud_port_report.md` §1.
-- **Applicant profile (M20–M21):** every detail applications ask, edited in the Profile tab, stored locally.
+- **Applicant profile (M20–M21):** every detail applications ask, edited in the Profile tab ("Your details", ten sections), stored locally. Questions from one employer's form never appear there; they stay with the application (D-215, F-11, F-14).
 - **ATS resume tailor (M20–M21):** per job; a truthful, keyword-aligned DOCX (and PDF through Word) from a clean ATS template; temporary storage.
-- **Auto-apply (M20–M21):** fully automatic for Greenhouse, Lever, Ashby and Workday, including Workday account creation, a password vault, and email verification through IMAP; batch apply from the Inbox; an audit of every answer.
+- **Auto-apply (M20–M21):** fully automatic for Greenhouse, Lever, Ashby and Workday, including Workday account creation, a password vault, and email verification through IMAP; ~~batch apply from the Inbox~~ an auto-apply queue fed by Inbox clicks, each click a real submission on the owner's install (D-203, D-205); an audit of every answer, shown per application (F-14); the app starts the local model itself (F-42, D-214).
 
 ### 4.2 Later (M22)
 - Workable, SmartRecruiters and Recruitee adapters; a generic LLM-assisted adapter for custom pages, SAP SuccessFactors, Oracle and iCIMS (fill-and-submit with the same guards).
-- Answer memory: correcting an answer in the audit view teaches the resolver.
+- Answer memory: correcting an answer in the audit view teaches the resolver. (Brought forward: built 2026-11-15 as "Answer for next time" in What was sent, F-12, D-215.)
 - Cloud items C-9 (partial), C-19 (Settings chip editors), C-20 (line endings + CI bundle check), C-21 (measurement tools), C-24 (one job at a time, CLI included).
 - Passwords written to the Default Edge profile directly, if spike S-1's sync route fails (via a browser extension).
 
@@ -114,11 +114,18 @@ Priority: P0 = the milestone can't ship without it, P1 = important, P2 = nice to
 - THE SYSTEM SHALL hold the owner's standing declarations (D-55): not a politically exposed person, no audit or independence conflicts, no shareholdings or financial interests in employers, no relatives at employers, no criminal record, no bankruptcy, no regulatory or disciplinary history, no non-compete. Each one can be changed in the profile.
 
 **F-11 (P0) Edit the profile in the Profile tab.**
-- WHEN the owner opens Profile THE SYSTEM SHALL show an "Application details" form, grouped as in F-10, with a completeness meter that counts the fields auto-apply needs.
+- WHEN the owner opens Profile THE SYSTEM SHALL show ~~an "Application details" form, grouped as in F-10, with a completeness meter that counts the fields auto-apply needs~~ the view "Your details": one status line ("Ready for auto-apply", or "{n} details needed" with "Fill in") over ten sections (Identity; Contact; Work rights; Availability and pay; Education; Experience; Skills, languages and links; Equal-opportunity questions; Consents and declarations; Files), each with a one-line summary and "Complete", "{n} to fill" or "Needed", opened in place one at a time and saved with "Save section" (D-215; `q127_profile_questions_design.md` B.4).
+- THE SYSTEM SHALL never show on the Profile page a question tied to one employer or one application, nor an employer's name (D-215, ADR-0012 R1).
 - WHEN the owner saves THE SYSTEM SHALL validate it (e.g. postal code is 6 digits, email has the right format, salary is a positive whole number) and SHALL name each invalid field.
 - IF a field auto-apply needs is empty THEN THE SYSTEM SHALL list it before any auto-apply starts.
 
-**F-12 (P1) Answer memory.** WHEN the owner corrects an answer in an application's audit view and ticks "Remember for this question" THE SYSTEM SHALL store the normalised question label with the answer and SHALL use it ahead of the LLM next time (resolver tier 3, after profile rules: F-32's order; D-65).
+**F-12 (P1) Answer memory.** WHEN the owner ~~corrects an answer in an application's audit view and ticks "Remember for this question"~~ gives an answer with "Answer for next time" or "Use a different answer next time" in an application's "What was sent" / "What was filled" (F-14) THE SYSTEM SHALL store the normalised question label with the answer in the details file's `extra` entries and SHALL use it ahead of the LLM next time (resolver tier 3, after profile rules: F-32's order; D-65). The answer SHALL apply only to applications to that employer unless the owner unticks "Only for applications to {employer}" (ticked by default). THE SYSTEM SHALL refuse to save an answer that follows the owner's details, declarations, consents, work rights or sponsorship, and SHALL point to Your details instead. Saved answers SHALL be listed in Settings → Apply → "Answers you corrected", each with "Forget" (D-215; design B.2b).
+
+**~~F-13 (P0) Questions from applications.~~** ~~A required question no tier can answer is captured and shown in the Profile tab as a new field; the owner answers it once and waiting attempts can be retried (D-74; `questions_design.md` §4–§10).~~ Built in M20 (Q-30), **superseded by D-215 (2026-11-15):** the Profile page lists no such questions. What replaces it: each stopped application shows its own questions and answers (F-14); a missing detail that has a field in Your details is named on that application's row ("Needs one detail: {label}" with "Add it"); a question becomes a field only through F-15. The captured rows stay in the database as records; the old question routes are retired.
+
+**F-14 (P0) What was sent, per application.** WHEN the owner opens an application in Applications THE SYSTEM SHALL offer "See what was sent" ("See what was filled" when nothing was sent) and SHALL show, for each field of that attempt, the employer's label, the value, where the value came from in plain words, and an "Assumed" (with its reason) or "Not answered" badge. Each row that may be remembered SHALL offer "Answer for next time" / "Use a different answer next time" (F-12). The row in Applications SHALL say what a stopped application needs: "Stopped: {n} questions had no answer", "Needs one detail: {label}" with "Add it", or "Ready to try again" with "Try again" (D-215; design B.2b, B.2c, B.2e). Built 2026-11-15 (Q-127 Release 1).
+
+**F-15 (P2, PLANNED) A detail many employers ask for.** WHEN a required question that the details and the resume could not answer has been asked by more than 15 different employers (`apply.topics.min_count` 16, counted by employer) THE SYSTEM SHALL propose it once as one field under "More about you" in Your details, with no employer name and no form's wording, offering "Add to details" or "Not needed" (D-215; design B.1 R1–R6, ADR-0012). Not built: Q-127 Release 2.
 
 ### 5.3 ATS resume tailor (key area KA-4). Design: `docs/architecture/tailor_design.md`, from `docs/research/resume_tailor_brief.md` §4–§5
 
@@ -155,7 +162,7 @@ Priority: P0 = the milestone can't ship without it, P1 = important, P2 = nice to
 
 **F-30 (P0) Start an application.**
 - WHEN the owner clicks "Auto-apply" on a role in the Inbox ~~, or "Auto-apply to selected" on several,~~ (not built: the Inbox has no multi-select; the API takes up to 20 ids, `apply_queue_design.md` §1) THE SYSTEM SHALL add the role to the auto-apply queue and answer at once, and one background worker SHALL apply to the queued roles one at a time, in order, while the owner keeps adding roles. Runs → "Auto-apply queue" SHALL show the role being applied to, the roles waiting and the recently finished ones, with Pause, Resume, Clear and Remove (D-205).
-- The owner's click is the only trigger: a search run, the shortlist and app start-up SHALL never start an attempt; "Try again" in Applications and "Retry" under Questions from applications count as fresh clicks. WHEN the app restarts with roles waiting THE SYSTEM SHALL keep them and SHALL pause the queue until the owner presses Resume (D-200, D-205).
+- The owner's click is the only trigger: a search run, the shortlist and app start-up SHALL never start an attempt; "Try again" in Applications and ~~"Retry" under Questions from applications~~ "Apply again to {n} applications" after "Save section" in Your details count as fresh clicks; with `apply.mode` `auto` each of them sends a real application with no further confirmation (D-203, D-215). Saving a section SHALL never start an application by itself (D-215, design B.2e). WHEN the app restarts with roles waiting THE SYSTEM SHALL keep them and SHALL pause the queue until the owner presses Resume (D-200, D-205).
 - IF the role is already `applied` in Applications, or a twin of it is (M17 same-URL rule), or an attempt for it already reached `submitted` or `submitted_unconfirmed`, or it is already queued or being applied to THEN THE SYSTEM SHALL refuse it and say why (D-205).
 - IF a required profile field is missing THEN THE SYSTEM SHALL refuse to start and list the fields (F-11).
 - THE SYSTEM SHALL enforce the caps set in Settings → Apply, counted by Submit clicks on the Singapore calendar day, with 0 meaning no limit; the owner's values are no daily limit and at most 10 a day per employer. One attempt is in flight at a time (D-204).
@@ -211,11 +218,22 @@ Priority: P0 = the milestone can't ship without it, P1 = important, P2 = nice to
 
 **F-39 (P0) Audit: what I told this employer.**
 - THE SYSTEM SHALL store one row per field filled (verbatim label, field type, offered options, value, tier, confidence, rule or prompt id) for every attempt, kept as long as the application.
-- WHEN the owner opens an application THE SYSTEM SHALL show "What I told this employer": the answers, the resume file sent, the screenshots, and the outcome.
+- WHEN the owner opens an application THE SYSTEM SHALL show ~~"What I told this employer": the answers, the resume file sent, the screenshots, and the outcome~~ "What was sent" / "What was filled" as F-14 states (D-215). The "What I told this employer" view was never built in the web app; `apply show <job id>` prints an attempt's answers on the command line.
 
-**F-40 (P1) Apply settings.** Settings → Apply SHALL show each value and edit it in place, saved on change: mode (Automatic submit | Dry run; switching to Automatic submit asks once), applications a day and per employer (0 = no limit), show the browser window, the human-check wait (0–600 s) and write cover letters. These values SHALL be stored in the settings table and SHALL win over `config/config.yaml` from the next apply job (Q-111, Q-116). Settings → Accounts SHALL hold the connected accounts (email updates, the application mailbox, the apply browser, the local AI, the employer accounts list) and SHALL never send a stored password to the browser: ~~Copy password~~ dropped (ADR-0009); Export for Edge stays on the command line (`accounts export-edge`); entering the mailbox and employer passwords from the web is Q-103 (Q-100 Wave 2) (D-191, D-203, D-204).
+**F-40 (P1) Apply settings.** Settings → Apply SHALL show each value and edit it in place, saved on change: mode (Automatic submit | Dry run; switching to Automatic submit asks once), applications a day and per employer (0 = no limit; the owner's values: no daily limit, 10 per employer, D-204), show the browser window, the human-check wait (0–600 s), write cover letters, "How forms are answered" ("Stop when unsure" | "Always answer"; while the release lock holds, "Always answer" is shown disabled with "Always answer isn't available yet: it is still being checked.", F-43, D-223), "Trial applications" (D-216: stays 0) and "Answers you corrected" (F-12, D-215). These values SHALL be stored in the settings table and SHALL win over `config/config.yaml` from the next apply job (Q-111, Q-116). Settings → Accounts SHALL hold the connected accounts (email updates, the application mailbox, the apply browser, the local AI with its "Start the local AI model when it is needed" switch (F-42, D-214), the employer accounts list) and SHALL never send a stored password to the browser: ~~Copy password~~ dropped (ADR-0009); Export for Edge stays on the command line (`accounts export-edge`); entering the mailbox and employer passwords from the web is Q-103 (Q-100 Wave 2) (D-191, D-203, D-204).
 
 **F-41 (P1, M22) More ATSs.** Adapters for Workable, SmartRecruiters and Recruitee; a generic adapter (LLM labels the page's fields, same resolver and guards) for custom pages, SuccessFactors, Oracle and iCIMS.
+
+**F-42 (P0) The app starts the local model (D-214, D-217; `ollama_autostart_design.md`, ADR-0013).**
+- WHEN a process is about to use the model (the apply worker before it takes a role, a search run, a resume task) and the local Ollama port refuses connections THE SYSTEM SHALL start the installed Ollama server, wait for it and load the model, then carry on. While it does, Runs → "Auto-apply queue" SHALL show "Starting the local AI model…", then "Loading the model…" ("The first load can take a minute.").
+- THE SYSTEM SHALL never stop or kill an Ollama server, never restart one that answers, and never download a model.
+- IF the start fails, Ollama isn't installed, the model isn't downloaded, the port is taken, or the model doesn't load or answer THEN THE SYSTEM SHALL pause the queue with that reason, send nothing, and say what to do.
+- A model pause SHALL lift only on an owner click: "Resume", or a new Inbox "Auto-apply" click; never on a timer (D-217 (1)). Across an app restart D-200 holds.
+- The owner SHALL be able to turn the start off with "Start the local AI model when it is needed" in Settings → Accounts → Local AI (on by default; settings key `budget.ollama_autostart`). Dev copies, worktrees and tests SHALL never start it (D-217 (3)).
+
+**F-43 (P0) The release lock on "Always answer" (D-223).**
+- WHILE `apply.always_available` in `config/config.yaml` is not true (the key is read from the file only, never from the settings table or a route) THE SYSTEM SHALL answer every application with the strict filler ("Stop when unsure"), whatever `fill_policy` says; SHALL refuse a request to set `fill_policy` to `always` (422); and SHALL show "Always answer" in Settings → Apply as visible but disabled.
+- The always-answer filler (D-208, `llm_first_fill_design.md`, ADR-0011) is built and locked. It is switched on in one commit (`always_available: true` and `fill_policy: always`) only after a fresh review says READY and a clean real-model rehearsal; the first Auto-apply click after that sends for real, with no trial runs (D-216).
 
 ### 5.5 Non-functional
 
@@ -225,7 +243,7 @@ Priority: P0 = the milestone can't ship without it, P1 = important, P2 = nice to
 | NF-02 | Secrets: passwords, the IMAP app password and mail-status account passwords live only in Windows Credential Manager; never in SQLite, YAML, logs, screenshots' file names, or LLM prompts | P0 |
 | NF-03 | Local only: no cloud LLM; the web app still binds to 127.0.0.1 and answers only loopback Host headers | P0 |
 | NF-04 | Layering: `tailor/` and `apply/` are stage packages; `apply_flow.py` is the orchestrator; `mailstatus/` is a stage package, `mailstatus_flow.py` is its orchestrator, and `imapread.py` is the foundation module that speaks IMAP; `web/` may not import it; only `store.py` has SQL and only `backends.py` talks to the model; `tests/test_layering.py` enforces it | P0 |
-| NF-05 | Pace: one attempt at a time; actions at human pace (no artificial jitter for evasion); caps per D-61 | P0 |
+| NF-05 | Pace: one attempt at a time; actions at human pace (no artificial jitter for evasion); caps per D-61, with the owner's values from D-204: no daily limit, at most 10 submissions per employer per Singapore calendar day (0 = no limit) | P0 |
 | NF-06 | Idempotency: a posting is never submitted twice by the app (attempt state + Applications + twins) | P0 |
 | NF-07 | Time: tailoring finishes in ≤ 90 s per job on the owner's PC; an auto-apply attempt (no account) in ≤ 4 min | P1 |
 | NF-08 | The live app (port 8765, `data/jobscraper.db`) is never used for development; dev instances use a copied DB on port 8768 | P0 |
@@ -263,7 +281,7 @@ With the owner's opt-in per mailbox, JobScraper reads Gmail over IMAP, read-only
 | Area | Why it is key | Requirements |
 |---|---|---|
 | **KA-1 Auto-apply engine** (browser driver, adapters, attempt state machine, submit and confirmation) | Invisible failure modes (a half-filled submission, a double submission), terms-of-service and bot-control exposure, and everything else plugs into it | F-30, F-31, F-34, F-37, F-38, NF-05, NF-06 |
-| **KA-2 Answer resolution and declarations** | Wrong answers are legal attestations to an employer; an LLM is involved; mistakes are invisible without the audit | F-32, F-33, F-39, F-12 |
+| **KA-2 Answer resolution and declarations** | Wrong answers are legal attestations to an employer; an LLM is involved; mistakes are invisible without the audit | F-32, F-33, F-39, F-12, F-14, F-15, F-43 (F-13 superseded, D-215) |
 | **KA-3 Accounts, vault and mailbox** | Credentials, mailbox access, and account creation on third-party sites; reading the owner's Gmail to update applications (F-50) | F-35, F-36, F-50, NF-02 |
 | **KA-4 Resume tailor truthfulness** | A fabricated claim on a resume is costly and invisible; LLM rewriting | F-20 to F-24 |
 
@@ -278,10 +296,10 @@ Python 3.12 (system interpreter, no venv), FastAPI + Vue 3 SPA (built bundle com
 ### 7.2 What is added
 
 ```
-web (Profile: Application details · Inbox: Tailor / Auto-apply · Applications: What I told this employer · Settings: Apply, Accounts)
+web (Profile: Your details (D-215) · Inbox: Tailor (F-25, not built yet) / Auto-apply · Applications: What was sent, Answer for next time · Runs: Auto-apply queue · Settings: Apply (Answers you corrected), Accounts (Local AI))
    │ HTTP /api  (routers: applicant.py, tailor.py, apply.py)
    ▼
-CLI verbs: tailor <job_id> · apply <job_id>… [--dry-run] · applicant check     ← background job kinds "tailor", "apply"
+CLI verbs: tailor <job_id> · apply <job_id>… [--dry-run] · apply queue · applicant check     ← background job kinds "tailor", "apply"
    ▼
 orchestrators: tailor_flow.py (master → keywords → rewrite → validate → render)
                apply_flow.py  (queue → detect → tailor → plan → resolve → browser/adapter → submit → record)
@@ -318,7 +336,7 @@ foundation: store.py (+ tables tailored, apply_attempts, apply_answers, ats_acco
 | R-2 | Qwen3-14B rewrites bullets within the rules at temperature 0.25 in ≤ 90 s | Weak tailoring, or the validator rejects most rewrites | **Spike S-2**: golden cases A–C plus 3 real JDs; count validator rejections and time | Done 2026-11-02: no coverage gain over the swaps, validator gaps; see D-67 |
 | R-3 | Greenhouse forms fill reliably (react-select dropdowns, file upload, reCAPTCHA stays invisible at human pace) | The walking skeleton stalls | **Spike S-3**: dry-run fill on 2 real Greenhouse postings, no submit | Before M20 build |
 | R-4 | Gmail IMAP with an app password works for the owner's address (needs 2-Step Verification on) | No automatic verification; Workday attempts end `email_verification_timeout` | **Spike S-4** after the owner creates the app password (owner task) | Before the M21 Workday work |
-| R-5 | Fully automatic submission sends a wrong answer (about 4% of 30-field forms are fully right at 90% per-field accuracy, auto-apply brief §1.2) | A wrong attestation or a poor application under the owner's name | The resolver prefers deterministic tiers; grounding check; `unanswerable_required` fails closed; ~~M20's gate reviews 5 dry runs before `auto` is switched on~~ (superseded for the owner's own clicks: `auto` is on and the first real submissions are also the filler's first live runs; Submit only after the pre-Submit scan passes); full audit (D-203) | M20 gate |
+| R-5 | Fully automatic submission sends a wrong answer (about 4% of 30-field forms are fully right at 90% per-field accuracy, auto-apply brief §1.2) | A wrong attestation or a poor application under the owner's name | The resolver prefers deterministic tiers; grounding check; `unanswerable_required` fails closed; ~~M20's gate reviews 5 dry runs before `auto` is switched on~~ (superseded for the owner's own clicks: `auto` is on and the first real submissions are also the filler's first live runs; Submit only after the pre-Submit scan passes); full audit (D-203), shown per application in "What was sent" (F-14, D-215). The always-answer filler (D-208), which would answer every field and mark its assumptions, stays locked behind F-43 until a fresh review says READY and a real-model rehearsal is clean (D-223); until then the strict filler answers and stops on a required unknown | M20 gate; F-43 before the unlock |
 | R-6 | Workday's site terms forbid third-party apps without consent; ATS bot controls may flag or drop automated applications | Locked accounts, silently dropped applications | Owner's informed choice (D-54); human pace, caps, no evasion; the attempt fails on any challenge | Recorded at kickoff |
 | R-7 | Merging M19's UI ports makes the paused M18 audit partly stale | M18 rework | M18 resumes from the new `personal`; its audit gaps are re-checked first (report §3b) | When M18 resumes |
 | R-8 | Changing `personal` changes the app the owner uses every day | A broken daily app | Work in worktrees; dev DB copies on port 8768; smoke check on `personal` after each merge; the owner relaunches the app to pick up changes | Always |
@@ -338,7 +356,7 @@ foundation: store.py (+ tables tailored, apply_attempts, apply_answers, ats_acco
 | D-58 | Tailored resume use | Automatic: no review gate before use; the validator is the guard; the diff is always viewable | Coordinator, from D-51 | DECIDED |
 | D-59 | Tailor retention | Drafts 7 days; a sent file until its application closes + 30 days; rows kept | Coordinator, 2026-11-01 | DECIDED |
 | D-60 | Tailor output | A clean ATS template; DOCX always, PDF through Word (installed); keep the original page count; temperature 0.25; target-title headline on; alias list editable | Coordinator, 2026-11-01 | DECIDED |
-| D-61 | Caps | 10 submissions a day, 2 per employer a day, one in flight; editable in Settings | Coordinator, 2026-11-01 | DECIDED |
+| D-61 | Caps | 10 submissions a day, 2 per employer a day, one in flight; editable in Settings | Coordinator, 2026-11-01 | DECIDED; values replaced on the owner's install by D-204 (no daily limit, 10 per employer) |
 | D-62 | Team and process | Standard team (coordinator, researcher, architect, planner, software-engineer, tester, reviewer), no security reviewer; product-first testing; the Coordinator merges into `personal` and may push | owner, 2026-11-01 | DECIDED |
 | D-63 | Cloud UI ports vs paused M18 | Port the UI items to `personal` now (M19); M18 rebases onto the result when resumed. Skip C-11 (M18 already has a better version) | Coordinator, 2026-11-01 | DECIDED |
 | D-65 | Design-time PRD fixes (architect, Q-04) | Answer memory is resolver tier 3; "I have this" skills go to `data/applicant.yaml` `attested_skills`; golden case B: Excel is an exact match; reason codes `cancelled`, `mail_not_set_up`; `vault.py` in the foundation; `apply_flow` may import `tailor_flow`; `app_events.by` column | Coordinator, 2026-11-02 | DECIDED |
