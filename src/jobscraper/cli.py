@@ -1104,7 +1104,7 @@ def _applicant_refresh(cfg, save: bool, args=None) -> int:
     template = applicant.load_template()
     plan = applicant.refresh_plan(profile, props, template)
     print(BAR)
-    print(f"Update your details from{props.get('source_name') or 'your resume'}")
+    print(f"Update your details from {props.get('source_name') or 'your resume'}")
     print(BAR)
     rows = [c for c in plan["changes"] if c["list"] != "skills"]
     for c in rows:
