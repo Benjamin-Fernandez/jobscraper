@@ -168,8 +168,9 @@ function lowerFirst(text) {
 //   "Stopped: {n} questions had no answer" (a strict stop; its answers are in the panel),
 //   "Ready to try again" (`ready`: the server says every detail it waited on is filled),
 //   "Stopped: this form asks for your {fact}, ..." (`noField`: Your details cannot hold it).
-// The count of unanswered questions is not in the attempt (the server sends none): the
-// row hands it in as `last_attempt.not_answered` once the panel has loaded the fields.
+// The count of unanswered questions is `last_attempt.not_answered` (Q-128: the list carries it,
+// `store.not_answered_counts`, the same rows the panel's "Not answered n" counts); the row
+// replaces it with the panel's own count once the panel has loaded the fields.
 export function rowState(row) {
   const a = row?.last_attempt ?? null
   let kind = a?.kind ?? null
@@ -263,7 +264,7 @@ export function canRetry(row) {
 // What a refused enqueue (422) says, in the owner's words: the refusals' own sentences,
 // or the profile. Same wording as the Inbox.
 export function refusalMessage(body) {
-  if (body?.detail === 'profile_incomplete') return 'Finish your application details first.'
+  if (body?.detail === 'profile_incomplete') return 'Finish your details first.'
   const refused = Array.isArray(body?.refused) ? body.refused : []
   const texts = refused.map(r => [r.text, r.hint].filter(Boolean).join(' '))
   return texts.length ? texts.join(' ') : 'Could not add this role to the auto-apply queue.'

@@ -328,8 +328,13 @@ def test_lock_the_cli_apply_path_builds_the_same_locked_settings():
     for apply_block in ({"fill_policy": "always"}, {"fill_policy": "always", "fill": "llm"},
                         {"always_available": False, "fill_policy": "always", "always_trial_runs": 2}):
         out = _doctor(apply_block={"always_available": False, **apply_block}, be=backend(Net()))
-        assert "always answer is not released on this install" in out, out
-        assert "fill policy    Always answer" not in out and "trial" not in out.lower(), out
+        # Q-128: the doctor uses the screens' words; the LOCK is proved by the exact line (strict
+        # label, then "Always answer is not released"), by the absence of the always line
+        # ("Always answer:" is what a released install prints) and of any trial line.
+        assert ("fill policy    Stop when unsure - Always answer is not released on this install"
+                in out), out
+        assert "fill policy    Always answer" not in out and "Always answer:" not in out, out
+        assert "trial" not in out.lower() and "WARNING" not in out, out
     # and the doctor with the lock open still shows always (the control)
     on = _doctor(apply_block={"fill_policy": "always"}, be=backend(Net()))
     assert "fill policy    Always answer" in on and "not released" not in on, on

@@ -290,21 +290,24 @@ def _doctor(*, apply_block, be, profile=None, spent=0):
 
 def test_doctor_says_which_fill_policy_applies_and_why_always_is_off():
     strict = _doctor(apply_block={}, be=backend(Net()))
-    assert "fill policy    Ask me first (strict)" in strict and "WARNING" not in strict, strict
+    # Q-128: the doctor says the screens' label ("Stop when unsure"), not "Ask me first (strict)"
+    assert "fill policy    Stop when unsure" in strict and "WARNING" not in strict, strict
     on = _doctor(apply_block={"fill_policy": "always"}, be=backend(Net()))
     assert "fill policy    Always answer" in on and "not reachable" not in on, on
     for be in (backend(Net(), url="http://ollama:11434"), backend(Net(), model="qwen3:cloud")):
         off = _doctor(apply_block={"fill_policy": "always"}, be=be)
-        assert "Ask me first (strict) - always answer is off for now" in off, off
+        assert "Stop when unsure - Always answer is off for now" in off, off
         assert "WARNING: fill_policy always is ignored: the AI model isn't on this computer" in off, off
-        assert "Always answer" not in off
+        # Q-128: the off line itself now names "Always answer" (as what is off); the policy line of a
+        # running always ("fill policy    Always answer: ...") must not be there
+        assert "fill policy    Always answer" not in off and "Always answer:" not in off
     for bad in ("sometimes", 7):
         logging.disable(logging.CRITICAL)
         try:
             out = _doctor(apply_block={"fill_policy": bad}, be=backend(Net()))
         finally:
             logging.disable(logging.NOTSET)
-        assert "fill policy    Ask me first (strict)" in out, out
+        assert "fill policy    Stop when unsure" in out, out
 
 
 def test_doctor_shows_the_trial_and_warns_about_a_model_that_is_down():

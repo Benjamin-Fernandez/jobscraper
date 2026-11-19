@@ -250,11 +250,11 @@ export function applySteps({ connections = null, applicant = null } = {}) {
   const missing = Array.isArray(applicant?.missing) ? applicant.missing : null
   steps.push(missing === null
     ? {
-      id: 'details', label: 'Fill in your application details', href: DETAILS_HREF, cta: 'Fill in details',
+      id: 'details', label: 'Fill in your details', href: DETAILS_HREF, cta: 'Fill in details',
       required: true, status: 'unknown', done: false, hint: "Couldn't check",
     }
     : {
-      id: 'details', label: 'Fill in your application details', href: DETAILS_HREF, cta: 'Fill in details',
+      id: 'details', label: 'Fill in your details', href: DETAILS_HREF, cta: 'Fill in details',
       required: true, status: missing.length ? 'todo' : 'done', done: missing.length === 0,
       hint: missing.length ? `${missing.length} missing` : 'Ready',
     })

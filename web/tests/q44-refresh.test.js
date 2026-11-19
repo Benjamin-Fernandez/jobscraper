@@ -173,10 +173,10 @@ describe('the job log sits under Details (Q-73)', () => {
 
 // ------------------------------------------------------------------ R10: the panel
 
-describe('Update your application details (R10)', () => {
+describe('Update your details (R10)', () => {
   it('lists each change with its label, entry and before -> after; kept rows have no checkbox', async () => {
     const w = await mountProfile({ refresh: PLAN() })
-    expect(panel(w).find('h3').text()).toBe('Update your application details')
+    expect(panel(w).find('h3').text()).toBe('Update your details')
     expect(panel(w).find('.rr-intro').text()).toContain('Entries you edited yourself are never changed')
     const row = id => panel(w).find(`.rr-check[data-id="${id}"]`).element.closest('.rr-row')
     const part = (r, cls) => r.querySelector(cls)?.textContent.trim()
@@ -279,7 +279,7 @@ describe('Update your application details (R10)', () => {
       'experience:update:beta|analyst',
       'skills:add',
     ].sort())
-    expect(w.find('.rr-saved').text()).toContain('Saved 4 changes. Check them in Application details.')
+    expect(w.find('.rr-saved').text()).toContain('Saved 4 changes. Check them in Your details.')
     expect(w.find('.rr-saved').attributes('role')).toBe('status')
     expect(w.find('.rr-list').exists()).toBe(false)
   })
@@ -342,7 +342,7 @@ describe('Update your application details (R10)', () => {
 
   it('says so when nothing differs', async () => {
     const w = await mountProfile({ refresh: { ...PLAN(), changes: [], skills: { add: [], not_on_resume: [] } } })
-    expect(w.find('.rr-empty').text()).toBe('Your application details match your resume.')
+    expect(w.find('.rr-empty').text()).toBe('Your details match your resume.')
     expect(w.find('.rr-save').exists()).toBe(false)
   })
 
@@ -370,7 +370,7 @@ describe('Update your application details (R10)', () => {
     // Q-126 (design §4.5, stale by design): JobScraper starts the model itself, so the line
     // points at Settings, not at "Start Ollama" / "Re-read resume".
     const text = w.find('.rr-unavailable').text()
-    expect(text).toContain("Couldn't compare with your application details")
+    expect(text).toContain("Couldn't compare with your details")
     expect(text).toContain("the local AI model couldn't start")
     expect(text).toContain('Settings → Accounts → Local AI')
     expect(text).not.toContain('Start Ollama')
