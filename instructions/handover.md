@@ -16,9 +16,10 @@
 - Q-127 Release 2 (topics counter, a proposed details field after more than 15 employers, schema v10): not started; design B.8.
 
 ## Watch out
+- Agent cap: 10 at once (owner D-227, 2026-11-19). `python -m jobscraper doctor` OPENS the store (it migrated the live DB on 2026-11-15): run it with `JOBSCRAPER_DB=<copy>`.
 - **Mode is `auto`:** never run `jobscraper apply`, `apply queue` or `POST /api/apply` with a real job id. Dev instances: DB copy with `apply.mode=dry_run` in the copy, `JOBSCRAPER_APPLY_QUEUE=0`, `JOBSCRAPER_MAIL_SYNC=0`, `JOBSCRAPER_CONFIG=<copy of config.yaml>` whose `paths.applicant` is a COPY of the details file; `JOBSCRAPER_OLLAMA_AUTOSTART=0` on CLI commands from the main checkout.
 - A new rule in a protected area (work rights, status, declarations, consents) is not done until a reviewer who has not seen it has read it: every round of new filler code today needed one; my own S2 ruling was too broad and a fresh reviewer caught it.
 - Test with what the real model says, not an idealised fake (the place-call gap was invisible to every fake).
 - The full suite takes ~35 min under load and skips Edge tests silently (run `-k apply_flow` and `-k apply_e2e` alone); background runs can die silently: `python -u … > log`, on a frozen worktree (`.claude/worktrees/gate-Q-121`, detached).
 - Before every push: deny-list scan of the tip diff, every outgoing commit and the commit messages (list: memory `denylist-location`; add the live attempt's employer and the application mailbox as extra terms, never printed); no `data/` path. Made-up names only in briefs and tests.
-- IDs: next **Q-128**, **D-227**. Backlog: doctor still says "Ask me first (strict)" (the screens say "Stop when unsure"); `not_answered` count on the attempt view; "Answers you corrected" scope wording (server text); resolver country table (Spain, Korea, cities, all-caps); Q-124, Q-122, Q-117, Q-123 rest; PRD rows for D-214..D-224.
+- IDs: next **Q-130**, **D-229** (Q-128 live-app polish, Q-129 docs: started 2026-11-19). Backlog: doctor still says "Ask me first (strict)" (the screens say "Stop when unsure"); `not_answered` count on the attempt view; "Answers you corrected" scope wording (server text); resolver country table (Spain, Korea, cities, all-caps); Q-124, Q-122, Q-117, Q-123 rest; PRD rows for D-214..D-224.
