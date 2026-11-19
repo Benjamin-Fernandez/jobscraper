@@ -368,12 +368,12 @@ def _profile_shape_lines(path) -> list[str]:
     except OSError:
         exists = False
     if not exists:
-        return [head + "no profile file yet (fill it in under Profile -> Application details)"]
+        return [head + "no profile file yet (fill it in under Profile -> Your details)"]
     try:
         profile = applicant.load(p)
     except Exception as exc:                             # noqa: BLE001 - one line, no traceback
         return [head + f"the profile file could not be read ({type(exc).__name__}); "
-                "open Profile -> Application details to fix it"]
+                "open Profile -> Your details to fix it"]
     if not isinstance(profile, dict):
         return [head + "the profile file holds no details"]
     try:
@@ -1104,7 +1104,7 @@ def _applicant_refresh(cfg, save: bool, args=None) -> int:
     template = applicant.load_template()
     plan = applicant.refresh_plan(profile, props, template)
     print(BAR)
-    print(f"Update your application details from {props.get('source_name') or 'your resume'}")
+    print(f"Update your details from{props.get('source_name') or 'your resume'}")
     print(BAR)
     rows = [c for c in plan["changes"] if c["list"] != "skills"]
     for c in rows:
@@ -1127,7 +1127,7 @@ def _applicant_refresh(cfg, save: bool, args=None) -> int:
         print("    Not on your resume, so not added: " + ", ".join(plan["skills"]["not_on_resume"]))
     accept = [c["id"] for c in plan["changes"] if c["default"]]
     if not accept:
-        print("Your application details match your resume.")
+        print("Your details match your resume.")
         print(BAR)
         return 0
     if not save:
@@ -1142,7 +1142,7 @@ def _applicant_refresh(cfg, save: bool, args=None) -> int:
         print(f"applicant: nothing saved: {exc}", file=sys.stderr)
         return 1
     print(f"Saved {len(accept)} change{'' if len(accept) == 1 else 's'}. "
-          "Check them in Profile -> Application details.")
+          "Check them in Profile -> Your details.")
     print(BAR)
     return 0
 
@@ -1747,7 +1747,7 @@ def build_parser() -> argparse.ArgumentParser:
     prof.add_argument("--bump", action="store_true",
                       help="bump profile_version: every cached decision goes stale")
     prof.add_argument("--plan-applicant", action="store_true",
-                      help="then compare the resume with your application details "
+                      help="then compare the resume with your details "
                            "(the Profile tab offers the changes)")
     prof.set_defaults(fn=cmd_profile)
 
@@ -1787,8 +1787,8 @@ def build_parser() -> argparse.ArgumentParser:
     apc = ap_sub.add_parser("check", help="validate the profile and list what "
                                           "auto-apply still needs")
     apc.add_argument("--file", help="profile to check (default paths.applicant)")
-    apr = ap_sub.add_parser("refresh-resume", help="compare your resume with the "
-                                                   "application details and show what would change")
+    apr = ap_sub.add_parser("refresh-resume", help="compare your resume with "
+                                                   "your details and show what would change")
     apr.add_argument("--yes", action="store_true",
                      help="save the changes that are ticked by default")
     ap.set_defaults(fn=cmd_applicant)
