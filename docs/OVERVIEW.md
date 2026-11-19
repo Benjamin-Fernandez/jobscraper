@@ -23,7 +23,8 @@ When you choose **Auto-apply** on a role, JobScraper applies for you: it fills
 in the employer's application form in Microsoft Edge and submits it.
 
 It runs on your own computer. The AI model runs locally too: no account, no
-subscription, no API key.
+subscription, no API key. JobScraper starts the model by itself when a task
+needs it.
 
 ---
 
@@ -104,7 +105,8 @@ ever applied to unless you click Auto-apply on that role.**
    finished form. It stops that application, and sends nothing, when a required
    question has no answer it can back up, when a site shows a CAPTCHA or a bot
    check (it never solves one), or when it doesn't recognise a page. It never
-   applies to the same posting twice.
+   applies to the same posting twice. Every answer it filled in is kept with
+   the application, so you can see later exactly what was sent.
 5. **The role is marked Applied only when the employer's site confirms it.**
    Until then Applications shows it as **Queued · 1st**, **Applying…**, and so
    on.
@@ -123,10 +125,23 @@ Applications**). While it works, a pill at the top of the app says
 - To have forms filled but **never** submitted, set Settings → Apply → **Mode**
   to **Dry run**. Roles already waiting are then filled only, too.
 - The queue also pauses by itself when something needs you: the local AI model
-  isn't answering, Edge couldn't open, two sites in a row showed a bot check,
-  the same problem happened three times in a row, or today's limit is reached.
+  couldn't be started, Edge couldn't open, two sites in a row showed a bot
+  check, the same problem happened three times in a row, or a limit is reached.
   A note in the queue panel says why and what to do; press **Resume** when it
   is fixed.
+
+**The local AI model starts by itself.** You don't need to open Ollama first.
+When an application, a search run or a resume task needs the model and it
+isn't running, JobScraper starts Ollama, waits for it and loads the model.
+When it does this for an application, Runs → Auto-apply queue shows
+**Starting the local AI model…** and then **Loading the model…** ("The first
+load can take a minute."), and the queue carries on by itself once the model is
+ready. JobScraper never stops Ollama and never downloads a model. If it can't
+start the model for an application (Ollama isn't installed, the model isn't
+downloaded, another program holds its port, or the model doesn't load or
+answer), the queue pauses, nothing is sent, and the note says what to do. Such a pause is lifted only by your click: **Resume**, or a
+new **Auto-apply** click in the Inbox. It is never lifted on a timer. To turn
+the automatic start off, use the switch in Settings → Accounts → Local AI.
 
 **After a restart.** If roles were still waiting when you closed JobScraper,
 they are kept, but the queue does **not** start by itself. Runs shows "Roles
@@ -144,15 +159,36 @@ start a run while an application is in progress, the button reads **Run after
 this application**: the run starts when that application finishes, and the
 queue carries on after the run.
 
-**"Needs your input".** When an application stops because a form asked
-something JobScraper had no answer for, nothing was sent. The row in
-Applications says **Needs your answers** with **Answer in Profile** (its attempt
-list says **Needs your input**). The question waits in Profile → Application
-details → **Questions from applications**. Answer it once and it is used on
-every application that asks. Then press **Retry** there (in Automatic submit
-mode it first asks "Send … now?") or **Try again** on the row: the role goes
-back into the queue. The queue doesn't wait for you; it goes on with the next
-role.
+**When an application stops.** Nothing was sent. Everything about it stays on
+that role's row in Applications; the Profile page never lists questions from
+one employer's form. The row says what it needs:
+- **Stopped: 3 questions had no answer** (with the real number), and **See what
+  was filled**: the form's questions, each with the answer JobScraper filled in
+  and where that answer came from, and the empty ones marked **Not answered**.
+- **Needs one detail: …** (for example a date of birth) with **Add it**, which
+  opens that field in Profile → Your details. This one comes from the locked
+  Always answer filler (see below); with Stop when unsure, a stop reads
+  "Stopped: … questions had no answer" instead.
+- **Ready to try again**, with **Try again**, once everything it waited for is
+  answered or filled in.
+
+**Answer for next time.** On a question in **See what was filled** (or **See
+what was sent**, where it reads **Use a different answer next time**), you can
+give the answer to use from then on, then press **Save for next time**. The box
+**Only for applications to Example Co** (it names that employer) is ticked by
+default; untick it to use the answer on every application that asks the same
+question. Saved answers are listed in Settings → Apply → **Answers you
+corrected**, where **Forget** removes one. Some answers can't be saved this
+way, because they follow your details: anything taken from your details, your
+declarations, your consents and your work rights. Those rows say "This answer
+follows your details. Change it in Your details." with a link.
+
+**Trying again.** **Try again** on the row puts the role back in the queue.
+With Mode set to Automatic submit, that sends a real application, with no
+second question. When you fill in a detail that applications were waiting for
+and press **Save section**, the section says "Saved. 2 applications were
+waiting for this." (with the real number) and offers **Apply again to 2
+applications**; saving alone never starts an application. The queue doesn't wait for you; it goes on with the next role.
 
 **What the AI may read.** The local model reads your whole applicant profile and
 your resume to fill a form, because it runs on your computer. Passwords and
@@ -162,19 +198,22 @@ the company matches one of your past employers, by that employer's name or by
 any of its other names. Two names match when they are the same, or differ only
 by generic words such as legal forms ("Inc", "Pte Ltd"), places ("Singapore"),
 "Group", "Holdings" or "Bank". Any other extra word means a different company.
-You add an employer's other names in Profile → Application details →
-Experience, in the **Also known as** field on each entry: the group or parent
+You add an employer's other names in Profile → Your details → Experience, in
+the **Also known as** field on each entry: the group or parent
 company, a trading name or an abbreviation. Say you worked at "Northwind
 Platforms Inc" and gave it the other name "Northwind". A posting from
 "Northwind" or "Northwind Pte Ltd" gets Yes. One from "Northwind Logistics" gets
 No. Without that other name, "Northwind" alone would not match either, because
 "Platforms" is not a generic word.
 
-**In progress, off by default.** A new way of filling is being built and
-tested: the AI model fills every field, and any answer it had to assume would
-be shown to you afterwards to keep or change. It is not switched on. Today's
-filler still stops an application when a required question has no answer it can
-back up.
+**Built, locked, not switched on.** A second way of filling forms, **Always
+answer**, is in the app but locked: the AI model would fill every field, and
+mark each answer it had to assume so you can see it under **See what was
+sent**. It stays locked until it has passed a fresh review and a run with the
+real model. Until then Settings → Apply → **How forms are answered** shows it
+greyed out with "Always answer isn't available yet: it is still being
+checked.", and every application is answered by **Stop when unsure**: it stops
+when your details don't cover a required question, as described above.
 
 ---
 
@@ -185,9 +224,11 @@ back up.
   (not rejected or withdrawn), **Interviews**, and **Response rate** (an
   interview, offer or rejection after you applied counts as a reply). The first
   three open the matching list.
-- **To do**: what needs you now, such as questions waiting for your answer,
-  new roles to triage, and applications to follow up (applied 14 or more days
-  ago with no reply). Each has a button that takes you there.
+- **To do**: what needs you now, such as applications waiting for a detail
+  (**Add details**), applications that stopped on a question JobScraper can't
+  answer (**See applications**), new roles to triage, and applications to
+  follow up (applied 14 or more days ago with no reply). Each has a button that
+  takes you there.
 - **Pipeline**: a bar of Applied, Interviewing, Offer and Rejected. Click a part
   to open that stage in Applications.
 - **Last run** (how it went, what it found) and **Past 7 days** (new roles
@@ -217,9 +258,15 @@ back up.
   Offer, Rejected). With a mouse you can also drag a role onto a tab. Every
   change is kept in the role's History and can be undone.
 - Auto-apply states show on the line: **Queued · 1st**, **Applying…** (with the
-  step), **Applied automatically**, **Needs your answers**, **Stopped: …** (with
-  **Open the posting**), and **Try again** where it can go again. A role being
-  applied to stays at the top and can't be moved until it finishes.
+  step), **Applied automatically**, **Stopped: 3 questions had no answer**,
+  **Needs one detail: …** (with **Add it**), **Ready to try again**,
+  **Stopped: …** (with **Open the posting**), and **Try again** where it can go
+  again. A role being applied to stays at the top and can't be moved until it
+  finishes.
+- **See what was sent** (or **See what was filled** when nothing was sent)
+  opens the answers under the line: each question, the answer, where it came
+  from, and **Assumed** or **Not answered** where that applies, with **Answer
+  for next time** (see "How applying works now").
 - The **⋯** menu: Add note, Show details (the job and its **Auto-apply
   attempts**), Open the posting, Remove from Applications.
 - **From your email**: suggestions from your mailbox, if you connected one.
@@ -227,7 +274,9 @@ back up.
 ### Runs: searching, and the auto-apply queue
 - **Auto-apply queue**: now applying, up next, recently finished, with
   **Pause queue**, **Resume**, **Clear queue**, **Remove** and **Stop this
-  application** (see "How applying works now").
+  application** (see "How applying works now"). While JobScraper starts the
+  model, **Now applying** shows **Starting the local AI model…** (then
+  **Loading the model…**) with the time so far: nothing for you to do.
 - **Start a run**: pick how many companies (30, 50, 100, 200, All or Custom);
   the button carries the number ("Check 100 companies"). The **Dry run** switch
   fetches and reports but saves nothing.
@@ -248,14 +297,22 @@ back up.
   has the downloads and the full report.
 
 ### Profile: you, as the app sees you
-- Two views: **Resume and titles**, and **Application details**.
+- Two views: **Resume and titles**, and **Your details**.
 - **From your resume**: what the app read (experience, graduation, a summary),
   with **Replace resume** (PDF or Word) and **Re-read resume**.
 - **Skills** as chips, and **Job titles to search for**, which you can add to or
   remove; **Recommend titles** suggests new ones, never one it suggested before.
-- **Application details**: the answers application forms ask for (contact
-  details, work rights, declarations and so on), and **Questions from
-  applications**: questions employers asked that JobScraper couldn't answer.
+- **Your details**: what auto-apply puts on application forms, and nothing
+  else. At the top, one status line: **Ready for auto-apply**, or how many
+  details are still needed (for example "2 details needed"), with **Fill in**.
+  Below it, ten sections: Identity, Contact, Work rights, Availability and pay,
+  Education, Experience, Skills, languages and links, Equal-opportunity
+  questions, Consents and declarations, and Files. Each shows a one-line
+  summary and **Complete**, **Needed** or how many are left to fill. Click one
+  to open it in place, change what you need and press **Save section**.
+- The page never lists questions that one employer's form asked: those stay with
+  that application in Applications. When a detail is needed, the view's label
+  carries the count ("Your details 2"), and so does the Profile tab's badge.
 
 ### Settings: one page, four parts
 A list on the left picks the part. Each row shows its current value; change it
@@ -264,11 +321,20 @@ asks you once ("Switch to automatic submit" or "Keep dry run").
 - **Accounts**: your connected accounts: **Email updates** (Gmail), the
   **Application mailbox** (for the codes some sites email during an
   application), the **Apply browser**, the **Local AI**, and **Employer
-  accounts**.
+  accounts**. The Local AI card has the switch **Start the local AI model when
+  it is needed** (on by default): JobScraper then starts Ollama and loads the
+  model itself, and never downloads a model. While Ollama is off and the switch
+  is on, the card simply says "Ollama isn't running. JobScraper starts it when a
+  task needs it."
 - **Apply**: **Mode** (Automatic submit or Dry run), **Show the browser
-  window**, **Human-check wait** (how long to leave a CAPTCHA'd page open for
-  you; it never solves one), **Applications a day**, **Per employer**, **Write
-  cover letters** (off by default: you're asked instead), plus links to your
+  window**, **How forms are answered** (**Stop when unsure** is in use;
+  **Always answer** is shown greyed out, not available yet), **Trial
+  applications** (it only matters for Always answer), **Human-check wait** (how
+  long to leave a CAPTCHA'd page open for you; it never solves one),
+  **Applications a day**, **Per employer**, **Write cover letters** (off by
+  default: an application whose form requires one stops, and its row says
+  why), **Answers you corrected** (the answers you
+  saved from an application, each with **Forget**), plus links to your
   application details and resume.
 - **Search**: the cycle, companies per run, and links to job titles and companies.
 - **Preferences**: colour theme, compact company list, keyboard shortcuts.
@@ -305,7 +371,9 @@ came from, then **Open in Gmail** or **Undo**.
   data is never in it. The only things that leave are what an application sends
   to that employer, after you clicked Auto-apply on it.
 - **The AI runs locally.** The model runs on your own computer through Ollama:
-  no cloud AI service, no key, no cost per use.
+  no cloud AI service, no key, no cost per use. JobScraper starts Ollama when a
+  task needs it and leaves it running afterwards (Ollama frees the graphics
+  card's memory by itself after a few idle minutes).
 - **Searching reads public pages only, politely.** It reads employers' public job
   listings, waits between requests, respects sites that ask not to be crawled,
   and never logs in while searching. It does not scrape LinkedIn.
@@ -332,10 +400,13 @@ came from, then **Open in Gmail** or **Undo**.
 | Pause applying | Runs → Auto-apply queue → **Pause queue** (or **Stop this application**). |
 | Fill forms without sending | Settings → Apply → Mode → **Dry run**. |
 | Change the limits | Settings → Apply → Limits. |
-| Answer a form's question | Profile → Application details → Questions from applications. |
+| Fill in a missing detail | Profile → Your details → open the section → **Save section**. |
+| Fix an answer for next time | Applications → the role → **See what was sent** (or **See what was filled**) → **Answer for next time**. Saved ones: Settings → Apply → Answers you corrected. |
+| Send a stopped application again | Applications → the role → **Try again** (in Automatic submit mode this sends it for real). |
 | Add companies | Companies tab → Edit list or Upload list, or edit `config/watchlist.yaml`. |
 | Update your resume | Profile tab → Replace resume. |
-| See exactly what was sent | `python -m jobscraper apply show <job id>` prints one attempt's answers. |
+| See exactly what was sent | Applications → the role → **See what was sent**. On the command line, `python -m jobscraper apply show <job id>` prints one attempt's answers. |
+| Stop the app starting the AI model | Settings → Accounts → Local AI → turn off **Start the local AI model when it is needed**. |
 | Use the command line | `python -m jobscraper <command>` with `PYTHONPATH=src`; see the README's command table. |
 
 Setting it up on a new computer is in the [README](../README.md).
@@ -399,5 +470,29 @@ flowchart TB
 | [docs/DESIGN.md](DESIGN.md) | The architecture diagrams and the decisions behind them. |
 | [docs/prd.md](prd.md) | The specification for M19–M22: the cloud port, the resume tailor and auto-apply. |
 | `docs/architecture/apply_queue_design.md` | How the auto-apply queue works. |
+| `docs/architecture/q127_profile_questions_design.md` | Why the Profile page holds only your details, and how answers are seen and corrected per application. |
+| `docs/architecture/ollama_autostart_design.md` | How the app starts the local AI model. |
 | `.claude/prds/jobscraper-v2.prd.md` | The specification and build record of the earlier milestones (M0–M17). |
 | `jobscraper-cloud` repository | The plan for a hosted, multi-user version of JobScraper. |
+
+---
+
+## Recent changes
+
+**15 November 2026**
+- The app starts the local AI model (Ollama) by itself when a task needs it. You
+  no longer open Ollama first; a switch in Settings → Accounts → Local AI turns
+  this off.
+- A paused queue waiting for the model goes on only when you click **Resume** or
+  **Auto-apply** again, never on a timer.
+- Profile → **Your details** is now a short page: a status line and ten sections
+  you open one at a time. Questions from one employer's form are no longer
+  listed there.
+- In Applications, **See what was sent** (or **See what was filled**) shows every
+  answer and where it came from; **Answer for next time** saves a better one,
+  for that employer only unless you untick the box.
+- Settings → Apply lists your saved answers under **Answers you corrected**.
+- **Always answer** (the AI fills every field) is built but locked; forms are
+  still answered by **Stop when unsure**.
+- Planned, not built yet: a question that more than 15 different employers ask
+  will be suggested once as a new field in Your details.

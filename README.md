@@ -21,9 +21,18 @@ build ledger: [`.claude/prds/jobscraper-v2.prd.md`](.claude/prds/jobscraper-v2.p
 
 ## Quick start (Windows, no Docker)
 
-Needs Python 3.12 and, for the model steps, [Ollama](https://ollama.com) with
-`ollama pull qwen3:14b` (9.3 GB; `qwen3:8b` on a smaller GPU). No API key.
-(v1 is kept at the `v1-final` tag.)
+Needs Python 3.12 and, for the model steps, [Ollama](https://ollama.com)
+installed, with the model downloaded once: `ollama pull qwen3:14b` (9.3 GB;
+`qwen3:8b` on a smaller GPU). No API key. (v1 is kept at the `v1-final` tag.)
+
+You don't need to start Ollama yourself: when a search run, an application or a
+resume task needs the model and Ollama isn't running, JobScraper starts it,
+waits for it and loads the model. It never stops Ollama and never downloads a
+model. To turn this off, use the switch **Start the local AI model when it is
+needed** in Settings → Accounts → Local AI (or set `budget.ollama_autostart:
+false` in `config/config.yaml`); you then start Ollama yourself. If Ollama is
+installed somewhere unusual, set `budget.ollama_path` in `config/config.yaml`
+to its `ollama.exe`.
 
 ```powershell
 git clone https://github.com/Benjamin-Fernandez/jobscraper.git
@@ -57,6 +66,17 @@ Node is **not** needed to run it: the built web app is committed under
    python -m jobscraper run            # the most-overdue companies
    ```
    or `.\run.ps1`, which runs a batch and then opens the web app.
+4. Apply from the web app:
+   - Fill in **Profile → Your details** once (ten sections; **Save section**
+     on each). Only your own details go there, never one employer's questions.
+   - In the Inbox, **Auto-apply** adds a role to the queue. With Settings →
+     Apply → Mode on **Automatic submit**, that sends a real application.
+   - In Applications, **See what was sent** (or **See what was filled**) shows
+     every answer; **Answer for next time** saves a better one, and **Try
+     again** sends a stopped application again.
+   - Forms are answered by **Stop when unsure**: an application stops when your
+     details don't cover a required question. **Always answer** is built but
+     locked, and shows as not available yet.
 
 ## Docker
 
@@ -78,7 +98,8 @@ docker compose run --rm app doctor                    # judge: ollama (qwen3:14b
 Without `--profile llm` the app still runs; the model step is skipped and
 survivors wait until a model is reachable. Details and the security notes are in `docker-compose.yml`.
 
-Outside Docker the app talks to Ollama on `127.0.0.1:11434` (`budget.ollama_url`).
+Outside Docker the app talks to Ollama on `127.0.0.1:11434` (`budget.ollama_url`)
+and starts it there when nothing answers (see Quick start).
 
 ---
 
@@ -115,7 +136,7 @@ watchlist.yaml -> who is due? -> scrape -> free prefilter -> ~800-char extract
 |---|---|
 | `run [--dry-run] [--batch-size N]` | One batch. `--dry-run` fetches and reports but writes nothing and consumes nothing. |
 | `status` | Due now, due this week, never checked, quarantined, run rate vs the rate a sweep needs. |
-| `web` | The web app: **Overview**, **Inbox** (triage new roles; **Auto-apply** adds a role to the auto-apply queue, which fills and submits its application in the background), **Applications** (by stage), **Runs** (search runs and the auto-apply queue), Companies, Profile, Settings, Developer (the background job's log). How applying works: [docs/OVERVIEW.md](docs/OVERVIEW.md#how-applying-works-now). |
+| `web` | The web app: **Overview**, **Inbox** (triage new roles; **Auto-apply** adds a role to the auto-apply queue, which fills and submits its application in the background), **Applications** (by stage; **See what was sent** per application, **Answer for next time**, **Try again**), **Runs** (search runs and the auto-apply queue), Companies, **Profile** (**Resume and titles**, and **Your details**: the ten sections auto-apply fills forms from), **Settings** (Accounts, including the Local AI switch; Apply, including **How forms are answered** and **Answers you corrected**; Search; Preferences), Developer (the background job's log). How applying works: [docs/OVERVIEW.md](docs/OVERVIEW.md#how-applying-works-now). |
 | `doctor` | Checks the whole setup, including whether Qwen (Ollama) is reachable. |
 | `watchlist list` / `add "Name" URL` / `disable KEY` | Manage companies; edits keep your comments. |
 | `profile [--show \| --refresh \| --bump]` | Build or inspect the resume-derived profile. |
@@ -177,9 +198,14 @@ Editing the rules re-checks every stored posting on the next run, for free.
 
 `config/config.yaml` — batch size, the cycle (7 days by default; the web app's
 Settings tab changes it), the model (`budget.backend: ollama | off`, Qwen3 via
-Ollama), how long job descriptions are kept (`retention.description_days`), web
-host/port. Environment overrides:
-`JOBSCRAPER_CONFIG`, `JOBSCRAPER_DB`, `JOBSCRAPER_HOST`, `JOBSCRAPER_PORT`.
+Ollama; `budget.ollama_autostart`, on by default, lets the app start Ollama;
+`budget.ollama_path` points at `ollama.exe` if it is not in a usual place), how
+long job descriptions are kept (`retention.description_days`), web host/port,
+and the `apply:` block (Settings → Apply overrides the values it shows;
+`apply.always_available: false` keeps **Always answer** locked and is changed
+only in its own release, not by hand). Environment overrides:
+`JOBSCRAPER_CONFIG`, `JOBSCRAPER_DB`, `JOBSCRAPER_HOST`, `JOBSCRAPER_PORT`,
+`JOBSCRAPER_OLLAMA_AUTOSTART=0` (never start Ollama from this command).
 Keep the host at `127.0.0.1`: the app has no login.
 
 ## Development
