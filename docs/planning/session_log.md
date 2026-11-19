@@ -160,3 +160,8 @@ One entry per session. Older handover notes end up here, so `handover.md` stays 
 
 ## 2026-11-15 (late) · session jobscraper-7d / -fc: stop point
 - Stopped at the owner's request. Live: Q-126 and Q-127 Release 1 under the release lock. Behind the lock the filler's fixes for the closure review are built (D-223 G, D-224, D-225, D-226) and mostly pinned; the last tester round (`tst/Q-121-G2`) was halted mid-way. Not done: a fresh review of that range, the real-model rehearsal with the lock opened in the tool's memory, the unlock.
+
+## 2026-11-19 · session jobscraper-7d / -fc
+- Live app first: Q-128 (polish: the chip counts unanswered questions, doctor and every text say what the screens say) and Q-129 (docs) merged and pushed; a real start of the model was observed. The owner raised the agent cap to 10 (D-227).
+- The locked filler: three parallel reviews (availability on 12 realistic forms, work rights / status, consents). The consents review found two HIGH in word-list detection; the fix inverts the test (D-230) as D-220 did for retention. Three consents became Profile switches, off by default; every unanswered field now carries a fixed reason, a code and a profile key (contract v10).
+- Lessons: (1) a screen must not choose a link by parsing a sentence: give it a code and a key in the contract; (2) a stricter rule moves availability the other way (required privacy boxes that stop went 8 to 14 of 30 before the on-behalf ruling): measure both directions with the same probes; (3) a one-character slip in a printed line is only caught by a pin on the printed line.
