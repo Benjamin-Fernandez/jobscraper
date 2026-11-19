@@ -610,14 +610,18 @@ REMEMBERED_KEY = Path(..., pattern=r"^[a-z][a-z0-9_]{1,39}$")
 
 def _scope_text(entry: dict[str, Any]) -> str:
     """"Every application" or "Only {employer}". An entry the old cards saved with per-employer
-    overrides (`by_employer`) also says how many employers differ."""
+    overrides (`by_employer`) reads "Every application; 1 employer has their own answer" /
+    "Every application; 2 employers have their own answer" (Q-128)."""
     scoped = str(entry.get(EXTRA_EMPLOYER_FIELD) or "").strip()
     if scoped:
         return REMEMBER_SCOPE_TEXTS[RememberScope.EMPLOYER].format(employer=scoped)
     text = REMEMBER_SCOPE_TEXTS[RememberScope.EVERY]
     by = entry.get("by_employer")
     n = len(by) if isinstance(by, dict) else 0
-    return f"{text}, with {n} {'employer' if n == 1 else 'employers'} answered differently" if n else text
+    if not n:
+        return text
+    return f"{text}; {n} employer has their own answer" if n == 1 \
+        else f"{text}; {n} employers have their own answer"
 
 
 def remembered_view(profile: dict) -> list[dict[str, Any]]:
