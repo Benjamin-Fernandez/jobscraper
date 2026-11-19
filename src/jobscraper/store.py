@@ -2100,6 +2100,31 @@ class Store:
         """`assumed_counts` for one attempt."""
         return self.assumed_counts([attempt_id]).get(int(attempt_id), 0)
 
+    # Q-128: the audit statuses "What was filled" shows as "Not answered" (the web router's
+    # `_NOT_ANSWERED`: `AnswerStatus.UNKNOWN` / `UNGROUNDED`).
+    _NOT_ANSWERED = ("unknown", "ungrounded")
+
+    def not_answered_counts(self, attempt_ids: Iterable[int]) -> dict[int, int]:
+        """{attempt_id: number of audit rows the panel marks "Not answered"} for the given
+        attempts (absent = 0): rows whose status is `unknown` / `ungrounded`, hidden fields
+        left out. The same rows the attempt's "What was filled" counts under its "Not answered
+        n" filter (it lists every audit row except a hidden field, `skipped` and
+        `blank_optional`), so the chip on the Applications row and the panel always agree;
+        it is not limited to required fields because the panel's count is not. One query per
+        chunk, like `assumed_counts`, for the Applications list."""
+        ids = list(dict.fromkeys(int(i) for i in attempt_ids))
+        out: dict[int, int] = {}
+        for i in range(0, len(ids), 500):
+            chunk = ids[i:i + 500]
+            marks = ",".join("?" * len(chunk))
+            for r in self.conn.execute(
+                    f"""SELECT attempt_id, COUNT(*) AS n FROM apply_answers
+                         WHERE status IN (?, ?) AND COALESCE(field_type, '') != 'hidden'
+                           AND attempt_id IN ({marks})
+                         GROUP BY attempt_id""", (*self._NOT_ANSWERED, *chunk)):
+                out[int(r["attempt_id"])] = int(r["n"])
+        return out
+
     def entries_notes(self, attempt_ids: Iterable[int]) -> dict[int, str]:
         """{attempt_id: "1 of 2 education entries added"} for the given attempts whose
         "Add another" fell short under `always` (review F5: a note, not a stop); absent =

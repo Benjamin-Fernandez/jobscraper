@@ -83,6 +83,7 @@ def list_applications(request: Request,
         latest = store.last_attempts()      # one query for every row (Q-76), never N+1
         assumed = store.assumed_counts([a['id'] for a in latest.values()])   # Q-121, one query
         notes = store.entries_notes([a['id'] for a in latest.values()])      # Q-121, one query
+        unanswered = store.not_answered_counts([a['id'] for a in latest.values()])   # Q-128, one query
         paths = store.attempt_question_paths([a['id'] for a in latest.values()])  # A1-W, one query
         # Q-127 B.2e: the jobs whose stopped attempt can be tried again now (never one that was sent).
         ready = ready_to_retry_jobs(store, profile_or_empty(cfg))
@@ -103,7 +104,8 @@ def list_applications(request: Request,
         row["last_attempt"] = (attempt_view(last, assumed=assumed.get(last['id'], 0),
                                             entries_note=notes.get(last['id']),
                                             owner_fact_path=paths.get(last['id']),
-                                            ready_to_retry=row["job_id"] in ready)
+                                            ready_to_retry=row["job_id"] in ready,
+                                            not_answered=unanswered.get(last['id'], 0))
                                if last else None)
         row["attempts"] = int(last["attempts"]) if last else 0
         position = positions.get(row["job_id"])
@@ -153,7 +155,7 @@ TRIAL_TEXT = "Trial: filled, not sent"       # llm_first_fill_design section 12 
 def attempt_view(row: dict[str, Any], assumed: int = 0,
                  entries_note: Optional[str] = None,
                  owner_fact_path: Optional[str] = None,
-                 ready_to_retry: bool = False) -> dict[str, Any]:
+                 ready_to_retry: bool = False, not_answered: int = 0) -> dict[str, Any]:
     """One apply_attempts row as the SPA sees it (Q-76 N11).
 
     `kind` is what the pill shows; `text`/`hint` are the owner-facing copy from
@@ -185,6 +187,11 @@ def attempt_view(row: dict[str, Any], assumed: int = 0,
     fact the profile has no field for (`NO_FIELD_FACT_TITLES`, B.2d) is kind `stopped` with the
     contract's `OWNER_FACT_NO_FIELD_TEXT` (its hint is `OWNER_FACT_NO_FIELD_HINT`), since there
     is nothing to add in Your details.
+
+    Q-128 (additive): `not_answered` is how many of the attempt's audit rows "What was filled"
+    marks "Not answered" (`store.not_answered_counts`; the caller passes it so a list stays one
+    query). The Applications chip of a strict stop reads "Stopped: {n} questions had no answer"
+    from it without the panel being opened.
     """
     state = str(row.get("state") or "")
     reason = row.get("reason_code")
@@ -234,7 +241,7 @@ def attempt_view(row: dict[str, Any], assumed: int = 0,
             if reason in _PROFILE_PATH_REASONS and st is AttemptState.FAILED
             and not no_field else None,
             "ready_to_retry": bool(ready_to_retry) and st is AttemptState.FAILED and not no_field,
-            "no_field": no_field}
+            "no_field": no_field, "not_answered": max(0, int(not_answered or 0))}
 
 
 def _queued_view(last: Optional[dict[str, Any]]) -> dict[str, Any]:
@@ -247,7 +254,7 @@ def _queued_view(last: Optional[dict[str, Any]]) -> dict[str, Any]:
             "resume_source": (last or {}).get("resume_source"),
             "assumed": 0, "assumed_text": "", "entries_note": None, "trial": False,
             "trial_text": "", "owner_fact_path": None, "ready_to_retry": False,
-            "no_field": False}
+            "no_field": False, "not_answered": 0}
 
 
 @router.get("/applications/{job_id}/attempts")
@@ -259,8 +266,9 @@ def list_attempts(request: Request, job_id: str = JOB_ID) -> list[dict[str, Any]
         assumed = store.assumed_counts([r['id'] for r in rows])
         notes = store.entries_notes([r['id'] for r in rows])
         paths = store.attempt_question_paths([r['id'] for r in rows])
+        unanswered = store.not_answered_counts([r['id'] for r in rows])
     return [attempt_view(r, assumed=assumed.get(r['id'], 0), entries_note=notes.get(r['id']),
-                         owner_fact_path=paths.get(r['id']))
+                         owner_fact_path=paths.get(r['id']), not_answered=unanswered.get(r['id'], 0))
             for r in reversed(rows)]
 
 
