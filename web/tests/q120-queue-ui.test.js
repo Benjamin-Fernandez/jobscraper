@@ -101,7 +101,7 @@ describe('Inbox: Auto-apply adds to the queue (U1)', () => {
     const blocked = await mountInbox({ status: STATUS({ missing: ['personal.phone'] }) })
     await pick(blocked, JOBS[0].id)
     expect(autoButton(blocked).attributes('disabled')).toBeDefined()
-    expect(blocked.find('.auto-apply-note').text()).toContain('Finish your application details first')
+    expect(blocked.find('.auto-apply-note').text()).toContain('Finish your details first')
   })
 
   it('a click takes the role out of the list and the toast says what the queue did', async () => {

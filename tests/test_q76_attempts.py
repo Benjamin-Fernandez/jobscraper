@@ -162,8 +162,10 @@ def test_q76_d2_leaks_no_path_or_url():
     assert set(v) == {"id", "mode", "state", "kind", "reason_code", "text", "hint",
                       "queued_at", "finished_at", "submit_clicked_at", "resume_source",
                       "assumed", "assumed_text", "entries_note", "trial", "trial_text",
-                      "owner_fact_path", "ready_to_retry", "no_field"}
+                      "owner_fact_path", "ready_to_retry", "no_field", "not_answered"}
     assert v["ready_to_retry"] is False and v["no_field"] is False       # plain booleans, no text to leak
+    # Q-128: `not_answered` is a plain count (an int, no text); 0 when the caller passes none
+    assert v["not_answered"] == 0 and type(v["not_answered"]) is int
     blob = repr(v)
     for secret in ("secret", "acme.wd3", "resume.pdf", "CONF-1", "ab" * 8):
         assert secret not in blob, secret
