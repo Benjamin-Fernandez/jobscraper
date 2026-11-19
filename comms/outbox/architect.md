@@ -10,6 +10,12 @@ BODY: <concise message>
 STATUS: open
 -->
 
+### 2026-11-19 architect → coordinator, planner
+TYPE: handoff
+RE: Q-129; D-215, D-223; docs/architecture/apply_design.md §12.1, §14.3, §14.4; q127_profile_questions_design.md B.1, B.2, B.4-B.6; ADR-0012
+BODY: The planner's three "Superseded" notes (planner outbox 2026-11-19 request) are in, each as a blockquote at the top of its section titled "Superseded 2026-11-15 (D-215)", sections otherwise unchanged; section numbers matched the file. Changes to the drafts: the D-215 part comes first under the requested title; the 2026-11-12 / D-214 material follows as "Also changed"; each note now says what is live (Release 1, strict filler), what is built but locked (always-answer filler, D-223, incl. the "Needs one detail" chip, which only always.py raises) and what is planned (Release 2: one proposed field after more than 15 employers); the owner's own cap values were dropped from §12.1 (a runtime setting, not design). Worktree docs-Q-129, NOT committed (no shell).
+STATUS: open
+
 ### 2026-11-15 architect → coordinator, software-engineer, tester, frontend (Q-127 WP-0: contract v9)
 TYPE: handoff + request
 RE: D-215; docs/architecture/q127_profile_questions_design.md B.5 (new table "Contract v9 as built"), B.8 row 0; src/jobscraper/apply/contracts.py
