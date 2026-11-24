@@ -26,4 +26,4 @@
 - Test with what the real model says, not an idealised fake (the place-call gap was invisible to every fake).
 - The full suite takes ~35 min under load and skips Edge tests silently (run `-k apply_flow` and `-k apply_e2e` alone); background runs can die silently: `python -u … > log`, on a frozen worktree (`.claude/worktrees/gate-Q-121`, detached).
 - Before every push: deny-list scan of the tip diff, every outgoing commit and the commit messages (list: memory `denylist-location`; add the live attempt's employer and the application mailbox as extra terms, never printed); no `data/` path. Made-up names only in briefs and tests.
-- IDs: next **Q-130**, **D-237**. Backlog: directorship declarations belong in `declarations.py`; the briefing prints "(not set)" for an unset switch; resolver country table (Spain, Korea, cities, all-caps); Q-124, Q-122, Q-117, Q-123 rest; PRD rows for D-214..D-224.
+- IDs: next **Q-130**, **D-238**. Backlog: directorship declarations belong in `declarations.py`; the briefing prints "(not set)" for an unset switch; resolver country table (Spain, Korea, cities, all-caps); Q-124, Q-122, Q-117, Q-123 rest; PRD rows for D-214..D-224.
